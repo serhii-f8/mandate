@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { AuditLog, CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
 import type { Db } from './client.js';
 import { openSealed, rewrap, seal, type SealedCredential } from './envelope.js';
@@ -107,60 +107,72 @@ export class PostgresCredentialVault implements CredentialVault {
 
   /**
    * Re-wraps every data key that is not under the current master key version (the
-   * ciphertext is untouched), one row per transaction, idempotent. Each re-wrapped row
-   * is audited as `credential.rotate`. Rows whose key version is not configured, or that
-   * do not authenticate, are left alone and counted in `onOldVersions`.
+   * ciphertext is untouched), one row per transaction, idempotent. Each re-wrapped row is
+   * audited as `credential.rotate` inside its transaction: if the append fails the row
+   * rolls back, stays on its old version and a re-run retries it. Rows whose key version
+   * is not configured or that do not authenticate are left alone and listed by ref in
+   * `failed`. `onOldVersions` counts every row still not on the current version.
    */
   async rotate(
     actor: string,
     audit: AuditLog,
     correlationId: string,
-  ): Promise<{ rewrapped: number; onOldVersions: number }> {
+  ): Promise<{ rewrapped: number; onOldVersions: number; failed: readonly string[] }> {
     const toVersion = this.keys.current().version;
     const candidates = await this.db
       .select({ ref: credential.ref })
       .from(credential)
-      .where(ne(credential.keyVersion, toVersion));
+      .where(ne(credential.keyVersion, toVersion))
+      .orderBy(asc(credential.ref));
 
     let rewrapped = 0;
+    const failed: string[] = [];
     for (const { ref } of candidates) {
-      const fromVersion = await this.db.transaction(async (tx) => {
-        const [row] = await tx
-          .select()
-          .from(credential)
-          .where(and(eq(credential.ref, ref), ne(credential.keyVersion, toVersion)))
-          .for('update');
-        // Gone, rewritten or rotated by a concurrent run since the candidate scan.
-        if (row === undefined) return undefined;
-        let next: SealedCredential;
-        try {
-          next = rewrap(this.keys, ref, row);
-        } catch {
-          return undefined;
-        }
-        await tx
-          .update(credential)
-          .set({ wrappedKey: next.wrappedKey, keyNonce: next.keyNonce, keyVersion: next.keyVersion })
-          .where(eq(credential.ref, ref));
-        return row.keyVersion;
-      });
-      if (fromVersion === undefined) continue;
-      rewrapped += 1;
-      await audit.append({
-        id: randomUUID(),
-        actor,
-        action: 'credential.rotate',
-        subject: ref,
-        outcome: 'ok',
-        correlationId,
-        details: { fromVersion, toVersion },
-      });
+      let outcome: 'rewrapped' | 'skipped' | 'unreadable';
+      try {
+        outcome = await this.db.transaction(async (tx) => {
+          const [row] = await tx
+            .select()
+            .from(credential)
+            .where(and(eq(credential.ref, ref), ne(credential.keyVersion, toVersion)))
+            .for('update');
+          // Gone, rewritten or rotated by a concurrent run since the candidate scan.
+          if (row === undefined) return 'skipped';
+          let next: SealedCredential;
+          try {
+            next = rewrap(this.keys, ref, row);
+          } catch {
+            return 'unreadable';
+          }
+          await tx
+            .update(credential)
+            .set({ wrappedKey: next.wrappedKey, keyNonce: next.keyNonce, keyVersion: next.keyVersion })
+            .where(eq(credential.ref, ref));
+          // Throws to roll the row back when the audit cannot be written (AUD-1).
+          await audit.append({
+            id: randomUUID(),
+            actor,
+            action: 'credential.rotate',
+            subject: ref,
+            outcome: 'ok',
+            correlationId,
+            details: { fromVersion: row.keyVersion, toVersion },
+          });
+          return 'rewrapped';
+        });
+      } catch {
+        // Rolled back (audit or database failure); the row stays on its old version and
+        // is counted in `onOldVersions`, so a re-run retries it.
+        outcome = 'skipped';
+      }
+      if (outcome === 'rewrapped') rewrapped += 1;
+      if (outcome === 'unreadable') failed.push(ref);
     }
 
     const [remaining] = await this.db
       .select({ n: sql<number>`count(*)::int` })
       .from(credential)
       .where(ne(credential.keyVersion, toVersion));
-    return { rewrapped, onOldVersions: remaining?.n ?? 0 };
+    return { rewrapped, onOldVersions: remaining?.n ?? 0, failed };
   }
 }

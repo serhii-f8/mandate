@@ -105,7 +105,11 @@ describe('SEC-2 credential vault in PostgreSQL', () => {
     await both.put({ ref: 'c', scheme: 'bearer', secret: { token: 'dev-only-c' }, actor: 'alice' });
     const audit = new InMemoryAuditLog();
 
-    await expect(both.rotate('cli', audit, 'corr-rotate-1')).resolves.toEqual({ rewrapped: 2, onOldVersions: 0 });
+    await expect(both.rotate('cli', audit, 'corr-rotate-1')).resolves.toEqual({
+      rewrapped: 2,
+      onOldVersions: 0,
+      failed: [],
+    });
     expect(audit.events).toHaveLength(2);
     const subjects = audit.events.map((event) => event.subject).sort();
     expect(subjects).toEqual(['a', 'b']);
@@ -121,7 +125,11 @@ describe('SEC-2 credential vault in PostgreSQL', () => {
       for (const material of [KEY_1, KEY_2, 'dev-only-a', 'dev-only-b']) expect(serialized).not.toContain(material);
     }
 
-    await expect(both.rotate('cli', audit, 'corr-rotate-2')).resolves.toEqual({ rewrapped: 0, onOldVersions: 0 });
+    await expect(both.rotate('cli', audit, 'corr-rotate-2')).resolves.toEqual({
+      rewrapped: 0,
+      onOldVersions: 0,
+      failed: [],
+    });
     expect(audit.events).toHaveLength(2);
 
     const v2 = new PostgresCredentialVault(database.db, parseMasterKeys(`2:${KEY_2}`));
@@ -130,13 +138,57 @@ describe('SEC-2 credential vault in PostgreSQL', () => {
     await expect((await v2.handle('c'))?.open()).resolves.toEqual({ token: 'dev-only-c' });
   });
 
-  it('rotate counts rows whose key version is not configured as still on old versions', async () => {
+  it('rotate reports rows whose key version is not configured as failed and still on old versions', async () => {
     const v1 = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
     await v1.put({ ref: 'a', scheme: 'bearer', secret: { token: 'dev-only-a' }, actor: 'alice' });
     const v2 = new PostgresCredentialVault(database.db, parseMasterKeys(`2:${KEY_2}`));
     const audit = new InMemoryAuditLog();
-    await expect(v2.rotate('cli', audit, 'corr')).resolves.toEqual({ rewrapped: 0, onOldVersions: 1 });
+    await expect(v2.rotate('cli', audit, 'corr')).resolves.toEqual({
+      rewrapped: 0,
+      onOldVersions: 1,
+      failed: ['a'],
+    });
     expect(audit.events).toHaveLength(0);
+  });
+
+  it('rotate reports rows that fail authentication as failed, by ref only', async () => {
+    const v1 = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
+    await v1.put({ ref: 'good', scheme: 'bearer', secret: { token: 'dev-only-good' }, actor: 'alice' });
+    await v1.put({ ref: 'broken', scheme: 'bearer', secret: { token: 'dev-only-broken' }, actor: 'alice' });
+    await database.pool.query(
+      `UPDATE credential SET wrapped_key = set_byte(wrapped_key, 0, get_byte(wrapped_key, 0) # 255) WHERE ref = 'broken'`,
+    );
+    const both = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1},2:${KEY_2}`));
+    const audit = new InMemoryAuditLog();
+    const result = await both.rotate('cli', audit, 'corr');
+    expect(result).toEqual({ rewrapped: 1, onOldVersions: 1, failed: ['broken'] });
+    expect(JSON.stringify(result)).not.toContain('dev-only');
+    expect(audit.events.map((event) => event.subject)).toEqual(['good']);
+  });
+
+  it('rotate rolls a row back when its audit append fails, and a re-run retries it', async () => {
+    const v1 = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
+    await v1.put({ ref: 'a', scheme: 'bearer', secret: { token: 'dev-only-a' }, actor: 'alice' });
+    const both = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1},2:${KEY_2}`));
+    const audit = new InMemoryAuditLog();
+    audit.failNext = new Error('audit unavailable');
+
+    await expect(both.rotate('cli', audit, 'corr-1')).resolves.toEqual({
+      rewrapped: 0,
+      onOldVersions: 1,
+      failed: [],
+    });
+    const [status] = await both.describe(['a']);
+    expect(status?.keyVersion).toBe(1);
+    expect(audit.events).toHaveLength(0);
+
+    await expect(both.rotate('cli', audit, 'corr-2')).resolves.toEqual({
+      rewrapped: 1,
+      onOldVersions: 0,
+      failed: [],
+    });
+    expect(audit.events).toHaveLength(1);
+    await expect((await both.handle('a'))?.open()).resolves.toEqual({ token: 'dev-only-a' });
   });
 
   it('describe returns metadata only, in the requested order, with unset refs', async () => {

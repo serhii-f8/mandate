@@ -36,14 +36,21 @@ function encrypt(key: Buffer, aad: Buffer, plaintext: Buffer): { ciphertext: Buf
 
 /** Decrypts or throws a fixed message; the crypto error is dropped so nothing leaks. */
 function decrypt(key: Buffer, aad: Buffer, nonce: Buffer, sealed: Buffer, what: string): Buffer {
+  // Intermediate plaintext copies, zeroed on success and on authentication failure.
+  const parts: Buffer[] = [];
   try {
     if (nonce.length !== NONCE_BYTES || sealed.length < TAG_BYTES) throw new Error('malformed');
     const decipher = createDecipheriv(ALGORITHM, key, nonce, { authTagLength: TAG_BYTES });
     decipher.setAAD(aad);
     decipher.setAuthTag(sealed.subarray(sealed.length - TAG_BYTES));
-    return Buffer.concat([decipher.update(sealed.subarray(0, sealed.length - TAG_BYTES)), decipher.final()]);
+    parts.push(decipher.update(sealed.subarray(0, sealed.length - TAG_BYTES)));
+    parts.push(decipher.final());
+    // The caller owns and zero-fills the returned buffer.
+    return Buffer.concat(parts);
   } catch {
     throw new Error(`credential ${what} could not be decrypted`);
+  } finally {
+    for (const part of parts) part.fill(0);
   }
 }
 
