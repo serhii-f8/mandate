@@ -1,3 +1,10 @@
 .claude/worktrees/
 .superpowers/
 node_modules/
+.env
+dist/
+.turbo/
+coverage/
+*.tsbuildinfo
+.serena/
+.idea/

@@ -1,0 +1,25 @@
+{
+  "name": "@aiops/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Temporal worker: operation workflows and the activities that call upstream systems.",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "@aiops/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --project unit --passWithNoTests"
+  },
+  "devDependencies": {}
+}
