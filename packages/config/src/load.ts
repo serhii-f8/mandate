@@ -66,14 +66,27 @@ const YAML_FILE = /\.ya?ml$/i;
 export async function loadConfigurationDirectory(dir: string, options: LoadOptions = {}): Promise<LoadResult> {
   let names: string[];
   try {
-    names = (await readdir(dir, { recursive: true })).filter((n) => YAML_FILE.test(n));
+    // Hidden files and directories (editor lock files, `..data` copies) are not configuration.
+    names = (await readdir(dir, { recursive: true })).filter((n) => YAML_FILE.test(n) && !n.split(sep).some((part) => part.startsWith('.')));
   } catch {
     return { ok: false, issues: [{ file: '.', path: '', message: 'configuration directory cannot be read' }] };
   }
-  const sources = await Promise.all(
-    names.map(async (name) => ({ file: name.split(sep).join('/'), text: await readFile(join(dir, name), 'utf8') })),
+  const read = await Promise.all(
+    names.map(async (name) => {
+      const file = name.split(sep).join('/');
+      try {
+        return { file, text: await readFile(join(dir, name), 'utf8') };
+      } catch {
+        return { file, issue: { file, path: '', message: 'cannot be read' } satisfies ConfigIssue };
+      }
+    }),
   );
-  return loadConfigurationSources(sources, options);
+  const unreadable = read.flatMap((r) => ('issue' in r ? [r.issue] : []));
+  if (unreadable.length > 0) return { ok: false, issues: unreadable };
+  return loadConfigurationSources(
+    read.flatMap((r) => ('text' in r ? [{ file: r.file, text: r.text }] : [])),
+    options,
+  );
 }
 
 export function loadConfigurationSources(sources: readonly { file: string; text: string }[], options: LoadOptions = {}): LoadResult {

@@ -19,10 +19,16 @@ async function main(): Promise<void> {
   logger.info({ hash: configuration.current.hash }, 'configuration loaded');
   // SIGHUP reloads; an invalid configuration is reported and the previous one stays active (CFG-2).
   process.on('SIGHUP', () => {
-    void configuration.reload().then((result) => {
-      if (result.ok) logger.info({ hash: configuration.current.hash }, 'configuration reloaded');
-      else for (const issue of result.issues) logger.warn({ issue: formatIssue(issue) }, 'configuration reload rejected; previous configuration stays active');
-    });
+    configuration.reload().then(
+      (result) => {
+        if (result.ok) logger.info({ hash: configuration.current.hash }, 'configuration reloaded');
+        else for (const issue of result.issues) logger.warn({ issue: formatIssue(issue) }, 'configuration reload rejected; previous configuration stays active');
+      },
+      (error: unknown) => {
+        // Never let a failed reload end the process: the previous configuration stays active.
+        logger.error({ err: error instanceof Error ? error.message : 'unknown' }, 'configuration reload failed; previous configuration stays active');
+      },
+    );
   });
   const { applied } = await runMigrations(env.databaseUrl);
   logger.info({ applied }, 'database migrations applied');

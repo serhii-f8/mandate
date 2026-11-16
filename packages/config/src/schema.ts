@@ -11,7 +11,14 @@ const id = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
 export const OPERATION_ID = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/;
 const operationId = z.string().max(64).regex(OPERATION_ID);
 const credentialRef = id;
-const httpUrl = z.url({ protocol: /^https?$/ });
+const httpUrl = z.url({ protocol: /^https?$/ }).refine(
+  (v) => {
+    const url = new URL(v);
+    return url.username === '' && url.password === '';
+  },
+  // CFG-5: a URL with credentials in it is a secret in configuration.
+  { message: 'must not contain a user name or password; reference a credential by name' },
+);
 const openObject = z.record(z.string(), z.unknown());
 const positiveInt = z.number().int().positive();
 

@@ -32,6 +32,16 @@ describe('CFG-2 the previous configuration stays active', () => {
     expect(holder.current.hash).not.toBe(first.hash);
   });
 
+  it('applies overlapping reloads in the order they were requested', async () => {
+    const holder = await ConfigurationHolder.load(dir);
+    await writeFile(join(dir, 'roles.yaml'), 'version: 1\nroles:\n  - id: content_manager\n    grants: []\n  - id: support_agent\n    grants: []\n');
+    const first = holder.reload();
+    await writeFile(join(dir, 'roles.yaml'), 'version: 1\nroles:\n  - id: content_manager\n    grants: []\n  - id: support_agent\n    grants: []\n  - id: extra\n    grants: []\n');
+    const second = holder.reload();
+    await Promise.all([first, second]);
+    expect(holder.current.policy.roles.map((r) => r.id)).toContain('extra');
+  });
+
   it('refuses to start from an invalid directory and carries the issues', async () => {
     await writeFile(join(dir, 'roles.yaml'), 'version: 1\nroles: nope\n');
     const error = await ConfigurationHolder.load(dir).catch((e: unknown) => e);

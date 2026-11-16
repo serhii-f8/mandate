@@ -4,7 +4,7 @@
  * (`upstream`) and names the rule. `input_schema` is skipped: argument names
  * such as `page_token` are legitimate there (ADR 0015).
  */
-const SECRET_KEY = /password|passwd|secret|token|api[_-]?key|private[_-]?key|authorization/i;
+const SECRET_KEY = /password|passwd|secret|token|api[_-]?key|private[_-]?key|authorization|cookie|bearer|credential/i;
 const ALLOWED_KEY = /(^|_)credential_ref$/;
 const SKIPPED_SUBTREES = new Set(['input_schema']);
 

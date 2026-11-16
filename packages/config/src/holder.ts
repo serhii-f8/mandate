@@ -30,10 +30,17 @@ export class ConfigurationHolder {
     return this.active;
   }
 
-  async reload(): Promise<{ ok: true } | { ok: false; issues: readonly ConfigIssue[] }> {
-    const result = await loadConfigurationDirectory(this.dir, this.options);
-    if (!result.ok) return { ok: false, issues: result.issues };
-    this.active = result.configuration;
-    return { ok: true };
+  private queue: Promise<unknown> = Promise.resolve();
+
+  /** Reloads run one after another, so an older read can never replace a newer one. */
+  reload(): Promise<{ ok: true } | { ok: false; issues: readonly ConfigIssue[] }> {
+    const next = this.queue.then(async () => {
+      const result = await loadConfigurationDirectory(this.dir, this.options);
+      if (!result.ok) return { ok: false as const, issues: result.issues };
+      this.active = result.configuration;
+      return { ok: true as const };
+    });
+    this.queue = next.catch(() => undefined);
+    return next;
   }
 }

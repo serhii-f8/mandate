@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,6 +79,31 @@ describe('CFG-1 load a configuration directory', () => {
     }
   });
 
+  it('reports an unreadable file as an issue instead of failing', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiops-config-'));
+    try {
+      await cp(VALID_DIR, dir, { recursive: true });
+      await symlink(join(dir, 'does-not-exist.yaml'), join(dir, 'dangling.yaml'));
+      const found = issues(await loadConfigurationDirectory(dir));
+      expect(found).toEqual([{ file: 'dangling.yaml', path: '', message: 'cannot be read' }]);
+    } finally {
+      await rm(dir, { recursive: true });
+    }
+  });
+
+  it('skips hidden files and directories, such as editor lock files', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiops-config-'));
+    try {
+      await cp(VALID_DIR, dir, { recursive: true });
+      await symlink('nobody@host.123', join(dir, '.#roles.yaml'));
+      await mkdir(join(dir, '..data'));
+      await writeFile(join(dir, '..data', 'roles.yaml'), 'not: [valid');
+      expect((await loadConfigurationDirectory(dir)).ok).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true });
+    }
+  });
+
   it('reports a missing directory as an issue', async () => {
     expect(issues(await loadConfigurationDirectory('/nonexistent/aiops-config'))[0]?.message).toMatch(/cannot be read/);
   });
@@ -145,6 +170,17 @@ describe('CFG-5 secrets never appear in configuration', () => {
   ])('rejects the key %s', (key, path) => {
     const found = issues(load({ 'connections.yaml': CONNECTIONS.replace('credential_ref: magento-integration', `credential_ref: magento-integration, ${key}: hunter2-value`) }));
     expect(found).toContainEqual(expect.objectContaining({ path, message }));
+    expect(found.map(formatIssue).join('\n')).not.toContain('hunter2-value');
+  });
+
+  it.each([['cookie'], ['bearer'], ['credential']])('rejects the key %s', (key) => {
+    const found = issues(load({ 'operations.yaml': OPERATIONS.replace('upstream: { method: GET, path: /V1/products }', `upstream: { method: GET, path: /V1/products, ${key}: x-value }`) }));
+    expect(found).toContainEqual(expect.objectContaining({ path: `operations[0].upstream.${key}`, message }));
+  });
+
+  it('rejects a connection URL with a user name or password in it', () => {
+    const found = issues(load({ 'connections.yaml': CONNECTIONS.replace('https://shop.example.test/rest', 'https://svc:hunter2-value@shop.example.test/rest') }));
+    expect(found).toContainEqual(expect.objectContaining({ path: 'connections[0].base_url', message: 'must not contain a user name or password; reference a credential by name' }));
     expect(found.map(formatIssue).join('\n')).not.toContain('hunter2-value');
   });
 
