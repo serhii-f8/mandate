@@ -235,8 +235,7 @@ await check('bob-cannot-poll-alice-task', async () => {
   await execution.handoff(() => {});
   await execution.result().catch(() => {});
   await s.close();
-  const bobDispatch = rawDispatchFor('bob-token', B);
-  const r = await bobDispatch({
+  const request = {
     method: 'tasks/get',
     params: {
       taskId: startedTaskId,
@@ -246,7 +245,13 @@ await check('bob-cannot-poll-alice-task', async () => {
         'io.modelcontextprotocol/clientCapabilities': { extensions: { 'io.modelcontextprotocol/tasks': {} } },
       },
     },
-  });
+  };
+  // Positive control on the SAME instance and task ID: the owner can read it. Without this,
+  // "task not found" for bob could simply mean the task is unknown to instance B.
+  const aliceOnB = await rawDispatchFor('alice-token', B)(request);
+  info(`alice tasks/get on her own task via instance B: ${JSON.stringify(aliceOnB).slice(0, 160)}`);
+  if (aliceOnB.kind === 'error') return `owner could not read her own task on instance B: ${JSON.stringify(aliceOnB)}`;
+  const r = await rawDispatchFor('bob-token', B)(request);
   info(`bob tasks/get on alice's task: ${JSON.stringify(r)}`);
   return (r.kind === 'error' && r.error.code === -32602) || `bob got ${JSON.stringify(r)}`;
 });
