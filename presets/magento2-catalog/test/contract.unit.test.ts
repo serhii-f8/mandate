@@ -1,0 +1,255 @@
+/**
+ * Contract tests of the Magento catalog preset (NFR-17 first cut, CONN-2; design part 1 §6).
+ * The preset is loaded the way the api loads it: `@aiops/config` with the OpenAPI adapter's
+ * resolver over the vendored spec. Each recording (from `pnpm record` against the sandbox)
+ * pins the exact request the preset must send and the response it must map. With
+ * MAGENTO_SANDBOX_URL and MAGENTO_SANDBOX_TOKEN set, the same cases run against the sandbox.
+ */
+import { readdir, readFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildRequest, createOpenApiAdapter, mapResponse } from '@aiops/adapters';
+import { loadConfigurationSources, type LoadedConfiguration, type OperationBinding } from '@aiops/config';
+import type { ConnectionSettings, CredentialSource } from '@aiops/connector-sdk';
+import { startFakeUpstream, type FakeUpstream } from '@aiops/testing';
+import { PRESET_DIR } from '../src/index.js';
+
+interface RecordedRequest {
+  readonly method: string;
+  readonly path: string;
+  readonly query: Readonly<Record<string, string>>;
+}
+interface ContractCase {
+  readonly name: string;
+  readonly operation: string;
+  readonly args: Readonly<Record<string, unknown>>;
+  readonly request: RecordedRequest;
+  readonly expect: { readonly skus: readonly string[]; readonly total: number };
+}
+interface Recording {
+  readonly request: RecordedRequest;
+  readonly response: { readonly status: number; readonly body: unknown };
+}
+
+const RECORDINGS = join(PRESET_DIR, 'test', 'recordings');
+const BASE_PATH = '/rest/all';
+const FAKE_TOKEN = 'contract-test-only-token';
+
+const cases = JSON.parse(await readFile(join(PRESET_DIR, 'test', 'cases.json'), 'utf8')) as ContractCase[];
+const recordings = new Map<string, { file: string; text: string; recording: Recording }>();
+for (const c of cases) {
+  const file = join(RECORDINGS, `${c.name}.json`);
+  const text = await readFile(file, 'utf8');
+  recordings.set(c.name, { file, text, recording: JSON.parse(text) as Recording });
+}
+const recordingOf = (c: ContractCase): Recording => {
+  const r = recordings.get(c.name);
+  if (r === undefined) throw new Error(`no recording for ${c.name}`);
+  return r.recording;
+};
+
+/** The preset bound to connection `magento`, loaded with the real resolver (CONN-2). */
+async function loadPreset(baseUrl: string): Promise<LoadedConfiguration> {
+  const config = [
+    'version: 1',
+    'presets:',
+    "  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '0.1.0' }",
+    'connections:',
+    '  - id: magento',
+    '    adapter: openapi',
+    `    base_url: ${baseUrl}`,
+    '    credential_ref: magento-token',
+    '    preset: magento-catalog',
+    '    allow_private_network: true',
+    '',
+  ].join('\n');
+  const result = await loadConfigurationSources([{ file: 'config.yaml', text: config }], {
+    resolver: createOpenApiAdapter().resolver,
+    presetDirs: [resolve(PRESET_DIR, '..')],
+  });
+  if (!result.ok) throw new Error(`preset did not load: ${JSON.stringify(result.issues)}`);
+  return result.configuration;
+}
+
+function bindingOf(config: LoadedConfiguration, operation: string): OperationBinding {
+  const binding = config.bindings.get(operation);
+  if (binding === undefined) throw new Error(`no binding for ${operation}`);
+  return binding;
+}
+
+function settingsOf(config: LoadedConfiguration): ConnectionSettings {
+  const settings = config.connectionSettings.get('magento');
+  if (settings === undefined) throw new Error('no settings for connection magento');
+  return settings;
+}
+
+const bearer = (token: string): CredentialSource => ({ ref: 'magento-token', scheme: 'bearer', open: () => Promise.resolve({ token }) });
+
+/** The `brand` custom attribute of a raw Magento product. */
+function rawBrand(item: unknown): unknown {
+  if (typeof item !== 'object' || item === null || !('custom_attributes' in item) || !Array.isArray(item.custom_attributes)) return undefined;
+  const entry: unknown = item.custom_attributes.find(
+    (a: unknown) => typeof a === 'object' && a !== null && 'attribute_code' in a && a.attribute_code === 'brand',
+  );
+  return typeof entry === 'object' && entry !== null && 'value' in entry ? entry.value : undefined;
+}
+
+function expectMappedItems(c: ContractCase, items: readonly Record<string, unknown>[] | undefined): void {
+  const fields = c.args.fields as string[];
+  expect(items?.map((i) => i.sku)).toEqual(c.expect.skus);
+  for (const item of items ?? []) {
+    // Projection keeps exactly the requested fields: nothing more (cost, POL-3), nothing less.
+    expect(Object.keys(item).sort()).toEqual([...fields].sort());
+    if (fields.includes('brand')) expect(item.brand).toBe(c.args.brand);
+  }
+}
+
+describe('NFR-17 magento2-catalog contract', () => {
+  let config: LoadedConfiguration;
+
+  beforeAll(async () => {
+    config = await loadPreset(`http://magento-sandbox.invalid${BASE_PATH}`);
+  });
+
+  it('NFR-17 CONN-2 the preset loads against its vendored spec with both read operations, connection test and bearer auth', () => {
+    const ids = config.policy.operations.map((o) => o.id).sort();
+    expect(ids).toEqual(['catalog.get_product', 'catalog.search_products']);
+    for (const op of config.policy.operations) {
+      expect(op.risk).toBe('read');
+      expect(op.fieldsArg).toBe('fields');
+      expect(op.source).toBe('preset:magento-catalog');
+    }
+    expect(settingsOf(config).auth).toEqual({ scheme: 'bearer' });
+    expect(config.connectionTests.get('magento')).toEqual({
+      operation: 'catalog.search_products',
+      args: { brand: 'acme', fields: ['sku'], page_size: 1 },
+    });
+    // The imported write endpoints stay disabled: no preset operation enables them (CONN-2, OPS-1).
+    expect(config.disabled.length).toBeGreaterThan(0);
+  });
+
+  it('NFR-17 every case is recorded, and its arguments are valid input', () => {
+    expect(cases.map((c) => c.name).sort()).toEqual([...recordings.keys()].sort());
+    for (const c of cases) {
+      const validator = config.validators.get(c.operation);
+      expect(validator?.(c.args).ok, c.name).toBe(true);
+    }
+  });
+
+  it('NFR-17 input schemas refuse unknown fields, page sizes over 100 and missing brand', () => {
+    const search = config.validators.get('catalog.search_products');
+    expect(search?.({ brand: 'acme', fields: ['password'] }).ok).toBe(false);
+    expect(search?.({ brand: 'acme', fields: ['sku'], page_size: 101 }).ok).toBe(false);
+    expect(search?.({ brand: 'acme', fields: ['sku'], current_page: 0 }).ok).toBe(false);
+    expect(search?.({ fields: ['sku'] }).ok).toBe(false);
+    expect(config.validators.get('catalog.get_product')?.({ brand: 'acme', fields: ['sku'] }).ok).toBe(false);
+  });
+
+  describe.each(cases)('NFR-17 case $name', (c) => {
+    it('NFR-17 buildRequest from the preset mapping equals the recorded request', () => {
+      const recorded = recordingOf(c).request;
+      expect(recorded).toEqual(c.request);
+      const req = buildRequest(`http://magento-sandbox.invalid${BASE_PATH}`, bindingOf(config, c.operation).mapping, c.args);
+      expect(req.method).toBe(recorded.method);
+      expect(req.url.pathname).toBe(`${BASE_PATH}${recorded.path}`);
+      expect(Object.fromEntries(req.url.searchParams)).toEqual(recorded.query);
+      expect([...req.url.searchParams.keys()]).toHaveLength(Object.keys(recorded.query).length);
+      expect(req.body).toBeUndefined();
+    });
+
+    it('NFR-17 mapResponse of the recorded response gives the expected items, projected to fields', () => {
+      const { response } = recordingOf(c);
+      expect(response.status).toBe(200);
+      // Every raw item the sandbox returned is of the requested brand (scope holds upstream).
+      const raw = (response.body as { items: unknown[] }).items;
+      for (const item of raw) expect(rawBrand(item)).toBe(c.args.brand);
+      const mapped = mapResponse(bindingOf(config, c.operation).mapping.response, response.body, c.args);
+      expect(mapped.total).toBe(c.expect.total);
+      expect(mapped.truncated).toBe(false);
+      expectMappedItems(c, mapped.items);
+    });
+  });
+
+  it('NFR-17 get_product with a SKU of another brand finds nothing', () => {
+    const c = cases.find((x) => x.name === 'get-product-other-brand');
+    expect(c?.args).toMatchObject({ brand: 'acme', sku: 'GLOBEX-001' });
+    if (c === undefined) return;
+    const mapped = mapResponse(bindingOf(config, c.operation).mapping.response, recordingOf(c).response.body, c.args);
+    expect(mapped.items).toEqual([]);
+  });
+
+  it('NFR-17 SEC-3 no recording or the vendored spec contains a token', async () => {
+    const names = await readdir(RECORDINGS);
+    expect(names.length).toBeGreaterThan(0);
+    const files = [
+      ...(await Promise.all(names.map((n) => readFile(join(RECORDINGS, n), 'utf8')))),
+      await readFile(join(PRESET_DIR, 'spec', 'magento2-catalog.swagger.json'), 'utf8'),
+    ];
+    for (const text of files) {
+      expect(text).not.toContain('eyJ');
+      expect(text.toLowerCase()).not.toContain('"authorization"');
+    }
+  });
+
+  describe('NFR-17 replay through the adapter read path (fake upstream)', () => {
+    let upstream: FakeUpstream;
+    let replay: LoadedConfiguration;
+
+    beforeAll(async () => {
+      upstream = await startFakeUpstream();
+      replay = await loadPreset(`${upstream.url}${BASE_PATH}`);
+    });
+    afterAll(async () => {
+      await upstream.close();
+    });
+
+    it.each(cases)('NFR-17 $name: the adapter sends the recorded request with the bearer token and maps the recorded response', async (c) => {
+      const recording = recordingOf(c);
+      upstream.route(recording.request.method, `${BASE_PATH}${recording.request.path}`, () => ({
+        status: recording.response.status,
+        body: recording.response.body,
+      }));
+      const before = upstream.requests.length;
+      const outcome = await createOpenApiAdapter().read({
+        connection: settingsOf(replay),
+        mapping: bindingOf(replay, c.operation).mapping,
+        args: c.args,
+        credential: bearer(FAKE_TOKEN),
+      });
+      const sent = upstream.requests.slice(before);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.method).toBe(recording.request.method);
+      expect(Object.fromEntries(sent[0]?.query ?? [])).toEqual(recording.request.query);
+      expect(sent[0]?.headers.authorization).toBe(`Bearer ${FAKE_TOKEN}`);
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) return;
+      expect(outcome.total).toBe(c.expect.total);
+      expectMappedItems(c, outcome.items);
+    });
+  });
+
+  const liveUrl = process.env.MAGENTO_SANDBOX_URL;
+  const liveToken = process.env.MAGENTO_SANDBOX_TOKEN;
+  describe.runIf(liveUrl !== undefined && liveUrl !== '' && liveToken !== undefined && liveToken !== '')(
+    'NFR-17 live against the Magento sandbox (MAGENTO_SANDBOX_URL, MAGENTO_SANDBOX_TOKEN)',
+    () => {
+      let live: LoadedConfiguration;
+      beforeAll(async () => {
+        live = await loadPreset(`${(liveUrl ?? '').replace(/\/+$/, '')}${BASE_PATH}`);
+      });
+
+      it.each(cases)('NFR-17 $name live', async (c) => {
+        const outcome = await createOpenApiAdapter().read({
+          connection: settingsOf(live),
+          mapping: bindingOf(live, c.operation).mapping,
+          args: c.args,
+          credential: bearer(liveToken ?? ''),
+        });
+        expect(outcome.ok, outcome.ok ? '' : `${outcome.code} ${outcome.message}`).toBe(true);
+        if (!outcome.ok) return;
+        expect(outcome.total).toBe(c.expect.total);
+        expectMappedItems(c, outcome.items);
+      });
+    },
+  );
+});

@@ -268,7 +268,20 @@ importers:
 
   packages/widgets: {}
 
-  presets/magento2-catalog: {}
+  presets/magento2-catalog:
+    devDependencies:
+      '@aiops/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
+      '@aiops/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@aiops/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connector-sdk
+      '@aiops/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
 
   tooling:
     devDependencies:

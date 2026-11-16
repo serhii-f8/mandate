@@ -52,11 +52,28 @@ export const boundaryRules = [
     },
   },
   {
-    files: ['presets/**/*.ts'],
+    files: ['presets/*/src/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
         { patterns: [workspaceExcept(['connector-sdk', 'config'], 'Presets use only @aiops/connector-sdk and @aiops/config.')] },
+      ],
+    },
+  },
+  {
+    // Contract tests (NFR-17) run the preset through the real adapter and the shared fakes.
+    files: ['presets/*/src/**/*.test.ts', 'presets/*/test/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            workspaceExcept(
+              ['connector-sdk', 'config', 'adapters', 'testing'],
+              'Preset tests use only @aiops/connector-sdk, @aiops/config, @aiops/adapters and @aiops/testing.',
+            ),
+          ],
+        },
       ],
     },
   },
