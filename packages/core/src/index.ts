@@ -12,3 +12,12 @@ export type {
   ScopeValue,
 } from './policy-model.js';
 export { resolveRoles } from './roles.js';
+export {
+  createPolicyEngine,
+  type DenyReason,
+  type EvaluationRequest,
+  type PolicyDecision,
+  type PolicyEngine,
+} from './policy-engine.js';
+export { MAX_AUDITED_TOOL_NAME, policyDecisionAuditEvent, type PolicyDecisionRecord } from './policy-audit.js';
+export type { InvocationRequest, InvocationResult, OperationInvoker } from './operation-invoker.js';
