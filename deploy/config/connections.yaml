@@ -1,0 +1,8 @@
+# Development configuration (design §7). Connection magento is a placeholder until the
+# OpenAPI adapter exists (Phase 3); allowed calls end in a "no adapter" result.
+version: 1
+connections:
+  - id: magento
+    adapter: openapi
+    base_url: https://shop.example.test/rest
+    credential_ref: magento-integration
