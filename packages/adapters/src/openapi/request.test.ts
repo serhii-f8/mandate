@@ -45,4 +45,25 @@ describe('MCP-4 request building', () => {
   it('rejects object values in query', () => {
     expect(() => buildRequest('http://h', { ...base, query: { a: { arg: 'a' } } }, { a: { x: 1 } })).toThrow(MappingError);
   });
+  it.each(['..', '.', '%2e%2e', '%2E.'])('rejects dot-segment path value %s', (sku) => {
+    expect(() => buildRequest('http://h', { ...base, path: '/p/{sku}', pathParams: { sku: { arg: 'sku' } } }, { sku })).toThrow(
+      new MappingError('path parameter sku is not allowed'),
+    );
+  });
+  it('allows dots inside a value', () => {
+    const r = buildRequest('http://h', { ...base, path: '/p/{sku}', pathParams: { sku: { arg: 'sku' } } }, { sku: 'a.b' });
+    expect(r.url.pathname).toBe('/p/a.b');
+  });
+  it('rejects a base URL with query or fragment', () => {
+    expect(() => buildRequest('http://h/x?y=1', base, {})).toThrow(MappingError);
+    expect(() => buildRequest('http://h/x#f', base, {})).toThrow(MappingError);
+  });
+  it('rejects an array path parameter', () => {
+    expect(() => buildRequest('http://h', { ...base, path: '/p/{s}', pathParams: { s: { arg: 's' } } }, { s: ['a', 'b'] })).toThrow(MappingError);
+  });
+  it('sends literal headers and joins array headers', () => {
+    const r = buildRequest('http://h', { ...base, headers: { 'X-A': 'lit', 'X-B': { arg: 'b' } } }, { b: ['1', '2'] });
+    expect(r.headers['x-a']).toBe('lit');
+    expect(r.headers['x-b']).toBe('1, 2');
+  });
 });

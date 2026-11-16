@@ -35,16 +35,28 @@ function resolveScalars(name: string, t: TemplateValue, args: Readonly<Record<st
   throw new MappingError(`parameter ${name} must be a scalar or an array of scalars`);
 }
 
+const isDotSegment = (v: string): boolean => v === '.' || v === '..';
+
 export function buildRequest(
   baseUrl: string,
   mapping: UpstreamMapping & { method: HttpMethod; path: string },
   args: Readonly<Record<string, unknown>>,
 ): HttpRequestSpec {
+  if (/[?#]/.test(baseUrl)) throw new MappingError('base URL must not contain a query or fragment');
   const path = mapping.path.replace(/\{([^{}]+)\}/g, (_m, name: string) => {
     const tpl = Object.hasOwn(mapping.pathParams, name) ? mapping.pathParams[name] : undefined;
     const vals = tpl ? resolveScalars(name, tpl, args) : undefined;
     if (vals?.length !== 1) throw new MappingError(`path parameter ${name} has no value`);
-    return encodeURIComponent(String(vals[0]));
+    const raw = String(vals[0]);
+    let decoded = raw;
+    try {
+      decoded = decodeURIComponent(raw);
+    } catch {
+      // not decodable: the raw value is checked as is
+    }
+    // Dot segments would escape the operation path once the upstream normalises the URL.
+    if (isDotSegment(raw) || isDotSegment(decoded)) throw new MappingError(`path parameter ${name} is not allowed`);
+    return encodeURIComponent(raw);
   });
 
   const url = new URL(baseUrl.replace(/\/+$/, '') + path);

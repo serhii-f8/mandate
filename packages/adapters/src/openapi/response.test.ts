@@ -50,4 +50,26 @@ describe('POL-3 projection keeps unrequested fields out', () => {
     expect(r.items).toEqual([{ sku: 'A1', brand: 'acme' }]);
     expect(JSON.stringify(r)).not.toContain('cost');
   });
+  it('fails closed when the fields argument is missing or malformed', () => {
+    const m = { items: 'items', fieldsFromArg: 'fields', maxItems: 10 };
+    const err = new MappingError('fields argument is missing');
+    expect(() => mapResponse(m, magento, {})).toThrow(err);
+    expect(() => mapResponse(m, magento, { fields: 'sku' })).toThrow(err);
+    expect(() => mapResponse(m, magento, { fields: ['sku', 1] })).toThrow(err);
+  });
+  it('an empty fields array yields items with no keys', () => {
+    const r = mapResponse({ items: 'items', fieldsFromArg: 'fields', maxItems: 10 }, magento, { fields: [] });
+    expect(r.items).toEqual([{}]);
+  });
+  it('treats __proto__ as data in flatten and projection', () => {
+    const body = { items: [{ a: 1, e: [{ k: '__proto__', v: 'x' }] }] };
+    const r = mapResponse({ items: 'items', flatten: { path: 'e', key: 'k', value: 'v' }, fieldsFromArg: 'f', maxItems: 5 }, body, { f: ['a', '__proto__'] });
+    expect(Object.getPrototypeOf(r.items?.[0])).toBe(Object.prototype);
+    expect(Object.keys(r.items?.[0] ?? {})).toEqual(['a', '__proto__']);
+    expect(({} as Record<string, unknown>).x).toBeUndefined();
+  });
+  it('returns non-object items unchanged and never projects them', () => {
+    const r = mapResponse({ items: 'items', fieldsFromArg: 'f', maxItems: 5 }, { items: ['s', 2] }, { f: ['a'] });
+    expect(r.items).toEqual(['s', 2]);
+  });
 });

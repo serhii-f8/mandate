@@ -68,12 +68,19 @@ export function mapResponse(
   if (!Array.isArray(raw)) throw new MappingError('response items path is not an array');
   if (raw.length > mapping.maxItems) result.truncated = true;
 
-  const fieldsArg = mapping.fieldsFromArg !== undefined && Object.hasOwn(args, mapping.fieldsFromArg) ? args[mapping.fieldsFromArg] : undefined;
-  const fields = Array.isArray(fieldsArg) ? fieldsArg.filter((x): x is string => typeof x === 'string') : undefined;
+  let fields: string[] | undefined;
+  if (mapping.fieldsFromArg !== undefined) {
+    // Fail closed: without an explicit field list nothing is returned.
+    const arg = Object.hasOwn(args, mapping.fieldsFromArg) ? args[mapping.fieldsFromArg] : undefined;
+    if (!Array.isArray(arg) || !arg.every((x): x is string => typeof x === 'string')) throw new MappingError('fields argument is missing');
+    fields = arg;
+  }
 
   result.items = (raw as unknown[]).slice(0, mapping.maxItems).map((it) => {
     const flat = mapping.flatten ? flattenItem(it, mapping.flatten) : it;
-    let item: Obj = isObj(flat) ? flat : { value: flat };
+    // Non-object items are returned unchanged and never projected.
+    if (!isObj(flat)) return clip(flat) as Obj;
+    let item: Obj = flat;
     if (fields) {
       const proj: Obj = {};
       for (const k of fields) if (Object.hasOwn(item, k)) set(proj, k, item[k]);
