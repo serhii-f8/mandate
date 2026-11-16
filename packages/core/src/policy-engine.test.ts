@@ -122,6 +122,20 @@ describe('POL-3 denied fields', () => {
     });
   });
 
+  it.each([
+    ['an array of objects', [{ code: 'cost', value: 1 }]],
+    ['a string', 'cost'],
+    ['a nested array', [['cost']]],
+    ['an array mixing strings and objects', ['name', { code: 'cost' }]],
+  ])('denies when the fields argument is %s, since its fields cannot be read (fail closed)', (_name, fields) => {
+    expect(search({ brand: 'acme', fields })).toMatchObject({
+      effect: 'deny',
+      rule: 'role:content_manager/grant:own-brands/deny_fields',
+      reason: 'denied_field',
+      detail: 'fields',
+    });
+  });
+
   it('reports the first grant first failing check when no grant passes', () => {
     expect(search({ brand: 'initech', fields: ['price'] })).toMatchObject({
       effect: 'deny',

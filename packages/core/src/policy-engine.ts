@@ -66,15 +66,23 @@ function checkScope(grant: GrantDefinition, args: Readonly<Record<string, unknow
   return PASS;
 }
 
-function touchedFields(fieldsArg: string | undefined, args: Readonly<Record<string, unknown>>): readonly string[] {
+/** Fields the call touches, or `unreadable` when the argument is neither an object nor an array of strings. */
+function touchedFields(fieldsArg: string | undefined, args: Readonly<Record<string, unknown>>): readonly string[] | 'unreadable' {
   if (fieldsArg === undefined) return [];
   const value = args[fieldsArg];
-  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string');
-  if (typeof value === 'object' && value !== null) return Object.keys(value);
-  return [];
+  if (value === undefined || value === null) return [];
+  if (Array.isArray(value)) return value.every((v) => typeof v === 'string') ? value : 'unreadable';
+  if (typeof value === 'object') return Object.keys(value);
+  return 'unreadable';
 }
 
-function checkFields(grant: GrantDefinition, fields: readonly string[]): Check {
+function checkFields(grant: GrantDefinition, fields: readonly string[] | 'unreadable', fieldsArg: string | undefined): Check {
+  if (fields === 'unreadable') {
+    // Fail closed (POL-3): a grant that restricts fields cannot pass a call whose fields it cannot read.
+    if (grant.denyFields.length > 0) return { ok: false, suffix: '/deny_fields', reason: 'denied_field', detail: fieldsArg ?? '' };
+    if (grant.allowFields !== undefined) return { ok: false, suffix: '/allow_fields', reason: 'field_not_allowed', detail: fieldsArg ?? '' };
+    return PASS;
+  }
   const denied = fields.find((f) => grant.denyFields.includes(f));
   if (denied !== undefined) return { ok: false, suffix: '/deny_fields', reason: 'denied_field', detail: denied };
   const allow = grant.allowFields;
@@ -119,7 +127,7 @@ export function createPolicyEngine(config: PolicyConfiguration): PolicyEngine {
       let firstFailure: { ref: string; check: Extract<Check, { ok: false }> } | undefined;
       for (const { ref, grant } of matching) {
         const scope = checkScope(grant, args);
-        const check = scope.ok ? checkFields(grant, fields) : scope;
+        const check = scope.ok ? checkFields(grant, fields, operation.fieldsArg) : scope;
         if (check.ok) return { effect: 'allow', rule: ref, roles };
         firstFailure ??= { ref, check };
       }
