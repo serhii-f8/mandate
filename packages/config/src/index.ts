@@ -14,3 +14,12 @@ export {
   type RoleConfig,
   type RoleLimits,
 } from './schema.js';
+export { createSchemaCompiler, type ArgumentCheck, type ArgumentValidator } from './argument-validators.js';
+export {
+  BUILTIN_TOOL_NAMES,
+  loadConfigurationDirectory,
+  loadConfigurationSources,
+  type LoadedConfiguration,
+  type LoadOptions,
+  type LoadResult,
+} from './load.js';
