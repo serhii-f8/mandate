@@ -13,13 +13,25 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "migrations"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --project unit --passWithNoTests"
+    "test": "vitest run --project unit --passWithNoTests",
+    "test:int": "vitest run --project integration",
+    "db:generate": "drizzle-kit generate"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@aiops/testing": "workspace:*",
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.11"
+  },
+  "dependencies": {
+    "@aiops/core": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "pg": "8.23.1"
+  }
 }

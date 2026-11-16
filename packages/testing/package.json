@@ -21,5 +21,10 @@
     "lint": "eslint .",
     "test": "vitest run --project unit --passWithNoTests"
   },
-  "devDependencies": {}
+  "devDependencies": {},
+  "dependencies": {
+    "@aiops/core": "workspace:*",
+    "@testcontainers/postgresql": "12.2.1",
+    "testcontainers": "12.2.1"
+  }
 }
