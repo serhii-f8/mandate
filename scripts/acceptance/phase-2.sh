@@ -97,8 +97,10 @@ mkdir -p "$WORK/broken"
 cp deploy/config/*.yaml "$WORK/broken/"
 sed -i 's/      - operation: support.lookup_order/      - operation: support.lookup_orders/' "$WORK/broken/roles.yaml"
 set +e
-OUT="$(compose run --rm --no-deps -T -v "$WORK/broken:/etc/aiops/config:ro" --entrypoint node api \
-  node_modules/@aiops/config/dist/cli.js validate /etc/aiops/config 2>&1)"
+# The configuration applies the Magento preset: without it a grant could name a preset operation,
+# so the check needs the preset directory of the clone (Phase 3).
+OUT="$(compose run --rm --no-deps -T -v "$WORK/broken:/etc/aiops/config:ro" -v "$PWD/presets:/etc/aiops/presets:ro" --entrypoint node api \
+  node_modules/@aiops/config/dist/cli.js validate /etc/aiops/config --preset-dir /etc/aiops/presets 2>&1)"
 CODE=$?
 set -e
 if [[ "$CODE" == 1 ]] && grep -q '^roles.yaml:[0-9]*:[0-9]* roles\[1\]\.grants\[0\]\.operation: ' <<<"$OUT"; then

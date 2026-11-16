@@ -8,6 +8,7 @@ import { InMemoryAuditLog, startFakeUpstream, type FakeUpstream } from '@aiops/t
 import { runApiCli, type CliDeps, type CliStore } from './cli.js';
 
 const DEV_CONFIG = fileURLToPath(new URL('../../../deploy/config', import.meta.url));
+const REPO_PRESETS = fileURLToPath(new URL('../../../presets', import.meta.url));
 const FIXTURE_CONFIG = fileURLToPath(new URL('../test/e2e/fixtures/credentials-config', import.meta.url));
 const TOKEN = 'unit-only-cli-token-value-0123456789';
 
@@ -73,8 +74,9 @@ async function run(argv: string[], env: Record<string, string> = {}, stored = tr
 
 describe('CFG-3 aiops validate and test-connection', () => {
   it('CFG-3 validate of the development configuration exits 0', async () => {
-    const { code, lines } = await run(['validate', DEV_CONFIG]);
-    expect(lines.join('\n')).toMatch(/^Configuration valid: 1 connections, 2 operations, 3 roles$/m);
+    const { code, lines } = await run(['validate', DEV_CONFIG, '--preset-dir', REPO_PRESETS]);
+    // support.lookup_order from configuration, catalog.search_products and catalog.get_product from the Magento preset.
+    expect(lines.join('\n')).toMatch(/^Configuration valid: 1 connections, 3 operations, 3 roles$/m);
     expect(lines.join('\n')).not.toContain('skipped');
     expect(code).toBe(0);
   });
@@ -101,16 +103,10 @@ describe('CFG-3 aiops validate and test-connection', () => {
   });
 
   it('CFG-3 validate with presets declared and no preset directory exits 1 and says so', async () => {
-    const withPreset = await mkdtemp(join(tmpdir(), 'aiops-cli-preset-'));
-    try {
-      await cp(DEV_CONFIG, withPreset, { recursive: true });
-      await writeFile(join(withPreset, 'presets.yaml'), 'version: 1\npresets:\n  - { id: magento-catalog, package: "@aiops/preset-magento2-catalog" }\n');
-      const { code, lines } = await run(['validate', withPreset]);
-      expect(code).toBe(1);
-      expect(lines.join('\n')).toContain('preset directories not set');
-    } finally {
-      await rm(withPreset, { recursive: true });
-    }
+    // The development configuration applies the Magento preset; this run has no preset directory.
+    const { code, lines } = await run(['validate', DEV_CONFIG]);
+    expect(code).toBe(1);
+    expect(lines.join('\n')).toContain('preset directories not set');
   });
 
   it('CONN-7 test-connection prints the result line, audits as cli and exits 0', async () => {

@@ -1,15 +1,19 @@
-# Development configuration (design §7). Connection magento points at a placeholder shop;
-# its credential is entered on the trusted credential page (UI-5), until then allowed calls
-# end in the fixed "credential has not been entered" result. The Magento preset replaces the
-# explicit operation mappings in operations.yaml when it ships.
+# Development configuration (design §7). Connection magento points at a placeholder shop
+# and applies the Magento catalog preset (presets/magento2-catalog), which brings
+# catalog.search_products, catalog.get_product and the connection test. Its credential is
+# entered on the trusted credential page (UI-5); until then allowed calls end in the fixed
+# "credential has not been entered" result. The api loads the preset from AIOPS_PRESET_DIRS;
+# check this directory with `pnpm aiops validate deploy/config --preset-dir presets`.
 version: 1
+presets:
+  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '0.1.0' }
 connections:
   - id: magento
     adapter: openapi
-    base_url: https://shop.example.test/rest
+    base_url: https://shop.example.test/rest/all
     credential_ref: magento-integration
     auth: { scheme: bearer }
+    preset: magento-catalog
     # Development only: lets the connection reach a shop on a private or loopback address
     # (a local sandbox). Leave it out, or false, in production (CONN-5).
     allow_private_network: true
-    test: { operation: catalog.search_products, args: { brand: acme, fields: [sku] } }
