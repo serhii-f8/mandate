@@ -1,0 +1,6 @@
+# Lets `docker compose up -d --wait` work from the repository root (ADR 0012).
+# The stack itself is defined in deploy/docker-compose.yml.
+name: aiops
+
+include:
+  - deploy/docker-compose.yml

@@ -1,0 +1,5 @@
+# Temporal dynamic configuration for the bundled single-node server (from Temporal's
+# reference Compose, temporalio/temporal-server-operations compose/dynamicconfig).
+limit.maxIDLength:
+  - value: 255
+    constraints: {}
