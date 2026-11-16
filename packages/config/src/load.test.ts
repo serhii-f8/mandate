@@ -115,6 +115,15 @@ describe('CFG-2 invalid configuration is rejected as a whole', () => {
     expect(found).toEqual([{ file: 'extra.yaml', line: 3, column: 5, path: 'roles[0].id', message: 'has an invalid format' }]);
   });
 
+  it('tells a wrong value or type apart from a missing key, without echoing the value', async () => {
+    const found = issues(await load({ 'extra.yaml': 'version: 2\nroles: nope-value\n' }));
+    expect(found.map((i) => [i.path, i.message])).toEqual([
+      ['version', 'must be one of: 1'],
+      ['roles', 'must be array'],
+    ]);
+    expect(issues(await load({ 'extra.yaml': 'roles: []\n' }))).toEqual([expect.objectContaining({ path: 'version', message: 'is required' })]);
+  });
+
   it('names both files for a duplicate operation ID', async () => {
     const second = OPERATIONS.replace('version: 1\n', 'version: 1\n');
     const found = issues(await load({ 'z-operations.yaml': second }));

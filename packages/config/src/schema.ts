@@ -120,6 +120,13 @@ export interface SchemaIssue {
   readonly message: string;
 }
 
+/**
+ * Parse parameters for configuration documents. Zod 4 leaves `input` out of issues
+ * unless asked; `messageFor` needs it to tell a missing key from a wrong value. The
+ * input never reaches a message: `schemaIssues` keeps only path and message.
+ */
+export const PARSE_PARAMS = { reportInput: true } as const;
+
 /** Turns a Zod result into value-free issues: Zod's own messages can quote the input. */
 export function schemaIssues(result: { success: true } | { success: false; error: z.ZodError }): SchemaIssue[] {
   if (result.success) return [];

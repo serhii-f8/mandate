@@ -15,6 +15,7 @@ import { readSpecFile, resolvePreset, type LoadedPreset } from './presets.js';
 import { buildRegistry, propertiesOf, type CatalogState, type Located, type OperationBinding, type OperationSource } from './registry.js';
 import {
   configDocumentSchema,
+  PARSE_PARAMS,
   schemaIssues,
   type ConfigDocument,
   type ConnectionConfig,
@@ -144,7 +145,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     const source = parsed.document;
     if (source === undefined) continue;
     for (const path of findSecretKeys(source.value)) at(source, path, SECRET_MESSAGE);
-    const result = configDocumentSchema.safeParse(source.value ?? {});
+    const result = configDocumentSchema.safeParse(source.value ?? {}, PARSE_PARAMS);
     for (const issue of schemaIssues(result)) at(source, issue.path, issue.message);
     if (result.success) documents.push({ source, doc: result.data });
   }

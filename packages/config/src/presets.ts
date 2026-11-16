@@ -8,7 +8,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
 import { pathToString, type ConfigIssue } from './issues.js';
-import { presetOperationSchema, schemaIssues, type PresetConfig, type PresetOperationConfig } from './schema.js';
+import { PARSE_PARAMS, presetOperationSchema, schemaIssues, type PresetConfig, type PresetOperationConfig } from './schema.js';
 import { findSecretKeys, SECRET_MESSAGE } from './secrets.js';
 import { authSchema, connectionTestSchema, isSpecUrl, type AuthConfig, type ConnectionTestConfig } from './upstream-schema.js';
 import { parseYamlSource, type SourceDocument } from './yaml-source.js';
@@ -94,7 +94,7 @@ export async function resolvePreset(entry: PresetConfig, dirs: readonly string[]
     issues.push({ file, path: pathToString(path), ...(source.locate(path) ?? {}), message });
   };
   for (const path of findSecretKeys(source.value)) at(path, SECRET_MESSAGE);
-  const result = presetDocumentSchema.safeParse(source.value ?? {});
+  const result = presetDocumentSchema.safeParse(source.value ?? {}, PARSE_PARAMS);
   for (const issue of schemaIssues(result)) at(issue.path, issue.message);
   if (!result.success || issues.length > 0) return { ok: false, issues };
   const doc = result.data;
