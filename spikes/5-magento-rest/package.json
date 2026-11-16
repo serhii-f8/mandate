@@ -1,0 +1,11 @@
+{
+  "name": "spike-5-magento-rest",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "scripts": { "check": "node check.mjs" },
+  "dependencies": {
+    "@readme/openapi-parser": "10.0.0",
+    "swagger2openapi": "7.0.8"
+  }
+}

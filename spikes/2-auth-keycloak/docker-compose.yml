@@ -1,0 +1,29 @@
+# Spike 2: Keycloak as the bundled authorization server.
+# Run with: docker compose -p fde-spike-2 up -d   (run.sh does this for you)
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2
+    command:
+      - start-dev
+      - --import-realm
+      - --http-port=8080
+      # Experimental features needed for MCP 2026-07-28 (see Keycloak MCP guide):
+      #   cimd                -> OAuth Client ID Metadata Documents
+      #   resource-indicators -> RFC 8707 `resource` parameter processing
+      - --features=cimd,resource-indicators
+      # Trust the spike's self-signed CA so Keycloak can fetch the CIMD document over HTTPS.
+      - --truststore-paths=/opt/keycloak/conf/spike-ca/ca.pem
+      # Public URL of Keycloak (issuer). Change KC_PUBLIC_URL when exposing through a tunnel.
+      - --hostname=${KC_PUBLIC_URL:-http://localhost:4180}
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # Used as a placeholder inside realm.json (audience of MCP access tokens).
+      MCP_RESOURCE: ${MCP_RESOURCE:-http://localhost:4111/mcp}
+    ports:
+      - "4180:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./realm.json:/opt/keycloak/data/import/realm.json:ro
+      - ./.run/ca:/opt/keycloak/conf/spike-ca:ro

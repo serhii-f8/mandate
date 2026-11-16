@@ -1,0 +1,13 @@
+{
+  "name": "spike-2-auth-keycloak",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "./run.sh"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
+    "jose": "6.2.17"
+  }
+}

@@ -1,0 +1,28 @@
+# Temporal dev server (SQLite file on a named volume so a container restart keeps state).
+# Image/tag: temporalio/temporal:1.10.1 = Temporal CLI 1.10.1 (embeds Server 1.32.2, UI 2.56.4);
+# verified with `docker run --rm temporalio/temporal:1.10.1 --version` on 2026-11-16.
+name: fde-spike-4
+services:
+  temporal:
+    image: temporalio/temporal:1.10.1
+    user: "0"   # a fresh named volume is root-owned; the image's default user cannot create the DB file there
+    command:
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --port
+      - "7233"
+      - --ui-ip
+      - 0.0.0.0
+      - --ui-port
+      - "8233"
+      - --db-filename
+      - /data/temporal.db
+    ports:
+      - "127.0.0.1:4233:7233"
+      - "127.0.0.1:4288:8233"
+    volumes:
+      - temporal-data:/data
+volumes:
+  temporal-data:

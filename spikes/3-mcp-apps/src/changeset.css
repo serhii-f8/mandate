@@ -1,0 +1,64 @@
+/* Shared styles for widget and page. Every colour reads a standard MCP Apps
+   host variable (spec 2026-01-26, "Theming") with a fallback that is used when
+   no host supplies it (standalone page, or a host that omits styles). The
+   fallbacks deliberately differ from the basic-host values so the host-theme
+   assertion can tell them apart. */
+:root {
+  color-scheme: light dark;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+.cs {
+  box-sizing: border-box;
+  padding: 16px;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  background: var(--color-background-primary, light-dark(#fdf6e3, #002b36));
+  color: var(--color-text-primary, light-dark(#073642, #eee8d5));
+  border-radius: var(--border-radius-md, 6px);
+}
+.cs-title {
+  margin: 0 0 8px;
+  font-size: var(--font-heading-sm-size, 1.1rem);
+}
+.cs-summary {
+  margin: 0 0 12px;
+  color: var(--color-text-secondary, light-dark(#586e75, #93a1a1));
+}
+.cs-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 12px;
+  font-size: var(--font-text-sm-size, 0.9rem);
+}
+.cs-table th,
+.cs-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-border-primary, light-dark(#eee8d5, #073642));
+}
+.cs-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.cs-submit {
+  padding: 6px 14px;
+  border-radius: var(--border-radius-sm, 4px);
+  border: 1px solid var(--color-border-secondary, #93a1a1);
+  background: var(--color-background-inverse, light-dark(#073642, #eee8d5));
+  color: var(--color-text-inverse, light-dark(#eee8d5, #073642));
+  cursor: pointer;
+}
+.cs-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.cs-result {
+  margin: 12px 0 0;
+}
+.cs-error {
+  color: var(--color-text-danger, #dc322f);
+}
