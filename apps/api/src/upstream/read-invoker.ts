@@ -51,6 +51,18 @@ function credentialSource(handle: CredentialHandle, scheme: CredentialScheme): C
   return { ref: handle.ref, scheme, open: () => handle.open() };
 }
 
+/**
+ * The credential of a connection as the adapter takes it: `undefined` when the connection
+ * has no reference or nothing is stored (the adapter answers `credential_missing` if it
+ * needs one), `'unusable'` when the stored scheme is unknown.
+ */
+export async function connectionCredential(vault: CredentialVault, ref: string | undefined): Promise<CredentialSource | 'unusable' | undefined> {
+  if (ref === undefined) return undefined;
+  const handle = await vault.handle(ref);
+  if (handle === undefined) return undefined;
+  return isScheme(handle.scheme) ? credentialSource(handle, handle.scheme) : 'unusable';
+}
+
 type Details = Record<string, string | number | boolean>;
 
 function fromOutcome(operation: string, base: Details, outcome: ReadOutcome): InvocationResult {
@@ -90,15 +102,9 @@ export class DirectReadInvoker implements OperationInvoker {
 
     // From here on the binding decides the connection, for the call and for the audit.
     const bound: Details = { operation: operation.id, connection: binding.connection };
-    let credential: CredentialSource | undefined;
-    if (connection.credentialRef !== undefined) {
-      const handle = await this.deps.vault.handle(connection.credentialRef);
-      if (handle !== undefined) {
-        if (!isScheme(handle.scheme)) {
-          return { ...readErrorResult(operation.id, 'credential_unusable'), auditDetails: { ...bound, errorCode: 'credential_unusable' } };
-        }
-        credential = credentialSource(handle, handle.scheme);
-      }
+    const credential = await connectionCredential(this.deps.vault, connection.credentialRef);
+    if (credential === 'unusable') {
+      return { ...readErrorResult(operation.id, 'credential_unusable'), auditDetails: { ...bound, errorCode: 'credential_unusable' } };
     }
 
     const outcome = await this.deps.adapter.read({ connection, mapping: binding.mapping, args, ...(credential === undefined ? {} : { credential }) });

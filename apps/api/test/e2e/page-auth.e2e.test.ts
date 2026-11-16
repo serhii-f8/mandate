@@ -328,7 +328,7 @@ describe('SEC-1 every page route is authorized', () => {
       }
     }
     expect(routes.map((r) => r.name)).toEqual(
-      expect.arrayContaining(['McpController.handle', 'HealthController.live', 'AuthController.login', 'AuthController.callback', 'SessionController.current']),
+      expect.arrayContaining(['McpController.handle', 'HealthController.live', 'AuthController.login', 'AuthController.callback', 'SessionController.current', 'CredentialsController.list', 'CredentialsController.put', 'ConnectionsController.test']),
     );
     expect(routes.filter((r) => !r.marked)).toEqual([]);
   });

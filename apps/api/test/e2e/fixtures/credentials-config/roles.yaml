@@ -1,0 +1,18 @@
+version: 1
+roles:
+  - id: integration_admin
+    grants: []
+    manage_credentials: [shop-token]
+  - id: platform_admin
+    grants: []
+    manage_credentials: ['*']
+  - id: support_agent
+    grants:
+      - operation: catalog.search_products
+role_mapping:
+  - group: admins
+    roles: [integration_admin]
+  - group: platform
+    roles: [platform_admin]
+  - group: support
+    roles: [support_agent]

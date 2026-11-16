@@ -3,7 +3,7 @@ import { HttpException, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it } from 'vitest';
 import type { SessionRow } from '@aiops/db';
-import { PageAccess, PageAccessGuard, Public, type PageRequest } from './access.js';
+import { PageAccess, PageAccessGuard, pageDenial, Public, type PageRequest } from './access.js';
 import { hashToken } from './session.service.js';
 
 const ORIGIN = 'https://aiops.example.test';
@@ -152,5 +152,25 @@ describe('SEC-8 CSRF and fresh session on page mutations', () => {
     expect(await outcome(guard(old), PagesController, 'secret', withCookie(good))).toEqual({ status: 403, body: { error: 'reauthentication_required' } });
     // CSRF is checked before freshness: a forged request never learns the session age.
     expect(await outcome(guard(old), PagesController, 'secret', withCookie({ origin: ORIGIN }))).toEqual({ status: 403, body: { error: 'csrf' } });
+  });
+});
+
+describe('SEC-8 page checks run in a fixed order', () => {
+  const checks = { publicOrigin: ORIGIN, freshAuthSeconds: 300, now: () => NOW };
+  const good = { origin: ORIGIN, 'x-csrf-token': 'csrf-token-1' };
+  const old = session({ authTime: new Date(NOW - 301_000) });
+  const all = { permitted: false, csrf: true, fresh: true };
+
+  it('SEC-8 SEC-1 permission first, then Origin + CSRF, then freshness', () => {
+    expect(pageDenial({}, old, all, checks)).toBe('forbidden');
+    expect(pageDenial({}, old, { ...all, permitted: true }, checks)).toBe('csrf');
+    expect(pageDenial(good, old, { ...all, permitted: true }, checks)).toBe('reauthentication_required');
+    expect(pageDenial(good, session(), { ...all, permitted: true }, checks)).toBeUndefined();
+  });
+
+  it('SEC-8 checks not required are not run', () => {
+    expect(pageDenial({}, old, {}, checks)).toBeUndefined();
+    expect(pageDenial({}, old, { fresh: false, csrf: false }, checks)).toBeUndefined();
+    expect(pageDenial(good, old, { csrf: true }, checks)).toBeUndefined();
   });
 });

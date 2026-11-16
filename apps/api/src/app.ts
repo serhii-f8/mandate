@@ -21,11 +21,27 @@ import { BUILTIN_TOOLS } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
 import { createServerFactory } from './mcp/mcp-server-factory.js';
 import { snapshotOf, type PipelineDeps } from './mcp/tool-pipeline.js';
-import { API_ENV, AUDIT_LOG, BEARER_GATE, CONFIGURATION, CREDENTIAL_VAULT, DATABASE, LOGGER, MCP_HANDLER, OIDC_CLIENT, PAGE_SESSIONS } from './tokens.js';
+import {
+  API_ENV,
+  AUDIT_LOG,
+  BEARER_GATE,
+  CONFIGURATION,
+  CONNECTION_TEST,
+  CREDENTIAL_VAULT,
+  DATABASE,
+  LOGGER,
+  MCP_HANDLER,
+  OIDC_CLIENT,
+  PAGE_CHECKS,
+  PAGE_SESSIONS,
+} from './tokens.js';
+import { ConnectionTestService } from './upstream/connection-test.js';
 import { directReadInvokers } from './upstream/read-invoker.js';
 import { assertFullyChecked } from './upstream/upstream-runtime.js';
-import { PageAccessGuard } from './web/access.js';
+import { PageAccessGuard, type PageChecks } from './web/access.js';
 import { AuthController, SessionController } from './web/auth.controller.js';
+import { ConnectionsController } from './web/connections.controller.js';
+import { CredentialsController } from './web/credentials.controller.js';
 import { createOidcClient } from './web/oidc-client.js';
 import { SessionService } from './web/session.service.js';
 
@@ -89,9 +105,11 @@ class AppModule {
       redirectUri: new URL('/auth/callback', env.publicUrl).href,
       jwks,
     });
+    // One set of SEC-8 settings for the guard and the credential controllers.
+    const pageChecks: PageChecks = { publicOrigin: env.publicUrl.origin, freshAuthSeconds: env.freshAuthSeconds };
     return {
       module: AppModule,
-      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController],
+      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController],
       providers: [
         { provide: API_ENV, useValue: env },
         { provide: LOGGER, useValue: logger },
@@ -136,6 +154,13 @@ class AppModule {
               },
             ),
         },
+        {
+          provide: CONNECTION_TEST,
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT],
+          useFactory: (audit: AuditLog, vault: CredentialVault) =>
+            new ConnectionTestService({ configuration: () => configuration.current, vault, adapter, audit, newId: randomUUID }),
+        },
+        { provide: PAGE_CHECKS, useValue: pageChecks },
         { provide: OIDC_CLIENT, useValue: oidc },
         {
           provide: PAGE_SESSIONS,
@@ -147,10 +172,7 @@ class AppModule {
           provide: APP_GUARD,
           inject: [PAGE_SESSIONS],
           useFactory: (sessions: SessionService) =>
-            new PageAccessGuard(new Reflector(), sessions, (groups) => resolveRoles(groups, configuration.current.policy.roleMapping), {
-              publicOrigin: env.publicUrl.origin,
-              freshAuthSeconds: env.freshAuthSeconds,
-            }),
+            new PageAccessGuard(new Reflector(), sessions, (groups) => resolveRoles(groups, configuration.current.policy.roleMapping), pageChecks),
         },
         Resources,
       ],

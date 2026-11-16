@@ -51,15 +51,45 @@ export function routeAccess(reflector: Reflector, handler: RouteTarget, cls: Rou
   return 'none';
 }
 
-export interface PageAccessGuardOptions {
+/** The settings of the SEC-8 checks, shared by the guard and the controllers that run them themselves. */
+export interface PageChecks {
   /** `AIOPS_PUBLIC_URL`'s origin. */
   readonly publicOrigin: string;
   readonly freshAuthSeconds: number;
   readonly now?: () => number;
 }
 
-const deny = (status: 401 | 403, error: 'unauthenticated' | 'forbidden' | 'csrf' | 'reauthentication_required'): HttpException =>
-  new HttpException({ error }, status);
+export type PageAccessGuardOptions = PageChecks;
+
+/** Why a page request with a valid session is refused (403). */
+export type PageDenial = 'forbidden' | 'csrf' | 'reauthentication_required';
+
+export interface RequiredChecks extends PageAccessOptions {
+  /** The route's permission, when it depends on the request (e.g. on `:ref`); `false` is `forbidden`. */
+  readonly permitted?: boolean;
+}
+
+/**
+ * The checks of a page request after its session was found, in one fixed order:
+ * permission → `Origin` + CSRF → fresh session (SEC-1, SEC-8). A forged request learns
+ * neither the session age nor whether the body would be accepted. `undefined` = allowed.
+ */
+export function pageDenial(
+  headers: PageRequest['headers'],
+  session: Pick<SessionRow, 'csrfToken' | 'authTime'>,
+  required: RequiredChecks,
+  checks: PageChecks,
+): PageDenial | undefined {
+  if (required.permitted === false) return 'forbidden';
+  if (required.csrf === true && !csrfAllowed(headers, session.csrfToken, checks.publicOrigin)) return 'csrf';
+  if (required.fresh === true) {
+    const now = checks.now?.() ?? Date.now();
+    if (now - session.authTime.getTime() > checks.freshAuthSeconds * 1000) return 'reauthentication_required';
+  }
+  return undefined;
+}
+
+export const deny = (status: 401 | 403, error: 'unauthenticated' | PageDenial): HttpException => new HttpException({ error }, status);
 
 /**
  * Global guard (SEC-1): every route is denied unless marked `@Public()` or
@@ -88,11 +118,8 @@ export class PageAccessGuard implements CanActivate {
     const session = cookieValue === undefined || cookieValue === '' ? undefined : await this.sessions.find(cookieValue);
     if (session === undefined) throw deny(401, 'unauthenticated');
 
-    if (access.csrf === true && !csrfAllowed(req.headers, session.csrfToken, this.options.publicOrigin)) throw deny(403, 'csrf');
-    if (access.fresh === true) {
-      const now = this.options.now?.() ?? Date.now();
-      if (now - session.authTime.getTime() > this.options.freshAuthSeconds * 1000) throw deny(403, 'reauthentication_required');
-    }
+    const denial = pageDenial(req.headers, session, access, this.options);
+    if (denial !== undefined) throw deny(403, denial);
     req.page = { session, roles: this.rolesFor(session.groups) };
     return true;
   }

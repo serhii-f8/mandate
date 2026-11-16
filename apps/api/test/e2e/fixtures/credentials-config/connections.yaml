@@ -1,0 +1,20 @@
+# Credential page e2e (UI-5, SEC-8, SEC-3, CONN-7). The test replaces __UPSTREAM_URL__ with the fake upstream's URL.
+version: 1
+connections:
+  - id: shop
+    adapter: openapi
+    base_url: __UPSTREAM_URL__/rest
+    credential_ref: shop-token
+    auth: { scheme: bearer }
+    allow_private_network: true
+    timeout_ms: 2000
+    retry: { max_attempts: 1 }
+    test: { operation: catalog.search_products, args: { brand: acme, fields: [sku] } }
+  - id: erp
+    adapter: openapi
+    base_url: __UPSTREAM_URL__/erp
+    credential_ref: erp-key
+    auth: { scheme: api_key, header: x-api-key }
+    allow_private_network: true
+    timeout_ms: 2000
+    retry: { max_attempts: 1 }
