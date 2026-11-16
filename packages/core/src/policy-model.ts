@@ -27,12 +27,12 @@ export interface OperationDefinition {
 
 /** A catalogue entry the operator has not enabled (visible to admins only). */
 export interface DisabledOperation {
-  key: string;
-  connection: string;
-  method: string;
-  path: string;
-  operationId?: string;
-  summary?: string;
+  readonly key: string;
+  readonly connection: string;
+  readonly method: string;
+  readonly path: string;
+  readonly operationId?: string;
+  readonly summary?: string;
 }
 
 export interface GrantDefinition {

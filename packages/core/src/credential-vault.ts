@@ -8,12 +8,12 @@ export interface CredentialHandle {
 }
 
 export interface CredentialStatus {
-  ref: string;
-  set: boolean;
-  scheme?: string;
-  updatedAt?: Date;
-  updatedBy?: string;
-  keyVersion?: number;
+  readonly ref: string;
+  readonly set: boolean;
+  readonly scheme?: string;
+  readonly updatedAt?: Date;
+  readonly updatedBy?: string;
+  readonly keyVersion?: number;
 }
 
 export interface CredentialVault {

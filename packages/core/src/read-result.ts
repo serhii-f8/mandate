@@ -61,7 +61,7 @@ export function readToolResult(input: ReadToolResultInput): InvocationResult {
 export function readErrorResult(operation: string, code: string, status?: number): InvocationResult {
   let text: string;
   if (code === 'http_status') text = READ_RESULT_TEXT.httpStatus(operation, status);
-  else if (code in READ_RESULT_TEXT.errors) {
+  else if (Object.hasOwn(READ_RESULT_TEXT.errors, code)) {
     text = READ_RESULT_TEXT.errors[code as keyof typeof READ_RESULT_TEXT.errors](operation);
   } else text = READ_RESULT_TEXT.unknown(operation);
   return { text, isError: true };

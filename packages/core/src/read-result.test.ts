@@ -35,16 +35,24 @@ describe('SEC-5 upstream content stays data', () => {
     expect(r.text).not.toContain('delete_all');
   });
   it('error texts are fixed and carry no argument data', () => {
-    const codes = ['credential_missing', 'credential_unusable', 'egress_denied', 'timeout', 'network', 'busy', 'invalid_response', 'mapping', 'http_status', 'weird'];
-    for (const code of codes) {
+    const expected: Record<string, string> = {
+      credential_missing: 'op cannot run: the credential for its connection has not been entered.',
+      credential_unusable: 'op cannot run: the credential for its connection cannot be used.',
+      egress_denied: 'op cannot run: the upstream host is not allowed.',
+      timeout: 'op failed: the upstream system did not answer in time.',
+      network: 'op failed: the upstream system could not be reached.',
+      busy: 'op cannot run right now: too many requests are in flight. Try again shortly.',
+      invalid_response: 'op failed: the upstream system returned a response that could not be read.',
+      mapping: 'op failed: the upstream response did not match the expected shape.',
+      http_status: 'op failed: the upstream system answered HTTP 503.',
+      weird: 'op failed.',
+      constructor: 'op failed.',
+      toString: 'op failed.',
+    };
+    for (const [code, text] of Object.entries(expected)) {
       const r = readErrorResult('op', code, 503);
       expect(r.isError).toBe(true);
-      expect(r.text.startsWith('op ')).toBe(true);
+      expect(r.text).toBe(text);
     }
-    expect(readErrorResult('op', 'http_status', 503).text).toBe('op failed: the upstream system answered HTTP 503.');
-    expect(readErrorResult('op', 'credential_missing').text).toBe(
-      'op cannot run: the credential for its connection has not been entered.',
-    );
-    expect(readErrorResult('op', 'egress_denied').text).toBe('op cannot run: the upstream host is not allowed.');
   });
 });
