@@ -52,15 +52,14 @@ export function createServerFactory(deps: { catalog: ToolCatalog; audit: AuditLo
     const server = new McpServer(SERVER_INFO);
     for (const tool of deps.catalog.toolsFor(caller)) {
       server.registerTool(tool.name, { description: tool.description, inputSchema: tool.inputSchema }, (args, ctx) => {
-        // Phase 1 has no token client ID; use the client's self-declared name from the
-        // 2026-07-28 request envelope when present (absent on 2025-era requests).
+        // The 2026-07-28 envelope carries the client's self-declared name (absent on
+        // 2025-era requests). It is unverified, so it is audited as a detail only.
         const clientName = declaredClientName(ctx.mcpReq.envelope);
-        const effective: Caller =
-          caller.clientId === undefined && clientName !== undefined ? { ...caller, clientId: clientName } : caller;
         return auditedTool(tool, {
           audit: deps.audit,
-          caller: effective,
+          caller,
           correlationId,
+          ...(clientName === undefined ? {} : { declaredClientName: clientName }),
           newId: randomUUID,
           now: () => performance.now(),
         })(args);

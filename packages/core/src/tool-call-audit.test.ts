@@ -32,6 +32,12 @@ describe('AUD-1 tool call audit event', () => {
     expect(toolCallAuditEvent({ ...base, caller, outcome: 'ok' })).toMatchObject({ actor: 'alice', clientId: 'claude-ai' });
   });
 
+  it('records a self-declared client name in the details, never as the client ID', () => {
+    const event = toolCallAuditEvent({ ...base, outcome: 'ok', declaredClientName: 'some-client' });
+    expect(event.details).toEqual({ durationMs: 3, declaredClientName: 'some-client' });
+    expect(Object.keys(event)).not.toContain('clientId');
+  });
+
   it('adds the error code to the details only for an error', () => {
     expect(toolCallAuditEvent({ ...base, outcome: 'error', errorCode: 'handler_failed' }).details).toEqual({
       durationMs: 3,

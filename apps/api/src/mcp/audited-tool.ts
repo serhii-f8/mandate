@@ -6,6 +6,8 @@ export interface AuditedToolDeps {
   readonly audit: AuditLog;
   readonly caller: Caller;
   readonly correlationId: string;
+  /** Unverified client name the request declared, if any. */
+  readonly declaredClientName?: string;
   readonly newId: () => string;
   /** Monotonic milliseconds, for the duration. */
   readonly now: () => number;
@@ -44,6 +46,7 @@ export function auditedTool(def: ToolDefinition, deps: AuditedToolDeps): (args: 
       correlationId: deps.correlationId,
       durationMs: deps.now() - started,
       ...(result === TOOL_FAILED ? { errorCode: 'handler_failed' } : {}),
+      ...(deps.declaredClientName === undefined ? {} : { declaredClientName: deps.declaredClientName }),
     });
     try {
       await deps.audit.append(event);

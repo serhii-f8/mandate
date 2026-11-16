@@ -25,6 +25,7 @@ afterAll(async () => {
 interface AuditRow {
   actor: string;
   client_id: string | null;
+  details: Record<string, unknown>;
   action: string;
   subject: string;
   outcome: string;
@@ -102,7 +103,9 @@ describe('MCP-1 stateless Streamable HTTP endpoint at protocol 2026-07-28', () =
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       actor: 'anonymous',
-      client_id: 'aiops-e2e',
+      // client_id is reserved for a verified client (Phase 2); the declared name is detail.
+      client_id: null,
+      details: { declaredClientName: 'aiops-e2e' },
       action: 'tool.call',
       subject: 'ping',
       outcome: 'ok',

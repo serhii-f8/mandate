@@ -10,6 +10,11 @@ export interface ToolCallRecord {
   readonly durationMs: number;
   /** Machine-readable failure reason; kept only when `outcome` is `error`. */
   readonly errorCode?: string;
+  /**
+   * The client's self-declared name from the request, unverified. Kept in the
+   * details so `clientId` only ever holds a verified client identity.
+   */
+  readonly declaredClientName?: string;
 }
 
 /**
@@ -19,6 +24,7 @@ export interface ToolCallRecord {
  */
 export function toolCallAuditEvent(call: ToolCallRecord): AuditEventInput {
   const details: Record<string, unknown> = { durationMs: call.durationMs };
+  if (call.declaredClientName !== undefined) details.declaredClientName = call.declaredClientName;
   if (call.outcome === 'error' && call.errorCode !== undefined) details.errorCode = call.errorCode;
   return {
     id: call.id,
