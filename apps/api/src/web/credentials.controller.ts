@@ -67,16 +67,26 @@ export class CredentialsController {
       return;
     }
     const { session } = request.page;
-    const { keyVersion } = await this.vault.put({ ref, scheme: declared.scheme, secret: parsed.secret, actor: session.subject });
-    await this.audit.append({
-      id: randomUUID(),
+    const correlationId = request.correlationId;
+    // Stored and audited in one transaction: a secret whose change cannot be audited is not stored (AUD-1).
+    await this.vault.put({
+      ref,
+      scheme: declared.scheme,
+      secret: parsed.secret,
       actor: session.subject,
-      clientId: session.clientId,
-      action: 'credential.set',
-      subject: ref,
-      outcome: 'ok',
-      correlationId: request.correlationId,
-      details: { ref, scheme: declared.scheme, keyVersion },
+      audit: {
+        log: this.audit,
+        event: (keyVersion) => ({
+          id: randomUUID(),
+          actor: session.subject,
+          clientId: session.clientId,
+          action: 'credential.set',
+          subject: ref,
+          outcome: 'ok',
+          correlationId,
+          details: { ref, scheme: declared.scheme, keyVersion },
+        }),
+      },
     });
     res.status(204).end();
   }

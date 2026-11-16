@@ -166,6 +166,44 @@ describe('SEC-2 credential vault in PostgreSQL', () => {
     expect(audit.events.map((event) => event.subject)).toEqual(['good']);
   });
 
+  it('SEC-2 AUD-1 put with an audit appends the event with the stored key version', async () => {
+    const vault = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
+    const audit = new InMemoryAuditLog();
+    const result = await vault.put({
+      ref: 'r',
+      scheme: 'bearer',
+      secret: { token: SECRET_VALUE },
+      actor: 'carol',
+      audit: {
+        log: audit,
+        event: (keyVersion) => ({ id: 'e1', actor: 'carol', action: 'credential.set', outcome: 'ok', correlationId: 'c', details: { ref: 'r', keyVersion } }),
+      },
+    });
+    expect(result).toEqual({ keyVersion: 1 });
+    expect(audit.events).toEqual([expect.objectContaining({ action: 'credential.set', details: { ref: 'r', keyVersion: 1 } })]);
+  });
+
+  it('SEC-2 AUD-1 put rolls back when its audit append fails: a new ref is not stored, an old value is kept', async () => {
+    const vault = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
+    const audit = new InMemoryAuditLog();
+    const event = (keyVersion: number) => ({ id: 'e', actor: 'carol', action: 'credential.set' as const, outcome: 'ok' as const, correlationId: 'c', details: { keyVersion } });
+
+    audit.failNext = new Error('audit unavailable');
+    await expect(vault.put({ ref: 'new', scheme: 'bearer', secret: { token: 'dev-only-new' }, actor: 'carol', audit: { log: audit, event } })).rejects.toThrow(
+      'audit unavailable',
+    );
+    await expect(vault.handle('new')).resolves.toBeUndefined();
+
+    await vault.put({ ref: 'old', scheme: 'bearer', secret: { token: 'dev-only-old' }, actor: 'alice' });
+    audit.failNext = new Error('audit unavailable');
+    await expect(vault.put({ ref: 'old', scheme: 'bearer', secret: { token: 'dev-only-replaced' }, actor: 'carol', audit: { log: audit, event } })).rejects.toThrow(
+      'audit unavailable',
+    );
+    await expect((await vault.handle('old'))?.open()).resolves.toEqual({ token: 'dev-only-old' });
+    expect((await vault.describe(['old']))[0]?.updatedBy).toBe('alice');
+    expect(audit.events).toEqual([]);
+  });
+
   it('rotate rolls a row back when its audit append fails, and a re-run retries it', async () => {
     const v1 = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
     await v1.put({ ref: 'a', scheme: 'bearer', secret: { token: 'dev-only-a' }, actor: 'alice' });

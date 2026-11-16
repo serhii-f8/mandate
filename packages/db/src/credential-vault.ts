@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
-import type { AuditLog, CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
+import type { AuditEventInput, AuditLog, CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
 import type { Db } from './client.js';
 import { openSealed, rewrap, seal, type SealedCredential } from './envelope.js';
 import type { KeyProvider } from './keyring.js';
@@ -39,6 +39,7 @@ export class PostgresCredentialVault implements CredentialVault {
     scheme: string;
     secret: Readonly<Record<string, string>>;
     actor: string;
+    audit?: { log: AuditLog; event: (keyVersion: number) => AuditEventInput };
   }): Promise<{ keyVersion: number }> {
     const plaintext = Buffer.from(JSON.stringify(input.secret), 'utf8');
     let record: SealedCredential;
@@ -48,10 +49,15 @@ export class PostgresCredentialVault implements CredentialVault {
       plaintext.fill(0);
     }
     const values = { ...record, updatedBy: input.actor, updatedAt: sql`now()` };
-    await this.db
-      .insert(credential)
-      .values({ ref: input.ref, ...values })
-      .onConflictDoUpdate({ target: credential.ref, set: values });
+    const { audit } = input;
+    await this.db.transaction(async (tx) => {
+      await tx
+        .insert(credential)
+        .values({ ref: input.ref, ...values })
+        .onConflictDoUpdate({ target: credential.ref, set: values });
+      // Throws to roll the write back when the audit cannot be written (AUD-1), like `rotate`.
+      if (audit !== undefined) await audit.log.append(audit.event(record.keyVersion));
+    });
     return { keyVersion: record.keyVersion };
   }
 
