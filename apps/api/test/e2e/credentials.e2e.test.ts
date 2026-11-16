@@ -241,6 +241,28 @@ describe('CONN-7 connection test from the page', () => {
   });
 });
 
+describe('SEC-3 audited path parameters', () => {
+  it('SEC-3 a ref or connection that is not ID-shaped is audited as (invalid)', async () => {
+    const dave = await login(DAVE);
+    const put = await putSecret(dave, encodeURIComponent('Not A Ref'), { token: DENIED_SECRET });
+    expect(put).toMatchObject({ status: 403, body: { error: 'forbidden' } });
+    expect(await rowsOf('credential.set', put.correlationId)).toEqual([
+      expect.objectContaining({ subject: '(invalid)', outcome: 'denied', details: { ref: '(invalid)', reason: 'forbidden' } }),
+    ]);
+    const test = await testConnection(dave, 'NOT-AN-ID');
+    expect(test).toMatchObject({ status: 403, body: { error: 'forbidden' } });
+    expect(await rowsOf('connection.test', test.correlationId)).toEqual([
+      expect.objectContaining({ subject: '(invalid)', outcome: 'denied', details: { connection: '(invalid)', reason: 'forbidden' } }),
+    ]);
+  });
+
+  it('SEC-3 an ID-shaped unknown ref is audited as given', async () => {
+    const dave = await login(DAVE);
+    const put = await putSecret(dave, 'no-such-ref', { token: DENIED_SECRET });
+    expect(await rowsOf('credential.set', put.correlationId)).toEqual([expect.objectContaining({ details: { ref: 'no-such-ref', reason: 'forbidden' } })]);
+  });
+});
+
 describe('SEC-1 a user without manage_credentials', () => {
   it('SEC-1 bob is refused with 403 on PUT and on test, and both are audited as denied', async () => {
     const bob = await login(BOB);

@@ -4,8 +4,8 @@ import type { Request, Response } from 'express';
 import type { Logger } from 'pino';
 import type { ApiEnv } from '@aiops/config';
 import type { AuditLog } from '@aiops/core';
-import { API_ENV, AUDIT_LOG, LOGGER, OIDC_CLIENT, PAGE_SESSIONS } from '../tokens.js';
-import { PageAccess, pageOf, Public, type PageRequest } from './access.js';
+import { API_ENV, AUDIT_LOG, LOGGER, OIDC_CLIENT, PAGE_CHECKS, PAGE_SESSIONS } from '../tokens.js';
+import { PageAccess, pageDenial, pageOf, Public, type PageChecks, type PageRequest } from './access.js';
 import { pageCorrelation } from './correlation.js';
 import type { OidcClient } from './oidc-client.js';
 import { constantTimeEqual } from './csrf.js';
@@ -157,6 +157,8 @@ export class AuthController {
 /** The page session as the trusted pages see it (AUTH-5). */
 @Controller('api/v1')
 export class SessionController {
+  constructor(@Inject(PAGE_CHECKS) private readonly checks: PageChecks) {}
+
   @Get('session')
   @PageAccess()
   current(@Req() req: PageRequest, @Res() res: Response): void {
@@ -168,6 +170,8 @@ export class SessionController {
       roles,
       csrfToken: session.csrfToken,
       authTime: session.authTime.toISOString(),
+      // SEC-8: the same rule the credential change applies, so the page can re-authenticate first.
+      fresh: pageDenial(req.headers, session, { fresh: true }, this.checks) === undefined,
       expiresAt: session.expiresAt.toISOString(),
     });
   }

@@ -149,6 +149,7 @@ describe('AUTH-5 pages log in through the identity provider', () => {
       roles: ['integration_admin'],
       csrfToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) as unknown,
       authTime: expect.any(String) as unknown,
+      fresh: true,
       expiresAt: expect.any(String) as unknown,
     });
     secrets.add(String(body.csrfToken));
@@ -280,13 +281,15 @@ describe('AUTH-5 pages log in through the identity provider', () => {
     }
   });
 
-  it('AUTH-5 the session keeps the auth_time of the ID token', async () => {
+  it('AUTH-5 SEC-8 the session keeps the auth_time of the ID token and reports whether it is fresh', async () => {
     const authTime = Math.floor(Date.now() / 1000) - 3600;
     issuer.setLoginUser({ ...CAROL, authTime });
     try {
       const { cookie } = await pageLogin(a.url, 'carol', 'unused');
-      const session = (await (await get(`${a.url}/api/v1/session`, { cookie })).json()) as { authTime: string };
+      const session = (await (await get(`${a.url}/api/v1/session`, { cookie })).json()) as { authTime: string; fresh: boolean };
       expect(Date.parse(session.authTime)).toBe(authTime * 1000);
+      // SEC-8: older than AIOPS_FRESH_AUTH_SECONDS, so the page knows to re-authenticate before a credential change.
+      expect(session.fresh).toBe(false);
     } finally {
       issuer.setLoginUser(CAROL);
     }

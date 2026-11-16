@@ -164,6 +164,59 @@ describe('CONN-7 connection test service', () => {
     expect(adapter.reads).toEqual([]);
   });
 
+  it('CONN-7 a stored credential of an unknown scheme reports credential_unusable without calling the upstream', async () => {
+    const { vault, adapter, service, audit } = await setup();
+    await vault.put({ ref: 'magento-integration', scheme: 'kerberos', secret: { ticket: TOKEN }, actor: 'setup' });
+    const report = await service.run('magento', 'cli', 'cli', 'corr-8');
+    expect(report).toMatchObject({ ok: false, operation: 'catalog.search_products', code: 'credential_unusable' });
+    expect(adapter.reads).toEqual([]);
+    expect(audit.events[0]).toMatchObject({ outcome: 'error', details: { connection: 'magento', ok: false, code: 'credential_unusable', scopesDetectable: false } });
+  });
+
+  it.each<[string, (s: Awaited<ReturnType<typeof setup>>) => void, string]>([
+    [
+      'the vault lookup throws',
+      ({ vault }) => {
+        vault.handle = () => Promise.reject(new Error(`db down ${TOKEN}`));
+      },
+      'credential_unusable',
+    ],
+    [
+      'opening the credential throws (decrypt)',
+      ({ vault, adapter }) => {
+        vault.handle = (ref) => Promise.resolve({ ref, scheme: 'bearer', open: () => Promise.reject(new Error(`bad tag ${TOKEN}`)) });
+        // The adapter opens the credential while reading.
+        adapter.read = async (input) => {
+          await input.credential?.open();
+          return OK;
+        };
+      },
+      'credential_unusable',
+    ],
+    [
+      'adapter.read throws',
+      ({ adapter }) => {
+        adapter.read = () => Promise.reject(new Error(`socket ${TOKEN}`));
+      },
+      'network',
+    ],
+    [
+      'detectScopes throws',
+      ({ adapter }) => {
+        adapter.detectScopes = () => Promise.reject(new Error(`token ${TOKEN}`));
+      },
+      'network',
+    ],
+  ])('CONN-7 AUD-1 when %s the report is ok:false with a fixed message, and it is audited', async (_name, breakIt, code) => {
+    const s = await setup();
+    breakIt(s);
+    const report = await s.service.run('magento', 'carol-id', 'aiops-web', 'corr-9');
+    expect(report).toMatchObject({ ok: false, operation: 'catalog.search_products', code, scopes: { detectable: false } });
+    expect(JSON.stringify(report)).not.toContain(TOKEN);
+    expect(s.audit.events).toEqual([expect.objectContaining({ outcome: 'error', details: { connection: 'magento', ok: false, code, scopesDetectable: false } })]);
+    expect(JSON.stringify(s.audit.events)).not.toContain(TOKEN);
+  });
+
   it('SEC-3 the report and the audit never contain the secret', async () => {
     const { service, audit } = await setup();
     const report = await service.run('magento', 'carol-id', 'aiops-web', 'corr-7');
