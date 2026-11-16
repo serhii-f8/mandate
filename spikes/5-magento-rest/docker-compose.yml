@@ -1,0 +1,32 @@
+name: fde-spike-5
+services:
+  db:
+    image: mariadb:11.4
+    environment:
+      MARIADB_ROOT_PASSWORD: spike-root
+      MARIADB_DATABASE: magento
+      MARIADB_USER: magento
+      MARIADB_PASSWORD: spike-password
+    command: --max-allowed-packet=64M --innodb-buffer-pool-size=512M
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 30
+  search:
+    image: opensearchproject/opensearch:3.0.0
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+  web:
+    build: .
+    depends_on:
+      db: {condition: service_healthy}
+      search: {condition: service_started}
+    ports:
+      - "127.0.0.1:4380:80"
+    volumes:
+      - magento-src:/var/www/html
+volumes:
+  magento-src:
