@@ -20,3 +20,5 @@ export {
 } from './http/client.js';
 export { fetchClientCredentialsToken, lastTokenScopes, TOKEN_REFRESH_MARGIN_MS, type ClientCredentialsParams, type TokenFetchResult } from './http/oauth.js';
 export { Semaphore, semaphoreFor, type Release } from './http/semaphore.js';
+export { createOpenApiAdapter, jwtScopes, type OpenApiAdapter, type OpenApiAdapterDeps } from './openapi/adapter.js';
+export { loadSpecFile, fetchSpecUrl, parseSpecText, MAX_SPEC_BYTES, type SpecLoadResult } from './openapi/spec-source.js';
