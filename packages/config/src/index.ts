@@ -15,6 +15,7 @@ export {
   type RoleLimits,
 } from './schema.js';
 export { createSchemaCompiler, type ArgumentCheck, type ArgumentValidator } from './argument-validators.js';
+export { ConfigurationError, ConfigurationHolder } from './holder.js';
 export {
   BUILTIN_TOOL_NAMES,
   loadConfigurationDirectory,
