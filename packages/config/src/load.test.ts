@@ -124,6 +124,14 @@ describe('CFG-2 invalid configuration is rejected as a whole', () => {
     expect(issues(await load({ 'extra.yaml': 'roles: []\n' }))).toEqual([expect.objectContaining({ path: 'version', message: 'is required' })]);
   });
 
+  it('CFG-2 reports a base URL that is not a URL as a located issue', async () => {
+    const result = await load({
+      'extra-connections.yaml': 'version: 1\nconnections:\n  - { id: broken, adapter: openapi, base_url: "__UPSTREAM_URL__/rest" }\n',
+    });
+    expect(issues(result)).toEqual([expect.objectContaining({ file: 'extra-connections.yaml', path: 'connections[0].base_url' })]);
+    expect(JSON.stringify(issues(result))).not.toContain('__UPSTREAM_URL__');
+  });
+
   it('names both files for a duplicate operation ID', async () => {
     const second = OPERATIONS.replace('version: 1\n', 'version: 1\n');
     const found = issues(await load({ 'z-operations.yaml': second }));

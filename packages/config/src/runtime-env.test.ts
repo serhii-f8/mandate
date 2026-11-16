@@ -117,7 +117,7 @@ describe('AUTH-5 page login environment', () => {
   });
 
   it('rejects a public URL with a path, query or fragment', () => {
-    for (const bad of ['http://localhost:8400/app', 'http://localhost:8400/?a=1', 'http://localhost:8400/#x', 'ftp://x']) {
+    for (const bad of ['not a url', 'http://localhost:8400/app', 'http://localhost:8400/?a=1', 'http://localhost:8400/#x', 'ftp://x']) {
       expect(() => parseApiEnv({ ...API, AIOPS_PUBLIC_URL: bad })).toThrow(/AIOPS_PUBLIC_URL/);
     }
   });

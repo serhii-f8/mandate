@@ -12,6 +12,8 @@ export const OPERATION_ID = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/;
 export const operationId = z.string().max(64).regex(OPERATION_ID);
 export const httpUrl = z.url({ protocol: /^https?$/ }).refine(
   (v) => {
+    // Zod runs refinements even after `z.url()` failed; that failure is already reported (CFG-2).
+    if (!URL.canParse(v)) return true;
     const url = new URL(v);
     return url.username === '' && url.password === '';
   },

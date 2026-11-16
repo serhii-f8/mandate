@@ -83,6 +83,8 @@ const apiSchema = z.object({
   OIDC_JWKS_URL: httpUrl,
   AIOPS_PUBLIC_URL: httpUrl.refine(
     (v) => {
+      // Runs even after `z.url()` failed; that failure is already reported.
+      if (!URL.canParse(v)) return true;
       const u = new URL(v);
       return u.pathname === '/' && u.search === '' && u.hash === '' && !v.includes('?') && !v.includes('#');
     },

@@ -246,7 +246,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       retry: { maxAttempts: c.retry.max_attempts, initialBackoffMs: c.retry.initial_backoff_ms },
       maxConcurrency: c.max_concurrency,
       allowPrivateNetwork: c.allow_private_network,
-      extraHosts: spec?.kind === 'url' ? [new URL(spec.url).hostname] : [],
+      extraHosts: spec?.kind === 'url' && URL.canParse(spec.url) ? [new URL(spec.url).hostname] : [],
     };
     states.set(c.id, { located, ...(preset === undefined ? {} : { preset }), ...(auth === undefined ? {} : { auth }), ...(spec === undefined ? {} : { spec }), settings });
   }
