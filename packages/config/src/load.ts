@@ -233,6 +233,8 @@ function requiredOf(schema: Readonly<Record<string, unknown>>): Set<string> {
 function toOperation(op: OperationConfig): OperationDefinition {
   return {
     id: op.id,
+    toolName: op.id,
+    source: 'config',
     connection: op.connection,
     risk: op.risk,
     ...(op.title === undefined ? {} : { title: op.title }),

@@ -6,6 +6,10 @@ export interface InvocationResult {
   readonly text: string;
   readonly structured?: Readonly<Record<string, unknown>>;
   readonly isError?: boolean;
+  /** Second text block: the data as JSON, for clients that ignore structuredContent. */
+  readonly dataText?: string;
+  /** Merged into the `tool.call` audit row. Non-sensitive only (SEC-3). */
+  readonly auditDetails?: Readonly<Record<string, string | number | boolean>>;
 }
 
 export interface InvocationRequest {
