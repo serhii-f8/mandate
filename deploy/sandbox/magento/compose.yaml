@@ -1,0 +1,56 @@
+# Magento 2 (Mage-OS 4.0.0) sandbox for acceptance runs and contract recordings (Phase 3+).
+# Development only: every password here is a visibly fake default. A separate Compose
+# project with persistent volumes, so the slow first install happens once.
+#   bash deploy/sandbox/magento/up.sh      # idempotent; first run downloads Mage-OS (~10 min)
+#   bash deploy/sandbox/magento/seed.sh    # brand attribute and sample products (idempotent)
+#   bash deploy/sandbox/magento/down.sh    # stop (add -v to drop the data)
+# The web container joins the external network `aiops-sandbox` as `magento-sandbox`, so an
+# api container on that network reaches http://magento-sandbox/rest/all.
+name: aiops-magento-sandbox
+services:
+  db:
+    image: mariadb:11.4
+    environment:
+      MARIADB_ROOT_PASSWORD: dev-only-sandbox-root
+      MARIADB_DATABASE: magento
+      MARIADB_USER: magento
+      MARIADB_PASSWORD: dev-only-sandbox-db
+    command: --max-allowed-packet=64M --innodb-buffer-pool-size=512M
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 30
+    restart: unless-stopped
+  search:
+    image: opensearchproject/opensearch:3.0.0
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - search-data:/usr/share/opensearch/data
+    restart: unless-stopped
+  web:
+    build: .
+    depends_on:
+      db: {condition: service_healthy}
+      search: {condition: service_started}
+    ports:
+      - "127.0.0.1:${AIOPS_MAGENTO_PORT:-4390}:80"
+    volumes:
+      - magento-src:/var/www/html
+    networks:
+      default: {}
+      aiops-sandbox:
+        aliases: [magento-sandbox]
+    restart: unless-stopped
+networks:
+  aiops-sandbox:
+    external: true
+volumes:
+  magento-src:
+  db-data:
+  search-data:
