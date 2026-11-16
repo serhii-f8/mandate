@@ -5,7 +5,18 @@ operations:
     risk: read
     title: Search products
     description: Search the catalog by brand.
-    upstream: { method: GET, path: /V1/products }
+    upstream:
+      method: GET
+      path: /V1/products
+      query:
+        searchCriteria[filter_groups][0][filters][0][field]: brand
+        searchCriteria[filter_groups][0][filters][0][value]: { arg: brand }
+        searchCriteria[filter_groups][0][filters][0][condition_type]: eq
+      response:
+        items: items
+        total: total_count
+        flatten: { path: custom_attributes, key: attribute_code, value: value }
+        fields_from_arg: fields
     input_schema:
       type: object
       properties:
@@ -18,7 +29,14 @@ operations:
     connection: magento
     risk: read
     description: Look up an order by its number.
-    upstream: { method: GET, path: /V1/orders }
+    upstream:
+      method: GET
+      path: /V1/orders
+      query:
+        searchCriteria[filter_groups][0][filters][0][field]: increment_id
+        searchCriteria[filter_groups][0][filters][0][value]: { arg: order_number }
+        searchCriteria[filter_groups][0][filters][0][condition_type]: eq
+      response: { items: items, total: total_count }
     input_schema:
       type: object
       properties: { order_number: { type: string, minLength: 1 } }

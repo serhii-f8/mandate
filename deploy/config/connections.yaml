@@ -1,5 +1,7 @@
-# Development configuration (design §7). Connection magento is a placeholder until the
-# OpenAPI adapter exists (Phase 3); allowed calls end in a "no adapter" result.
+# Development configuration (design §7). Connection magento points at a placeholder shop;
+# its credential is entered on the trusted credential page (UI-5), until then allowed calls
+# end in the fixed "credential has not been entered" result. The Magento preset replaces the
+# explicit operation mappings in operations.yaml when it ships.
 version: 1
 connections:
   - id: magento
@@ -7,3 +9,7 @@ connections:
     base_url: https://shop.example.test/rest
     credential_ref: magento-integration
     auth: { scheme: bearer }
+    # Development only: lets the connection reach a shop on a private or loopback address
+    # (a local sandbox). Leave it out, or false, in production (CONN-5).
+    allow_private_network: true
+    test: { operation: catalog.search_products, args: { brand: acme, fields: [sku] } }
