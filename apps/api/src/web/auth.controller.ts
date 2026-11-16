@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Controller, Get, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
+import { Controller, Get, Inject, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { Logger } from 'pino';
 import type { ApiEnv } from '@aiops/config';
@@ -8,7 +8,8 @@ import { API_ENV, AUDIT_LOG, LOGGER, OIDC_CLIENT, PAGE_SESSIONS } from '../token
 import { PageAccess, pageOf, Public, type PageRequest } from './access.js';
 import { pageCorrelation } from './correlation.js';
 import type { OidcClient } from './oidc-client.js';
-import { clearedSessionCookie, sessionCookie, type SessionService } from './session.service.js';
+import { constantTimeEqual } from './csrf.js';
+import { clearedLoginCookie, clearedSessionCookie, LOGIN_COOKIE, loginCookie, parseCookies, sessionCookie, type SessionService } from './session.service.js';
 
 const DEFAULT_RETURN = '/app/';
 const MAX_RETURN_LENGTH = 2048;
@@ -58,7 +59,11 @@ export class AuthController {
   @Get('login')
   @Public()
   async login(@Req() req: Request, @Res() res: Response): Promise<void> {
-    pageCorrelation(req, res);
+    const correlationId = pageCorrelation(req, res);
+    // Housekeeping must never block a login.
+    await this.sessions.purgeIfDue().catch((error: unknown) => {
+      this.logger.warn({ correlationId, err: error instanceof Error ? error.message : 'unknown' }, 'purge of expired page sessions failed');
+    });
     const fresh = req.query.fresh === '1';
     const request = this.oidc.authorizationRequest({ fresh });
     await this.sessions.beginLogin({
@@ -69,6 +74,7 @@ export class AuthController {
       fresh,
     });
     res.setHeader('cache-control', 'no-store');
+    res.append('set-cookie', loginCookie(request.state, this.secure));
     res.redirect(302, request.url.toString());
   }
 
@@ -77,8 +83,16 @@ export class AuthController {
   async callback(@Req() req: Request, @Res() res: Response): Promise<void> {
     const correlationId = pageCorrelation(req, res);
     res.setHeader('cache-control', 'no-store');
+    // The login cookie is single use too, whatever the outcome.
+    res.append('set-cookie', clearedLoginCookie(this.secure));
     const state = single(req.query.state);
-    const login = state === undefined ? undefined : await this.sessions.consumeLogin(state);
+    const bound = parseCookies(req.headers.cookie).get(LOGIN_COOKIE);
+    // SEC-8 login CSRF: the state must come back in the browser that started the login.
+    if (state === undefined || bound === undefined || !constantTimeEqual(bound, state)) {
+      await this.failed(res, correlationId, 'state_unknown');
+      return;
+    }
+    const login = await this.sessions.consumeLogin(state);
     if (login === undefined) {
       await this.failed(res, correlationId, 'state_unknown');
       return;
@@ -104,18 +118,18 @@ export class AuthController {
       details: { fresh: login.fresh },
     });
     const { cookieValue } = await this.sessions.create(result.identity);
-    res.setHeader('set-cookie', sessionCookie(cookieValue, this.env.sessionMaxAgeSeconds, this.secure));
+    res.append('set-cookie', sessionCookie(cookieValue, this.env.sessionMaxAgeSeconds, this.secure));
     res.redirect(302, login.returnTo);
   }
 
   @Post('logout')
   @PageAccess({ csrf: true })
-  @HttpCode(204)
   async logout(@Req() req: PageRequest, @Res() res: Response): Promise<void> {
     const correlationId = pageCorrelation(req, res);
     const { session } = pageOf(req);
-    await this.sessions.end(session);
+    // Audited first: a logout that cannot be audited does not happen (AUD-1).
     await this.audit.append({ id: randomUUID(), actor: session.subject, clientId: session.clientId, action: 'auth.logout', outcome: 'ok', correlationId, details: {} });
+    await this.sessions.end(session);
     res.setHeader('set-cookie', clearedSessionCookie(this.secure));
     res.status(204).end();
   }
@@ -127,11 +141,14 @@ export class AuthController {
   }
 
   private async failed(res: Response, correlationId: string, reason: LoginFailure): Promise<void> {
-    await this.audit
-      .append({ id: randomUUID(), actor: 'unknown', clientId: this.env.webClientId, action: 'auth.login', outcome: 'error', correlationId, details: { reason } })
-      .catch((error: unknown) => {
-        this.logger.warn({ correlationId, err: error instanceof Error ? error.message : 'unknown' }, 'audit of failed login failed');
-      });
+    try {
+      await this.audit.append({ id: randomUUID(), actor: 'unknown', clientId: this.env.webClientId, action: 'auth.login', outcome: 'error', correlationId, details: { reason } });
+    } catch (error) {
+      // Like the success path: an outcome that cannot be audited is a server error (AUD-1).
+      this.logger.warn({ correlationId, err: error instanceof Error ? error.message : 'unknown' }, 'audit of failed login failed');
+      res.status(500).type('text/plain').send('Login could not be completed. Try again later.\n');
+      return;
+    }
     // A fixed page: nothing from the request or the identity provider is echoed.
     res.status(400).type('text/plain').send('Login failed. Open /app/ to try again.\n');
   }

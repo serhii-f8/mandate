@@ -46,7 +46,7 @@ export function routeAccess(reflector: Reflector, handler: RouteTarget, cls: Rou
   for (const target of [handler, cls]) {
     const access = reflector.get<PageAccessOptions | undefined>(PAGE_ACCESS_KEY, target);
     if (access !== undefined) return access;
-    if (reflector.get<boolean | undefined>(PUBLIC_KEY, target as never) === true) return 'public';
+    if (reflector.get<boolean | undefined>(PUBLIC_KEY, target) === true) return 'public';
   }
   return 'none';
 }

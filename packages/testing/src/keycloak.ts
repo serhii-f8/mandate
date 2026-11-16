@@ -262,7 +262,8 @@ export interface PageLoginResult {
 /**
  * Logs in to the api's trusted pages like a browser (AUTH-5): `/auth/login` → IdP
  * (posting Keycloak's login form when it appears) → `/auth/callback` → the return path.
- * Then reads the CSRF token from `GET /api/v1/session`.
+ * The jar carries the api's `aiops_login` cookie from `/auth/login` to `/auth/callback`
+ * (login state bound to the browser, SEC-8). Then reads the CSRF token from `GET /api/v1/session`.
  */
 export async function pageLogin(apiBaseUrl: string, username: string, password: string, options: PageLoginOptions = {}): Promise<PageLoginResult> {
   const jar = options.cookieJar ?? new CookieJar();

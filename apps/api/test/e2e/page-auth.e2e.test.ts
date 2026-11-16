@@ -54,15 +54,32 @@ async function query<T extends pg.QueryResultRow>(sql: string, params: unknown[]
 
 const get = (url: string, headers: Record<string, string> = {}): Promise<Response> => fetch(url, { redirect: 'manual', headers });
 
+/** The `aiops_login` cookie each `/auth/login` set, by state. */
+const loginCookies = new Map<string, string>();
+/** The raw `Set-Cookie` of the last `/auth/login`. */
+let lastLoginSetCookie = '';
+
 /** `/auth/login` → the issuer's authorization URL. */
 async function startLogin(api: RunningApi, params = 'return_to=/app/'): Promise<URL> {
   const response = await get(`${api.url}/auth/login?${params}`);
   expect(response.status).toBe(302);
   const location = new URL(response.headers.get('location') ?? '');
-  secrets.add(location.searchParams.get('state') ?? '');
+  const state = location.searchParams.get('state') ?? '';
+  secrets.add(state);
   secrets.add(location.searchParams.get('nonce') ?? '');
+  lastLoginSetCookie = response.headers.getSetCookie().find((c) => c.startsWith('aiops_login=')) ?? '';
+  loginCookies.set(state, lastLoginSetCookie.split(';')[0] ?? '');
   return location;
 }
+
+/** Follows the callback like the browser that started the login: with its `aiops_login` cookie unless `cookie` is given. */
+function complete(callback: URL, cookie?: string): Promise<Response> {
+  const sent = cookie ?? loginCookies.get(callback.searchParams.get('state') ?? '') ?? '';
+  return get(callback.toString(), sent === '' ? {} : { cookie: sent });
+}
+
+/** The callback always clears the login cookie on its own path. */
+const LOGIN_CLEARED = /^aiops_login=; (?=.*Path=\/auth\/callback)(?=.*Max-Age=0)/;
 
 /** The issuer's answer: the callback URL on the api. */
 async function authorize(location: URL): Promise<URL> {
@@ -106,9 +123,10 @@ describe('AUTH-5 pages log in through the identity provider', () => {
   it('AUTH-5 the callback creates a strict HttpOnly session cookie, audits the login, and the session shows mapped roles', async () => {
     const callback = await authorize(await startLogin(a, 'return_to=/app/credentials'));
     expect(`${callback.origin}${callback.pathname}`).toBe(`${a.url}/auth/callback`);
-    const response = await get(callback.toString());
+    const response = await complete(callback);
     expect(response.status).toBe(302);
     expect(response.headers.get('location')).toBe('/app/credentials');
+    expect(response.headers.getSetCookie()).toEqual(expect.arrayContaining([expect.stringMatching(LOGIN_CLEARED)]));
     const setCookie = response.headers.getSetCookie().find((c) => c.startsWith('aiops_session=')) ?? '';
     expect(setCookie).toMatch(/; HttpOnly/);
     expect(setCookie).toMatch(/; SameSite=Strict/);
@@ -144,10 +162,10 @@ describe('AUTH-5 pages log in through the identity provider', () => {
 
   it('AUTH-5 a replayed state is refused with 400 and an auth.login error row', async () => {
     const callback = await authorize(await startLogin(a));
-    expect((await get(callback.toString())).status).toBe(302);
-    const replay = await get(callback.toString());
+    expect((await complete(callback)).status).toBe(302);
+    const replay = await complete(callback);
     expect(replay.status).toBe(400);
-    expect(replay.headers.getSetCookie()).toEqual([]);
+    expect(replay.headers.getSetCookie()).toEqual([expect.stringMatching(LOGIN_CLEARED)]);
     expect(await loginRows(replay.headers.get('x-correlation-id'))).toEqual([
       expect.objectContaining({ actor: 'unknown', outcome: 'error', details: { reason: 'state_unknown' } }),
     ]);
@@ -162,9 +180,9 @@ describe('AUTH-5 pages log in through the identity provider', () => {
   ])('AUTH-5 an ID token with %s ends in id_token_invalid and no session', async (_name, tamper) => {
     issuer.tamperIdToken(tamper);
     try {
-      const response = await get((await authorize(await startLogin(a))).toString());
+      const response = await complete(await authorize(await startLogin(a)));
       expect(response.status).toBe(400);
-      expect(response.headers.getSetCookie()).toEqual([]);
+      expect(response.headers.getSetCookie()).toEqual([expect.stringMatching(LOGIN_CLEARED)]);
       expect(await loginRows(response.headers.get('x-correlation-id'))).toEqual([expect.objectContaining({ outcome: 'error', details: { reason: 'id_token_invalid' } })]);
     } finally {
       issuer.tamperIdToken(undefined);
@@ -173,7 +191,7 @@ describe('AUTH-5 pages log in through the identity provider', () => {
 
   it('AUTH-5 a code the token endpoint refuses ends in code_exchange_failed', async () => {
     const state = (await startLogin(a)).searchParams.get('state') ?? '';
-    const response = await get(`${a.url}/auth/callback?state=${encodeURIComponent(state)}&code=not-a-code`);
+    const response = await get(`${a.url}/auth/callback?state=${encodeURIComponent(state)}&code=not-a-code`, { cookie: loginCookies.get(state) ?? '' });
     expect(response.status).toBe(400);
     expect(await loginRows(response.headers.get('x-correlation-id'))).toEqual([expect.objectContaining({ details: { reason: 'code_exchange_failed' } })]);
   });
@@ -183,13 +201,46 @@ describe('AUTH-5 pages log in through the identity provider', () => {
     try {
       const callback = await authorize(await startLogin(a));
       expect(callback.searchParams.get('error')).toBe('access_denied');
-      const response = await get(callback.toString());
+      const response = await complete(callback);
       expect(response.status).toBe(400);
       expect(await response.text()).not.toContain('access_denied');
       expect(await loginRows(response.headers.get('x-correlation-id'))).toEqual([expect.objectContaining({ details: { reason: 'idp_error' } })]);
     } finally {
       issuer.setLoginUser(CAROL);
     }
+  });
+
+  it('SEC-8 /auth/login binds the state to the browser with a Lax cookie scoped to the callback', async () => {
+    const location = await startLogin(a);
+    const state = location.searchParams.get('state') ?? '';
+    expect(lastLoginSetCookie.split(';')[0]).toBe(`aiops_login=${state}`);
+    expect(lastLoginSetCookie).toMatch(/; HttpOnly/);
+    expect(lastLoginSetCookie).toMatch(/; SameSite=Lax/);
+    expect(lastLoginSetCookie).toMatch(/; Path=\/auth\/callback/);
+    expect(lastLoginSetCookie).toMatch(/; Max-Age=600/);
+    expect(lastLoginSetCookie).not.toMatch(/Secure/);
+  });
+
+  it('SEC-8 a valid state and code without the login cookie are refused as state_unknown', async () => {
+    const callback = await authorize(await startLogin(a));
+    const response = await complete(callback, '');
+    expect(response.status).toBe(400);
+    expect(response.headers.getSetCookie()).toEqual([expect.stringMatching(LOGIN_CLEARED)]);
+    expect(await loginRows(response.headers.get('x-correlation-id'))).toEqual([
+      expect.objectContaining({ actor: 'unknown', outcome: 'error', details: { reason: 'state_unknown' } }),
+    ]);
+    // The refused attempt did not consume the login; the browser that started it can still finish.
+    expect((await complete(callback)).status).toBe(302);
+  });
+
+  it("SEC-8 a callback carrying someone else's login cookie is refused (login CSRF)", async () => {
+    const attacker = await authorize(await startLogin(a));
+    await startLogin(a);
+    const victimCookie = lastLoginSetCookie.split(';')[0] ?? '';
+    const response = await complete(attacker, victimCookie);
+    expect(response.status).toBe(400);
+    expect(response.headers.getSetCookie().some((c) => c.startsWith('aiops_session='))).toBe(false);
+    expect(await loginRows(response.headers.get('x-correlation-id'))).toEqual([expect.objectContaining({ details: { reason: 'state_unknown' } })]);
   });
 
   it.each([
@@ -220,7 +271,7 @@ describe('AUTH-5 pages log in through the identity provider', () => {
       const location = await startLogin(a, 'return_to=/app/&fresh=1');
       expect(location.searchParams.get('prompt')).toBe('login');
       expect(location.searchParams.get('max_age')).toBe('0');
-      const response = await get((await authorize(location)).toString());
+      const response = await complete(await authorize(location));
       expect(await loginRows(response.headers.get('x-correlation-id'))).toEqual([expect.objectContaining({ outcome: 'ok', details: { fresh: true } })]);
       const session = (await (await get(`${a.url}/api/v1/session`, { cookie: sessionCookieOf(response) })).json()) as { authTime: string };
       expect(Date.now() - Date.parse(session.authTime)).toBeLessThan(60_000);
@@ -293,6 +344,19 @@ describe('SEC-1 every page route is authorized', () => {
   it('SEC-1 public routes still answer without a session', async () => {
     expect((await get(`${a.url}/healthz`)).status).toBe(200);
     expect((await get(`${a.url}/.well-known/oauth-protected-resource`)).status).toBe(200);
+  });
+});
+
+describe('AUTH-5 expired login state and sessions are purged', () => {
+  it('AUTH-5 the first /auth/login of an instance removes expired web_login and web_session rows', async () => {
+    await query("insert into web_login (state_hash, code_verifier, nonce, return_to, fresh, expires_at) values ('expired-login', 'v', 'n', '/app/', false, now() - interval '1 minute')");
+    await query(
+      "insert into web_session (id_hash, subject, client_id, groups, auth_time, csrf_token, expires_at) values ('expired-session', 's', 'aiops-web', '[]', now(), 'c', now() - interval '1 minute')",
+    );
+    // Instance b has not served /auth/login yet, so its first one purges.
+    await startLogin(b);
+    expect(await query("select state_hash from web_login where state_hash = 'expired-login'")).toEqual([]);
+    expect(await query("select id_hash from web_session where id_hash = 'expired-session'")).toEqual([]);
   });
 });
 
