@@ -1,6 +1,7 @@
 /** PostgreSQL persistence: Drizzle schema, SQL migrations, migrator and repository implementations. */
 export { DrizzleAuditLog } from './audit-log.js';
 export { PostgresCredentialVault } from './credential-vault.js';
+export { PostgresSessionStore, type LoginRow, type SessionRow } from './web-sessions.js';
 export type { SealedCredential } from './envelope.js';
 export { parseMasterKeys, type KeyProvider } from './keyring.js';
 export { createDb, type Database, type Db } from './client.js';
