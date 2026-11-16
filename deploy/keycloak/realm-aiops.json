@@ -2,6 +2,9 @@
   "realm": "aiops",
   "enabled": true,
   "accessTokenLifespan": 300,
+  "offlineSessionIdleTimeout": 604800,
+  "offlineSessionMaxLifespanEnabled": true,
+  "offlineSessionMaxLifespan": 2592000,
   "defaultDefaultClientScopes": [
     "basic",
     "acr",
@@ -580,7 +583,9 @@
       "redirectUris": [
         "https://claude.ai/api/mcp/auth_callback",
         "https://chatgpt.com/connector_platform_oauth_redirect",
-        "https://chatgpt.com/connector/oauth/*"
+        "https://chatgpt.com/connector/oauth/*",
+        "http://localhost:33418/callback",
+        "http://127.0.0.1:33418/callback"
       ],
       "webOrigins": [
         "+"

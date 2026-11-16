@@ -29,7 +29,7 @@ export async function startDatabase(): Promise<{ postgres: StartedPostgres; data
   return { postgres, databaseUrl };
 }
 
-function freePort(): Promise<number> {
+export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.on('error', reject);
@@ -48,10 +48,12 @@ export interface StartApiOptions {
   readonly invoker?: OperationInvoker;
   /** Canonical MCP URL to serve as, e.g. a second instance behind the same load balancer URL. */
   readonly resource?: string;
+  /** Port to listen on; a free one by default. */
+  readonly port?: number;
 }
 
 export async function startApi(databaseUrl: string, options: StartApiOptions): Promise<RunningApi> {
-  const port = await freePort();
+  const port = options.port ?? (await freePort());
   const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
   const env: ApiEnv = {
     databaseUrl,
