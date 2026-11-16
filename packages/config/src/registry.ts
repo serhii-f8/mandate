@@ -83,7 +83,7 @@ export function buildRegistry(input: RegistryInput): Registry {
   const validators = new Map<string, ArgumentValidator>();
   const bindings = new Map<string, OperationBinding>();
   const disabled: DisabledOperation[] = [];
-  /** Catalog entry keys an enabled operation uses. */
+  /** Catalog entry keys already accounted for: used by an enabled operation, or listed with a disabled one. */
   const used = new Set<string>();
 
   for (const located of input.operations) {
@@ -171,11 +171,14 @@ export function buildRegistry(input: RegistryInput): Registry {
       if (entry !== undefined) used.add(entry.key);
       else if (u.method !== undefined && u.path !== undefined) used.add(`${connection}\0${u.method} ${u.path}`);
     } else {
+      // The operation's own row stands for its catalog entry, so the entry is not listed again.
+      if (entry !== undefined) used.add(entry.key);
       disabled.push({
         key: op.id,
         connection,
-        method: binding?.mapping.method ?? u.method ?? '',
-        path: binding?.mapping.path ?? u.path ?? '',
+        // Unresolved spec (no resolver): the target is not known yet.
+        method: binding?.mapping.method ?? u.method ?? 'unknown',
+        path: binding?.mapping.path ?? u.path ?? 'unknown',
         ...(entry?.operationId === undefined ? {} : { operationId: entry.operationId }),
         ...(entry?.summary === undefined ? {} : { summary: entry.summary }),
       });

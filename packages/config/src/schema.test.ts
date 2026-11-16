@@ -64,7 +64,7 @@ role_mapping:
 presets:
   - id: magento2-catalog
     package: "@aiops/preset-magento2-catalog"
-    version: "^0.1.0"
+    version: "0.1.0"
 notifications:
   - id: ops-email
     kind: email

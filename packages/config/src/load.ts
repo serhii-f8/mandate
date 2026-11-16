@@ -64,6 +64,8 @@ export interface LoadedConfiguration {
   readonly credentialRefs: ReadonlyMap<string, { readonly scheme: CredentialScheme; readonly connections: readonly string[] }>;
   /** Role → credential references it may manage (`*` for all). */
   readonly credentialManagers: ReadonlyMap<string, readonly string[]>;
+  /** True when presets were declared but not loaded because no preset directories were given. */
+  readonly presetChecksSkipped: boolean;
   /** True when specs were declared but not resolved because no resolver was given. */
   readonly specChecksSkipped: boolean;
   /** SHA-256 over the sorted files, the preset files and the spec files (CFG-4 records it from Phase 8). */
@@ -78,7 +80,10 @@ export interface LoadOptions {
   readonly reservedToolNames?: readonly string[];
   /** Reads specs and derives catalogs (CONN-2). Without it, spec checks are skipped. */
   readonly resolver?: UpstreamResolver;
-  /** Directories holding preset packages (CONN-8 first cut). */
+  /**
+   * Directories holding preset packages (CONN-8 first cut). Undefined: presets are not
+   * loaded and `presetChecksSkipped` is set; `[]` means none is installed.
+   */
   readonly presetDirs?: readonly string[];
   /**
    * Directory the source file names are relative to, for spec paths. Set by
@@ -178,16 +183,24 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   indexById(notifications);
 
   // Presets (CONN-8 first cut): resolve every declared preset, bind each to at most one connection.
+  // Without preset directories (the static CLI) presets are not loaded, and the result says so.
+  const presetChecksSkipped = options.presetDirs === undefined && presetById.size > 0;
   const loadedPresets = new Map<string, LoadedPreset>();
-  for (const [presetId, entry] of presetById) {
-    const result = await resolvePreset(entry.value, options.presetDirs ?? [], entry);
-    if (result.ok) loadedPresets.set(presetId, result.preset);
-    else issues.push(...result.issues);
+  if (options.presetDirs !== undefined) {
+    for (const [presetId, entry] of presetById) {
+      const result = await resolvePreset(entry.value, options.presetDirs, entry);
+      if (result.ok) loadedPresets.set(presetId, result.preset);
+      else issues.push(...result.issues);
+    }
   }
   const presetBoundTo = new Map<string, string>();
   for (const { value: c, source, path } of connections) {
     if (c.preset === undefined) continue;
     if (!presetById.has(c.preset)) at(source, [...path, 'preset'], 'names a preset that is not defined');
+    if (c.adapter !== 'openapi') {
+      at(source, [...path, 'preset'], 'preset requires an openapi connection');
+      continue;
+    }
     const bound = presetBoundTo.get(c.preset);
     if (bound !== undefined) at(source, [...path, 'preset'], `the preset is already bound to connection ${bound}`);
     else presetBoundTo.set(c.preset, c.id);
@@ -399,6 +412,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       credentialRefs,
       credentialManagers,
       specChecksSkipped,
+      presetChecksSkipped,
       hash: hash.digest('hex'),
     },
   };

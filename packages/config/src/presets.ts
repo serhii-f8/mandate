@@ -4,8 +4,8 @@
  * holding a `preset.yaml` and a vendored spec. Issues inside the preset are reported
  * with the file `<package>/preset.yaml` (CFG-2).
  */
-import { readdir, readFile, stat } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { PARSE_PARAMS, presetOperationSchema, schemaIssues, type PresetConfig, type PresetOperationConfig } from './schema.js';
@@ -100,12 +100,23 @@ export async function resolvePreset(entry: PresetConfig, dirs: readonly string[]
   const doc = result.data;
 
   const specFile = resolve(found.dir, doc.spec);
-  const inside = relative(found.dir, specFile);
-  if (isSpecUrl(doc.spec) || isAbsolute(doc.spec) || inside.startsWith('..') || isAbsolute(inside)) {
+  if (isSpecUrl(doc.spec) || isAbsolute(doc.spec) || !isInside(found.dir, specFile)) {
     at(['spec'], 'must be a path inside the preset');
     return { ok: false, issues };
   }
-  const spec = await readSpecFile(specFile);
+  // A symbolic link may still point elsewhere: compare the real paths too.
+  let realSpec: string;
+  try {
+    realSpec = await realpath(specFile);
+  } catch {
+    at(['spec'], 'spec file cannot be read');
+    return { ok: false, issues };
+  }
+  if (!isInside(await realpath(found.dir), realSpec)) {
+    at(['spec'], 'must be a path inside the preset');
+    return { ok: false, issues };
+  }
+  const spec = await readSpecFile(realSpec);
   if (!spec.ok) {
     at(['spec'], spec.message);
     return { ok: false, issues };
@@ -119,7 +130,7 @@ export async function resolvePreset(entry: PresetConfig, dirs: readonly string[]
       version: found.version,
       dir: found.dir,
       source,
-      specFile,
+      specFile: realSpec,
       ...(doc.auth === undefined ? {} : { auth: doc.auth }),
       ...(doc.test === undefined ? {} : { test: doc.test }),
       operations: doc.operations,
@@ -130,6 +141,12 @@ export async function resolvePreset(entry: PresetConfig, dirs: readonly string[]
       ],
     },
   };
+}
+
+/** True when `path` is `dir` or below it (a first segment `..` leaves it; `..spec.json` does not). */
+function isInside(dir: string, path: string): boolean {
+  const rel = relative(dir, path);
+  return !isAbsolute(rel) && rel.split(sep)[0] !== '..';
 }
 
 /** The first package directory, in directory order, whose `package.json` has the name. */

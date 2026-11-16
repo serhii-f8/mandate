@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -118,6 +118,15 @@ describe('OPS-1 operations are enabled only by configuration or an applied prese
     expect(config.policy.operations.map((o) => o.id)).not.toContain('shop:deleteItem');
   });
 
+  it('skips preset loading without preset directories, without reporting preset operations as undefined', async () => {
+    const config = ok(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver() }));
+    expect(config.presetChecksSkipped).toBe(true);
+    expect(config.policy.operations).toEqual([]);
+    expect(config.credentialRefs.has('shop-token')).toBe(false);
+    const full = ok(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: PRESET_DIRS }));
+    expect(full.presetChecksSkipped).toBe(false);
+  });
+
   it('does not enable the operations of a preset that no connection binds', async () => {
     const dir = await fixture('with-preset', {
       'config.yaml': `version: 1
@@ -136,8 +145,16 @@ connections:
     const config = ok(await loadConfigurationDirectory(dir, { resolver: resolver(), presetDirs: PRESET_DIRS }));
     expect(config.policy.operations.map((o) => o.id)).toEqual(['fake.search_items']);
     expect(config.bindings.has('fake.get_item')).toBe(false);
-    expect(config.disabled).toContainEqual({ key: 'fake.get_item', connection: 'shop', method: 'GET', path: '/items/{sku}', operationId: 'getItem' });
-    expect(config.disabled).toContainEqual(expect.objectContaining({ key: 'shop:getItem' }));
+    expect(config.disabled).toEqual([
+      { key: 'fake.get_item', connection: 'shop', method: 'GET', path: '/items/{sku}', operationId: 'getItem' },
+      { key: 'shop:deleteItem', connection: 'shop', method: 'DELETE', path: '/items/{sku}', operationId: 'deleteItem' },
+    ]);
+  });
+
+  it('lists an operation disabled while its spec is unresolved with an unknown method and path', async () => {
+    const dir = await fixture('derived', { 'overrides.yaml': 'version: 1\noverrides:\n  - { operation: shop.get_item, enabled: false }\n' });
+    const config = ok(await loadConfigurationDirectory(dir));
+    expect(config.disabled).toEqual([{ key: 'shop.get_item', connection: 'shop', method: 'unknown', path: 'unknown' }]);
   });
 });
 
@@ -397,6 +414,32 @@ operations:
     expect(found).toEqual([expect.objectContaining({ file: '@aiops/fake-preset/preset.yaml', path: 'spec', message: 'must be a path inside the preset' })]);
   });
 
+  it('refuses a preset bound to a connection that is not openapi', async () => {
+    const dir = await fixture('with-preset', {
+      'config.yaml': `version: 1
+presets:
+  - { id: fake, package: "@aiops/fake-preset" }
+connections:
+  - { id: shop, adapter: mcp, mcp_url: https://shop.example.test/mcp, preset: fake }
+`,
+    });
+    const found = issues(await loadConfigurationDirectory(dir, { resolver: resolver(), presetDirs: PRESET_DIRS }));
+    expect(found).toEqual([expect.objectContaining({ path: 'connections[0].preset', message: 'preset requires an openapi connection' })]);
+  });
+
+  it('refuses a preset spec that is a symbolic link out of the preset directory', async () => {
+    const presets = await presetDir({ 'spec.json': null });
+    await symlink(join(FIXTURES, 'derived', 'specs', 'shop.json'), join(presets, 'fake-preset', 'spec.json'));
+    const found = issues(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: [presets] }));
+    expect(found).toEqual([expect.objectContaining({ file: '@aiops/fake-preset/preset.yaml', path: 'spec', message: 'must be a path inside the preset' })]);
+  });
+
+  it('accepts a preset spec whose name starts with two dots', async () => {
+    const text = (await readFile(join(FIXTURES, 'preset-dir', 'fake-preset', 'preset.yaml'), 'utf8')).replace('spec: spec.json', 'spec: ..spec.json');
+    const presets = await presetDir({ 'preset.yaml': text, '..spec.json': await readFile(join(FIXTURES, 'preset-dir', 'fake-preset', 'spec.json'), 'utf8') });
+    ok(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: [presets] }));
+  });
+
   it('refuses a preset bound to two connections', async () => {
     const dir = await fixture('with-preset', {
       'second.yaml': 'version: 1\nconnections:\n  - { id: shop2, adapter: openapi, base_url: https://shop.example.test/api, credential_ref: shop-token, preset: fake }\n',
@@ -478,6 +521,14 @@ describe('CFG-5 credentials stay out of configuration', () => {
       'roles.yaml': 'version: 1\nroles:\n  - { id: admin, grants: [], manage_credentials: [shop-token] }\n',
     });
     expect(result.ok).toBe(true);
+  });
+
+  it('scans connection test argument values, not argument names', async () => {
+    const op = SEARCH.replace('properties: { q: { type: string }', 'properties: { page_token: { type: string }, q: { type: string }');
+    const accepted = await sources({ 'base.yaml': `${BASE}    test: { operation: shop.search, args: { page_token: abc, fields: [sku] } }\n`, 'search.yaml': op });
+    expect(accepted.ok).toBe(true);
+    const nested = issues(await sources({ 'base.yaml': `${BASE}    test: { operation: shop.search, args: { q: { password: hunter2-value }, fields: [sku] } }\n`, 'search.yaml': op }));
+    expect(nested).toContainEqual(expect.objectContaining({ path: 'connections[0].test.args.q.password' }));
   });
 
   it('rejects a token URL with credentials in it', async () => {
