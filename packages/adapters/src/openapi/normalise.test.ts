@@ -1,6 +1,42 @@
 import { describe, expect, it } from 'vitest';
-import { loadSpec } from '../../test/strict-ajv.js';
-import { normaliseSpec, validateSpecDocument } from './normalise.js';
+import { loadSpec, strictAjv } from '../../test/strict-ajv.js';
+import { MAX_SCHEMA_NODES, normaliseSpec, validateSpecDocument } from './normalise.js';
+
+function countObjects(value: unknown): number {
+  if (Array.isArray(value)) return value.reduce((n: number, v: unknown) => n + countObjects(v), 0);
+  if (typeof value !== 'object' || value === null) return 0;
+  return 1 + Object.values(value).reduce((n: number, v: unknown) => n + countObjects(v), 0);
+}
+
+describe('CONN-2 OpenAPI normaliser limits', () => {
+  it('CONN-2 truncates an operation whose inlined schema exceeds the node budget, fast, with one issue', () => {
+    const started = Date.now();
+    const { operations, issues } = normaliseSpec(loadSpec('fanout.json'));
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(issues).toEqual([{ path: ['paths', '/things', 'post'], message: 'input schema truncated: too large to inline' }]);
+    const body = operations.find((o) => o.operationId === 'saveThing')?.jsonBody?.schema;
+    expect(body).toBeDefined();
+    // One object per translated schema node, plus at most one `properties` map per node.
+    expect(countObjects(body)).toBeLessThanOrEqual(2 * MAX_SCHEMA_NODES);
+    expect(() => strictAjv().compile({ type: 'object', properties: { body } })).not.toThrow();
+    expect(operations.find((o) => o.operationId === 'small')?.parameters).toHaveLength(1);
+  });
+
+  it('CONN-2 reports a path placeholder without a declared path parameter at the operation', () => {
+    const doc = {
+      openapi: '3.0.3',
+      info: { title: 't', version: '1' },
+      paths: {
+        '/a/{id}/b/{x}': {
+          get: { parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: {} },
+        },
+      },
+    };
+    expect(normaliseSpec(doc).issues).toEqual([
+      { path: ['paths', '/a/{id}/b/{x}', 'get'], message: 'path placeholder {x} has no path parameter' },
+    ]);
+  });
+});
 
 describe('CONN-2 OpenAPI spec validation', () => {
   it('CONN-2 accepts Swagger 2.0, OpenAPI 3.0 and 3.1 documents', async () => {

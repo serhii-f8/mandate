@@ -105,3 +105,34 @@ describe('CONN-2 OpenAPI schema translation to JSON Schema 2020-12', () => {
     expect(issues).toEqual([{ path: ['$ref'], message: '$ref does not resolve in the document' }]);
   });
 });
+
+describe('CONN-2 schema translation limits', () => {
+  it('CONN-2 stops inlining once the node budget is spent and marks the budget truncated', () => {
+    const budget = { remaining: 3, truncated: false };
+    const out = toJsonSchema2020(
+      { type: 'object', properties: { a: { type: 'string' }, b: { type: 'string' }, c: { type: 'string' }, d: { type: 'string' } } },
+      { ...noRefs, budget },
+    );
+    expect(out).toEqual({ type: 'object', properties: { a: { type: 'string' }, b: { type: 'string' }, c: {}, d: {} } });
+    expect(budget).toEqual({ remaining: 0, truncated: true });
+    expect(() => strictAjv().compile(out)).not.toThrow();
+  });
+
+  it('CONN-2 reports the same issue once', () => {
+    const issues: SpecIssue[] = [];
+    toJsonSchema2020({ allOf: [{ $ref: 'x.json' }, { $ref: 'x.json' }] }, { ...noRefs, issues });
+    toJsonSchema2020({ $ref: 'x.json' }, { ...noRefs, at: ['allOf', 0], issues });
+    expect(issues).toEqual([
+      { path: ['allOf', 0, '$ref'], message: 'external $ref is not supported' },
+      { path: ['allOf', 1, '$ref'], message: 'external $ref is not supported' },
+    ]);
+  });
+
+  it('CONN-2 format names from the ajv-formats deep import match the formats the plugin registers', async () => {
+    // schema-translate.ts imports `ajv-formats/dist/formats.js`: no public export lists the names.
+    const { formatNames } = await import('ajv-formats/dist/formats.js');
+    expect(formatNames).toContain('int32');
+    expect([...formatNames].sort()).toEqual(Object.keys(strictAjv().formats).sort());
+    expect(toJsonSchema2020({ type: 'string', format: 'date-time' }, noRefs)).toEqual({ type: 'string', format: 'date-time' });
+  });
+});

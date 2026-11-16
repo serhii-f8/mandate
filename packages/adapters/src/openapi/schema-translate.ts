@@ -12,6 +12,9 @@
  * becomes `{}`. Derived schemas may be looser than the spec; the upstream stays the
  * business validator.
  */
+// Deep import on purpose: ajv-formats 3.0.1 has no `exports` map and its main entry only
+// exports the `FormatName` type, not the names. schema-translate.test.ts fails if this path
+// breaks or drifts from the formats the plugin registers.
 import { formatNames } from 'ajv-formats/dist/formats.js';
 import type { SpecIssue } from '@aiops/connector-sdk';
 
@@ -28,6 +31,11 @@ export interface TranslateContext {
   issues?: SpecIssue[];
   /** `$ref`s being expanded on this branch (cycle detection). */
   seen?: readonly string[];
+  /**
+   * Schema nodes still allowed, shared by every call for one derived input schema. Once
+   * spent, further subtrees become `{}` and `truncated` is set.
+   */
+  budget?: { remaining: number; truncated: boolean };
 }
 
 type Schema = Record<string, unknown>;
@@ -78,10 +86,24 @@ export function refToPath(ref: string): string[] {
     });
 }
 
+/** Keys of the issues already in each list, so de-duplication stays O(1) per issue. */
+const issueKeys = new WeakMap<SpecIssue[], Set<string>>();
+
+/** Appends an issue unless the same path and message are already in the list. */
+export function pushIssue(issues: SpecIssue[], path: Path, message: string): void {
+  let keys = issueKeys.get(issues);
+  if (keys === undefined) {
+    keys = new Set(issues.map((i) => JSON.stringify([i.path, i.message])));
+    issueKeys.set(issues, keys);
+  }
+  const key = JSON.stringify([path, message]);
+  if (keys.has(key)) return;
+  keys.add(key);
+  issues.push({ path: [...path], message });
+}
+
 function report(ctx: TranslateContext, path: Path, message: string): void {
-  if (ctx.issues === undefined) return;
-  const exists = ctx.issues.some((i) => i.message === message && JSON.stringify(i.path) === JSON.stringify(path));
-  if (!exists) ctx.issues.push({ path: [...path], message });
+  if (ctx.issues !== undefined) pushIssue(ctx.issues, path, message);
 }
 
 function sub(ctx: TranslateContext, ...segments: (string | number)[]): TranslateContext {
@@ -92,6 +114,14 @@ export function toJsonSchema2020(schema: unknown, ctx: TranslateContext): Schema
   if (schema === false) return { not: {} };
   if (!isPlainObject(schema)) return {};
   if (typeof schema.$ref === 'string') return translateRef(schema.$ref, ctx);
+  if (ctx.budget !== undefined) {
+    // Fan-out of acyclic refs grows exponentially below the depth limit; cap the output.
+    if (ctx.budget.remaining <= 0) {
+      ctx.budget.truncated = true;
+      return {};
+    }
+    ctx.budget.remaining -= 1;
+  }
 
   const generic: Schema = {};
   const groups: Record<Group, Schema> = { number: {}, string: {}, array: {}, object: {} };

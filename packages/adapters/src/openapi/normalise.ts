@@ -8,7 +8,7 @@
  */
 import { Validator } from '@seriousme/openapi-schema-validator';
 import type { HttpMethod, SpecIssue } from '@aiops/connector-sdk';
-import { isPlainObject, refToPath, toJsonSchema2020, type TranslateContext } from './schema-translate.js';
+import { isPlainObject, pushIssue, refToPath, toJsonSchema2020, type TranslateContext } from './schema-translate.js';
 
 export interface NormalisedParameter {
   name: string;
@@ -29,6 +29,8 @@ export interface NormalisedOperation {
 type Pointer = (string | number)[];
 
 const MAX_VALIDATION_ISSUES = 50;
+/** Schema nodes one derived input schema may inline (all parameters and the body together). */
+export const MAX_SCHEMA_NODES = 2000;
 const METHODS: ReadonlyMap<string, HttpMethod> = new Map([
   ['get', 'GET'],
   ['put', 'PUT'],
@@ -97,8 +99,9 @@ export function normaliseSpec(doc: Record<string, unknown>): { operations: Norma
     }
     return node;
   };
-  const translate = (schema: unknown, at: Pointer): Record<string, unknown> => {
-    const ctx: TranslateContext = { resolve: resolvePointer, depth: 0, at, issues };
+  type Budget = NonNullable<TranslateContext['budget']>;
+  const translate = (schema: unknown, at: Pointer, budget: Budget): Record<string, unknown> => {
+    const ctx: TranslateContext = { resolve: resolvePointer, depth: 0, at, issues, budget };
     return toJsonSchema2020(schema, ctx);
   };
   /** Follows `$ref`s of parameter, path item and request body objects (not schemas). */
@@ -150,6 +153,7 @@ export function normaliseSpec(doc: Record<string, unknown>): { operations: Norma
       add(own, opAt);
 
       const op: NormalisedOperation = { method, path, parameters: [] };
+      const budget: Budget = { remaining: MAX_SCHEMA_NODES, truncated: false };
       if (typeof rawOp.operationId === 'string' && rawOp.operationId !== '') op.operationId = rawOp.operationId;
       if (typeof rawOp.summary === 'string') op.summary = rawOp.summary;
 
@@ -158,12 +162,14 @@ export function normaliseSpec(doc: Record<string, unknown>): { operations: Norma
         const name = param.name as string; // checked to be a string in `add`
         if (location === 'body') {
           if (swagger2 && acceptsJson(rawOp.consumes ?? doc.consumes)) {
-            op.jsonBody = { required: param.required === true, schema: translate(param.schema, [...at, 'schema']) };
+            op.jsonBody = { required: param.required === true, schema: translate(param.schema, [...at, 'schema'], budget) };
           }
           continue;
         }
         if (location !== 'path' && location !== 'query' && location !== 'header') continue;
-        const schema = swagger2 ? translate(swagger2ParameterSchema(param), at) : translate(oas3ParameterSchema(param), schemaAt(param, at));
+        const schema = swagger2
+          ? translate(swagger2ParameterSchema(param), at, budget)
+          : translate(oas3ParameterSchema(param), schemaAt(param, at), budget);
         if (typeof param.description === 'string' && schema.description === undefined) schema.description = param.description;
         op.parameters.push({ name, in: location, required: location === 'path' || param.required === true, schema });
       }
@@ -176,7 +182,14 @@ export function normaliseSpec(doc: Record<string, unknown>): { operations: Norma
         if (body !== undefined && mediaType !== undefined) {
           const media = content[mediaType];
           const schema = isPlainObject(media) ? media.schema : undefined;
-          op.jsonBody = { required: body.required === true, schema: translate(schema, [...bodyAt, 'content', mediaType, 'schema']) };
+          op.jsonBody = { required: body.required === true, schema: translate(schema, [...bodyAt, 'content', mediaType, 'schema'], budget) };
+        }
+      }
+      if (budget.truncated) addIssue(issues, opAt, 'input schema truncated: too large to inline');
+      for (const placeholder of path.matchAll(/\{([^}]*)\}/g)) {
+        const name = placeholder[1] ?? '';
+        if (!op.parameters.some((p) => p.in === 'path' && p.name === name)) {
+          addIssue(issues, opAt, `path placeholder {${name}} has no path parameter`);
         }
       }
       operations.push(op);
@@ -186,7 +199,7 @@ export function normaliseSpec(doc: Record<string, unknown>): { operations: Norma
 }
 
 function addIssue(issues: SpecIssue[], path: Pointer, message: string): void {
-  if (!issues.some((i) => i.message === message && JSON.stringify(i.path) === JSON.stringify(path))) issues.push({ path, message });
+  pushIssue(issues, path, message);
 }
 
 function acceptsJson(consumes: unknown): boolean {
