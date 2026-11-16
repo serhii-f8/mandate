@@ -161,6 +161,11 @@ services:
       # Tokens carry the public issuer; keys are fetched on the internal network (ADR 0014).
       OIDC_ISSUER: ${AIOPS_KEYCLOAK_PUBLIC_URL:-http://localhost:8480}/realms/aiops
       OIDC_JWKS_URL: http://keycloak:8080/realms/aiops/protocol/openid-connect/certs
+      # Trusted-page login, credential vault keys (development-only defaults).
+      AIOPS_PUBLIC_URL: ${AIOPS_PUBLIC_URL:-http://localhost:8400}
+      OIDC_WEB_CLIENT_SECRET: ${AIOPS_WEB_CLIENT_SECRET:-dev-only-web-client-secret}
+      OIDC_TOKEN_URL: http://keycloak:8080/realms/aiops/protocol/openid-connect/token
+      AIOPS_MASTER_KEYS: ${AIOPS_MASTER_KEYS:-1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=}
     volumes:
       - ./config:/etc/aiops/config:ro
     ports:

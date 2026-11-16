@@ -64,6 +64,15 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
     mcpResource: new URL(resource),
     oidcIssuer: options.issuer.issuer,
     oidcJwksUrl: new URL(options.issuer.jwksUrl),
+    publicUrl: new URL(`http://127.0.0.1:${String(port)}`),
+    webClientId: 'aiops-web',
+    webClientSecret: 'test-only-web-client-secret',
+    oidcAuthorizationUrl: new URL(`${options.issuer.issuer}/protocol/openid-connect/auth`),
+    oidcTokenUrl: new URL(`${options.issuer.issuer}/protocol/openid-connect/token`),
+    masterKeys: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
+    sessionMaxAgeSeconds: 28_800,
+    freshAuthSeconds: 300,
+    presetDirs: [],
   };
   const configuration = await ConfigurationHolder.load(env.configDir);
   const app = await createApp({ env, configuration, ...(options.invoker === undefined ? {} : { overrides: { invoker: options.invoker } }) });
