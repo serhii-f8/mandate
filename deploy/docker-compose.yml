@@ -26,7 +26,9 @@ services:
     ports:
       - "127.0.0.1:${AIOPS_POSTGRES_PORT:-15432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d keycloak"]
+      # Over TCP: during first-time init the temporary server listens on the socket
+      # only, so this stays unhealthy until init.sh has created roles and databases.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d keycloak"]
       interval: 3s
       timeout: 3s
       retries: 60
