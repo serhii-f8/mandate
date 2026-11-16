@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/.turbo
+**/coverage
+**/*.tsbuildinfo
+.git
+.claude
+.superpowers
+.idea
+.serena
+.env
+spikes
+docs

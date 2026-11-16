@@ -1,0 +1,40 @@
+{
+  "name": "@aiops/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Temporal worker: operation workflows and the activities that call upstream systems.",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "@aiops/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --project unit --passWithNoTests",
+    "test:int": "vitest run --project integration",
+    "start": "node dist/main.js",
+    "record-history": "tsx scripts/record-history.ts"
+  },
+  "devDependencies": {
+    "@temporalio/client": "1.25.0",
+    "@temporalio/testing": "1.25.0",
+    "tsx": "4.23.15"
+  },
+  "dependencies": {
+    "@aiops/config": "workspace:*",
+    "@temporalio/activity": "1.25.0",
+    "@temporalio/common": "1.25.0",
+    "@temporalio/worker": "1.25.0",
+    "@temporalio/workflow": "1.25.0",
+    "pino": "10.4.0"
+  }
+}

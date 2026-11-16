@@ -1,0 +1,163 @@
+# AI Operations Layer — standard installation (NFR-9, ADR 0012).
+# Start from the repository root with one command:   docker compose up -d --wait
+# Every value below has a development default equal to .env.example. All defaults
+# are development-only fakes; a `.env` in the repository root overrides them.
+# Host ports bind to 127.0.0.1 only: Phase 1 has no authentication (ADR 0013).
+
+x-temporal-db: &temporal-db
+  DB: postgres12
+  DB_PORT: "5432"
+  POSTGRES_SEEDS: postgres
+  POSTGRES_USER: temporal
+  POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:-dev-only-temporal-db-password}
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-dev-only-postgres-password}
+      AIOPS_DB_PASSWORD: ${AIOPS_DB_PASSWORD:-dev-only-aiops-db-password}
+      TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:-dev-only-temporal-db-password}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-dev-only-keycloak-db-password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sh:/docker-entrypoint-initdb.d/10-aiops-init.sh:ro
+    ports:
+      - "127.0.0.1:${AIOPS_POSTGRES_PORT:-15432}:5432"
+    healthcheck:
+      # Over TCP: during first-time init the temporary server listens on the socket
+      # only, so this stays unhealthy until init.sh has created roles and databases.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d keycloak"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    restart: unless-stopped
+
+  temporal-schema:
+    image: temporalio/admin-tools:1.32.2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *temporal-db
+    volumes:
+      - ./temporal/setup-schema.sh:/scripts/setup-schema.sh:ro
+    entrypoint: ["/bin/sh", "/scripts/setup-schema.sh"]
+    restart: "no"
+
+  temporal:
+    image: temporalio/server:1.32.2
+    depends_on:
+      temporal-schema:
+        condition: service_completed_successfully
+    environment:
+      <<: *temporal-db
+      BIND_ON_IP: 0.0.0.0
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    volumes:
+      - ./temporal/dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+    ports:
+      - "127.0.0.1:${AIOPS_TEMPORAL_PORT:-17233}:7233"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7233"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    restart: unless-stopped
+
+  temporal-namespace:
+    image: temporalio/admin-tools:1.32.2
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+    volumes:
+      - ./temporal/create-namespace.sh:/scripts/create-namespace.sh:ro
+    entrypoint: ["/bin/sh", "/scripts/create-namespace.sh"]
+    restart: "no"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - start-dev
+      - --import-realm
+      - --http-port=8080
+      - --health-enabled=true
+      # Experimental features needed for MCP 2026-07-28 (ADR 0004).
+      - --features=cimd,resource-indicators
+      - --hostname=${AIOPS_KEYCLOAK_PUBLIC_URL:-http://localhost:8480}
+      - --db=postgres
+      - --db-url=jdbc:postgresql://postgres:5432/keycloak
+      - --db-username=keycloak
+      - --db-password=${KEYCLOAK_DB_PASSWORD:-dev-only-keycloak-db-password}
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-dev-only-keycloak-admin-password}
+      # Placeholder inside the realm file: the audience of MCP access tokens.
+      MCP_RESOURCE: ${AIOPS_MCP_RESOURCE:-http://localhost:8400/mcp}
+    volumes:
+      - ./keycloak/realm-aiops.json:/opt/keycloak/data/import/realm-aiops.json:ro
+    ports:
+      - "127.0.0.1:${AIOPS_KEYCLOAK_PORT:-8480}:8080"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"UP"' <&3
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: api
+    image: aiops-api:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://aiops:${AIOPS_DB_PASSWORD:-dev-only-aiops-db-password}@postgres:5432/aiops
+      API_PORT: "8080"
+      API_ALLOWED_HOSTS: ${API_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:${AIOPS_API_PORT:-8400}:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/readyz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: worker
+    image: aiops-worker:local
+    depends_on:
+      temporal-namespace:
+        condition: service_completed_successfully
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-aiops-operations}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "globalDependencies": [
+    "tsconfig.base.json",
+    "eslint.config.js",
+    "eslint.boundaries.js",
+    "vitest.shared.ts",
+    ".nvmrc",
+    "pnpm-workspace.yaml"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
+    },
+    "typecheck": {
+      "outputs": []
+    },
+    "lint": {
+      "outputs": []
+    },
+    "test": {
+      "outputs": []
+    },
+    "test:int": {
+      "outputs": [],
+      "cache": false
+    },
+    "test:e2e": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [],
+      "cache": false
+    }
+  }
+}

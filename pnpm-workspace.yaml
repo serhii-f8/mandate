@@ -1,0 +1,25 @@
+packages:
+  - apps/*
+  - packages/*
+  - presets/*
+  - tooling
+minimumReleaseAgeExclude:
+  - '@typescript-eslint/eslint-plugin@8.73.0'
+  - '@typescript-eslint/parser@8.73.0'
+  - '@typescript-eslint/project-service@8.73.0'
+  - '@typescript-eslint/scope-manager@8.73.0'
+  - '@typescript-eslint/tsconfig-utils@8.73.0'
+  - '@typescript-eslint/type-utils@8.73.0'
+  - '@typescript-eslint/types@8.73.0'
+  - '@typescript-eslint/typescript-estree@8.73.0'
+  - '@typescript-eslint/utils@8.73.0'
+  - '@typescript-eslint/visitor-keys@8.73.0'
+  - typescript-eslint@8.73.0
+# Build scripts of dependencies are denied: each ships prebuilt binaries as optional
+# dependencies or only prints a notice (ADR 0010). Review before flipping any to true.
+allowBuilds:
+  '@swc/core': false
+  cpu-features: false
+  esbuild: false
+  protobufjs: false
+  ssh2: false
