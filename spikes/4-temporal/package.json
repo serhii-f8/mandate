@@ -1,0 +1,17 @@
+{
+  "name": "spike-4-temporal",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "dependencies": {
+    "@temporalio/activity": "1.25.0",
+    "@temporalio/client": "1.25.0",
+    "@temporalio/common": "1.25.0",
+    "@temporalio/worker": "1.25.0",
+    "@temporalio/workflow": "1.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.9.0",
+    "typescript": "5.6.3"
+  }
+}
