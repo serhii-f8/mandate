@@ -50,6 +50,9 @@ export function createServerFactory(deps: PipelineDeps): McpServerFactory {
   return ({ authInfo }) => {
     const { caller, correlationId } = contextOf(authInfo);
     const snapshot = deps.snapshot();
+    // `Server` is deprecated for ordinary use in favour of `McpServer`; owning the
+    // tools/* handlers so every rejection is audited is the advanced use it keeps (ADR 0016).
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
     const server = new Server(SERVER_INFO, { capabilities: { tools: { listChanged: false } } });
     const request = (envelope: object | undefined): PipelineRequest => {
       const name = declaredClientName(envelope);

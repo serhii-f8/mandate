@@ -184,9 +184,9 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
     name,
     async () => {
       if (builtin !== undefined) return builtin.handler(validArgs, req.caller);
-      // `operation` is defined whenever `builtin` is not (step 1).
-      const op = operation as OperationDefinition;
-      const result = await deps.invoker.invoke({ operation: op, args: validArgs, caller: req.caller });
+      // Step 1 returned unless a built-in or a granted operation was found.
+      if (operation === undefined) throw new Error('no operation after lookup');
+      const result = await deps.invoker.invoke({ operation, args: validArgs, caller: req.caller });
       return {
         content: [{ type: 'text', text: result.text }],
         ...(result.structured === undefined ? {} : { structuredContent: { ...result.structured } }),

@@ -5,17 +5,26 @@ import type { McpHttpHandler } from '@modelcontextprotocol/server';
 import type { Request, Response } from 'express';
 import type { Logger } from 'pino';
 import type { ApiEnv } from '@aiops/config';
+import type { AuditLog } from '@aiops/core';
+import type { BearerGate } from '../auth/bearer-gate.js';
 import { hostAllowed, originAllowed } from '../http/host-origin.js';
-import { API_ENV, LOGGER, MCP_HANDLER } from '../tokens.js';
-import { CALLER_RESOLVER, type CallerResolver } from './caller-resolver.js';
+import { API_ENV, AUDIT_LOG, BEARER_GATE, LOGGER, MCP_HANDLER } from '../tokens.js';
 import { authInfoFor } from './mcp-server-factory.js';
 
-/** The single MCP endpoint (MCP-1): stateless Streamable HTTP, POST only. */
+async function sendWebResponse(res: Response, response: globalThis.Response): Promise<void> {
+  response.headers.forEach((value, key) => {
+    res.setHeader(key, value);
+  });
+  res.status(response.status).send(await response.text());
+}
+
+/** The single MCP endpoint (MCP-1): stateless Streamable HTTP, POST only, a protected resource (AUTH-1). */
 @Controller('mcp')
 export class McpController {
   constructor(
     @Inject(MCP_HANDLER) private readonly handler: McpHttpHandler,
-    @Inject(CALLER_RESOLVER) private readonly callers: CallerResolver,
+    @Inject(BEARER_GATE) private readonly gate: BearerGate,
+    @Inject(AUDIT_LOG) private readonly audit: AuditLog,
     @Inject(API_ENV) private readonly env: ApiEnv,
     @Inject(LOGGER) private readonly logger: Logger,
   ) {}
@@ -28,8 +37,22 @@ export class McpController {
     }
     const correlationId = randomUUID();
     res.setHeader('x-correlation-id', correlationId);
-    const caller = await this.callers.resolve(req);
-    const authInfo = authInfoFor({ caller, correlationId });
+
+    const auth = await this.gate.authenticate(req.headers.authorization);
+    if (!auth.ok) {
+      if (auth.reason !== undefined) {
+        // Part of AUD-1: a presented token was refused. The reason is fixed text, never token content.
+        await this.audit
+          .append({ id: randomUUID(), actor: 'unknown', action: 'auth.rejected', outcome: 'denied', correlationId, details: { reason: auth.reason } })
+          .catch((error: unknown) => {
+            this.logger.warn({ correlationId, err: error instanceof Error ? error.message : 'unknown' }, 'audit of rejected token failed');
+          });
+      }
+      await sendWebResponse(res, auth.response);
+      return;
+    }
+
+    const authInfo = authInfoFor({ caller: auth.caller, correlationId }, auth.expiresAt);
     const node = toNodeHandler(
       { fetch: (request) => this.handler.fetch(request, { authInfo }) },
       {
