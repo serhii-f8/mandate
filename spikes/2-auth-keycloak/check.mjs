@@ -433,6 +433,25 @@ async function main() {
                 check(name, false, e.message.slice(0, 200));
             }
         }
+        // Manual check M1 (2026-11-16): claude.ai requests `offline_access` next to the MCP scope.
+        // The token exchange then needs the user to hold the `offline_access` realm role AND the
+        // `offline_access` client scope to carry that role in its scope mappings (CIMD clients are
+        // created with "Full scope allowed" off). A realm import that defines neither fails with
+        // "Offline tokens not allowed for the user or client".
+        for (const [name, clientId, redirectUri] of [
+            ['offline-access-cimd-claude-shape', cimdUrl('claude-desktop-shape.json'), 'https://claude.ai/api/mcp/auth_callback'],
+            ['offline-access-pre-registered', 'spike-mcp-client', REDIRECT_URI]
+        ]) {
+            try {
+                const az = await authorize({ asMeta: d.asMeta, clientId, scope: 'mcp:tools offline_access', resource: d.prm.resource, username: 'alice', redirectUri });
+                const tok = await token({ asMeta: d.asMeta, clientId, code: az.code, verifier: az.verifier, resource: d.prm.resource, redirectUri });
+                const who = (await mcpWhoami(tok.access_token)).who;
+                check(name, typeof tok.refresh_token === 'string' && decodeJwt(tok.refresh_token).typ === 'Offline' && who.preferred_username === 'alice',
+                    `refresh_token typ=${tok.refresh_token ? decodeJwt(tok.refresh_token).typ : 'none'} scope="${tok.scope}"`);
+            } catch (e) {
+                check(name, false, e.message.slice(0, 200));
+            }
+        }
         // The variant the Keycloak MCP guide says Keycloak rejects (auth method only in *_supported)
         try {
             const clientId = cimdUrl('chatgpt-guide-variant.json');
@@ -494,7 +513,10 @@ async function main() {
         const wrongAud = await passwordGrant('spike-negative-wrong-aud');
         const wa = await rawMcpStatus(wrongAud);
         // same issuer, valid signature, unexpired — only the audience is another resource
-        check('wrong-audience-401', wa.status === 401 && audIsExactly(decodeJwt(wrongAud).aud, 'http://localhost:4199/other-mcp'),
+        // With the realm default roles the user also carries `account` roles, so Keycloak adds the
+        // `account` audience here. The control stays valid: the MCP resource is not an audience.
+        const waAud = [decodeJwt(wrongAud).aud ?? []].flat();
+        check('wrong-audience-401', wa.status === 401 && waAud.includes('http://localhost:4199/other-mcp') && !waAud.includes(MCP_URL),
             `HTTP ${wa.status} aud=${JSON.stringify(decodeJwt(wrongAud).aud ?? null)}`);
 
         const short = await passwordGrant('spike-negative-short');
