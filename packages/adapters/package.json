@@ -21,11 +21,14 @@
     "lint": "eslint .",
     "test": "vitest run --project unit --passWithNoTests"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "@aiops/testing": "workspace:*"
+  },
   "dependencies": {
     "@aiops/connector-sdk": "workspace:*",
     "@seriousme/openapi-schema-validator": "2.12.0",
     "ajv": "8.20.0",
-    "ajv-formats": "3.0.1"
+    "ajv-formats": "3.0.1",
+    "zod": "4.6.7"
   }
 }

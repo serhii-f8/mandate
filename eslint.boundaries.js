@@ -42,6 +42,16 @@ export const boundaryRules = [
     },
   },
   {
+    // Tests may also use the shared fakes (fake upstream); production code may not.
+    files: ['packages/adapters/src/**/*.test.ts', 'packages/adapters/test/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [workspaceExcept(['connector-sdk', 'testing'], 'Adapter tests depend on @aiops/connector-sdk and @aiops/testing only.')] },
+      ],
+    },
+  },
+  {
     files: ['presets/**/*.ts'],
     rules: {
       'no-restricted-imports': [

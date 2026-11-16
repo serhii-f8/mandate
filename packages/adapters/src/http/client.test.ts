@@ -1,0 +1,428 @@
+import type { ConnectionSettings, CredentialSource } from '@aiops/connector-sdk';
+import { startFakeUpstream, type FakeUpstream } from '@aiops/testing';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { HttpRequestSpec } from '../openapi/request.js';
+import { createConnectionClient } from './client.js';
+import { createGuardedLookup } from './egress.js';
+import { clearTokenCache, lastTokenScopes } from './oauth.js';
+import { semaphoreFor } from './semaphore.js';
+
+let up: FakeUpstream;
+let seq = 0;
+
+beforeEach(async () => {
+  up = await startFakeUpstream();
+  clearTokenCache();
+});
+afterEach(async () => {
+  await up.close();
+});
+
+function settings(over: Partial<ConnectionSettings> = {}): ConnectionSettings {
+  seq += 1;
+  return {
+    id: `conn-${seq}`,
+    baseUrl: up.url,
+    timeoutMs: 2000,
+    retry: { maxAttempts: 3, initialBackoffMs: 100 },
+    maxConcurrency: 4,
+    allowPrivateNetwork: true,
+    extraHosts: [],
+    ...over,
+  };
+}
+
+function get(path = '/items', base = up.url): HttpRequestSpec {
+  return { method: 'GET', url: new URL(base + path), headers: { accept: 'application/json' } };
+}
+
+function cred(scheme: CredentialSource['scheme'], material: Record<string, string>): CredentialSource {
+  return { ref: 'test-cred', scheme, open: () => Promise.resolve(material) };
+}
+
+const noSleep = { sleep: () => Promise.resolve() };
+
+describe('CONN-3 credential injection', () => {
+  beforeEach(() => {
+    up.route('GET', '/items', () => ({ status: 200, body: { ok: 1 } }));
+  });
+
+  it('CONN-3 bearer sends Authorization: Bearer', async () => {
+    const c = createConnectionClient(settings({ auth: { scheme: 'bearer' } }));
+    const r = await c.send(get(), { credential: cred('bearer', { token: 'tok-1' }), retryable: false });
+    expect(r).toMatchObject({ ok: true, status: 200, json: { ok: 1 } });
+    expect(up.requests[0]?.headers.authorization).toBe('Bearer tok-1');
+  });
+
+  it('CONN-3 api_key sends the configured header and no Authorization', async () => {
+    const c = createConnectionClient(settings({ auth: { scheme: 'api_key', header: 'X-Api-Key' } }));
+    const r = await c.send(get(), { credential: cred('api_key', { key: 'key-1' }), retryable: false });
+    expect(r.ok).toBe(true);
+    expect(up.requests[0]?.headers['x-api-key']).toBe('key-1');
+    expect(up.requests[0]?.headers.authorization).toBeUndefined();
+  });
+
+  it('CONN-3 basic sends Authorization: Basic base64(user:pass)', async () => {
+    const c = createConnectionClient(settings({ auth: { scheme: 'basic' } }));
+    const r = await c.send(get(), { credential: cred('basic', { username: 'user', password: 'p:w' }), retryable: false });
+    expect(r.ok).toBe(true);
+    expect(up.requests[0]?.headers.authorization).toBe(`Basic ${Buffer.from('user:p:w').toString('base64')}`);
+  });
+
+  it('CONN-3 no auth configured sends no credential', async () => {
+    const c = createConnectionClient(settings());
+    const r = await c.send(get(), { retryable: false });
+    expect(r.ok).toBe(true);
+    expect(up.requests[0]?.headers.authorization).toBeUndefined();
+  });
+
+  it('CONN-3 auth configured but no credential is credential_missing and nothing is sent', async () => {
+    const c = createConnectionClient(settings({ auth: { scheme: 'bearer' } }));
+    const r = await c.send(get(), { retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'credential_missing' });
+    expect(up.requests).toHaveLength(0);
+  });
+
+  it('CONN-3 open() failing is credential_unusable and the error text is not echoed', async () => {
+    const c = createConnectionClient(settings({ auth: { scheme: 'bearer' } }));
+    const broken: CredentialSource = { ref: 'x', scheme: 'bearer', open: () => Promise.reject(new Error('decrypt failed for s3cr3t')) };
+    const r = await c.send(get(), { credential: broken, retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'credential_unusable' });
+    if (!r.ok) expect(r.message).not.toContain('s3cr3t');
+    expect(up.requests).toHaveLength(0);
+  });
+
+  it('CONN-3 material of the wrong shape or scheme is credential_unusable', async () => {
+    const c = createConnectionClient(settings({ auth: { scheme: 'basic' } }));
+    expect(await c.send(get(), { credential: cred('basic', { username: 'u' }), retryable: false })).toMatchObject({ ok: false, code: 'credential_unusable' });
+    expect(await c.send(get(), { credential: cred('bearer', { token: 't' }), retryable: false })).toMatchObject({ ok: false, code: 'credential_unusable' });
+    expect(up.requests).toHaveLength(0);
+  });
+
+  describe('CONN-3 oauth_client_credentials', () => {
+    let issued = 0;
+    beforeEach(() => {
+      issued = 0;
+      up.route('POST', '/token', () => {
+        issued += 1;
+        return { status: 200, body: { access_token: `issued-${issued}`, token_type: 'Bearer', expires_in: 3600, scope: 'catalog.read orders.read' } };
+      });
+    });
+    const oauth = (): ConnectionSettings => settings({ auth: { scheme: 'oauth_client_credentials', tokenUrl: `${up.url}/token`, scopes: ['catalog.read', 'orders.read'] } });
+    const client = cred('oauth_client_credentials', { client_id: 'id:1', client_secret: 's&cret' });
+
+    it('CONN-3 fetches a token once for two requests and sends it as Bearer', async () => {
+      const c = createConnectionClient(oauth());
+      expect((await c.send(get(), { credential: client, retryable: false })).ok).toBe(true);
+      expect((await c.send(get(), { credential: client, retryable: false })).ok).toBe(true);
+      const tokenCalls = up.requests.filter((r) => r.path === '/token');
+      expect(tokenCalls).toHaveLength(1);
+      const items = up.requests.filter((r) => r.path === '/items');
+      expect(items.map((r) => r.headers.authorization)).toEqual(['Bearer issued-1', 'Bearer issued-1']);
+    });
+
+    it('CONN-3 token request is client_secret_basic with grant_type and scope (RFC 6749 2.3.1)', async () => {
+      const s = oauth();
+      const c = createConnectionClient(s);
+      await c.send(get(), { credential: client, retryable: false });
+      const t = up.requests.find((r) => r.path === '/token');
+      expect(t?.headers['content-type']).toBe('application/x-www-form-urlencoded');
+      expect(t?.headers.authorization).toBe(`Basic ${Buffer.from('id%3A1:s%26cret').toString('base64')}`);
+      const form = new URLSearchParams(t?.body);
+      expect(form.get('grant_type')).toBe('client_credentials');
+      expect(form.get('scope')).toBe('catalog.read orders.read');
+      expect(form.has('client_secret')).toBe(false);
+      expect(lastTokenScopes(s.id)).toEqual(['catalog.read', 'orders.read']);
+    });
+
+    it('CONN-3 refetches the token once after an upstream 401', async () => {
+      let n = 0;
+      up.route('GET', '/items', () => {
+        n += 1;
+        return n === 1 ? { status: 401, body: { error: 'expired' } } : { status: 200, body: { ok: 1 } };
+      });
+      const c = createConnectionClient(oauth());
+      const r = await c.send(get(), { credential: client, retryable: false });
+      expect(r.ok).toBe(true);
+      expect(up.requests.filter((x) => x.path === '/token')).toHaveLength(2);
+      expect(up.requests.filter((x) => x.path === '/items').map((x) => x.headers.authorization)).toEqual(['Bearer issued-1', 'Bearer issued-2']);
+    });
+
+    it('CONN-3 a 401 that persists after the refresh is http_status 401', async () => {
+      up.route('GET', '/items', () => ({ status: 401, body: {} }));
+      const c = createConnectionClient(oauth());
+      const r = await c.send(get(), { credential: client, retryable: true });
+      expect(r).toMatchObject({ ok: false, code: 'http_status', status: 401 });
+      expect(up.requests.filter((x) => x.path === '/token')).toHaveLength(2);
+      expect(up.requests.filter((x) => x.path === '/items')).toHaveLength(2);
+    });
+
+    it('CONN-3 the cached token is renewed 30 s before expires_in', async () => {
+      up.route('POST', '/token', () => {
+        issued += 1;
+        return { status: 200, body: { access_token: `issued-${issued}`, expires_in: 60 } };
+      });
+      let clock = 1_000_000;
+      const c = createConnectionClient(oauth(), { now: () => clock });
+      await c.send(get(), { credential: client, retryable: false });
+      clock += 29_000;
+      await c.send(get(), { credential: client, retryable: false });
+      expect(issued).toBe(1);
+      clock += 2_000; // 31 s after issue: inside the 30 s margin of a 60 s token
+      await c.send(get(), { credential: client, retryable: false });
+      expect(issued).toBe(2);
+    });
+
+    it('CONN-3 a token endpoint refusal is credential_unusable with its status', async () => {
+      up.route('POST', '/token', () => ({ status: 401, body: { error: 'invalid_client' } }));
+      const c = createConnectionClient(oauth());
+      const r = await c.send(get(), { credential: client, retryable: false });
+      expect(r).toMatchObject({ ok: false, code: 'credential_unusable', status: 401 });
+      expect(up.requests.filter((x) => x.path === '/items')).toHaveLength(0);
+    });
+
+    it('CONN-3 a token response without access_token is invalid_response', async () => {
+      up.route('POST', '/token', () => ({ status: 200, body: { token_type: 'Bearer' } }));
+      const c = createConnectionClient(oauth());
+      const r = await c.send(get(), { credential: client, retryable: false });
+      expect(r).toMatchObject({ ok: false, code: 'invalid_response' });
+    });
+
+    it('CONN-5 a token URL on a refused address is egress_denied before connecting', async () => {
+      const s = settings({ allowPrivateNetwork: false, auth: { scheme: 'oauth_client_credentials', tokenUrl: `${up.url}/token`, scopes: [] } });
+      const c = createConnectionClient(s);
+      const r = await c.send(get(), { credential: client, retryable: false });
+      expect(r).toMatchObject({ ok: false, code: 'egress_denied' });
+      expect(up.requests).toHaveLength(0);
+    });
+  });
+});
+
+describe('CONN-6 timeout, retry and concurrency', () => {
+  it('CONN-6 503 twice then 200 succeeds after 3 attempts with exponential, jittered backoff', async () => {
+    let n = 0;
+    up.route('GET', '/items', () => {
+      n += 1;
+      return n < 3 ? { status: 503, body: {} } : { status: 200, body: { done: true } };
+    });
+    const sleeps: number[] = [];
+    const c = createConnectionClient(settings(), {
+      sleep: (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+      random: () => 0.5,
+    });
+    const r = await c.send(get(), { retryable: true });
+    expect(r).toMatchObject({ ok: true, json: { done: true } });
+    expect(up.requests).toHaveLength(3);
+    expect(sleeps).toEqual([50, 100]);
+  });
+
+  it.each([
+    ['2', 2000],
+    ['60', 10_000],
+  ])('CONN-6 Retry-After: %s sleeps %i ms', async (header, expected) => {
+    let n = 0;
+    up.route('GET', '/items', () => {
+      n += 1;
+      return n === 1 ? { status: 429, headers: { 'retry-after': header }, body: {} } : { status: 200, body: {} };
+    });
+    const sleeps: number[] = [];
+    const c = createConnectionClient(settings(), {
+      sleep: (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect((await c.send(get(), { retryable: true })).ok).toBe(true);
+    expect(sleeps).toEqual([expected]);
+  });
+
+  it('CONN-6 Retry-After as an HTTP date is honoured and capped', async () => {
+    let n = 0;
+    up.route('GET', '/items', () => {
+      n += 1;
+      const at = new Date(Date.now() + 5000).toUTCString();
+      return n === 1 ? { status: 503, headers: { 'retry-after': at }, body: {} } : { status: 200, body: {} };
+    });
+    const sleeps: number[] = [];
+    const c = createConnectionClient(settings(), {
+      sleep: (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect((await c.send(get(), { retryable: true })).ok).toBe(true);
+    expect(sleeps).toHaveLength(1);
+    expect(sleeps[0]).toBeGreaterThan(3000);
+    expect(sleeps[0]).toBeLessThanOrEqual(5000);
+  });
+
+  it('CONN-6 503 on every attempt is http_status 503 after max_attempts', async () => {
+    up.route('GET', '/items', () => ({ status: 503, body: {} }));
+    const c = createConnectionClient(settings(), noSleep);
+    const r = await c.send(get(), { retryable: true });
+    expect(r).toMatchObject({ ok: false, code: 'http_status', status: 503 });
+    expect(up.requests).toHaveLength(3);
+  });
+
+  it('CONN-6 retryable: false makes one attempt', async () => {
+    up.route('GET', '/items', () => ({ status: 503, body: {} }));
+    const c = createConnectionClient(settings(), noSleep);
+    const r = await c.send(get(), { retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'http_status', status: 503 });
+    expect(up.requests).toHaveLength(1);
+  });
+
+  it('CONN-6 a non-retryable status (400) is not retried', async () => {
+    up.route('GET', '/items', () => ({ status: 400, body: {} }));
+    const c = createConnectionClient(settings(), noSleep);
+    expect(await c.send(get(), { retryable: true })).toMatchObject({ ok: false, code: 'http_status', status: 400 });
+    expect(up.requests).toHaveLength(1);
+  });
+
+  it('CONN-6 a slow upstream is a timeout after timeout_ms', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {}, delayMs: 500 }));
+    const c = createConnectionClient(settings({ timeoutMs: 100 }));
+    const t0 = Date.now();
+    const r = await c.send(get(), { retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'timeout' });
+    expect(Date.now() - t0).toBeLessThan(400);
+  });
+
+  it('CONN-6 timeouts are retried for reads', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {}, delayMs: 300 }));
+    const c = createConnectionClient(settings({ timeoutMs: 50, retry: { maxAttempts: 2, initialBackoffMs: 1 } }), noSleep);
+    expect(await c.send(get(), { retryable: true })).toMatchObject({ ok: false, code: 'timeout' });
+    expect(up.requests).toHaveLength(2);
+  });
+
+  it('CONN-6 a refused connection is network and is retried', async () => {
+    const closed = await startFakeUpstream();
+    const url = closed.url;
+    await closed.close();
+    const c = createConnectionClient(settings({ baseUrl: url, retry: { maxAttempts: 2, initialBackoffMs: 1 } }), noSleep);
+    const r = await c.send(get('/items', url), { retryable: true });
+    expect(r).toMatchObject({ ok: false, code: 'network' });
+  });
+
+  it('CONN-6 max_concurrency 1: the upstream never sees two requests in flight', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {}, delayMs: 80 }));
+    const c = createConnectionClient(settings({ maxConcurrency: 1 }));
+    const rs = await Promise.all([c.send(get(), { retryable: false }), c.send(get(), { retryable: false })]);
+    expect(rs.every((r) => r.ok)).toBe(true);
+    expect(up.requests).toHaveLength(2);
+    expect(up.maxInFlight).toBe(1);
+  });
+
+  it('CONN-6 waiting for a slot counts against timeout_ms and ends as busy', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const s = settings({ maxConcurrency: 1, timeoutMs: 60 });
+    const held = await semaphoreFor(s.id, 1).acquire(1000);
+    const c = createConnectionClient(s);
+    const r = await c.send(get(), { retryable: false });
+    held?.();
+    expect(r).toMatchObject({ ok: false, code: 'busy' });
+    expect(up.requests).toHaveLength(0);
+  });
+});
+
+describe('CONN-6 response handling', () => {
+  it('CONN-6 a non-JSON response is invalid_response', async () => {
+    up.route('GET', '/items', () => ({ status: 200, headers: { 'content-type': 'text/html' }, body: '<html></html>' }));
+    const r = await createConnectionClient(settings()).send(get(), { retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'invalid_response' });
+  });
+
+  it('CONN-6 a +json content type is accepted', async () => {
+    up.route('GET', '/items', () => ({ status: 200, headers: { 'content-type': 'application/problem+json; charset=utf-8' }, body: '{"a":1}' }));
+    expect(await createConnectionClient(settings()).send(get(), { retryable: false })).toMatchObject({ ok: true, json: { a: 1 } });
+  });
+
+  it('CONN-6 malformed JSON is invalid_response', async () => {
+    up.route('GET', '/items', () => ({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"a":' }));
+    expect(await createConnectionClient(settings()).send(get(), { retryable: false })).toMatchObject({ ok: false, code: 'invalid_response' });
+  });
+
+  it('CONN-6 a body over 5 MB is invalid_response', async () => {
+    const big = `"${'x'.repeat(5 * 1024 * 1024 + 10)}"`;
+    up.route('GET', '/items', () => ({ status: 200, headers: { 'content-type': 'application/json' }, body: big }));
+    expect(await createConnectionClient(settings()).send(get(), { retryable: false })).toMatchObject({ ok: false, code: 'invalid_response' });
+  });
+
+  it('CONN-6 a POST carries its JSON body', async () => {
+    up.route('POST', '/items', (req) => ({ status: 200, body: { got: req.body, type: req.headers['content-type'] } }));
+    const spec: HttpRequestSpec = { method: 'POST', url: new URL(`${up.url}/items`), headers: { 'content-type': 'application/json' }, body: '{"q":1}' };
+    expect(await createConnectionClient(settings()).send(spec, { retryable: false })).toMatchObject({ ok: true, json: { got: '{"q":1}', type: 'application/json' } });
+  });
+});
+
+describe('SEC-3 upstream echoes the credential', () => {
+  it('SEC-3 an error result never contains the token', async () => {
+    up.route('GET', '/items', (req) => ({ status: 500, headers: { 'x-echo': req.headers.authorization ?? '' }, body: { echo: req.headers.authorization } }));
+    const c = createConnectionClient(settings({ auth: { scheme: 'bearer' } }), noSleep);
+    const r = await c.send(get(), { credential: cred('bearer', { token: 'very-secret-token' }), retryable: true });
+    expect(r).toMatchObject({ ok: false, code: 'http_status', status: 500 });
+    expect(JSON.stringify(r)).not.toContain('very-secret-token');
+  });
+
+  it('SEC-3 a success body echoing the secret is scrubbed', async () => {
+    up.route('GET', '/items', (req) => ({ status: 200, body: { echo: req.headers.authorization, b64: Buffer.from('user:pw-secret').toString('base64') } }));
+    const c = createConnectionClient(settings({ auth: { scheme: 'basic' } }));
+    const r = await c.send(get(), { credential: cred('basic', { username: 'user', password: 'pw-secret' }), retryable: false });
+    expect(r.ok).toBe(true);
+    expect(JSON.stringify(r)).not.toContain('pw-secret');
+    expect(JSON.stringify(r)).not.toContain(Buffer.from('user:pw-secret').toString('base64'));
+  });
+
+  it('SEC-3 a fetched OAuth token echoed by the upstream is scrubbed', async () => {
+    up.route('POST', '/token', () => ({ status: 200, body: { access_token: 'oauth-issued-secret', expires_in: 3600 } }));
+    up.route('GET', '/items', (req) => ({ status: 200, body: { echo: req.headers.authorization } }));
+    const c = createConnectionClient(settings({ auth: { scheme: 'oauth_client_credentials', tokenUrl: `${up.url}/token`, scopes: [] } }));
+    const r = await c.send(get(), { credential: cred('oauth_client_credentials', { client_id: 'cid', client_secret: 'csecret' }), retryable: false });
+    expect(r.ok).toBe(true);
+    expect(JSON.stringify(r)).not.toContain('oauth-issued-secret');
+  });
+});
+
+describe('CONN-5 no redirects and guarded egress', () => {
+  it('CONN-5 a 302 is http_status and the Location target is never requested', async () => {
+    up.route('GET', '/items', () => ({ status: 302, headers: { location: `${up.url}/elsewhere` } }));
+    up.route('GET', '/elsewhere', () => ({ status: 200, body: {} }));
+    const r = await createConnectionClient(settings()).send(get(), { retryable: true });
+    expect(r).toMatchObject({ ok: false, code: 'http_status', status: 302 });
+    expect(up.requests.map((x) => x.path)).toEqual(['/items']);
+  });
+
+  it('CONN-5 a loopback upstream without allow_private_network is egress_denied before connecting', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const r = await createConnectionClient(settings({ allowPrivateNetwork: false })).send(get(), { retryable: true });
+    expect(r).toMatchObject({ ok: false, code: 'egress_denied' });
+    expect(up.requests).toHaveLength(0);
+  });
+
+  it('CONN-5 a request to a host outside the connection is egress_denied', async () => {
+    const c = createConnectionClient(settings({ baseUrl: 'http://upstream.test' }));
+    const r = await c.send(get('/items'), { retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'egress_denied' });
+    expect(up.requests).toHaveLength(0);
+  });
+
+  it('CONN-5 host names are resolved through the guarded lookup', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: { via: 'lookup' } }));
+    const s = settings({ baseUrl: `http://upstream.test:${up.port}` });
+    const lookup = createGuardedLookup(s, () => Promise.resolve([{ address: '127.0.0.1', family: 4 }]));
+    const r = await createConnectionClient(s, { lookup }).send(get('/items', `http://upstream.test:${up.port}`), { retryable: false });
+    expect(r).toMatchObject({ ok: true, json: { via: 'lookup' } });
+    expect(up.requests[0]?.headers.host).toBe(`upstream.test:${up.port}`);
+  });
+
+  it('CONN-5 a host name that resolves to a refused address is egress_denied', async () => {
+    const s = settings({ baseUrl: `http://upstream.test:${up.port}`, allowPrivateNetwork: false });
+    const lookup = createGuardedLookup(s, () => Promise.resolve([{ address: '127.0.0.1', family: 4 }]));
+    const r = await createConnectionClient(s, { lookup }).send(get('/items', `http://upstream.test:${up.port}`), { retryable: true });
+    expect(r).toMatchObject({ ok: false, code: 'egress_denied' });
+    expect(up.requests).toHaveLength(0);
+  });
+});
