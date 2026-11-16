@@ -23,10 +23,12 @@ export async function runCli(argv: readonly string[], out: (line: string) => voi
     out(`Configuration invalid: ${String(result.issues.length)} issue${result.issues.length === 1 ? '' : 's'}`);
     return 1;
   }
-  const { policy, connections } = result.configuration;
+  const { policy, connections, specChecksSkipped } = result.configuration;
   out(
     `Configuration valid: ${String(connections.length)} connections, ${String(policy.operations.length)} operations, ${String(policy.roles.length)} roles`,
   );
+  // This CLI has no adapter (package boundaries); the api CLI resolves specs (ADR 0017).
+  if (specChecksSkipped) out('Spec checks skipped: run "aiops validate" in the api for the full check');
   return 0;
 }
 

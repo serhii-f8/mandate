@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { runCli } from './cli.js';
 
 const VALID_DIR = fileURLToPath(new URL('../test/fixtures/valid', import.meta.url));
+const DERIVED_DIR = fileURLToPath(new URL('../test/fixtures/derived', import.meta.url));
 
 async function run(argv: string[]): Promise<{ code: number; lines: string[] }> {
   const lines: string[] = [];
@@ -16,6 +17,13 @@ async function run(argv: string[]): Promise<{ code: number; lines: string[] }> {
 describe('CFG-3 validate command', () => {
   it('exits 0 with a summary for a valid directory', async () => {
     expect(await run(['validate', VALID_DIR])).toEqual({ code: 0, lines: ['Configuration valid: 1 connections, 2 operations, 2 roles'] });
+  });
+
+  it('says when spec checks were skipped', async () => {
+    expect(await run(['validate', DERIVED_DIR])).toEqual({
+      code: 0,
+      lines: ['Configuration valid: 1 connections, 2 operations, 0 roles', 'Spec checks skipped: run "aiops validate" in the api for the full check'],
+    });
   });
 
   it('exits 1 with one located line per issue for an invalid directory', async () => {

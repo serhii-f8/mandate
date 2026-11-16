@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { FakeResolver, fakeCatalogEntry } from '@aiops/testing';
 import { ConfigurationError, ConfigurationHolder } from './holder.js';
 
 const VALID_DIR = fileURLToPath(new URL('../test/fixtures/valid', import.meta.url));
+const DERIVED_DIR = fileURLToPath(new URL('../test/fixtures/derived', import.meta.url));
 let dir: string;
 
 beforeEach(async () => {
@@ -47,5 +49,29 @@ describe('CFG-2 the previous configuration stays active', () => {
     const error = await ConfigurationHolder.load(dir).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConfigurationError);
     expect((error as ConfigurationError).issues[0]).toMatchObject({ file: 'roles.yaml', path: 'roles' });
+  });
+
+  it('keeps the previous configuration when a spec file vanished, and passes the load options to every reload', async () => {
+    const derived = await mkdtemp(join(tmpdir(), 'aiops-holder-derived-'));
+    try {
+      await cp(DERIVED_DIR, derived, { recursive: true });
+      const resolver = new FakeResolver({
+        shop: [
+          fakeCatalogEntry('shop', { operationId: 'listItems', method: 'GET', path: '/items' }),
+          fakeCatalogEntry('shop', { operationId: 'getItem', method: 'GET', path: '/items/{sku}' }),
+          fakeCatalogEntry('shop', { operationId: 'deleteItem', method: 'DELETE', path: '/items/{sku}' }),
+        ],
+      });
+      const holder = await ConfigurationHolder.load(derived, { resolver });
+      const first = holder.current;
+      expect(first.specChecksSkipped).toBe(false);
+      await rm(join(derived, 'specs', 'shop.json'));
+      const failed = await holder.reload();
+      expect(failed).toEqual({ ok: false, issues: [expect.objectContaining({ file: 'config.yaml', path: 'connections[0].openapi.spec', message: 'spec file cannot be read' })] });
+      expect(holder.current).toBe(first);
+      expect(resolver.calls).toHaveLength(1);
+    } finally {
+      await rm(derived, { recursive: true });
+    }
   });
 });

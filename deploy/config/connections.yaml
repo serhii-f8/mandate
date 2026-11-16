@@ -6,3 +6,4 @@ connections:
     adapter: openapi
     base_url: https://shop.example.test/rest
     credential_ref: magento-integration
+    auth: { scheme: bearer }

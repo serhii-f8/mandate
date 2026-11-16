@@ -5,3 +5,4 @@ export { startTestIssuer, type TestIssuer, type TestTokenClaims } from './test-i
 export { FakeInvoker } from './fake-invoker.js';
 export { KEYCLOAK_IMAGE, loginWithPkce, registerClient, startKeycloak, type LoginOptions, type LoginResult, type StartedKeycloak } from './keycloak.js';
 export { startFakeUpstream, type FakeUpstream, type FakeHandler, type FakeResponse, type RecordedRequest } from './fake-upstream.js';
+export { FakeResolver, fakeCatalogEntry } from './fake-resolver.js';

@@ -11,7 +11,7 @@ import { callTool, listTools, snapshotOf, type PipelineDeps, type PipelineReques
 const SOURCES = {
   'connections.yaml': `version: 1
 connections:
-  - { id: magento, adapter: openapi, base_url: https://shop.example.test/rest, credential_ref: magento-integration }
+  - { id: magento, adapter: openapi, base_url: https://shop.example.test/rest, credential_ref: magento-integration, auth: { scheme: bearer } }
 `,
   'operations.yaml': `version: 1
 operations:
@@ -47,10 +47,12 @@ role_mapping:
 `,
 };
 
+const loaded = await loadConfigurationSources(Object.entries(SOURCES).map(([file, text]) => ({ file, text })));
+if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
+const LOADED: LoadedConfiguration = loaded.configuration;
+
 function configuration(): LoadedConfiguration {
-  const result = loadConfigurationSources(Object.entries(SOURCES).map(([file, text]) => ({ file, text })));
-  if (!result.ok) throw new Error(JSON.stringify(result.issues));
-  return result.configuration;
+  return LOADED;
 }
 
 const TOKEN = 'eyJhbGciOiJSUzI1NiJ9.do-not-leak-this-token.sig';

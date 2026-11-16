@@ -5,7 +5,8 @@
  * such as `page_token` are legitimate there (ADR 0015).
  */
 const SECRET_KEY = /password|passwd|secret|token|api[_-]?key|private[_-]?key|authorization|cookie|bearer|credential/i;
-const ALLOWED_KEY = /(^|_)credential_ref$/;
+/** Keys that name a reference or an endpoint, never secret material. */
+const ALLOWED_KEY = /(^|_)credential_ref$|^manage_credentials$|^token_url$/;
 const SKIPPED_SUBTREES = new Set(['input_schema']);
 
 export const SECRET_MESSAGE = 'secrets never appear in configuration; reference a credential by name';

@@ -10,7 +10,7 @@ const VALID_DIR = fileURLToPath(new URL('../test/fixtures/valid', import.meta.ur
 
 const CONNECTIONS = `version: 1
 connections:
-  - { id: magento, adapter: openapi, base_url: https://shop.example.test/rest, credential_ref: magento-integration }
+  - { id: magento, adapter: openapi, base_url: https://shop.example.test/rest, credential_ref: magento-integration, auth: { scheme: bearer } }
 `;
 const OPERATIONS = `version: 1
 operations:
@@ -34,7 +34,7 @@ role_mapping:
   - { group: content, roles: [content_manager] }
 `;
 
-function load(overrides: Record<string, string> = {}): LoadResult {
+function load(overrides: Record<string, string> = {}): Promise<LoadResult> {
   const files: Record<string, string> = { 'connections.yaml': CONNECTIONS, 'operations.yaml': OPERATIONS, 'roles.yaml': ROLES, ...overrides };
   return loadConfigurationSources(Object.entries(files).map(([file, text]) => ({ file, text })));
 }
@@ -63,7 +63,7 @@ describe('CFG-1 load a configuration directory', () => {
   it('gives the same hash for the same input and another for other input', async () => {
     const a = await loadConfigurationDirectory(VALID_DIR);
     const b = await loadConfigurationDirectory(VALID_DIR);
-    const c = load();
+    const c = await load();
     if (!a.ok || !b.ok || !c.ok) throw new Error('expected valid');
     expect(a.configuration.hash).toMatch(/^[0-9a-f]{64}$/);
     expect(a.configuration.hash).toBe(b.configuration.hash);
@@ -110,14 +110,14 @@ describe('CFG-1 load a configuration directory', () => {
 });
 
 describe('CFG-2 invalid configuration is rejected as a whole', () => {
-  it('rejects everything when one file is invalid, with file, line and path', () => {
-    const found = issues(load({ 'extra.yaml': 'version: 1\nroles:\n  - id: Bad Role\n    grants: []\n' }));
+  it('rejects everything when one file is invalid, with file, line and path', async () => {
+    const found = issues(await load({ 'extra.yaml': 'version: 1\nroles:\n  - id: Bad Role\n    grants: []\n' }));
     expect(found).toEqual([{ file: 'extra.yaml', line: 3, column: 5, path: 'roles[0].id', message: 'has an invalid format' }]);
   });
 
-  it('names both files for a duplicate operation ID', () => {
+  it('names both files for a duplicate operation ID', async () => {
     const second = OPERATIONS.replace('version: 1\n', 'version: 1\n');
-    const found = issues(load({ 'z-operations.yaml': second }));
+    const found = issues(await load({ 'z-operations.yaml': second }));
     expect(found).toHaveLength(1);
     expect(found[0]).toMatchObject({ file: 'z-operations.yaml', path: 'operations[0].id' });
     expect(found[0]?.message).toContain('operations.yaml');
@@ -129,33 +129,33 @@ describe('CFG-2 invalid configuration is rejected as a whole', () => {
     ['a scope key that is not an argument', { 'roles.yaml': ROLES.replace('scope: { brand: [acme] }', 'scope: { store: [x] }') }, 'roles[0].grants[0].scope.store'],
     ['a mapping to an unknown role', { 'roles.yaml': ROLES.replace('roles: [content_manager]', 'roles: [ghost]') }, 'role_mapping[0].roles[0]'],
     ['an operation ID reserved for a built-in tool', { 'operations.yaml': OPERATIONS.replace('id: catalog.search_products', 'id: ping') }, 'operations[0].id'],
-  ])('rejects %s', (_name, override, path) => {
-    const found = issues(load(override));
+  ])('rejects %s', async (_name, override, path) => {
+    const found = issues(await load(override));
     expect(found.map((i) => i.path)).toContain(path);
   });
 
-  it('rejects field rules on an operation without fields_arg', () => {
-    const found = issues(load({ 'operations.yaml': OPERATIONS.replace('    fields_arg: fields\n', '') }));
+  it('rejects field rules on an operation without fields_arg', async () => {
+    const found = issues(await load({ 'operations.yaml': OPERATIONS.replace('    fields_arg: fields\n', '') }));
     expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].grants[0].deny_fields' }));
   });
 
-  it('rejects field rules when fields_arg is not a required argument', () => {
-    const found = issues(load({ 'operations.yaml': OPERATIONS.replace('required: [brand, fields]', 'required: [brand]') }));
+  it('rejects field rules when fields_arg is not a required argument', async () => {
+    const found = issues(await load({ 'operations.yaml': OPERATIONS.replace('required: [brand, fields]', 'required: [brand]') }));
     expect(found).toContainEqual(expect.objectContaining({ path: 'operations[0].fields_arg' }));
   });
 
-  it('rejects an approver role that does not exist', () => {
-    const found = issues(load({ 'roles.yaml': ROLES.replace('    grants:', '    approval: { approver_role: nobody }\n    grants:') }));
+  it('rejects an approver role that does not exist', async () => {
+    const found = issues(await load({ 'roles.yaml': ROLES.replace('    grants:', '    approval: { approver_role: nobody }\n    grants:') }));
     expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.approver_role' }));
   });
 
-  it('rejects an input schema whose root is not an object', () => {
-    const found = issues(load({ 'operations.yaml': OPERATIONS.replace('      type: object\n      properties', '      type: array\n      properties') }));
+  it('rejects an input schema whose root is not an object', async () => {
+    const found = issues(await load({ 'operations.yaml': OPERATIONS.replace('      type: object\n      properties', '      type: array\n      properties') }));
     expect(found).toContainEqual(expect.objectContaining({ path: 'operations[0].input_schema' }));
   });
 
-  it('rejects an input schema with an unknown keyword (Ajv strict mode)', () => {
-    const found = issues(load({ 'operations.yaml': OPERATIONS.replace('required: [brand, fields]', 'required: [brand, fields]\n      requird: [brand]') }));
+  it('rejects an input schema with an unknown keyword (Ajv strict mode)', async () => {
+    const found = issues(await load({ 'operations.yaml': OPERATIONS.replace('required: [brand, fields]', 'required: [brand, fields]\n      requird: [brand]') }));
     expect(found).toContainEqual(expect.objectContaining({ path: 'operations[0].input_schema' }));
   });
 });
@@ -167,31 +167,31 @@ describe('CFG-5 secrets never appear in configuration', () => {
     ['password', 'connections[0].password'],
     ['api_key', 'connections[0].api_key'],
     ['clientSecret', 'connections[0].clientSecret'],
-  ])('rejects the key %s', (key, path) => {
-    const found = issues(load({ 'connections.yaml': CONNECTIONS.replace('credential_ref: magento-integration', `credential_ref: magento-integration, ${key}: hunter2-value`) }));
+  ])('rejects the key %s', async (key, path) => {
+    const found = issues(await load({ 'connections.yaml': CONNECTIONS.replace('credential_ref: magento-integration', `credential_ref: magento-integration, ${key}: hunter2-value`) }));
     expect(found).toContainEqual(expect.objectContaining({ path, message }));
     expect(found.map(formatIssue).join('\n')).not.toContain('hunter2-value');
   });
 
-  it.each([['cookie'], ['bearer'], ['credential']])('rejects the key %s', (key) => {
-    const found = issues(load({ 'operations.yaml': OPERATIONS.replace('upstream: { method: GET, path: /V1/products }', `upstream: { method: GET, path: /V1/products, ${key}: x-value }`) }));
+  it.each([['cookie'], ['bearer'], ['credential']])('rejects the key %s', async (key) => {
+    const found = issues(await load({ 'operations.yaml': OPERATIONS.replace('upstream: { method: GET, path: /V1/products }', `upstream: { method: GET, path: /V1/products, ${key}: x-value }`) }));
     expect(found).toContainEqual(expect.objectContaining({ path: `operations[0].upstream.${key}`, message }));
   });
 
-  it('rejects a connection URL with a user name or password in it', () => {
-    const found = issues(load({ 'connections.yaml': CONNECTIONS.replace('https://shop.example.test/rest', 'https://svc:hunter2-value@shop.example.test/rest') }));
+  it('rejects a connection URL with a user name or password in it', async () => {
+    const found = issues(await load({ 'connections.yaml': CONNECTIONS.replace('https://shop.example.test/rest', 'https://svc:hunter2-value@shop.example.test/rest') }));
     expect(found).toContainEqual(expect.objectContaining({ path: 'connections[0].base_url', message: 'must not contain a user name or password; reference a credential by name' }));
     expect(found.map(formatIssue).join('\n')).not.toContain('hunter2-value');
   });
 
-  it('rejects a secret inside upstream, where unknown keys are otherwise allowed', () => {
-    const found = issues(load({ 'operations.yaml': OPERATIONS.replace('upstream: { method: GET, path: /V1/products }', 'upstream: { method: GET, path: /V1/products, headers: { Authorization: Bearer abc.def } }') }));
+  it('rejects a secret header inside upstream', async () => {
+    const found = issues(await load({ 'operations.yaml': OPERATIONS.replace('upstream: { method: GET, path: /V1/products }', 'upstream: { method: GET, path: /V1/products, headers: { Authorization: Bearer abc.def } }') }));
     expect(found).toEqual([expect.objectContaining({ path: 'operations[0].upstream.headers.Authorization', message })]);
     expect(JSON.stringify(found)).not.toContain('abc.def');
   });
 
-  it('accepts credential references and argument names inside input schemas', () => {
-    const result = load({
+  it('accepts credential references and argument names inside input schemas', async () => {
+    const result = await load({
       'operations.yaml': OPERATIONS.replace('fields: { type: array', 'page_token: { type: string }, fields: { type: array'),
       'notify.yaml': 'version: 1\nnotifications:\n  - { id: chat, kind: webhook, url_credential_ref: chat-hook }\n',
     });
@@ -200,8 +200,8 @@ describe('CFG-5 secrets never appear in configuration', () => {
 });
 
 describe('MCP-3 argument validators', () => {
-  it('compiles one validator per operation', () => {
-    const result = load();
+  it('compiles one validator per operation', async () => {
+    const result = await load();
     if (!result.ok) throw new Error('expected valid');
     const validate = result.configuration.validators.get('catalog.search_products');
     expect(validate?.({ brand: 'acme', fields: ['name'] })).toEqual({ ok: true });
