@@ -13,7 +13,7 @@ beforeAll(async () => {
   postgres = await startPostgres();
   const url = await postgres.createDatabase();
   await runMigrations(url);
-  database = createDb(url);
+  database = createDb(url, { onError: () => undefined });
 });
 
 afterAll(async () => {

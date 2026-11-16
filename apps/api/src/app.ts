@@ -43,7 +43,15 @@ class AppModule {
       providers: [
         { provide: API_ENV, useValue: env },
         { provide: LOGGER, useValue: logger },
-        { provide: DATABASE, useFactory: () => createDb(env.databaseUrl) },
+        {
+          provide: DATABASE,
+          useFactory: () =>
+            createDb(env.databaseUrl, {
+              onError: (error) => {
+                logger.warn({ err: error.message }, 'idle database connection failed');
+              },
+            }),
+        },
         { provide: AUDIT_LOG, inject: [DATABASE], useFactory: (d: Database) => new DrizzleAuditLog(d.db) },
         { provide: CALLER_RESOLVER, useValue: overrides.callerResolver ?? new AnonymousCallerResolver() },
         { provide: TOOL_CATALOG, useValue: overrides.toolCatalog ?? new StaticToolCatalog([pingTool]) },
