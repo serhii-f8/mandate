@@ -333,10 +333,8 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       at(source, [...path, 'credential_ref'], `is used with another auth scheme by connection ${known.connections[0] ?? ''}`);
     } else known.connections.push(c.id);
   }
-  const usedRefs = new Set<string>([
-    ...connections.flatMap(({ value }) => (value.credential_ref === undefined ? [] : [value.credential_ref])),
-    ...notifications.flatMap(({ value }) => (value.kind === 'webhook' ? [value.url_credential_ref] : [])),
-  ]);
+  // Until notifications land (Phase 6) the credential page manages connection credentials only.
+  const connectionRefs = new Set<string>(connections.flatMap(({ value }) => (value.credential_ref === undefined ? [] : [value.credential_ref])));
 
   const credentialManagers = new Map<string, readonly string[]>();
   for (const { value: role, source, path } of roles) {
@@ -368,8 +366,8 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     if (approver !== undefined && !roleById.has(approver)) at(source, [...path, 'approval', 'approver_role'], 'names a role that is not defined');
     if (role.manage_credentials !== undefined) {
       role.manage_credentials.forEach((ref, index) => {
-        if (ref !== '*' && !usedRefs.has(ref)) {
-          at(source, [...path, 'manage_credentials', index], 'names a credential reference no connection or notification uses');
+        if (ref !== '*' && !connectionRefs.has(ref)) {
+          at(source, [...path, 'manage_credentials', index], 'names a credential that no connection uses');
         }
       });
       credentialManagers.set(role.id, [...role.manage_credentials]);

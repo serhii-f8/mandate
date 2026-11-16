@@ -544,24 +544,36 @@ describe('SEC-1 manage_credentials names only known credential references', () =
       await sources({
         'roles.yaml': `version: 1
 roles:
-  - { id: admin, grants: [], manage_credentials: [shop-token, chat-hook] }
+  - { id: admin, grants: [], manage_credentials: [shop-token] }
   - { id: root, grants: [], manage_credentials: ["*"] }
   - { id: viewer, grants: [] }
+`,
+      }),
+    );
+    expect([...config.credentialManagers]).toEqual([
+      ['admin', ['shop-token']],
+      ['root', ['*']],
+    ]);
+  });
+
+  it('UI-5 rejects a reference no connection uses', async () => {
+    const found = issues(await sources({ 'roles.yaml': 'version: 1\nroles:\n  - { id: admin, grants: [], manage_credentials: [shop-token, ghost] }\n' }));
+    expect(found).toEqual([
+      expect.objectContaining({ file: 'roles.yaml', path: 'roles[0].manage_credentials[1]', message: 'names a credential that no connection uses' }),
+    ]);
+  });
+
+  it('UI-5 rejects a notification credential until notifications land (Phase 6)', async () => {
+    const found = issues(
+      await sources({
+        'roles.yaml': `version: 1
+roles:
+  - { id: admin, grants: [], manage_credentials: [chat-hook] }
 notifications:
   - { id: chat, kind: webhook, url_credential_ref: chat-hook }
 `,
       }),
     );
-    expect([...config.credentialManagers]).toEqual([
-      ['admin', ['shop-token', 'chat-hook']],
-      ['root', ['*']],
-    ]);
-  });
-
-  it('rejects a reference no connection or notification uses', async () => {
-    const found = issues(await sources({ 'roles.yaml': 'version: 1\nroles:\n  - { id: admin, grants: [], manage_credentials: [shop-token, ghost] }\n' }));
-    expect(found).toEqual([
-      expect.objectContaining({ file: 'roles.yaml', path: 'roles[0].manage_credentials[1]', message: 'names a credential reference no connection or notification uses' }),
-    ]);
+    expect(found).toEqual([expect.objectContaining({ file: 'roles.yaml', path: 'roles[0].manage_credentials[0]', message: 'names a credential that no connection uses' })]);
   });
 });
