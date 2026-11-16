@@ -1,5 +1,5 @@
 /** Audit actions (AUD-1). Later phases extend the union. */
-export type AuditAction = 'tool.call';
+export type AuditAction = 'tool.call' | 'tools.list' | 'policy.decision' | 'auth.rejected';
 
 export type AuditOutcome = 'ok' | 'error' | 'denied';
 

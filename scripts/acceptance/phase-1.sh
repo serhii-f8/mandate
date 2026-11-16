@@ -44,8 +44,12 @@ else
   fail stack-healthy "see compose output below"; tail -40 "$WORK/up.log"; compose ps -a; exit 1
 fi
 
+# Since Phase 2 the endpoint is a protected resource: log in as a development user.
+login() { node "$REPO/tooling/acceptance/login.mjs" "$AIOPS_KEYCLOAK_PUBLIC_URL" alice dev-only-password "$AIOPS_MCP_RESOURCE"; }
+TOKEN="$(login 2>&1)" || { fail login "$TOKEN"; TOKEN=""; }
+
 # 2. An MCP client calls the tool.
-if CALL="$(node "$REPO/tooling/acceptance/mcp-call.mjs" "http://127.0.0.1:${AIOPS_API_PORT}/mcp" accept 2>&1)"; then
+if CALL="$(node "$REPO/tooling/acceptance/mcp-call.mjs" "http://127.0.0.1:${AIOPS_API_PORT}/mcp" accept --token "$TOKEN" 2>&1)"; then
   pass mcp-ping "$CALL"
 else
   fail mcp-ping "$CALL"
@@ -69,7 +73,8 @@ if [[ "$ISSUER" == */realms/aiops ]]; then pass keycloak-realm "issuer=$ISSUER";
 
 # A second start on the same volumes works and the endpoint still answers.
 if compose down >/dev/null 2>&1 && compose up -d --wait >"$WORK/up2.log" 2>&1 \
-  && node "$REPO/tooling/acceptance/mcp-call.mjs" "http://127.0.0.1:${AIOPS_API_PORT}/mcp" again >/dev/null 2>&1; then
+  && TOKEN="$(login 2>/dev/null)" \
+  && node "$REPO/tooling/acceptance/mcp-call.mjs" "http://127.0.0.1:${AIOPS_API_PORT}/mcp" again --token "$TOKEN" >/dev/null 2>&1; then
   pass restart "down + up -d --wait, ping answered"
 else
   fail restart "$(tail -20 "$WORK/up2.log" 2>/dev/null)"

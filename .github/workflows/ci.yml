@@ -21,9 +21,9 @@ jobs:
       - run: bash scripts/ci.sh
 
   compose:
-    name: Compose stack acceptance (Phase 1)
+    name: Compose stack acceptance (Phases 1 and 2)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,3 +34,4 @@ jobs:
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: bash scripts/acceptance/phase-1.sh
+      - run: bash scripts/acceptance/phase-2.sh

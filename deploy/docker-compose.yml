@@ -2,7 +2,8 @@
 # Start from the repository root with one command:   docker compose up -d --wait
 # Every value below has a development default equal to .env.example. All defaults
 # are development-only fakes; a `.env` in the repository root overrides them.
-# Host ports bind to 127.0.0.1 only: Phase 1 has no authentication (ADR 0013).
+# Host ports bind to 127.0.0.1 only. The MCP endpoint requires a Keycloak token
+# (Phase 2); the development users have visibly fake passwords.
 
 x-temporal-db: &temporal-db
   DB: postgres12
@@ -119,6 +120,26 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # Realm settings a realm import cannot toggle: PKCE for every client, CIMD, DCR switch (AUTH-8, ADR 0014).
+  keycloak-setup:
+    image: node:22-bookworm-slim
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    environment:
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_ADMIN_USER: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-dev-only-keycloak-admin-password}
+      AIOPS_MCP_RESOURCE: ${AIOPS_MCP_RESOURCE:-http://localhost:8400/mcp}
+      AIOPS_CIMD_CLIENT_DOMAINS: ${AIOPS_CIMD_CLIENT_DOMAINS:-claude.ai}
+      AIOPS_CIMD_EXTRA_DOMAINS: ${AIOPS_CIMD_EXTRA_DOMAINS:-localhost,127.0.0.1}
+      AIOPS_DCR: ${AIOPS_DCR:-off}
+      AIOPS_DCR_REDIRECT_HOSTS: ${AIOPS_DCR_REDIRECT_HOSTS:-claude.ai,chatgpt.com,localhost,127.0.0.1}
+    volumes:
+      - ./keycloak/bootstrap.mjs:/scripts/bootstrap.mjs:ro
+    entrypoint: ["node", "/scripts/bootstrap.mjs"]
+    restart: "no"
+
   api:
     build:
       context: ..
@@ -128,11 +149,20 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      keycloak-setup:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://aiops:${AIOPS_DB_PASSWORD:-dev-only-aiops-db-password}@postgres:5432/aiops
       API_PORT: "8080"
       API_ALLOWED_HOSTS: ${API_ALLOWED_HOSTS:-localhost,127.0.0.1}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      AIOPS_CONFIG_DIR: /etc/aiops/config
+      AIOPS_MCP_RESOURCE: ${AIOPS_MCP_RESOURCE:-http://localhost:8400/mcp}
+      # Tokens carry the public issuer; keys are fetched on the internal network (ADR 0014).
+      OIDC_ISSUER: ${AIOPS_KEYCLOAK_PUBLIC_URL:-http://localhost:8480}/realms/aiops
+      OIDC_JWKS_URL: http://keycloak:8080/realms/aiops/protocol/openid-connect/certs
+    volumes:
+      - ./config:/etc/aiops/config:ro
     ports:
       - "127.0.0.1:${AIOPS_API_PORT:-8400}:8080"
     healthcheck:

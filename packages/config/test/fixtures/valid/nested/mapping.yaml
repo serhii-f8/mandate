@@ -1,0 +1,6 @@
+version: 1
+role_mapping:
+  - group: content
+    roles: [content_manager]
+  - group: support
+    roles: [support_agent]

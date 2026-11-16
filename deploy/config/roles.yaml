@@ -1,0 +1,17 @@
+version: 1
+roles:
+  - id: content_manager
+    description: Edits product content.
+    grants:
+      - operation: catalog.search_products
+        id: own-brands
+        scope: { brand: [acme, globex] }
+        deny_fields: [cost]
+  - id: support_agent
+    grants:
+      - operation: support.lookup_order
+role_mapping:
+  - group: content
+    roles: [content_manager]
+  - group: support
+    roles: [support_agent]

@@ -1,0 +1,26 @@
+version: 1
+operations:
+  - id: catalog.search_products
+    connection: magento
+    risk: read
+    title: Search products
+    description: Search the catalog by brand.
+    upstream: { method: GET, path: /V1/products }
+    input_schema:
+      type: object
+      properties:
+        brand: { anyOf: [{ type: string }, { type: array, items: { type: string } }] }
+        fields: { type: array, items: { type: string } }
+      required: [brand, fields]
+      additionalProperties: false
+    fields_arg: fields
+  - id: support.lookup_order
+    connection: magento
+    risk: read
+    description: Look up an order by its number.
+    upstream: { method: GET, path: /V1/orders }
+    input_schema:
+      type: object
+      properties: { order_number: { type: string, minLength: 1 } }
+      required: [order_number]
+      additionalProperties: false

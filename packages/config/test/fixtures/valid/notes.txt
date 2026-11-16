@@ -1,0 +1,1 @@
+Not configuration: files without a .yaml or .yml extension are ignored.
