@@ -13,6 +13,14 @@ export interface ApiEnv {
   /** Host names accepted in `Host` and `Origin` of MCP requests (ADR 0013). */
   readonly allowedHosts: readonly string[];
   readonly logLevel: LogLevel;
+  /** Directory of YAML configuration files (CFG-1). */
+  readonly configDir: string;
+  /** Canonical URL of the MCP endpoint: the token audience and RFC 8707 resource (AUTH-1). */
+  readonly mcpResource: URL;
+  /** Expected `iss` of access tokens (the public issuer URL). */
+  readonly oidcIssuer: string;
+  /** Where `api` fetches the issuer's signing keys (may be an internal URL). */
+  readonly oidcJwksUrl: URL;
 }
 
 export interface WorkerEnv {
@@ -41,6 +49,8 @@ const postgresUrl = z
   .string()
   .refine((v) => /^postgres(ql)?:\/\/./.test(v), { message: 'must be a postgres:// or postgresql:// URL' });
 
+const httpUrl = z.url({ protocol: /^https?$/ });
+
 const apiSchema = z.object({
   DATABASE_URL: postgresUrl,
   API_PORT: port(8080),
@@ -50,6 +60,10 @@ const apiSchema = z.object({
     .transform((v) => v.split(',').map((h) => h.trim()).filter((h) => h.length > 0))
     .refine((hosts) => hosts.length > 0, { message: 'must list at least one host' }),
   LOG_LEVEL: logLevel,
+  AIOPS_CONFIG_DIR: z.string().trim().min(1),
+  AIOPS_MCP_RESOURCE: httpUrl.refine((v) => !v.includes('#'), { message: 'must not contain a fragment' }),
+  OIDC_ISSUER: httpUrl,
+  OIDC_JWKS_URL: httpUrl,
 });
 
 const workerSchema = z.object({
@@ -74,7 +88,16 @@ function parse<S extends z.ZodType>(schema: S, env: NodeJS.ProcessEnv): z.output
 
 export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
   const e = parse(apiSchema, env);
-  return { databaseUrl: e.DATABASE_URL, port: e.API_PORT, allowedHosts: e.API_ALLOWED_HOSTS, logLevel: e.LOG_LEVEL };
+  return {
+    databaseUrl: e.DATABASE_URL,
+    port: e.API_PORT,
+    allowedHosts: e.API_ALLOWED_HOSTS,
+    logLevel: e.LOG_LEVEL,
+    configDir: e.AIOPS_CONFIG_DIR,
+    mcpResource: new URL(e.AIOPS_MCP_RESOURCE),
+    oidcIssuer: e.OIDC_ISSUER,
+    oidcJwksUrl: new URL(e.OIDC_JWKS_URL),
+  };
 }
 
 export function parseWorkerEnv(env: NodeJS.ProcessEnv): WorkerEnv {
