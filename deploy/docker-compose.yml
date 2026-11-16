@@ -169,6 +169,9 @@ services:
       OIDC_WEB_CLIENT_SECRET: ${AIOPS_WEB_CLIENT_SECRET:-dev-only-web-client-secret}
       OIDC_TOKEN_URL: http://keycloak:8080/realms/aiops/protocol/openid-connect/token
       AIOPS_MASTER_KEYS: ${AIOPS_MASTER_KEYS:-1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=}
+      # Built into the image: the trusted pages' bundle and the shipped presets (CONN-8).
+      AIOPS_WEB_DIR: /app/web
+      AIOPS_PRESET_DIRS: /app/presets
     volumes:
       - ./config:/etc/aiops/config:ro
     ports:

@@ -14,10 +14,18 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm fetch
 COPY . .
 RUN pnpm install --offline --frozen-lockfile
-RUN pnpm turbo run build --filter=@aiops/api... --filter=@aiops/worker...
+RUN pnpm turbo run build --filter=@aiops/api... --filter=@aiops/worker... --filter=@aiops/web
 # Self-contained production trees (workspace packages copied in, dev dependencies dropped).
 RUN pnpm --filter @aiops/api deploy --prod --legacy /out/api \
  && pnpm --filter @aiops/worker deploy --prod --legacy /out/worker
+# The api serves the trusted pages from the built bundle (AIOPS_WEB_DIR) and loads presets
+# from their package.json, preset.yaml and vendored spec alone (AIOPS_PRESET_DIRS).
+RUN cp -r apps/web/dist /out/web \
+ && for dir in presets/*/; do \
+      name="$(basename "$dir")"; mkdir -p "/out/presets/$name"; \
+      cp "$dir/package.json" "$dir/preset.yaml" "/out/presets/$name/"; \
+      cp -r "$dir/spec" "/out/presets/$name/spec"; \
+    done
 
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
@@ -26,6 +34,8 @@ USER node
 
 FROM runtime AS api
 COPY --from=build --chown=node:node /out/api ./
+COPY --from=build --chown=node:node /out/presets ./presets
+COPY --from=build --chown=node:node /out/web ./web
 EXPOSE 8080
 CMD ["node", "dist/main.js"]
 
