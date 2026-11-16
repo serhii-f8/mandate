@@ -18,5 +18,5 @@ export {
   type SendResult,
   type Transport,
 } from './http/client.js';
-export { clearTokenCache, fetchClientCredentialsToken, lastTokenScopes, TOKEN_REFRESH_MARGIN_MS, type ClientCredentialsParams, type TokenFetchResult } from './http/oauth.js';
+export { fetchClientCredentialsToken, lastTokenScopes, TOKEN_REFRESH_MARGIN_MS, type ClientCredentialsParams, type TokenFetchResult } from './http/oauth.js';
 export { Semaphore, semaphoreFor, type Release } from './http/semaphore.js';

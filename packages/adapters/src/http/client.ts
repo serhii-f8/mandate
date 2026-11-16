@@ -1,10 +1,10 @@
-import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
+import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { LookupFunction } from 'node:net';
 import { parseSecret, type ConnectionSettings, type CredentialSource, type ReadErrorCode } from '@aiops/connector-sdk';
 import type { HttpRequestSpec } from '../openapi/request.js';
 import { assertEgressAllowed, createGuardedLookup, EgressDeniedError } from './egress.js';
-import { clientCredentialsToken } from './oauth.js';
+import { clientCredentialsToken, clientSecretBasicValue, HEADER_SAFE } from './oauth.js';
 import { createScrubber, type Scrubber } from './scrub.js';
 import { semaphoreFor } from './semaphore.js';
 
@@ -78,7 +78,15 @@ export function createTransport(settings: ConnectionSettings, lookup: LookupFunc
       const headers: Record<string, string> = { ...spec.headers };
       if (spec.body !== undefined) headers['content-length'] = String(Buffer.byteLength(spec.body));
       const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
-      const req = request(url, { method: spec.method, headers, lookup, agent: false }, (res) => {
+      let req: ReturnType<typeof request>;
+      try {
+        req = request(url, { method: spec.method, headers, lookup, agent: false }, onResponse);
+      } catch {
+        // Node validates header names and values synchronously (ERR_INVALID_CHAR and friends).
+        resolve({ kind: 'error', code: 'network', message: 'request could not be built (invalid header)' });
+        return;
+      }
+      function onResponse(res: IncomingMessage): void {
         const status = res.statusCode ?? 0;
         if (status < 200 || status >= 300) {
           // Redirects (3xx) are not followed (CONN-5); error bodies are never read (SEC-3).
@@ -123,10 +131,11 @@ export function createTransport(settings: ConnectionSettings, lookup: LookupFunc
         res.on('error', (err) => {
           finish({ kind: 'error', code: 'network', message: networkMessage(err) });
         });
-        res.on('aborted', () => {
-          finish({ kind: 'error', code: 'network', message: 'upstream closed the response early' });
+        res.on('close', () => {
+          // A no-op once `end` already settled the result; otherwise the body was cut off.
+          if (!res.complete) finish({ kind: 'error', code: 'network', message: 'upstream closed the response early' });
         });
-      });
+      }
       const timer = setTimeout(() => {
         finish({ kind: 'error', code: 'timeout', message: `upstream did not answer within ${timeoutMs} ms` });
         req.destroy();
@@ -147,7 +156,7 @@ export function createTransport(settings: ConnectionSettings, lookup: LookupFunc
   };
 }
 
-function retryAfterMs(headers: IncomingHttpHeaders): number | undefined {
+function retryAfterMs(headers: IncomingHttpHeaders, now: () => number): number | undefined {
   const raw = headers['retry-after'];
   if (typeof raw !== 'string' || raw.trim() === '') return undefined;
   const v = raw.trim();
@@ -156,7 +165,7 @@ function retryAfterMs(headers: IncomingHttpHeaders): number | undefined {
   else {
     const at = Date.parse(v);
     if (Number.isNaN(at)) return undefined;
-    ms = Math.max(0, at - Date.now());
+    ms = Math.max(0, at - now());
   }
   return Math.min(ms, MAX_RETRY_AFTER_MS);
 }
@@ -206,15 +215,20 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
       }
       const s = parsed.secret;
       secrets.push(...Object.values(s));
+      const unsendable = (): SendResult => fail('credential_unusable', `credential ${credential.ref} contains characters not allowed in a header`);
       switch (auth.scheme) {
         case 'bearer':
+          if (!HEADER_SAFE.test(s.token ?? '')) return unsendable();
           authHeader = ['authorization', `Bearer ${s.token ?? ''}`];
           break;
         case 'api_key':
+          if (!HEADER_SAFE.test(s.key ?? '')) return unsendable();
           authHeader = [auth.header.toLowerCase(), s.key ?? ''];
           break;
         case 'basic': {
           const value = Buffer.from(`${s.username ?? ''}:${s.password ?? ''}`).toString('base64');
+          // Base64 is always visible ASCII; checked anyway so the rule is the same for every scheme.
+          if (!HEADER_SAFE.test(value)) return unsendable();
           secrets.push(value);
           authHeader = ['authorization', `Basic ${value}`];
           break;
@@ -223,6 +237,8 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
           const clientId = s.client_id ?? '';
           const clientSecret = s.client_secret ?? '';
           secrets.push(Buffer.from(`${clientId}:${clientSecret}`).toString('base64'));
+          // The exact value sent to the token endpoint (form-encoded id and secret, RFC 6749 §2.3.1).
+          secrets.push(clientSecretBasicValue(clientId, clientSecret));
           oauth = { tokenUrl: auth.tokenUrl, clientId, clientSecret, scopes: auth.scopes, timeoutMs: settings.timeoutMs };
           break;
         }
@@ -230,16 +246,18 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
       scrubber = createScrubber(secrets);
     }
 
-    const useToken = async (forceRefresh: boolean): Promise<SendResult | undefined> => {
+    let currentToken: string | undefined;
+    const useToken = async (rejectedToken?: string): Promise<SendResult | undefined> => {
       if (!oauth) return undefined;
-      const t = await clientCredentialsToken(settings.id, oauth, { now, forceRefresh }, transport);
+      const t = await clientCredentialsToken(settings.id, oauth, rejectedToken === undefined ? { now } : { now, rejectedToken }, transport);
       if (!t.ok) return fail(t.code, t.message, t.status);
       secrets.push(t.accessToken);
       scrubber = createScrubber(secrets);
+      currentToken = t.accessToken;
       authHeader = ['authorization', `Bearer ${t.accessToken}`];
       return undefined;
     };
-    const tokenFailure = await useToken(false);
+    const tokenFailure = await useToken();
     if (tokenFailure) return tokenFailure;
 
     const semaphore = semaphoreFor(settings.id, settings.maxConcurrency);
@@ -269,8 +287,9 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
       }
       if (r.kind === 'status' && r.status === 401 && oauth && !refreshed) {
         // The cached token may have been revoked or expired early: refresh once (spec §4.5).
+        // Passing the rejected token lets a concurrent call that already refreshed win (no second fetch).
         refreshed = true;
-        const refreshFailure = await useToken(true);
+        const refreshFailure = await useToken(currentToken);
         if (refreshFailure) return refreshFailure;
         continue;
       }
@@ -278,7 +297,7 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
         r.kind === 'status' ? fail('http_status', `upstream returned status ${r.status}`, r.status) : fail(r.code, r.message);
       const retryable = r.kind === 'status' ? RETRYABLE_STATUS.has(r.status) : r.code === 'timeout' || r.code === 'network';
       if (!retryable || retries + 1 >= maxAttempts) return failure;
-      const hinted = r.kind === 'status' ? retryAfterMs(r.headers) : undefined;
+      const hinted = r.kind === 'status' ? retryAfterMs(r.headers, now) : undefined;
       const backoff = hinted ?? settings.retry.initialBackoffMs * 2 ** retries * random();
       retries += 1;
       await sleep(backoff);

@@ -1,5 +1,6 @@
 import type { ConnectionSettings, CredentialSource } from '@aiops/connector-sdk';
 import { startFakeUpstream, type FakeUpstream } from '@aiops/testing';
+import { createServer, type Server } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { HttpRequestSpec } from '../openapi/request.js';
 import { createConnectionClient } from './client.js';
@@ -239,24 +240,19 @@ describe('CONN-6 timeout, retry and concurrency', () => {
     expect(sleeps).toEqual([expected]);
   });
 
-  it('CONN-6 Retry-After as an HTTP date is honoured and capped', async () => {
-    let n = 0;
-    up.route('GET', '/items', () => {
-      n += 1;
-      const at = new Date(Date.now() + 5000).toUTCString();
-      return n === 1 ? { status: 503, headers: { 'retry-after': at }, body: {} } : { status: 200, body: {} };
-    });
+  it('CONN-6 Retry-After as an HTTP date is measured with the injected clock', async () => {
+    const clock = Date.parse('Wed, 01 Jan 2031 00:00:00 GMT');
+    up.route('GET', '/items', () => ({ status: 503, headers: { 'retry-after': new Date(clock + 5000).toUTCString() }, body: {} }));
     const sleeps: number[] = [];
-    const c = createConnectionClient(settings(), {
+    const c = createConnectionClient(settings({ retry: { maxAttempts: 2, initialBackoffMs: 100 } }), {
+      now: () => clock,
       sleep: (ms) => {
         sleeps.push(ms);
         return Promise.resolve();
       },
     });
-    expect((await c.send(get(), { retryable: true })).ok).toBe(true);
-    expect(sleeps).toHaveLength(1);
-    expect(sleeps[0]).toBeGreaterThan(3000);
-    expect(sleeps[0]).toBeLessThanOrEqual(5000);
+    await c.send(get(), { retryable: true });
+    expect(sleeps).toEqual([5000]);
   });
 
   it('CONN-6 503 on every attempt is http_status 503 after max_attempts', async () => {
@@ -424,5 +420,126 @@ describe('CONN-5 no redirects and guarded egress', () => {
     const r = await createConnectionClient(s, { lookup }).send(get('/items', `http://upstream.test:${up.port}`), { retryable: true });
     expect(r).toMatchObject({ ok: false, code: 'egress_denied' });
     expect(up.requests).toHaveLength(0);
+  });
+});
+
+describe('CONN-3 unusable header values give typed results', () => {
+  beforeEach(() => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+  });
+
+  it('CONN-3 a bearer token with a control character is credential_unusable and nothing is sent', async () => {
+    const c = createConnectionClient(settings({ auth: { scheme: 'bearer' } }));
+    const r = await c.send(get(), { credential: cred('bearer', { token: 'tok\n' }), retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'credential_unusable' });
+    expect(up.requests).toHaveLength(0);
+  });
+
+  it('CONN-3 an api key with a control character is credential_unusable', async () => {
+    const c = createConnectionClient(settings({ auth: { scheme: 'api_key', header: 'x-api-key' } }));
+    expect(await c.send(get(), { credential: cred('api_key', { key: 'k\u0001' }), retryable: false })).toMatchObject({ ok: false, code: 'credential_unusable' });
+    expect(up.requests).toHaveLength(0);
+  });
+
+  it('CONN-3 basic is checked on the computed header value, which is Base64 and therefore sendable', async () => {
+    const c = createConnectionClient(settings({ auth: { scheme: 'basic' } }));
+    const r = await c.send(get(), { credential: cred('basic', { username: 'u', password: 'p\n' }), retryable: false });
+    expect(r.ok).toBe(true);
+  });
+
+  it('CONN-3 an OAuth access_token with a control character is credential_unusable', async () => {
+    up.route('POST', '/token', () => ({ status: 200, body: { access_token: 'a\nb', expires_in: 3600 } }));
+    const c = createConnectionClient(settings({ auth: { scheme: 'oauth_client_credentials', tokenUrl: `${up.url}/token`, scopes: [] } }));
+    const r = await c.send(get(), { credential: cred('oauth_client_credentials', { client_id: 'c', client_secret: 's' }), retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'credential_unusable' });
+    expect(up.requests.filter((x) => x.path === '/items')).toHaveLength(0);
+  });
+
+  it('CONN-6 a request header that node refuses synchronously is a typed network result', async () => {
+    const spec: HttpRequestSpec = { method: 'GET', url: new URL(`${up.url}/items`), headers: { 'x-bad': 'a\nb' } };
+    const r = await createConnectionClient(settings()).send(spec, { retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'network' });
+    expect(up.requests).toHaveLength(0);
+  });
+});
+
+describe('CONN-3 token endpoint failures', () => {
+  const oauthAt = (tokenUrl: string): ConnectionSettings => settings({ auth: { scheme: 'oauth_client_credentials', tokenUrl, scopes: [] } });
+  const client = cred('oauth_client_credentials', { client_id: 'c', client_secret: 's' });
+
+  it('CONN-3 a token endpoint 5xx is http_status', async () => {
+    up.route('POST', '/token', () => ({ status: 503, body: {} }));
+    const r = await createConnectionClient(oauthAt(`${up.url}/token`)).send(get(), { credential: client, retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'http_status', status: 503 });
+  });
+
+  it('CONN-3 a token endpoint 4xx stays credential_unusable', async () => {
+    up.route('POST', '/token', () => ({ status: 400, body: {} }));
+    const r = await createConnectionClient(oauthAt(`${up.url}/token`)).send(get(), { credential: client, retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'credential_unusable', status: 400 });
+  });
+
+  it('CONN-3 an unreachable token endpoint is network', async () => {
+    const closed = await startFakeUpstream();
+    const url = closed.url;
+    await closed.close();
+    const r = await createConnectionClient(oauthAt(`${url}/token`)).send(get(), { credential: client, retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'network' });
+  });
+
+  it('CONN-3 concurrent 401s on the same token refresh it only once', async () => {
+    let issued = 0;
+    up.route('POST', '/token', () => {
+      issued += 1;
+      return { status: 200, body: { access_token: `issued-${issued}`, expires_in: 3600 } };
+    });
+    let n = 0;
+    up.route('GET', '/items', (req) => {
+      n += 1;
+      if (req.headers.authorization === 'Bearer issued-1') return { status: 401, body: {}, delayMs: n === 1 ? 0 : 150 };
+      return { status: 200, body: {} };
+    });
+    const c = createConnectionClient(oauthAt(`${up.url}/token`));
+    const rs = await Promise.all([c.send(get(), { credential: client, retryable: false }), c.send(get(), { credential: client, retryable: false })]);
+    expect(rs.every((r) => r.ok)).toBe(true);
+    expect(issued).toBe(2);
+  });
+});
+
+describe('SEC-3 token endpoint Basic value', () => {
+  it('SEC-3 the form-encoded Basic value sent to the token endpoint is scrubbed', async () => {
+    const sent = Buffer.from('id%3A1:s%26cret').toString('base64');
+    up.route('POST', '/token', () => ({ status: 200, body: { access_token: 'tok', expires_in: 3600 } }));
+    up.route('GET', '/items', () => ({ status: 200, body: { leak: sent } }));
+    const c = createConnectionClient(settings({ auth: { scheme: 'oauth_client_credentials', tokenUrl: `${up.url}/token`, scopes: [] } }));
+    const r = await c.send(get(), { credential: cred('oauth_client_credentials', { client_id: 'id:1', client_secret: 's&cret' }), retryable: false });
+    expect(r.ok).toBe(true);
+    expect(JSON.stringify(r)).not.toContain(sent);
+  });
+});
+
+describe('CONN-6 truncated responses', () => {
+  let raw: Server | undefined;
+  afterEach(() => {
+    raw?.close();
+  });
+
+  it('CONN-6 a response cut off before its declared length is network', async () => {
+    const server = createServer((sock) => {
+      sock.once('data', () => {
+        sock.end('HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 100\r\n\r\n{"a":');
+      });
+    });
+    raw = server;
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        resolve();
+      });
+    });
+    const addr = server.address();
+    const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+    const base = `http://127.0.0.1:${port}`;
+    const r = await createConnectionClient(settings({ baseUrl: base })).send(get('/items', base), { retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'network' });
   });
 });
