@@ -93,8 +93,8 @@ const apiSchema = z.object({
   OIDC_AUTHORIZATION_URL: httpUrl.optional(),
   OIDC_TOKEN_URL: httpUrl.optional(),
   AIOPS_MASTER_KEYS: z.string().trim().min(1),
-  SESSION_MAX_AGE_SECONDS: z.coerce.number().int().min(1).default(28_800),
-  FRESH_AUTH_SECONDS: z.coerce.number().int().min(1).default(300),
+  AIOPS_SESSION_MAX_AGE_SECONDS: z.coerce.number().int().min(1).default(28_800),
+  AIOPS_FRESH_AUTH_SECONDS: z.coerce.number().int().min(1).default(300),
   AIOPS_WEB_DIR: z.string().trim().min(1).optional(),
   AIOPS_PRESET_DIRS: z
     .string()
@@ -140,8 +140,8 @@ export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
     oidcAuthorizationUrl: new URL(e.OIDC_AUTHORIZATION_URL ?? `${issuerBase}/protocol/openid-connect/auth`),
     oidcTokenUrl: new URL(e.OIDC_TOKEN_URL ?? `${issuerBase}/protocol/openid-connect/token`),
     masterKeys: e.AIOPS_MASTER_KEYS,
-    sessionMaxAgeSeconds: e.SESSION_MAX_AGE_SECONDS,
-    freshAuthSeconds: e.FRESH_AUTH_SECONDS,
+    sessionMaxAgeSeconds: e.AIOPS_SESSION_MAX_AGE_SECONDS,
+    freshAuthSeconds: e.AIOPS_FRESH_AUTH_SECONDS,
     ...(e.AIOPS_WEB_DIR === undefined ? {} : { webDir: e.AIOPS_WEB_DIR }),
     presetDirs: e.AIOPS_PRESET_DIRS,
   };

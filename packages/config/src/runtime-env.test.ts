@@ -87,8 +87,8 @@ describe('AUTH-5 page login environment', () => {
       OIDC_ISSUER: 'http://localhost:8480/realms/aiops/',
       AIOPS_WEB_DIR: '/srv/web',
       AIOPS_PRESET_DIRS: '/p/a: /p/b::',
-      SESSION_MAX_AGE_SECONDS: '60',
-      FRESH_AUTH_SECONDS: '30',
+      AIOPS_SESSION_MAX_AGE_SECONDS: '60',
+      AIOPS_FRESH_AUTH_SECONDS: '30',
       OIDC_WEB_CLIENT_ID: 'web2',
       OIDC_TOKEN_URL: 'http://keycloak:8080/t',
     });
