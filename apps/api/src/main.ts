@@ -1,21 +1,27 @@
+import { createOpenApiAdapter } from '@aiops/adapters';
 import { ConfigurationError, ConfigurationHolder, formatIssue, parseApiEnv } from '@aiops/config';
 import { runMigrations } from '@aiops/db';
 import { createApp } from './app.js';
 import { createLogger } from './logger.js';
+import { assertFullyChecked, configurationLoadOptions } from './upstream/upstream-runtime.js';
 
 /** Process entry: parse env, load configuration (CFG-2), apply migrations (NFR-5), serve. */
 async function main(): Promise<void> {
   const env = parseApiEnv(process.env);
   const logger = createLogger(env.logLevel);
+  // One adapter: its resolver checks the specs at load and on every reload; it also runs the reads.
+  const adapter = createOpenApiAdapter();
   let configuration: ConfigurationHolder;
   try {
-    configuration = await ConfigurationHolder.load(env.configDir);
+    // The holder keeps these options, so a SIGHUP reload checks specs and presets the same way.
+    configuration = await ConfigurationHolder.load(env.configDir, configurationLoadOptions(adapter, env));
   } catch (error) {
     if (error instanceof ConfigurationError) {
       for (const issue of error.issues) logger.fatal({ issue: formatIssue(issue) }, 'invalid configuration');
     }
     throw error;
   }
+  assertFullyChecked(configuration.current);
   logger.info({ hash: configuration.current.hash }, 'configuration loaded');
   // SIGHUP reloads; an invalid configuration is reported and the previous one stays active (CFG-2).
   process.on('SIGHUP', () => {
@@ -32,7 +38,7 @@ async function main(): Promise<void> {
   });
   const { applied } = await runMigrations(env.databaseUrl);
   logger.info({ applied }, 'database migrations applied');
-  const app = await createApp({ env, configuration, logger });
+  const app = await createApp({ env, configuration, logger, overrides: { adapter } });
   app.enableShutdownHooks();
   await app.listen(env.port, '0.0.0.0');
   logger.info({ port: env.port }, 'api listening');

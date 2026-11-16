@@ -87,9 +87,10 @@ else
   fail denial-audited-with-rule "cid=$DENY_CID row=$ROW"
 fi
 
-# In scope the same call is allowed by policy and reaches the (Phase 2) no-adapter invoker.
+# In scope the same call is allowed by policy and reaches the read path; no credential is stored
+# for the development connection, so it ends in the fixed credential_missing text (Phase 3).
 ALLOW="$(json "$(mcp --token "$ALICE" --tool catalog.search_products --args '{"brand":"acme","fields":["name"]}' 2>&1 || true)" '.text')"
-if [[ "$ALLOW" == *"no adapter is available for connection magento"* ]]; then pass in-scope-allowed "$ALLOW"; else fail in-scope-allowed "$ALLOW"; fi
+if [[ "$ALLOW" == *"the credential for its connection has not been entered"* ]]; then pass in-scope-allowed "$ALLOW"; else fail in-scope-allowed "$ALLOW"; fi
 
 # 4. An invalid YAML file is rejected with file and path (CLI shipped in the api image).
 mkdir -p "$WORK/broken"

@@ -15,6 +15,12 @@ export interface ToolCallRecord {
    * details so `clientId` only ever holds a verified client identity.
    */
   readonly declaredClientName?: string;
+  /**
+   * Further non-sensitive details, e.g. the operation ID behind the tool name and the
+   * upstream status (MCP-9, AUD-1). Never arguments, results or secrets (SEC-3).
+   * `durationMs`, `declaredClientName` and `errorCode` above take precedence.
+   */
+  readonly details?: Readonly<Record<string, string | number | boolean>>;
 }
 
 /**
@@ -23,9 +29,11 @@ export interface ToolCallRecord {
  * fields, and redaction (SEC-3, AUD-4) arrives with the first adapters.
  */
 export function toolCallAuditEvent(call: ToolCallRecord): AuditEventInput {
-  const details: Record<string, unknown> = { durationMs: call.durationMs };
+  const details: Record<string, unknown> = { ...call.details, durationMs: call.durationMs };
   if (call.declaredClientName !== undefined) details.declaredClientName = call.declaredClientName;
   if (call.outcome === 'error' && call.errorCode !== undefined) details.errorCode = call.errorCode;
+  // An error code belongs to failed calls only, whoever supplied it.
+  if (call.outcome !== 'error') delete details.errorCode;
   return {
     id: call.id,
     actor: call.caller.subject,

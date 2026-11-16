@@ -50,4 +50,24 @@ describe('AUD-1 tool call audit event', () => {
     const event = toolCallAuditEvent({ ...base, outcome: 'ok' });
     expect(JSON.stringify(event)).not.toMatch(/argument/i);
   });
+
+  it('AUD-1 MCP-9 merges extra details such as the operation ID and the upstream status', () => {
+    const event = toolCallAuditEvent({
+      ...base,
+      tool: 'catalog.find',
+      outcome: 'ok',
+      details: { operation: 'catalog.search_products', connection: 'magento', upstreamStatus: 200, itemCount: 2, upstreamMs: 7 },
+    });
+    expect(event.subject).toBe('catalog.find');
+    expect(event.details).toEqual({ operation: 'catalog.search_products', connection: 'magento', upstreamStatus: 200, itemCount: 2, upstreamMs: 7, durationMs: 3 });
+  });
+
+  it('AUD-1 keeps its own duration and drops an extra error code from an ok call', () => {
+    const event = toolCallAuditEvent({ ...base, outcome: 'ok', details: { durationMs: 999, errorCode: 'x' } });
+    expect(event.details).toEqual({ durationMs: 3 });
+    const failed = toolCallAuditEvent({ ...base, outcome: 'error', details: { errorCode: 'http_status' } });
+    expect(failed.details).toEqual({ durationMs: 3, errorCode: 'http_status' });
+    const own = toolCallAuditEvent({ ...base, outcome: 'error', errorCode: 'handler_failed', details: { errorCode: 'http_status' } });
+    expect(own.details).toEqual({ durationMs: 3, errorCode: 'handler_failed' });
+  });
 });

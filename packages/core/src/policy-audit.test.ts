@@ -49,4 +49,17 @@ describe('POL-8 decision audit event', () => {
     });
     expect(event.subject).toHaveLength(128);
   });
+
+  it('MCP-9 records the operation ID next to the called tool name', () => {
+    const event = policyDecisionAuditEvent({
+      id,
+      caller: { subject: 'alice', groups: [] },
+      tool: 'catalog.find',
+      operation: 'catalog.search_products',
+      decision: { effect: 'allow', rule: 'r', roles: [] },
+      correlationId: 'c1',
+    });
+    expect(event.subject).toBe('catalog.find');
+    expect(event.details).toEqual({ rule: 'r', roles: [], operation: 'catalog.search_products' });
+  });
 });

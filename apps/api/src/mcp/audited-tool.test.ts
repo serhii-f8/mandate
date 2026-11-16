@@ -48,4 +48,17 @@ describe('AUD-1 every tool call is audited before its result is returned', () =>
     expect(audit.events[0]).toMatchObject({ outcome: 'error', details: { errorCode: 'handler_failed' } });
     expect(JSON.stringify(result)).not.toContain('secret detail');
   });
+
+  it('AUD-1 adds the details the run reports to the tool.call event', async () => {
+    const audit = new InMemoryAuditLog();
+    await auditedRun(
+      'catalog.find',
+      (report) => {
+        report({ operation: 'catalog.search_products', upstreamStatus: 200 });
+        return ok();
+      },
+      deps(audit),
+    );
+    expect(audit.events[0]?.details).toEqual({ operation: 'catalog.search_products', upstreamStatus: 200, durationMs: 5 });
+  });
 });

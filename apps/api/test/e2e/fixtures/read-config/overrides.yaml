@@ -1,0 +1,5 @@
+version: 1
+overrides:
+  - operation: support.lookup_order
+    tool_name: support.find_order
+    title: Find an order

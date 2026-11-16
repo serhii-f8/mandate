@@ -3,6 +3,7 @@ export const API_ENV = Symbol('ApiEnv');
 export const AUDIT_LOG = Symbol('AuditLog');
 export const BEARER_GATE = Symbol('BearerGate');
 export const CONFIGURATION = Symbol('ConfigurationHolder');
+export const CREDENTIAL_VAULT = Symbol('CredentialVault');
 export const DATABASE = Symbol('Database');
 export const MCP_HANDLER = Symbol('McpHttpHandler');
 export const LOGGER = Symbol('Logger');

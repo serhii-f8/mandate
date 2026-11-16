@@ -38,9 +38,15 @@ importers:
 
   apps/api:
     dependencies:
+      '@aiops/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
       '@aiops/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@aiops/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connector-sdk
       '@aiops/core':
         specifier: workspace:*
         version: link:../../packages/core

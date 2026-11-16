@@ -57,9 +57,10 @@ export function snapshotOf(configuration: LoadedConfiguration): Snapshot {
   return { configuration, engine };
 }
 
+/** Operations are published under their tool name (MCP-9); policy and audit use the operation ID. */
 function operationTool(op: OperationDefinition): Tool {
   return {
-    name: op.id,
+    name: op.toolName,
     ...(op.title === undefined ? {} : { title: op.title }),
     description: op.description,
     inputSchema: op.inputSchema as Tool['inputSchema'],
@@ -104,10 +105,23 @@ function deniedResult(decision: PolicyDecision): CallToolResult {
   return { isError: true, content: [{ type: 'text', text: `Denied by policy: ${reason} (rule ${decision.rule})` }] };
 }
 
-async function recordDecision(deps: PipelineDeps, req: PipelineRequest, tool: string, decision: PolicyDecision): Promise<boolean> {
+async function recordDecision(
+  deps: PipelineDeps,
+  req: PipelineRequest,
+  tool: string,
+  decision: PolicyDecision,
+  operation?: OperationDefinition,
+): Promise<boolean> {
   try {
     await deps.audit.append(
-      policyDecisionAuditEvent({ id: deps.newId(), caller: req.caller, tool, decision, correlationId: req.correlationId }),
+      policyDecisionAuditEvent({
+        id: deps.newId(),
+        caller: req.caller,
+        tool,
+        ...(operation === undefined ? {} : { operation: operation.id }),
+        decision,
+        correlationId: req.correlationId,
+      }),
     );
     return true;
   } catch {
@@ -118,11 +132,11 @@ async function recordDecision(deps: PipelineDeps, req: PipelineRequest, tool: st
 export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: string, rawArgs: unknown): Promise<CallToolResult> {
   const { configuration, engine } = req.snapshot;
   const builtin = deps.builtins.find((t) => t.name === name);
-  const operation = builtin === undefined ? engine.grantedOperations(req.caller).find((op) => op.id === name) : undefined;
+  const operation = builtin === undefined ? engine.grantedOperations(req.caller).find((op) => op.toolName === name) : undefined;
 
   // 1. Lookup (MCP-2): unknown and not granted get the same answer, so the list does not leak.
   if (builtin === undefined && operation === undefined) {
-    const exists = configuration.policy.operations.some((op) => op.id === name);
+    const exists = configuration.policy.operations.some((op) => op.toolName === name);
     await recordDecision(deps, req, name, {
       effect: 'deny',
       rule: 'default-deny',
@@ -143,7 +157,9 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
 
   // 2. Arguments (MCP-3), before any policy or upstream call.
   const args = rawArgs ?? {};
-  const check = builtin !== undefined ? builtin.validate(args) : configuration.validators.get(name)?.(args);
+  const check = builtin !== undefined ? builtin.validate(args) : operation === undefined ? undefined : configuration.validators.get(operation.id)?.(args);
+  // MCP-9: operation rows record the operation ID behind the called tool name.
+  const operationDetails = operation === undefined ? {} : { details: { operation: operation.id } };
   if (check?.ok !== true) {
     const message = check === undefined ? 'no input schema' : check.message;
     const invalid: CallToolResult = {
@@ -161,6 +177,7 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
           correlationId: req.correlationId,
           durationMs: 0,
           errorCode: 'invalid_arguments',
+          ...operationDetails,
           ...(req.declaredClientName === undefined ? {} : { declaredClientName: req.declaredClientName }),
         }),
       )
@@ -174,21 +191,26 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
   const decision: PolicyDecision =
     builtin !== undefined
       ? { effect: 'allow', rule: 'builtin', roles: resolveRoles(req.caller.groups, configuration.policy.roleMapping) }
-      : engine.evaluate({ caller: req.caller, operationId: name, args: validArgs });
-  const recorded = await recordDecision(deps, req, name, decision);
+      : // Step 1 returned unless a built-in or a granted operation was found.
+        engine.evaluate({ caller: req.caller, operationId: operation?.id ?? name, args: validArgs });
+  const recorded = await recordDecision(deps, req, name, decision, operation);
   if (decision.effect === 'deny') return deniedResult(decision);
   if (!recorded) return AUDIT_UNAVAILABLE;
 
   // 4. Run (SEC-1: only after an allow decision of this request is on record).
   return auditedRun(
     name,
-    async () => {
+    async (report) => {
       if (builtin !== undefined) return builtin.handler(validArgs, req.caller);
       // Step 1 returned unless a built-in or a granted operation was found.
       if (operation === undefined) throw new Error('no operation after lookup');
+      report({ operation: operation.id });
       const result = await deps.invoker.invoke({ operation, args: validArgs, caller: req.caller });
+      // The operation ID stays authoritative over whatever the invoker reports.
+      if (result.auditDetails !== undefined) report({ ...result.auditDetails, operation: operation.id });
       return {
-        content: [{ type: 'text', text: result.text }],
+        // MCP-4: summary first; the data again as JSON for clients that ignore structuredContent.
+        content: [{ type: 'text', text: result.text }, ...(result.dataText === undefined ? [] : [{ type: 'text' as const, text: result.dataText }])],
         ...(result.structured === undefined ? {} : { structuredContent: { ...result.structured } }),
         ...(result.isError === true ? { isError: true } : {}),
       };

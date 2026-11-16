@@ -4,12 +4,15 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { Client, StreamableHTTPClientTransport, type FetchLike } from '@modelcontextprotocol/client';
 import type { INestApplication } from '@nestjs/common';
+import type { Logger } from 'pino';
+import { createOpenApiAdapter, type OpenApiAdapter } from '@aiops/adapters';
 import { ConfigurationHolder, type ApiEnv } from '@aiops/config';
-import type { OperationInvoker } from '@aiops/core';
+import type { CredentialVault, OperationInvoker } from '@aiops/core';
 import { runMigrations } from '@aiops/db';
 import { startPostgres, type StartedPostgres, type TestIssuer } from '@aiops/testing';
 import { createApp } from '../../src/app.js';
-import { CONFIGURATION } from '../../src/tokens.js';
+import { CONFIGURATION, CREDENTIAL_VAULT } from '../../src/tokens.js';
+import { configurationLoadOptions } from '../../src/upstream/upstream-runtime.js';
 
 export const MODERN = '2026-07-28';
 export const FIXTURE_CONFIG = fileURLToPath(new URL('./fixtures/config', import.meta.url));
@@ -50,6 +53,10 @@ export interface StartApiOptions {
   readonly resource?: string;
   /** Port to listen on; a free one by default. */
   readonly port?: number;
+  /** The api logger, e.g. one writing to a captured stream. */
+  readonly logger?: Logger;
+  /** The read adapter; a fresh OpenAPI adapter by default, as `main.ts` uses. */
+  readonly adapter?: OpenApiAdapter;
 }
 
 export async function startApi(databaseUrl: string, options: StartApiOptions): Promise<RunningApi> {
@@ -74,10 +81,22 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
     freshAuthSeconds: 300,
     presetDirs: [],
   };
-  const configuration = await ConfigurationHolder.load(env.configDir);
-  const app = await createApp({ env, configuration, ...(options.invoker === undefined ? {} : { overrides: { invoker: options.invoker } }) });
+  const adapter = options.adapter ?? createOpenApiAdapter();
+  // Loaded as `main.ts` loads it: with the adapter's spec resolver and the preset directories.
+  const configuration = await ConfigurationHolder.load(env.configDir, configurationLoadOptions(adapter, env));
+  const app = await createApp({
+    env,
+    configuration,
+    overrides: { adapter, ...(options.invoker === undefined ? {} : { invoker: options.invoker }) },
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
+  });
   await app.listen(port, '127.0.0.1');
   return { app, url: `http://127.0.0.1:${String(port)}`, resource, close: () => app.close() };
+}
+
+/** The running api's credential vault (the real `PostgresCredentialVault`). */
+export function vaultOf(api: RunningApi): CredentialVault {
+  return api.app.get<CredentialVault>(CREDENTIAL_VAULT);
 }
 
 /** Reloads the configuration of a running api, as SIGHUP does. */

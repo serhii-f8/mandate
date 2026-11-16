@@ -9,6 +9,8 @@ export interface PolicyDecisionRecord {
   readonly id: string;
   readonly caller: Caller;
   readonly tool: string;
+  /** The operation ID behind the tool name, when the call named an operation (MCP-9). */
+  readonly operation?: string;
   readonly decision: PolicyDecision;
   readonly correlationId: string;
 }
@@ -22,6 +24,7 @@ export function policyDecisionAuditEvent(record: PolicyDecisionRecord): AuditEve
   const details: Record<string, unknown> = { rule: decision.rule, roles: [...decision.roles] };
   if (decision.reason !== undefined) details.reason = decision.reason;
   if (decision.detail !== undefined) details.detail = decision.detail;
+  if (record.operation !== undefined) details.operation = record.operation;
   return {
     id: record.id,
     actor: record.caller.subject,
