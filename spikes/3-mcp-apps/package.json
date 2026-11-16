@@ -1,0 +1,27 @@
+{
+  "name": "fde-spike-3-mcp-apps",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "scripts": {
+    "build": "TARGET=widget vite build && TARGET=page vite build && TARGET=host vite build && TARGET=sandbox vite build",
+    "check": "./run.sh",
+    "server": "node server.mjs",
+    "host": "node host-serve.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/core": "2.4.0",
+    "@modelcontextprotocol/ext-apps": "2.0.4",
+    "@modelcontextprotocol/server": "2.4.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.3.0",
+    "playwright": "1.65.1",
+    "vite": "8.3.8",
+    "vite-plugin-singlefile": "2.3.4"
+  }
+}
