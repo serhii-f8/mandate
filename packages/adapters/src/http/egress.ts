@@ -102,14 +102,15 @@ export function isBlockedAddress(ip: string): boolean {
   if (!g) return true;
   const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g6 = 0, h = 0] = g;
   const embedded = g6 * 65536 + h;
-  if (g.every((x) => x === 0)) return true; // ::
-  if (g.slice(0, 7).every((x) => x === 0) && h === 1) return true; // ::1
+  if (g.slice(0, 6).every((x) => x === 0)) return true; // ::/96 incl. ::, ::1, IPv4-compatible
   // IPv4-mapped ::ffff:0:0/96
   if (a === 0 && b === 0 && c === 0 && d === 0 && e === 0 && f === 0xffff) return v4Blocked(embedded);
   // NAT64 64:ff9b::/96
   if (a === 0x64 && b === 0xff9b && c === 0 && d === 0 && e === 0 && f === 0) return v4Blocked(embedded);
   if ((a & 0xfe00) === 0xfc00) return true; // fc00::/7
   if ((a & 0xffc0) === 0xfe80) return true; // fe80::/10
+  if ((a & 0xffc0) === 0xfec0) return true; // fec0::/10 (site-local, deprecated)
+  if (a === 0x2002) return v4Blocked(b * 65536 + c); // 6to4 2002::/16 with embedded IPv4
   if ((a & 0xff00) === 0xff00) return true; // ff00::/8
   if (a === 0x2001 && b === 0x0db8) return true; // documentation 2001:db8::/32
   return false;
@@ -140,10 +141,32 @@ export function allowedHostsOf(settings: ConnectionSettings): Set<string> {
     if (t) hosts.add(t);
   }
   for (const h of settings.extraHosts) {
-    const n = normaliseHost(h);
+    let n: string | undefined;
+    try {
+      n = normaliseHost(new URL(`http://${h.trim()}`).hostname);
+    } catch {
+      n = undefined; // an unparseable entry allows nothing
+    }
     if (n) hosts.add(n);
   }
   return hosts;
+}
+
+function checkHost(settings: ConnectionSettings, allowed: Set<string>, hostname: string): string {
+  const host = normaliseHost(hostname);
+  if (!allowed.has(host)) throw new EgressDeniedError(host);
+  if (isIP(host) && !settings.allowPrivateNetwork && isBlockedAddress(host)) throw new EgressDeniedError(host);
+  return host;
+}
+
+/**
+ * Synchronous pre-connect check (CONN-5). Node's `net` never calls the `lookup` option for IP-literal
+ * hosts, so the HTTP layer MUST call this before every request (and every redirect target, token
+ * fetch and spec fetch). Names are checked against the allow list only; their addresses are checked
+ * by `createGuardedLookup`. Throws `EgressDeniedError`.
+ */
+export function assertEgressAllowed(settings: ConnectionSettings, hostname: string): void {
+  checkHost(settings, allowedHostsOf(settings), hostname);
 }
 
 /**
@@ -153,8 +176,7 @@ export function allowedHostsOf(settings: ConnectionSettings): Set<string> {
 export function createGuardedLookup(settings: ConnectionSettings, resolver: Resolver = defaultResolver): LookupFunction {
   const allowed = allowedHostsOf(settings);
   const resolve = async (hostname: string): Promise<LookupAddress[]> => {
-    const host = normaliseHost(hostname);
-    if (!allowed.has(host)) throw new EgressDeniedError(host);
+    const host = checkHost(settings, allowed, hostname);
     const literal = isIP(host);
     const addrs: { address: string; family: number }[] = literal ? [{ address: host, family: literal }] : await resolver(host);
     if (addrs.length === 0) throw new EgressDeniedError(host);
@@ -169,7 +191,8 @@ export function createGuardedLookup(settings: ConnectionSettings, resolver: Reso
         const cb = callback as unknown as (err: Error | null, address?: string | LookupAddress[], family?: number) => void;
         const first = usable[0];
         if (!first) {
-          cb(new EgressDeniedError(normaliseHost(hostname)));
+          const host = normaliseHost(hostname);
+          cb(Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: 'ENOTFOUND', hostname: host }));
         } else if (options.all) {
           cb(null, usable);
         } else {

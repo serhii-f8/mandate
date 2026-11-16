@@ -32,4 +32,34 @@ describe('SEC-3 scrubbing', () => {
     expect(s.text('x abcdef y')).toBe('x [REDACTED] y');
     expect(createScrubber(['']).text('unchanged')).toBe('unchanged');
   });
+
+  it('SEC-3 scrubs form-urlencoded and base64url forms', () => {
+    const secret = 'a b>?c~';
+    const s = createScrubber([secret]);
+    const form = encodeURIComponent(secret).replace(/%20/g, '+');
+    const b64url = Buffer.from(secret).toString('base64url');
+    expect(form).toContain('+');
+    expect(s.text(`${form} ${b64url}`)).toBe('[REDACTED] [REDACTED]');
+  });
+
+  it('SEC-3 keeps __proto__ as an own property and does not pollute', () => {
+    const input = JSON.parse('{"__proto__": {"x": "s3cr3t-token"}}') as object;
+    const out = createScrubber([token]).deep(input);
+    expect(Object.prototype.hasOwnProperty.call(out, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(({} as Record<string, unknown>).x).toBeUndefined();
+  });
+
+  it('SEC-3 caps recursion depth at 64', () => {
+    let v: unknown = token;
+    for (let i = 0; i < 100; i++) v = { n: v };
+    let out = createScrubber([token]).deep(v) as Record<string, unknown>;
+    let depth = 0;
+    while (typeof out === 'object') {
+      out = out.n as Record<string, unknown>;
+      depth++;
+    }
+    expect(out).toBe('[depth limit]');
+    expect(depth).toBeLessThanOrEqual(65);
+  });
 });

@@ -1,7 +1,10 @@
 import type { LookupAddress } from 'node:dns';
 import { describe, expect, it } from 'vitest';
 import type { ConnectionSettings } from '@aiops/connector-sdk';
-import { allowedHostsOf, createGuardedLookup, EgressDeniedError, isBlockedAddress } from './egress.js';
+import { createServer } from 'node:http';
+import { request } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { assertEgressAllowed, allowedHostsOf, createGuardedLookup, EgressDeniedError, isBlockedAddress } from './egress.js';
 
 const settings = (over: Partial<ConnectionSettings> = {}): ConnectionSettings => ({
   id: 'c1',
@@ -122,5 +125,65 @@ describe('CONN-5 outbound restriction', () => {
   it('CONN-5 refuses an empty resolution', async () => {
     const lookup = createGuardedLookup(settings(), () => Promise.resolve([]));
     expect((await call(lookup, 'shop.example.com')).err).toBeInstanceOf(EgressDeniedError);
+  });
+
+  it.each(['::2', '::10.0.0.1', 'fec0::1', '2002:0a00:0001::1', '2002:7f00:1::'])('CONN-5 blocks %s', (ip) => {
+    expect(isBlockedAddress(ip)).toBe(true);
+  });
+
+  it('CONN-5 allows 6to4 with a public embedded IPv4', () => {
+    expect(isBlockedAddress('2002:5db8:d822::1')).toBe(false);
+  });
+
+  it('CONN-5 normalises extraHosts with ports and IDNA', () => {
+    const hosts = allowedHostsOf(settings({ extraHosts: ['Spec.Example.com:8080', 'b\u00fccher.example'] }));
+    expect(hosts.has('spec.example.com')).toBe(true);
+    expect(hosts.has('xn--bcher-kva.example')).toBe(true);
+  });
+
+  it('CONN-5 reports a family mismatch as ENOTFOUND, not egress_denied', async () => {
+    const lookup = createGuardedLookup(settings(), () => Promise.resolve([{ address: '93.184.216.34', family: 4 }]));
+    const { err } = await call(lookup, 'shop.example.com', { family: 6 });
+    expect(err).not.toBeInstanceOf(EgressDeniedError);
+    expect((err as NodeJS.ErrnoException).code).toBe('ENOTFOUND');
+  });
+
+  it('CONN-5 assertEgressAllowed checks allow list and literals synchronously', () => {
+    const s = settings();
+    expect(() => { assertEgressAllowed(s, 'Shop.Example.com.'); }).not.toThrow();
+    expect(() => { assertEgressAllowed(s, 'evil.example.org'); }).toThrow(EgressDeniedError);
+    const lit = settings({ baseUrl: 'http://127.0.0.1:1', extraHosts: [] });
+    expect(() => { assertEgressAllowed(lit, '127.0.0.1'); }).toThrow(EgressDeniedError);
+    expect(() => { assertEgressAllowed(lit, '[::1]'); }).toThrow(EgressDeniedError);
+    expect(() => { assertEgressAllowed({ ...lit, allowPrivateNetwork: true }, '127.0.0.1'); }).not.toThrow();
+  });
+
+  it('CONN-5 a real http.request to a literal loopback URL never reaches the server', async () => {
+    let connections = 0;
+    const server = createServer((_req, res) => res.end('ok'));
+    server.on('connection', () => {
+      connections += 1;
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const s = settings({ baseUrl: `http://127.0.0.1:${port}`, extraHosts: [] });
+      const lookup = createGuardedLookup(s);
+      const url = new URL(s.baseUrl);
+      const send = (): Promise<void> =>
+        new Promise((resolve, reject) => {
+          assertEgressAllowed(s, url.hostname); // the HTTP layer's mandatory pre-check
+          const req = request(url, { lookup }, (res) => {
+            res.resume();
+            resolve();
+          });
+          req.on('error', reject);
+          req.end();
+        });
+      await expect(send()).rejects.toBeInstanceOf(EgressDeniedError);
+      expect(connections).toBe(0);
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
   });
 });
