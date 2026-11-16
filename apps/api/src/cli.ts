@@ -4,6 +4,7 @@
  *
  *   aiops validate <dir> [--preset-dir <dir>]...   full check: specs resolved, presets loaded
  *   aiops test-connection <connection>             runs the connection's declared test read
+ *   aiops credentials rotate                       re-wraps credential data keys under the newest master key
  *
  * Exit codes: 0 success, 1 failed or invalid, 2 usage or environment. Each command parses
  * only the environment it needs; errors name variables, never values (SEC-3).
@@ -21,6 +22,7 @@ import { ConnectionTestService } from './upstream/connection-test.js';
 const USAGE = [
   'usage: aiops validate <dir> [--preset-dir <dir>]...',
   '       aiops test-connection <connection>',
+  '       aiops credentials rotate',
 ].join('\n');
 
 /** The actor and client the CLI audits as. */
@@ -190,11 +192,27 @@ async function testConnection(args: readonly string[], out: (line: string) => vo
   });
 }
 
+async function rotate(args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
+  if (args.length > 0) {
+    out(USAGE);
+    return 2;
+  }
+  const env = parseEnv({ DATABASE_URL: postgresUrl, AIOPS_MASTER_KEYS: nonEmpty }, deps.env);
+  return withStore(deps, env, async (store) => {
+    const result = await store.rotate(CLI_ACTOR, (deps.newId ?? randomUUID)());
+    out(`rewrapped=${String(result.rewrapped)} on_old_versions=${String(result.onOldVersions)}`);
+    // Refs are identifiers, not secrets. A row that cannot be opened with the configured keys needs the operator.
+    for (const ref of result.failed) out(`unreadable credential: ${ref}`);
+    return result.failed.length > 0 ? 1 : 0;
+  });
+}
+
 export async function runApiCli(argv: readonly string[], out: (line: string) => void, deps: CliDeps = { env: process.env }): Promise<number> {
   const [command, ...rest] = argv;
   try {
     if (command === 'validate') return await validate(rest, out, deps);
     if (command === 'test-connection') return await testConnection(rest, out, deps);
+    if (command === 'credentials' && rest[0] === 'rotate') return await rotate(rest.slice(1), out, deps);
     out(USAGE);
     return 2;
   } catch (error) {
