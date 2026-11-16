@@ -32,7 +32,7 @@ certificates, starts Keycloak, waits until the realm's discovery document answer
 starts the resource server, runs `check.mjs` and tears everything down again.
 It prints one `PASS`/`FAIL` line per assertion and exits non-zero on any failure.
 
-Expected today: 30 of 31 pass. `cimd-shape-chatgpt-private-key-jwt` fails by design of
+Expected today: 32 of 33 pass. `cimd-shape-chatgpt-private-key-jwt` fails by design of
 Keycloak 26.8.2 (it rejects any CIMD document containing a property its parser does not
 know, here `token_endpoint_auth_methods_supported`); see the finding.
 

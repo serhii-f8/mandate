@@ -42,6 +42,9 @@
       ],
       "groups": [
         "/content"
+      ],
+      "realmRoles": [
+        "default-roles-spike"
       ]
     },
     {
@@ -60,6 +63,9 @@
       ],
       "groups": [
         "/support"
+      ],
+      "realmRoles": [
+        "default-roles-spike"
       ]
     }
   ],
@@ -652,6 +658,14 @@
         "groups"
       ],
       "optionalClientScopes": [
+        "offline_access"
+      ]
+    }
+  ],
+  "scopeMappings": [
+    {
+      "clientScope": "offline_access",
+      "roles": [
         "offline_access"
       ]
     }
