@@ -1,5 +1,13 @@
 {
   "$schema": "https://turborepo.com/schema.json",
+  "globalDependencies": [
+    "tsconfig.base.json",
+    "eslint.config.js",
+    "eslint.boundaries.js",
+    "vitest.shared.ts",
+    ".nvmrc",
+    "pnpm-workspace.yaml"
+  ],
   "tasks": {
     "build": {
       "dependsOn": [
