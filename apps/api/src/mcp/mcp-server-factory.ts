@@ -1,9 +1,6 @@
-import { randomUUID } from 'node:crypto';
-import { performance } from 'node:perf_hooks';
-import { CLIENT_INFO_META_KEY, McpServer, type AuthInfo, type McpServerFactory } from '@modelcontextprotocol/server';
-import type { AuditLog, Caller } from '@aiops/core';
-import { auditedTool } from './audited-tool.js';
-import type { ToolCatalog } from './tool-catalog.js';
+import { CLIENT_INFO_META_KEY, Server, type AuthInfo, type McpServerFactory } from '@modelcontextprotocol/server';
+import type { Caller } from '@aiops/core';
+import { callTool, listTools, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
 
 export const SERVER_INFO = { name: 'aiops', version: '0.0.0' } as const;
 
@@ -15,11 +12,13 @@ export interface RequestContext {
 
 const CONTEXT_KEY = 'aiops/request';
 
-export function authInfoFor(context: RequestContext): AuthInfo {
+/** The SDK sees no token: the caller travels in `extra`, the token field stays empty (AUTH-7). */
+export function authInfoFor(context: RequestContext, expiresAt: number | undefined): AuthInfo {
   return {
     token: '',
-    clientId: context.caller.clientId ?? 'unknown',
+    clientId: context.caller.clientId ?? '',
     scopes: [],
+    ...(expiresAt === undefined ? {} : { expiresAt }),
     extra: { [CONTEXT_KEY]: context },
   };
 }
@@ -42,29 +41,24 @@ function contextOf(authInfo: AuthInfo | undefined): RequestContext {
 }
 
 /**
- * Builds a fresh `McpServer` per HTTP request (ADR 0003): only the tools the
- * caller's catalogue grants are registered, so the tool list is per caller and
- * a call to any other tool is an unknown tool. Nothing survives the request (NFR-3).
+ * Builds a fresh low-level `Server` per HTTP request (ADR 0003, ADR 0016) whose
+ * `tools/list` and `tools/call` handlers are `api`'s own, so every rejection is
+ * audited. The configuration snapshot is taken once per request. Nothing
+ * survives the request (NFR-3).
  */
-export function createServerFactory(deps: { catalog: ToolCatalog; audit: AuditLog }): McpServerFactory {
+export function createServerFactory(deps: PipelineDeps): McpServerFactory {
   return ({ authInfo }) => {
     const { caller, correlationId } = contextOf(authInfo);
-    const server = new McpServer(SERVER_INFO);
-    for (const tool of deps.catalog.toolsFor(caller)) {
-      server.registerTool(tool.name, { description: tool.description, inputSchema: tool.inputSchema }, (args, ctx) => {
-        // The 2026-07-28 envelope carries the client's self-declared name (absent on
-        // 2025-era requests). It is unverified, so it is audited as a detail only.
-        const clientName = declaredClientName(ctx.mcpReq.envelope);
-        return auditedTool(tool, {
-          audit: deps.audit,
-          caller,
-          correlationId,
-          ...(clientName === undefined ? {} : { declaredClientName: clientName }),
-          newId: randomUUID,
-          now: () => performance.now(),
-        })(args);
-      });
-    }
+    const snapshot = deps.snapshot();
+    const server = new Server(SERVER_INFO, { capabilities: { tools: { listChanged: false } } });
+    const request = (envelope: object | undefined): PipelineRequest => {
+      const name = declaredClientName(envelope);
+      return { caller, correlationId, snapshot, ...(name === undefined ? {} : { declaredClientName: name }) };
+    };
+    server.setRequestHandler('tools/list', async (_req, ctx) => ({ tools: await listTools(deps, request(ctx.mcpReq.envelope)) }));
+    server.setRequestHandler('tools/call', async (req, ctx) =>
+      server.projectCallToolResult(await callTool(deps, request(ctx.mcpReq.envelope), req.params.name, req.params.arguments), undefined),
+    );
     return server;
   };
 }

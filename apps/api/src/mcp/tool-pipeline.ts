@@ -1,0 +1,198 @@
+/**
+ * `tools/list` and `tools/call` as `api` owns them (ADR 0016): every request,
+ * including the ones rejected before anything runs, passes through code that
+ * audits it. Order of a call: lookup in the caller's own list (MCP-2) →
+ * argument validation (MCP-3) → policy decision, audited (POL-8) → run (SEC-1).
+ */
+import { ProtocolError, ProtocolErrorCode, type CallToolResult, type Tool } from '@modelcontextprotocol/server';
+import type { LoadedConfiguration } from '@aiops/config';
+import {
+  createPolicyEngine,
+  policyDecisionAuditEvent,
+  resolveRoles,
+  toolCallAuditEvent,
+  type AuditLog,
+  type Caller,
+  type DenyReason,
+  type OperationDefinition,
+  type OperationInvoker,
+  type PolicyDecision,
+  type PolicyEngine,
+} from '@aiops/core';
+import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
+import type { BuiltinTool } from './tool-catalog.js';
+
+/** One configuration and its engine, taken once per HTTP request. */
+export interface Snapshot {
+  readonly configuration: LoadedConfiguration;
+  readonly engine: PolicyEngine;
+}
+
+export interface PipelineDeps {
+  readonly snapshot: () => Snapshot;
+  readonly builtins: readonly BuiltinTool[];
+  readonly invoker: OperationInvoker;
+  readonly audit: AuditLog;
+  readonly newId: () => string;
+  /** Monotonic milliseconds. */
+  readonly now: () => number;
+}
+
+export interface PipelineRequest {
+  readonly caller: Caller;
+  readonly correlationId: string;
+  readonly declaredClientName?: string;
+  readonly snapshot: Snapshot;
+}
+
+const engines = new WeakMap<LoadedConfiguration, PolicyEngine>();
+
+/** The engine for a configuration, built once per configuration (NFR-6). */
+export function snapshotOf(configuration: LoadedConfiguration): Snapshot {
+  let engine = engines.get(configuration);
+  if (engine === undefined) {
+    engine = createPolicyEngine(configuration.policy);
+    engines.set(configuration, engine);
+  }
+  return { configuration, engine };
+}
+
+function operationTool(op: OperationDefinition): Tool {
+  return {
+    name: op.id,
+    ...(op.title === undefined ? {} : { title: op.title }),
+    description: op.description,
+    inputSchema: op.inputSchema as Tool['inputSchema'],
+    annotations: { readOnlyHint: op.risk === 'read', destructiveHint: op.risk === 'destructive' },
+  };
+}
+
+function builtinTool(tool: BuiltinTool): Tool {
+  return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema as Tool['inputSchema'], annotations: { readOnlyHint: true } };
+}
+
+export async function listTools(deps: PipelineDeps, req: PipelineRequest): Promise<Tool[]> {
+  const granted = req.snapshot.engine.grantedOperations(req.caller);
+  const tools = [...deps.builtins.map(builtinTool), ...granted.map(operationTool)];
+  try {
+    await deps.audit.append({
+      id: deps.newId(),
+      actor: req.caller.subject,
+      ...(req.caller.clientId === undefined ? {} : { clientId: req.caller.clientId }),
+      action: 'tools.list',
+      outcome: 'ok',
+      correlationId: req.correlationId,
+      details: { count: tools.length },
+    });
+  } catch {
+    throw new ProtocolError(ProtocolErrorCode.InternalError, 'Audit unavailable; the request was not completed.');
+  }
+  return tools;
+}
+
+const REASON_TEXT: Readonly<Record<DenyReason, (detail: string) => string>> = {
+  no_grant: () => 'the operation is not granted to you',
+  unknown_tool: () => 'the operation is not granted to you',
+  scope_argument_missing: (d) => `argument '${d}' is required by your scope`,
+  out_of_scope: (d) => `argument '${d}' is outside your scope`,
+  denied_field: (d) => `field '${d}' is denied`,
+  field_not_allowed: (d) => `field '${d}' is not allowed`,
+};
+
+function deniedResult(decision: PolicyDecision): CallToolResult {
+  const reason = REASON_TEXT[decision.reason ?? 'no_grant'](decision.detail ?? '');
+  return { isError: true, content: [{ type: 'text', text: `Denied by policy: ${reason} (rule ${decision.rule})` }] };
+}
+
+async function recordDecision(deps: PipelineDeps, req: PipelineRequest, tool: string, decision: PolicyDecision): Promise<boolean> {
+  try {
+    await deps.audit.append(
+      policyDecisionAuditEvent({ id: deps.newId(), caller: req.caller, tool, decision, correlationId: req.correlationId }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: string, rawArgs: unknown): Promise<CallToolResult> {
+  const { configuration, engine } = req.snapshot;
+  const builtin = deps.builtins.find((t) => t.name === name);
+  const operation = builtin === undefined ? engine.grantedOperations(req.caller).find((op) => op.id === name) : undefined;
+
+  // 1. Lookup (MCP-2): unknown and not granted get the same answer, so the list does not leak.
+  if (builtin === undefined && operation === undefined) {
+    const exists = configuration.policy.operations.some((op) => op.id === name);
+    await recordDecision(deps, req, name, {
+      effect: 'deny',
+      rule: 'default-deny',
+      reason: exists ? 'no_grant' : 'unknown_tool',
+      roles: resolveRoles(req.caller.groups, configuration.policy.roleMapping),
+    });
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Tool ${name} not found`);
+  }
+
+  const runDeps = {
+    audit: deps.audit,
+    caller: req.caller,
+    correlationId: req.correlationId,
+    newId: deps.newId,
+    now: deps.now,
+    ...(req.declaredClientName === undefined ? {} : { declaredClientName: req.declaredClientName }),
+  };
+
+  // 2. Arguments (MCP-3), before any policy or upstream call.
+  const args = rawArgs ?? {};
+  const check = builtin !== undefined ? builtin.validate(args) : configuration.validators.get(name)?.(args);
+  if (check?.ok !== true) {
+    const message = check === undefined ? 'no input schema' : check.message;
+    const invalid: CallToolResult = {
+      isError: true,
+      content: [{ type: 'text', text: `Input validation error: Invalid arguments for tool ${name}: ${message}` }],
+    };
+    // Nothing ran, so an audit failure does not change the answer.
+    await deps.audit
+      .append(
+        toolCallAuditEvent({
+          id: deps.newId(),
+          caller: req.caller,
+          tool: name,
+          outcome: 'error',
+          correlationId: req.correlationId,
+          durationMs: 0,
+          errorCode: 'invalid_arguments',
+          ...(req.declaredClientName === undefined ? {} : { declaredClientName: req.declaredClientName }),
+        }),
+      )
+      .catch(() => undefined);
+    return invalid;
+  }
+  // The schema root is `type: object`, so validated arguments are an object.
+  const validArgs = args as Readonly<Record<string, unknown>>;
+
+  // 3. Decision (POL-1..3), audited before anything runs (POL-8).
+  const decision: PolicyDecision =
+    builtin !== undefined
+      ? { effect: 'allow', rule: 'builtin', roles: resolveRoles(req.caller.groups, configuration.policy.roleMapping) }
+      : engine.evaluate({ caller: req.caller, operationId: name, args: validArgs });
+  const recorded = await recordDecision(deps, req, name, decision);
+  if (decision.effect === 'deny') return deniedResult(decision);
+  if (!recorded) return AUDIT_UNAVAILABLE;
+
+  // 4. Run (SEC-1: only after an allow decision of this request is on record).
+  return auditedRun(
+    name,
+    async () => {
+      if (builtin !== undefined) return builtin.handler(validArgs, req.caller);
+      // `operation` is defined whenever `builtin` is not (step 1).
+      const op = operation as OperationDefinition;
+      const result = await deps.invoker.invoke({ operation: op, args: validArgs, caller: req.caller });
+      return {
+        content: [{ type: 'text', text: result.text }],
+        ...(result.structured === undefined ? {} : { structuredContent: { ...result.structured } }),
+        ...(result.isError === true ? { isError: true } : {}),
+      };
+    },
+    runDeps,
+  );
+}
