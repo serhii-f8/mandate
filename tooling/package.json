@@ -10,5 +10,7 @@
     "lint": "eslint .",
     "test": "vitest run --project unit"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0"
+  }
 }
