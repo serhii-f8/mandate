@@ -9,7 +9,7 @@ import { createOpenApiAdapter, type OpenApiAdapter } from '@aiops/adapters';
 import { ConfigurationHolder, type ApiEnv } from '@aiops/config';
 import type { CredentialVault, OperationInvoker } from '@aiops/core';
 import { runMigrations } from '@aiops/db';
-import { startPostgres, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { startPostgres, TEST_WEB_CLIENT_SECRET, type StartedPostgres, type TestIssuer } from '@aiops/testing';
 import { createApp } from '../../src/app.js';
 import { CONFIGURATION, CREDENTIAL_VAULT } from '../../src/tokens.js';
 import { configurationLoadOptions } from '../../src/upstream/upstream-runtime.js';
@@ -73,7 +73,7 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
     oidcJwksUrl: new URL(options.issuer.jwksUrl),
     publicUrl: new URL(`http://127.0.0.1:${String(port)}`),
     webClientId: 'aiops-web',
-    webClientSecret: 'test-only-web-client-secret',
+    webClientSecret: TEST_WEB_CLIENT_SECRET,
     oidcAuthorizationUrl: new URL(`${options.issuer.issuer}/protocol/openid-connect/auth`),
     oidcTokenUrl: new URL(`${options.issuer.issuer}/protocol/openid-connect/token`),
     masterKeys: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',

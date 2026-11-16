@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { Inject, Module, type DynamicModule, type INestApplication, type OnApplicationShutdown } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
+import { APP_GUARD, NestFactory, Reflector } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { createMcpHandler, type McpHttpHandler } from '@modelcontextprotocol/server';
 import { createRemoteJWKSet, type JWTVerifyGetKey } from 'jose';
@@ -10,8 +10,8 @@ import type { Logger } from 'pino';
 import { createOpenApiAdapter } from '@aiops/adapters';
 import type { ReadAdapter } from '@aiops/connector-sdk';
 import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
-import type { AuditLog, CredentialVault, OperationInvoker } from '@aiops/core';
-import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresCredentialVault, type Database } from '@aiops/db';
+import { resolveRoles, type AuditLog, type CredentialVault, type OperationInvoker } from '@aiops/core';
+import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresCredentialVault, PostgresSessionStore, type Database } from '@aiops/db';
 import { createBearerGate } from './auth/bearer-gate.js';
 import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
@@ -21,9 +21,13 @@ import { BUILTIN_TOOLS } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
 import { createServerFactory } from './mcp/mcp-server-factory.js';
 import { snapshotOf, type PipelineDeps } from './mcp/tool-pipeline.js';
-import { API_ENV, AUDIT_LOG, BEARER_GATE, CONFIGURATION, CREDENTIAL_VAULT, DATABASE, LOGGER, MCP_HANDLER } from './tokens.js';
+import { API_ENV, AUDIT_LOG, BEARER_GATE, CONFIGURATION, CREDENTIAL_VAULT, DATABASE, LOGGER, MCP_HANDLER, OIDC_CLIENT, PAGE_SESSIONS } from './tokens.js';
 import { directReadInvokers } from './upstream/read-invoker.js';
 import { assertFullyChecked } from './upstream/upstream-runtime.js';
+import { PageAccessGuard } from './web/access.js';
+import { AuthController, SessionController } from './web/auth.controller.js';
+import { createOidcClient } from './web/oidc-client.js';
+import { SessionService } from './web/session.service.js';
 
 /** Seams the tests replace. */
 export interface AppOverrides {
@@ -73,14 +77,21 @@ class AppModule {
     // Parsed eagerly so a malformed key set stops the start (SEC-2); the message names no key material.
     const keys = overrides.vault === undefined ? parseMasterKeys(env.masterKeys) : undefined;
     const adapter = overrides.adapter ?? createOpenApiAdapter();
-    const verifier = createJwtVerifier({
+    // One key set for MCP access tokens and page ID tokens: same issuer.
+    const jwks = overrides.jwks ?? createRemoteJWKSet(env.oidcJwksUrl);
+    const verifier = createJwtVerifier({ issuer: env.oidcIssuer, audience: env.mcpResource.href, jwks });
+    const oidc = createOidcClient({
+      authorizationUrl: env.oidcAuthorizationUrl,
+      tokenUrl: env.oidcTokenUrl,
       issuer: env.oidcIssuer,
-      audience: env.mcpResource.href,
-      jwks: overrides.jwks ?? createRemoteJWKSet(env.oidcJwksUrl),
+      clientId: env.webClientId,
+      clientSecret: env.webClientSecret,
+      redirectUri: new URL('/auth/callback', env.publicUrl).href,
+      jwks,
     });
     return {
       module: AppModule,
-      controllers: [McpController, ProtectedResourceController, HealthController],
+      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController],
       providers: [
         { provide: API_ENV, useValue: env },
         { provide: LOGGER, useValue: logger },
@@ -124,6 +135,22 @@ class AppModule {
                 },
               },
             ),
+        },
+        { provide: OIDC_CLIENT, useValue: oidc },
+        {
+          provide: PAGE_SESSIONS,
+          inject: [DATABASE],
+          useFactory: (d: Database) => new SessionService(new PostgresSessionStore(d.db), { maxAgeSeconds: env.sessionMaxAgeSeconds }),
+        },
+        {
+          // SEC-1: every route is denied unless marked @Public or @PageAccess.
+          provide: APP_GUARD,
+          inject: [PAGE_SESSIONS],
+          useFactory: (sessions: SessionService) =>
+            new PageAccessGuard(new Reflector(), sessions, (groups) => resolveRoles(groups, configuration.current.policy.roleMapping), {
+              publicOrigin: env.publicUrl.origin,
+              freshAuthSeconds: env.freshAuthSeconds,
+            }),
         },
         Resources,
       ],

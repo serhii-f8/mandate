@@ -103,6 +103,9 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-dev-only-keycloak-admin-password}
       # Placeholder inside the realm file: the audience of MCP access tokens.
       MCP_RESOURCE: ${AIOPS_MCP_RESOURCE:-http://localhost:8400/mcp}
+      # Placeholders of the aiops-web page client: its secret and the api's public origin (ADR 0019).
+      AIOPS_WEB_CLIENT_SECRET: ${AIOPS_WEB_CLIENT_SECRET:-dev-only-web-client-secret}
+      AIOPS_PUBLIC_URL: ${AIOPS_PUBLIC_URL:-http://localhost:8400}
     volumes:
       - ./keycloak/realm-aiops.json:/opt/keycloak/data/import/realm-aiops.json:ro
     ports:

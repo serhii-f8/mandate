@@ -7,3 +7,5 @@ export const CREDENTIAL_VAULT = Symbol('CredentialVault');
 export const DATABASE = Symbol('Database');
 export const MCP_HANDLER = Symbol('McpHttpHandler');
 export const LOGGER = Symbol('Logger');
+export const OIDC_CLIENT = Symbol('OidcClient');
+export const PAGE_SESSIONS = Symbol('SessionService');
