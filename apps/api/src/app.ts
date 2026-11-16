@@ -44,6 +44,7 @@ import { ConnectionsController } from './web/connections.controller.js';
 import { CredentialsController } from './web/credentials.controller.js';
 import { createOidcClient } from './web/oidc-client.js';
 import { SessionService } from './web/session.service.js';
+import { WebAppController } from './web/static.js';
 
 /** Seams the tests replace. */
 export interface AppOverrides {
@@ -109,7 +110,7 @@ class AppModule {
     const pageChecks: PageChecks = { publicOrigin: env.publicUrl.origin, freshAuthSeconds: env.freshAuthSeconds };
     return {
       module: AppModule,
-      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController],
+      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, WebAppController],
       providers: [
         { provide: API_ENV, useValue: env },
         { provide: LOGGER, useValue: logger },

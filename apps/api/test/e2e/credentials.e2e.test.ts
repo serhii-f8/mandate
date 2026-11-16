@@ -1,4 +1,5 @@
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
@@ -26,6 +27,7 @@ let issuer: TestIssuer;
 let upstream: FakeUpstream;
 let api: RunningApi;
 let configDir: string;
+let webDir: string;
 let origin: string;
 const logLines: string[] = [];
 /** Every response body the tests received. */
@@ -45,13 +47,18 @@ beforeAll(async () => {
   await cp(CREDENTIALS_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));
+  // A stand-in bundle: the e2e does not depend on the web build.
+  webDir = await mkdtemp(join(tmpdir(), 'aiops-web-e2e-'));
+  await mkdir(join(webDir, 'assets'));
+  await writeFile(join(webDir, 'index.html'), '<!doctype html><title>Credentials</title><div id="root"></div>');
+  await writeFile(join(webDir, 'assets', 'app-abc123.js'), 'console.log("app");');
   const stream = new Writable({
     write(chunk: Buffer, _encoding, done) {
       logLines.push(chunk.toString('utf8'));
       done();
     },
   });
-  api = await startApi(databaseUrl, { issuer, configDir, logger: createLogger('debug', stream) });
+  api = await startApi(databaseUrl, { issuer, configDir, webDir, logger: createLogger('debug', stream) });
   origin = new URL(api.url).origin;
 });
 
@@ -61,6 +68,7 @@ afterAll(async () => {
   await issuer.close();
   await postgres.stop();
   await rm(configDir, { recursive: true });
+  await rm(webDir, { recursive: true });
 });
 
 async function login(user: TestLoginUser): Promise<Page> {
@@ -306,5 +314,59 @@ describe('SEC-3 credential values never echo', () => {
         expect(responses).not.toContain(value);
       }
     }
+  });
+});
+
+/** A raw request: `fetch` would normalise dot segments before sending. */
+function raw(path: string): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port: new URL(api.url).port, path, method: 'GET' }, (res) => {
+      let body = '';
+      res.on('data', (chunk: Buffer) => (body += chunk.toString('utf8')));
+      res.on('end', () => {
+        resolve({ status: res.statusCode ?? 0, headers: res.headers, body });
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+describe('UI-5 UI-2 the api serves the credential page', () => {
+  it('UI-5 GET /app/credentials without a session returns the HTML shell with the security headers', async () => {
+    const page = await raw('/app/credentials');
+    expect(page.status).toBe(200);
+    expect(page.body).toContain('<div id="root">');
+    expect(page.headers['content-type']).toMatch(/text\/html/);
+    expect(page.headers['content-security-policy']).toBe("default-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'");
+    expect(page.headers['x-content-type-options']).toBe('nosniff');
+    expect(page.headers['referrer-policy']).toBe('no-referrer');
+    expect(page.headers['cache-control']).toBe('no-store');
+    expect((await raw('/app/')).status).toBe(200);
+    expect((await raw('/app')).status).toBe(200);
+  });
+
+  it('UI-5 assets are served with their type and the headers; a missing asset is 404, not the shell', async () => {
+    const asset = await raw('/app/assets/app-abc123.js');
+    expect(asset.status).toBe(200);
+    expect(asset.headers['content-type']).toMatch(/javascript/);
+    expect(asset.headers['content-security-policy']).toBeDefined();
+    expect(asset.headers['cache-control']).not.toBe('no-store');
+    expect((await raw('/app/assets/missing.js')).status).toBe(404);
+  });
+
+  it('SEC-1 path traversal out of the bundle directory is 404, raw and encoded', async () => {
+    for (const path of ['/app/../../etc/passwd', '/app/..%2f..%2fetc%2fpasswd', '/app/%2e%2e/%2e%2e/etc/passwd', '/app/assets/..%2f..%2f..%2fpackage.json', '/app/%00', '/app/..\\..\\etc\\passwd']) {
+      const answer = await raw(path);
+      expect(answer.status, path).toBe(404);
+      expect(answer.body, path).not.toContain('root:');
+    }
+  });
+
+  it('SEC-1 the /app routes do not shadow the guarded and public api routes', async () => {
+    expect((await send('GET', '/api/v1/credentials', {})).status).toBe(401);
+    expect((await send('GET', '/api/v1/session', {})).status).toBe(401);
+    expect((await send('GET', '/healthz', {})).status).toBe(200);
+    expect((await send('POST', '/app/credentials', {})).status).toBe(404);
   });
 });

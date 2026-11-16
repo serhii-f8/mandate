@@ -3,23 +3,25 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Trusted pages (approval, credential entry, audit, change-set detail). Becomes a Vite app in a later phase.",
+  "description": "Trusted pages (credential entry now; approval, audit, change-set detail later). A static bundle the api serves under /app/.",
   "license": "Apache-2.0",
-  "exports": {
-    ".": {
-      "@aiops/source": "./src/index.ts",
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist"
-  ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run --project unit --passWithNoTests"
   },
-  "devDependencies": {}
+  "dependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "jsdom": "31.0.1",
+    "vite": "8.3.8"
+  }
 }

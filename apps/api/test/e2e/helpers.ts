@@ -57,6 +57,8 @@ export interface StartApiOptions {
   readonly logger?: Logger;
   /** The read adapter; a fresh OpenAPI adapter by default, as `main.ts` uses. */
   readonly adapter?: OpenApiAdapter;
+  /** Directory of the web bundle to serve under /app/ (`AIOPS_WEB_DIR`). */
+  readonly webDir?: string;
 }
 
 export async function startApi(databaseUrl: string, options: StartApiOptions): Promise<RunningApi> {
@@ -79,6 +81,7 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
     masterKeys: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
     sessionMaxAgeSeconds: 28_800,
     freshAuthSeconds: 300,
+    ...(options.webDir === undefined ? {} : { webDir: options.webDir }),
     presetDirs: [],
   };
   const adapter = options.adapter ?? createOpenApiAdapter();

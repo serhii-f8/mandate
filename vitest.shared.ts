@@ -15,6 +15,8 @@ const conditions = ['@aiops/source', ...defaultServerConditions];
 export interface PackageConfigOptions {
   /** Extra Vite plugins, e.g. SWC for decorator metadata in `apps/api`. */
   readonly plugins?: PluginOption[];
+  /** Test environment of the unit project, e.g. `jsdom` for `apps/web`; Node by default. */
+  readonly unitEnvironment?: 'jsdom';
 }
 
 export function packageConfig(options: PackageConfigOptions = {}): ViteUserConfig {
@@ -26,7 +28,11 @@ export function packageConfig(options: PackageConfigOptions = {}): ViteUserConfi
       projects: [
         {
           extends: true,
-          test: { name: 'unit', include: ['src/**/*.test.ts', 'test/**/*.unit.test.ts'] },
+          test: {
+            name: 'unit',
+            include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'test/**/*.unit.test.ts'],
+            ...(options.unitEnvironment === undefined ? {} : { environment: options.unitEnvironment }),
+          },
         },
         {
           extends: true,
