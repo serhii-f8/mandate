@@ -31,7 +31,11 @@ export interface Snapshot {
 export interface PipelineDeps {
   readonly snapshot: () => Snapshot;
   readonly builtins: readonly BuiltinTool[];
-  readonly invoker: OperationInvoker;
+  /**
+   * The invoker for one call, bound to the configuration snapshot its lookup, validation
+   * and policy decision used, so a reload in flight cannot change what runs (SEC-1).
+   */
+  readonly invokerFor: (configuration: LoadedConfiguration, correlationId: string) => OperationInvoker;
   readonly audit: AuditLog;
   readonly newId: () => string;
   /** Monotonic milliseconds. */
@@ -205,7 +209,7 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
       // Step 1 returned unless a built-in or a granted operation was found.
       if (operation === undefined) throw new Error('no operation after lookup');
       report({ operation: operation.id });
-      const result = await deps.invoker.invoke({ operation, args: validArgs, caller: req.caller });
+      const result = await deps.invokerFor(configuration, req.correlationId).invoke({ operation, args: validArgs, caller: req.caller });
       // The operation ID stays authoritative over whatever the invoker reports.
       if (result.auditDetails !== undefined) report({ ...result.auditDetails, operation: operation.id });
       return {

@@ -70,4 +70,9 @@ describe('AUD-1 tool call audit event', () => {
     const own = toolCallAuditEvent({ ...base, outcome: 'error', errorCode: 'handler_failed', details: { errorCode: 'http_status' } });
     expect(own.details).toEqual({ durationMs: 3, errorCode: 'handler_failed' });
   });
+
+  it('AUD-1 ignores a declared client name passed as an extra detail', () => {
+    expect(toolCallAuditEvent({ ...base, outcome: 'ok', details: { declaredClientName: 'spoofed' } }).details).toEqual({ durationMs: 3 });
+    expect(toolCallAuditEvent({ ...base, outcome: 'ok', declaredClientName: 'real', details: { declaredClientName: 'spoofed' } }).details).toEqual({ durationMs: 3, declaredClientName: 'real' });
+  });
 });

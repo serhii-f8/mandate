@@ -3,7 +3,7 @@ import { createOpenApiAdapter } from '@aiops/adapters';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
 import type { ReadAdapter, ReadOutcome } from '@aiops/connector-sdk';
 import { READ_RESULT_TEXT, type Caller, type CredentialHandle, type CredentialStatus, type CredentialVault, type OperationDefinition } from '@aiops/core';
-import { DirectReadInvoker, WRITE_NEEDS_CHANGESET } from './read-invoker.js';
+import { DirectReadInvoker, directReadInvokers, WRITE_NEEDS_CHANGESET, type UpstreamCallLog } from './read-invoker.js';
 
 const SOURCES = {
   'connections.yaml': `version: 1
@@ -82,7 +82,7 @@ const OK: ReadOutcome = { ok: true, status: 200, durationMs: 12, items: [{ sku: 
 function setup(outcome: ReadOutcome = OK) {
   const vault = new MemoryVault();
   const adapter = new FakeAdapter(outcome);
-  const invoker = new DirectReadInvoker({ configuration: () => CONFIG, vault, adapter });
+  const invoker = new DirectReadInvoker({ configuration: CONFIG, vault, adapter });
   return { vault, adapter, invoker };
 }
 
@@ -155,7 +155,7 @@ describe('MCP-4 direct read invoker', () => {
   });
 
   it('SEC-2 a missing credential gives the credential_missing text through the real adapter', async () => {
-    const invoker = new DirectReadInvoker({ configuration: () => CONFIG, vault: new MemoryVault(), adapter: createOpenApiAdapter() });
+    const invoker = new DirectReadInvoker({ configuration: CONFIG, vault: new MemoryVault(), adapter: createOpenApiAdapter() });
     const result = await invoker.invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
     expect(result.isError).toBe(true);
     expect(result.text).toBe(READ_RESULT_TEXT.errors.credential_missing('catalog.search_products'));
@@ -165,7 +165,7 @@ describe('MCP-4 direct read invoker', () => {
   it('MCP-4 answers with a fixed error when the operation has no upstream binding', async () => {
     const { adapter } = setup();
     const unbound: LoadedConfiguration = { ...CONFIG, bindings: new Map() };
-    const invoker = new DirectReadInvoker({ configuration: () => unbound, vault: new MemoryVault(), adapter });
+    const invoker = new DirectReadInvoker({ configuration: unbound, vault: new MemoryVault(), adapter });
     const result = await invoker.invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
     expect(result).toEqual({
       isError: true,
@@ -173,5 +173,49 @@ describe('MCP-4 direct read invoker', () => {
       auditDetails: { operation: 'catalog.search_products', connection: 'magento', errorCode: 'not_bound' },
     });
     expect(adapter.reads).toEqual([]);
+  });
+
+  it('SEC-1 POL-2 runs under the configuration it is given, not a newer one', async () => {
+    const other = await loadConfigurationSources(
+      Object.entries({ ...SOURCES, 'connections.yaml': SOURCES['connections.yaml'].replace('https://shop.example.test/rest', 'https://other.example.test/rest') }).map(([file, text]) => ({ file, text })),
+    );
+    if (!other.ok) throw new Error(JSON.stringify(other.issues));
+    const adapter = new FakeAdapter(OK);
+    const invokerFor = directReadInvokers({ vault: new MemoryVault(), adapter });
+    await invokerFor(CONFIG, 'corr-a').invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
+    await invokerFor(other.configuration, 'corr-b').invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
+    expect(adapter.reads.map((r) => r.connection.baseUrl)).toEqual(['https://shop.example.test/rest', 'https://other.example.test/rest']);
+    expect(adapter.reads[0]?.mapping).toBe(CONFIG.bindings.get('catalog.search_products')?.mapping);
+  });
+
+  it('AUD-1 records the connection of the binding that ran', async () => {
+    const binding = CONFIG.bindings.get('catalog.search_products');
+    const settings = CONFIG.connectionSettings.get('magento');
+    if (binding === undefined || settings === undefined) throw new Error('fixture');
+    const rebound: LoadedConfiguration = {
+      ...CONFIG,
+      bindings: new Map([['catalog.search_products', { ...binding, connection: 'magento-eu' }]]),
+      connectionSettings: new Map([['magento-eu', { ...settings, id: 'magento-eu' }]]),
+    };
+    const adapter = new FakeAdapter(OK);
+    const result = await new DirectReadInvoker({ configuration: rebound, vault: new MemoryVault(), adapter }).invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
+    expect(result.auditDetails).toMatchObject({ connection: 'magento-eu' });
+    expect(adapter.reads[0]?.connection.id).toBe('magento-eu');
+  });
+
+  it('SEC-3 logs each upstream call with correlation ID, operation, connection, status and duration only', async () => {
+    const lines: UpstreamCallLog[] = [];
+    const invokerFor = directReadInvokers({ vault: new MemoryVault(), adapter: new FakeAdapter(OK), log: (l) => lines.push(l) });
+    await invokerFor(CONFIG, 'corr-1').invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
+    const failing = directReadInvokers({
+      vault: new MemoryVault(),
+      adapter: new FakeAdapter({ ok: false, code: 'timeout', durationMs: 9, message: 'secret-detail' }),
+      log: (l) => lines.push(l),
+    });
+    await failing(CONFIG, 'corr-2').invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
+    expect(lines).toEqual([
+      { correlationId: 'corr-1', operation: 'catalog.search_products', connection: 'magento', status: 200, durationMs: 12 },
+      { correlationId: 'corr-2', operation: 'catalog.search_products', connection: 'magento', durationMs: 9, errorCode: 'timeout' },
+    ]);
   });
 });

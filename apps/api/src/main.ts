@@ -3,7 +3,7 @@ import { ConfigurationError, ConfigurationHolder, formatIssue, parseApiEnv } fro
 import { runMigrations } from '@aiops/db';
 import { createApp } from './app.js';
 import { createLogger } from './logger.js';
-import { assertFullyChecked, configurationLoadOptions } from './upstream/upstream-runtime.js';
+import { configurationLoadOptions } from './upstream/upstream-runtime.js';
 
 /** Process entry: parse env, load configuration (CFG-2), apply migrations (NFR-5), serve. */
 async function main(): Promise<void> {
@@ -21,7 +21,6 @@ async function main(): Promise<void> {
     }
     throw error;
   }
-  assertFullyChecked(configuration.current);
   logger.info({ hash: configuration.current.hash }, 'configuration loaded');
   // SIGHUP reloads; an invalid configuration is reported and the previous one stays active (CFG-2).
   process.on('SIGHUP', () => {

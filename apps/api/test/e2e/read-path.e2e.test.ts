@@ -173,7 +173,15 @@ describe('SEC-3 the credential never leaves the adapter', () => {
     const forbidden = [UPSTREAM_TOKEN, Buffer.from(UPSTREAM_TOKEN).toString('base64'), Buffer.from(`Bearer ${UPSTREAM_TOKEN}`).toString('base64')];
     const haystacks = { results: JSON.stringify([ok.result, failed.result]), audit: await allAuditText(), logs: logLines.join('') };
     expect(haystacks.results).toContain('[REDACTED]');
-    expect(haystacks.logs.length).toBeGreaterThan(0);
+    // Both upstream calls were logged under their request's correlation ID, with identifiers only.
+    for (const [id, status] of [
+      [ok.correlationId, 200],
+      [failed.correlationId, 500],
+    ] as const) {
+      const line = logLines.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.correlationId === id && l.msg === 'upstream call completed');
+      expect(line).toMatchObject({ operation: 'catalog.search_products', connection: 'shop', status, durationMs: expect.any(Number) as unknown });
+    }
+    expect(logLines.some((l) => l.includes(UPSTREAM_TOKEN))).toBe(false);
     for (const [where, text] of Object.entries(haystacks)) {
       for (const secret of forbidden) expect(text.includes(secret), `${where} contains a secret form`).toBe(false);
     }

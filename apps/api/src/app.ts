@@ -20,9 +20,9 @@ import { createLogger, PinoNestLogger } from './logger.js';
 import { BUILTIN_TOOLS } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
 import { createServerFactory } from './mcp/mcp-server-factory.js';
-import { snapshotOf } from './mcp/tool-pipeline.js';
+import { snapshotOf, type PipelineDeps } from './mcp/tool-pipeline.js';
 import { API_ENV, AUDIT_LOG, BEARER_GATE, CONFIGURATION, CREDENTIAL_VAULT, DATABASE, LOGGER, MCP_HANDLER } from './tokens.js';
-import { DirectReadInvoker } from './upstream/read-invoker.js';
+import { directReadInvokers } from './upstream/read-invoker.js';
 import { assertFullyChecked } from './upstream/upstream-runtime.js';
 
 /** Seams the tests replace. */
@@ -35,6 +35,23 @@ export interface AppOverrides {
   readonly vault?: CredentialVault;
   /** Signing keys; defaults to the remote JWKS at `OIDC_JWKS_URL`. */
   readonly jwks?: JWTVerifyGetKey;
+}
+
+/** The invoker per call: the override, or the direct read path bound to the request's snapshot. */
+function invokerFactory(
+  override: OperationInvoker | undefined,
+  vault: CredentialVault,
+  adapter: ReadAdapter,
+  logger: Logger,
+): PipelineDeps['invokerFor'] {
+  if (override !== undefined) return () => override;
+  return directReadInvokers({
+    vault,
+    adapter,
+    log: (record) => {
+      logger.info(record, 'upstream call completed');
+    },
+  });
 }
 
 /** Closes the per-process resources when the application shuts down. */
@@ -94,7 +111,7 @@ class AppModule {
               createServerFactory({
                 snapshot: () => snapshotOf(configuration.current),
                 builtins: BUILTIN_TOOLS,
-                invoker: overrides.invoker ?? new DirectReadInvoker({ configuration: () => configuration.current, vault, adapter }),
+                invokerFor: invokerFactory(overrides.invoker, vault, adapter, logger),
                 audit,
                 newId: randomUUID,
                 now: () => performance.now(),

@@ -66,7 +66,7 @@ function setup() {
   const deps: PipelineDeps = {
     snapshot: () => snapshotOf(config),
     builtins: [pingTool],
-    invoker,
+    invokerFor: () => invoker,
     audit,
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
     now: () => 0,
@@ -229,7 +229,7 @@ function setupWith(config: LoadedConfiguration, invoker: OperationInvoker) {
   const deps: PipelineDeps = {
     snapshot: () => snapshotOf(config),
     builtins: [pingTool],
-    invoker,
+    invokerFor: () => invoker,
     audit,
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
     now: () => 0,
@@ -299,5 +299,31 @@ describe('MCP-4 read results reach the client as summary, data block and structu
       details: { operation: 'catalog.search_products', connection: 'magento', upstreamStatus: 200, itemCount: 1, upstreamMs: 3, durationMs: 0 },
     });
     expect(JSON.stringify(audit.events)).not.toContain('acme');
+  });
+});
+
+describe('SEC-1 POL-2 the operation runs under the snapshot the decision used', () => {
+  it('SEC-1 hands the request snapshot configuration and correlation ID to the invoker factory, not the current one', async () => {
+    const invoker = new FakeInvoker();
+    const seen: [LoadedConfiguration, string][] = [];
+    let current: LoadedConfiguration = LOADED;
+    const audit = new InMemoryAuditLog();
+    const deps: PipelineDeps = {
+      snapshot: () => snapshotOf(current),
+      builtins: [pingTool],
+      invokerFor: (configuration, correlationId) => {
+        seen.push([configuration, correlationId]);
+        return invoker;
+      },
+      audit,
+      newId: () => '00000000-0000-4000-8000-000000000001',
+      now: () => 0,
+    };
+    const req: PipelineRequest = { caller: alice, correlationId: 'corr-9', snapshot: deps.snapshot() };
+    current = OVERRIDDEN; // a reload lands while the request is in flight
+    await callTool(deps, req, 'catalog.search_products', { brand: 'acme', fields: ['sku'] });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.[0]).toBe(LOADED);
+    expect(seen[0]?.[1]).toBe('corr-9');
   });
 });

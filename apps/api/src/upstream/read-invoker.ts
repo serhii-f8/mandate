@@ -18,11 +18,30 @@ import {
 
 export const WRITE_NEEDS_CHANGESET = 'write operations need change-sets, which arrive in Phase 4';
 
+/** One log record per upstream call: identifiers, status and timing only (SEC-3). */
+export interface UpstreamCallLog {
+  readonly correlationId: string;
+  readonly operation: string;
+  readonly connection: string;
+  readonly status?: number;
+  readonly durationMs: number;
+  readonly errorCode?: string;
+}
+
 export interface DirectReadInvokerDeps {
-  /** The active configuration, read per call so a reload takes effect (CFG-2). */
-  readonly configuration: () => LoadedConfiguration;
+  /** The request's configuration snapshot, the one its policy decision used (SEC-1). */
+  readonly configuration: LoadedConfiguration;
   readonly vault: CredentialVault;
   readonly adapter: ReadAdapter;
+  readonly correlationId?: string;
+  readonly log?: (record: UpstreamCallLog) => void;
+}
+
+/** Builds the per-call invoker the pipeline asks for (`PipelineDeps.invokerFor`). */
+export function directReadInvokers(
+  base: Omit<DirectReadInvokerDeps, 'configuration' | 'correlationId'>,
+): (configuration: LoadedConfiguration, correlationId: string) => DirectReadInvoker {
+  return (configuration, correlationId) => new DirectReadInvoker({ ...base, configuration, correlationId });
 }
 
 const isScheme = (scheme: string): scheme is CredentialScheme => (CREDENTIAL_SCHEMES as readonly string[]).includes(scheme);
@@ -61,7 +80,7 @@ export class DirectReadInvoker implements OperationInvoker {
     if (operation.risk !== 'read') {
       return { isError: true, text: `${operation.id} cannot run: ${WRITE_NEEDS_CHANGESET}.`, auditDetails: { ...base, errorCode: 'write_not_supported' } };
     }
-    const configuration = this.deps.configuration();
+    const { configuration } = this.deps;
     const binding = configuration.bindings.get(operation.id);
     const connection = binding === undefined ? undefined : configuration.connectionSettings.get(binding.connection);
     if (binding === undefined || connection === undefined) {
@@ -69,18 +88,28 @@ export class DirectReadInvoker implements OperationInvoker {
       return { isError: true, text: READ_RESULT_TEXT.unknown(operation.id), auditDetails: { ...base, errorCode: 'not_bound' } };
     }
 
+    // From here on the binding decides the connection, for the call and for the audit.
+    const bound: Details = { operation: operation.id, connection: binding.connection };
     let credential: CredentialSource | undefined;
     if (connection.credentialRef !== undefined) {
       const handle = await this.deps.vault.handle(connection.credentialRef);
       if (handle !== undefined) {
         if (!isScheme(handle.scheme)) {
-          return { ...readErrorResult(operation.id, 'credential_unusable'), auditDetails: { ...base, errorCode: 'credential_unusable' } };
+          return { ...readErrorResult(operation.id, 'credential_unusable'), auditDetails: { ...bound, errorCode: 'credential_unusable' } };
         }
         credential = credentialSource(handle, handle.scheme);
       }
     }
 
     const outcome = await this.deps.adapter.read({ connection, mapping: binding.mapping, args, ...(credential === undefined ? {} : { credential }) });
-    return fromOutcome(operation.id, base, outcome);
+    this.deps.log?.({
+      correlationId: this.deps.correlationId ?? '',
+      operation: operation.id,
+      connection: binding.connection,
+      ...(outcome.status === undefined ? {} : { status: outcome.status }),
+      durationMs: outcome.durationMs,
+      ...(outcome.ok ? {} : { errorCode: outcome.code }),
+    });
+    return fromOutcome(operation.id, bound, outcome);
   }
 }

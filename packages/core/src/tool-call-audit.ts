@@ -34,6 +34,8 @@ export function toolCallAuditEvent(call: ToolCallRecord): AuditEventInput {
   if (call.outcome === 'error' && call.errorCode !== undefined) details.errorCode = call.errorCode;
   // An error code belongs to failed calls only, whoever supplied it.
   if (call.outcome !== 'error') delete details.errorCode;
+  // Only the request's own declared name is recorded; an extra detail cannot supply one.
+  if (call.declaredClientName === undefined) delete details.declaredClientName;
   return {
     id: call.id,
     actor: call.caller.subject,
