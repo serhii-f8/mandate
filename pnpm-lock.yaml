@@ -53,6 +53,9 @@ importers:
       '@aiops/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@aiops/upstream':
+        specifier: workspace:*
+        version: link:../../packages/upstream
       '@modelcontextprotocol/node':
         specifier: 2.1.2
         version: 2.1.2(@modelcontextprotocol/server@2.4.0)
@@ -265,6 +268,18 @@ importers:
       testcontainers:
         specifier: 12.2.1
         version: 12.2.1(bare-buffer@3.7.2)(supports-color@8.1.1)
+
+  packages/upstream:
+    dependencies:
+      '@aiops/config':
+        specifier: workspace:*
+        version: link:../config
+      '@aiops/connector-sdk':
+        specifier: workspace:*
+        version: link:../connector-sdk
+      '@aiops/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/widgets: {}
 

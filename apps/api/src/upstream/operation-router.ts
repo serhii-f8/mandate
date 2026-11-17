@@ -9,7 +9,7 @@ import { ChangeSetInvoker } from '../changesets/changeset-invoker.js';
 import type { PipelineDeps } from '../mcp/tool-pipeline.js';
 import { DirectReadInvoker, type DirectReadInvokerDeps } from './read-invoker.js';
 import { riskNotSupportedResult } from './risk-not-supported.js';
-import { createUpstreamReader } from './upstream-reader.js';
+import { createUpstreamReader } from '@aiops/upstream';
 
 export { riskNotSupportedResult };
 

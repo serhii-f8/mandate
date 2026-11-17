@@ -52,6 +52,24 @@ export const boundaryRules = [
     },
   },
   {
+    files: ['packages/upstream/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [workspaceExcept(['core', 'config', 'connector-sdk'], 'packages/upstream depends on @aiops/core, @aiops/config and @aiops/connector-sdk only.')] },
+      ],
+    },
+  },
+  {
+    files: ['packages/upstream/src/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [workspaceExcept(['core', 'config', 'connector-sdk', 'testing'], 'packages/upstream tests may also use @aiops/testing.')] },
+      ],
+    },
+  },
+  {
     files: ['presets/*/src/**/*.ts'],
     rules: {
       'no-restricted-imports': [

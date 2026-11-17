@@ -41,6 +41,7 @@
     "@aiops/connector-sdk": "workspace:*",
     "@aiops/core": "workspace:*",
     "@aiops/db": "workspace:*",
+    "@aiops/upstream": "workspace:*",
     "@modelcontextprotocol/node": "2.1.2",
     "@modelcontextprotocol/server": "2.4.0",
     "@nestjs/common": "12.5.0",

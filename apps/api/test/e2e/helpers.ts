@@ -12,7 +12,7 @@ import { runMigrations } from '@aiops/db';
 import { startPostgres, TEST_WEB_CLIENT_SECRET, type StartedPostgres, type TestIssuer } from '@aiops/testing';
 import { createApp } from '../../src/app.js';
 import { CONFIGURATION, CREDENTIAL_VAULT } from '../../src/tokens.js';
-import { configurationLoadOptions } from '../../src/upstream/upstream-runtime.js';
+import { configurationLoadOptions } from '@aiops/upstream';
 
 export const MODERN = '2026-07-28';
 export const FIXTURE_CONFIG = fileURLToPath(new URL('./fixtures/config', import.meta.url));

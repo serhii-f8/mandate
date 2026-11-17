@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createOpenApiAdapter } from '@aiops/adapters';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import { assertFullyChecked, configurationLoadOptions } from './upstream-runtime.js';
+import type { UpstreamResolver } from '@aiops/connector-sdk';
+import { assertFullyChecked, configurationLoadOptions } from './load-options.js';
 
 const loaded = await loadConfigurationSources([{ file: 'c.yaml', text: 'version: 1\n' }]);
 if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
@@ -9,7 +9,7 @@ const CONFIG: LoadedConfiguration = loaded.configuration;
 
 describe('CONN-2 the api always loads the configuration with spec and preset checks', () => {
   it('CONN-2 load options carry the adapter resolver and the preset directories', () => {
-    const adapter = createOpenApiAdapter();
+    const adapter = { resolver: { resolveSpec: () => Promise.resolve({ ok: true as const, catalog: [] }) } satisfies UpstreamResolver };
     expect(configurationLoadOptions(adapter, { presetDirs: ['/opt/presets'] })).toEqual({ resolver: adapter.resolver, presetDirs: ['/opt/presets'] });
   });
 

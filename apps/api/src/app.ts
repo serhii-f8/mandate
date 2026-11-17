@@ -38,7 +38,7 @@ import {
 } from './tokens.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
 import { operationInvokers } from './upstream/operation-router.js';
-import { assertFullyChecked } from './upstream/upstream-runtime.js';
+import { assertFullyChecked } from '@aiops/upstream';
 import { PageAccessGuard, type PageChecks } from './web/access.js';
 import { AuthController, SessionController } from './web/auth.controller.js';
 import { ConnectionsController } from './web/connections.controller.js';

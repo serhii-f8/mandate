@@ -3,7 +3,7 @@ import { ConfigurationError, ConfigurationHolder, formatIssue, parseApiEnv } fro
 import { runMigrations } from '@aiops/db';
 import { createApp } from './app.js';
 import { createLogger } from './logger.js';
-import { configurationLoadOptions } from './upstream/upstream-runtime.js';
+import { configurationLoadOptions } from '@aiops/upstream';
 
 /** Process entry: parse env, load configuration (CFG-2), apply migrations (NFR-5), serve. */
 async function main(): Promise<void> {

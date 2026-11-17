@@ -79,6 +79,17 @@ describe('package boundaries (CLAUDE.md engineering conventions)', () => {
     }
   });
 
+  it('EXE-1 packages/upstream depends on core, config and the connector SDK only', async () => {
+    for (const spec of ['@aiops/db', '@aiops/adapters', '@aiops/api']) {
+      expect(await restrictedImportErrors('packages/upstream/src/probe.ts', spec)).toBe(1);
+    }
+    for (const spec of ['@aiops/core', '@aiops/config', '@aiops/connector-sdk']) {
+      expect(await restrictedImportErrors('packages/upstream/src/probe.ts', spec)).toBe(0);
+    }
+    expect(await restrictedImportErrors('packages/upstream/src/probe.test.ts', '@aiops/testing')).toBe(0);
+    expect(await restrictedImportErrors('packages/upstream/src/probe.ts', '@aiops/testing')).toBe(1);
+  });
+
   describe('Temporal workflow code stays deterministic (EXE-10)', () => {
     it.each(['node:fs', 'fs', '@aiops/db', '@nestjs/common', 'drizzle-orm', '@aiops/adapters'])(
       'rejects an import of %s',
