@@ -3,7 +3,7 @@ import type { ChangesetActivities } from '@aiops/temporal';
 import type { echo } from './echo.js';
 
 export { echo } from './echo.js';
-export { createActivities, unsupportedWriter, type ActivityDeps } from './changeset.js';
+export { createActivities, type ActivityDeps } from './changeset.js';
 export { createExecutionGuard, type ExecutionGuardDeps } from './guard.js';
 export { executionSettings, type ExecutionSettings } from './settings.js';
 

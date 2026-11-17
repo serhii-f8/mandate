@@ -43,14 +43,6 @@ export interface ActivityDeps {
   readonly now: () => Date;
 }
 
-/** Until the write path exists (part 2), every item fails with a fixed code; nothing is written upstream. */
-export function unsupportedWriter(): ChangeWriter {
-  return {
-    writeBatch: ({ items }) =>
-      Promise.resolve(items.map((i): ItemOutcome => ({ targetId: i.targetId, status: 'failed', error: 'write_mode_unsupported' }))),
-  };
-}
-
 const notFound = (): ApplicationFailure => ApplicationFailure.nonRetryable('changeset_not_found');
 const superseded = (): ApplicationFailure => ApplicationFailure.nonRetryable('batch_superseded');
 

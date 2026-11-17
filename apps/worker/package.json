@@ -32,6 +32,7 @@
   "dependencies": {
     "@aiops/adapters": "workspace:*",
     "@aiops/config": "workspace:*",
+    "@aiops/connector-sdk": "workspace:*",
     "@aiops/core": "workspace:*",
     "@aiops/db": "workspace:*",
     "@aiops/temporal": "workspace:*",

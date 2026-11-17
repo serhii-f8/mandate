@@ -3,13 +3,14 @@ import { createOpenApiAdapter } from '@aiops/adapters';
 import { ConfigurationError, ConfigurationHolder, formatIssue, type WorkerEnv } from '@aiops/config';
 import { assertMigrated, createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault } from '@aiops/db';
 import { parseTemporalKeys, workerDataConverter, type ActivityTuning } from '@aiops/temporal';
-import { assertFullyChecked, configurationLoadOptions, createUpstreamReader } from '@aiops/upstream';
+import { assertFullyChecked, configurationLoadOptions, createUpstreamReader, type UpstreamCallLog } from '@aiops/upstream';
 import { heartbeat } from '@temporalio/activity';
 import { NativeConnection } from '@temporalio/worker';
 import type { Logger } from 'pino';
-import { createActivities, createExecutionGuard, echo, unsupportedWriter, type WorkerActivities } from './activities/index.js';
+import { createActivities, createExecutionGuard, echo, type WorkerActivities } from './activities/index.js';
 import { installReload } from './reload.js';
 import { createWorker } from './worker.js';
+import { createWriterFor } from './writers.js';
 
 export interface WorkerRuntime {
   /** Polls the task queue until SIGINT/SIGTERM (`Worker.run` installs those handlers). */
@@ -32,26 +33,21 @@ interface RuntimeStores {
 /**
  * Activities registered on the worker: `echo` and the change-set activities bound to the stores,
  * the current configuration (it changes on SIGHUP) and the tuning from the environment. Writes
- * fail every item until the write path exists (part 2); reads run the shared upstream read path.
+ * go through `createWriterFor` (a bulk binding writes, anything else fails every item with
+ * `write_mode_unsupported`); reads run the shared upstream read path.
  */
 function activitiesFor(stores: RuntimeStores): WorkerActivities {
   const { configuration, repository, vault, adapter, logger } = stores;
+  const log = (record: UpstreamCallLog): void => {
+    logger.info(record, 'upstream call completed');
+  };
   return {
     echo,
     ...createActivities({
       repository,
       configuration: () => configuration.current,
-      writerFor: () => unsupportedWriter(),
-      readerFor: (current, correlationId) =>
-        createUpstreamReader({
-          configuration: current,
-          vault,
-          adapter,
-          correlationId,
-          log: (record) => {
-            logger.info(record, 'upstream call completed');
-          },
-        }),
+      writerFor: createWriterFor({ vault, adapter, log }),
+      readerFor: (current, correlationId) => createUpstreamReader({ configuration: current, vault, adapter, correlationId, log }),
       guardFor: createExecutionGuard({
         repository,
         audit: stores.audit,

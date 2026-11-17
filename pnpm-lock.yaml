@@ -148,6 +148,9 @@ importers:
       '@aiops/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@aiops/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connector-sdk
       '@aiops/core':
         specifier: workspace:*
         version: link:../../packages/core
