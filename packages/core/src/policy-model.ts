@@ -48,6 +48,8 @@ export interface ManifestDefinition {
   readonly scopeArgs: Readonly<Record<string, string>>;
   readonly readBefore: ManifestRead & { readonly idsArg: string };
   readonly selector?: ManifestRead & { readonly pageArg: string; readonly pageSizeArg: string; readonly pageSize: number };
+  /** Bulk writes (OPS-6): record fields carried over from the read-before value. */
+  readonly write?: { readonly carryFields: readonly string[] };
   readonly batchSize: number;
   readonly maxTargets: number;
   readonly rollback: RollbackStrategy;

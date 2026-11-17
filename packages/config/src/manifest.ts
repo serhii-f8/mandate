@@ -38,6 +38,8 @@ export const manifestSchema = z.strictObject({
       page_size: z.number().int().min(1).max(1000).default(100),
     })
     .optional(),
+  /** Write-time options (OPS-6): record fields the write carries over from the read-before value. */
+  write: z.strictObject({ carry_fields: z.array(name).min(1) }).optional(),
   batch_size: z.number().int().min(1).max(1000).default(100),
   max_targets: z.number().int().min(1).max(100_000).default(10_000),
   /** Required: choosing a strategy is a deliberate act (OPS-3). */
@@ -91,6 +93,7 @@ export function toManifestDefinition(m: ManifestConfig): ManifestDefinition {
             pageSize: m.selector.page_size,
           },
         }),
+    ...(m.write === undefined ? {} : { write: { carryFields: [...m.write.carry_fields] } }),
     batchSize: m.batch_size,
     maxTargets: m.max_targets,
     rollback: strategy,
@@ -236,6 +239,19 @@ export function checkManifests(input: ManifestCheckInput): void {
         for (const [arg, field] of Object.entries(manifest.scope_args)) {
           if (!known.has(field)) mAt(['scope_args', arg], notReturned);
         }
+      }
+    }
+
+    const carry = manifest.write?.carry_fields ?? [];
+    carry.forEach((f, index) => {
+      if (manifest.fields.includes(f)) mAt(['write', 'carry_fields', index], 'must not be one of fields');
+    });
+    if (read?.schemaKnown === true) {
+      const known = fieldEnum(read);
+      if (known !== undefined) {
+        carry.forEach((f, index) => {
+          if (!known.has(f)) mAt(['write', 'carry_fields', index], `is not a field operation ${read.definition.id} can return`);
+        });
       }
     }
 
