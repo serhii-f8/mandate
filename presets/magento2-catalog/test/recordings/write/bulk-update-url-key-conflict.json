@@ -1,0 +1,250 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/async/bulk/V1/products",
+    "body": [
+      {
+        "product": {
+          "sku": "GLOBEX-001",
+          "status": 1,
+          "custom_attributes": [
+            {
+              "attribute_code": "url_key",
+              "value": "acme-001"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "response": {
+    "status": 202,
+    "body": {
+      "bulk_uuid": "b1bb5f91-a1bd-4d65-9468-9ee035bc1bd1",
+      "request_items": [
+        {
+          "id": 0,
+          "data_hash": "7cadc219bc36dbe121e20479d78d1c35861f4375a4f6306d1c994329b506bdaa",
+          "status": "accepted"
+        }
+      ],
+      "errors": false
+    }
+  },
+  "polls": [
+    {
+      "status": 200,
+      "body": {
+        "operations_list": [
+          {
+            "id": 0,
+            "bulk_uuid": "b1bb5f91-a1bd-4d65-9468-9ee035bc1bd1",
+            "topic_name": "async.magento.catalog.api.productrepositoryinterface.save.post",
+            "serialized_data": "{\"entity_id\":null,\"entity_link\":\"\",\"meta_information\":\"{\\\"product\\\":{\\\"sku\\\":\\\"GLOBEX-001\\\",\\\"status\\\":1,\\\"custom_attributes\\\":[{\\\"attribute_code\\\":\\\"url_key\\\",\\\"value\\\":\\\"acme-001\\\"}]},\\\"saveOptions\\\":false}\",\"store_id\":\"0\"}",
+            "result_serialized_data": null,
+            "status": 4,
+            "result_message": null,
+            "error_code": null
+          }
+        ],
+        "user_type": 2,
+        "bulk_id": "b1bb5f91-a1bd-4d65-9468-9ee035bc1bd1",
+        "description": "Topic async.magento.catalog.api.productrepositoryinterface.save.post",
+        "start_time": "2026-11-17 15:52:24",
+        "user_id": 1,
+        "operation_count": 1
+      }
+    },
+    {
+      "status": 200,
+      "body": {
+        "operations_list": [
+          {
+            "id": 0,
+            "bulk_uuid": "b1bb5f91-a1bd-4d65-9468-9ee035bc1bd1",
+            "topic_name": "async.magento.catalog.api.productrepositoryinterface.save.post",
+            "serialized_data": "{\"entity_id\":null,\"entity_link\":\"\",\"meta_information\":\"{\\\"product\\\":{\\\"sku\\\":\\\"GLOBEX-001\\\",\\\"status\\\":1,\\\"custom_attributes\\\":[{\\\"attribute_code\\\":\\\"url_key\\\",\\\"value\\\":\\\"acme-001\\\"}]},\\\"saveOptions\\\":false}\",\"store_id\":\"0\"}",
+            "result_serialized_data": null,
+            "status": 4,
+            "result_message": null,
+            "error_code": null
+          }
+        ],
+        "user_type": 2,
+        "bulk_id": "b1bb5f91-a1bd-4d65-9468-9ee035bc1bd1",
+        "description": "Topic async.magento.catalog.api.productrepositoryinterface.save.post",
+        "start_time": "2026-11-17 15:52:24",
+        "user_id": 1,
+        "operation_count": 1
+      }
+    },
+    {
+      "status": 200,
+      "body": {
+        "operations_list": [
+          {
+            "id": 0,
+            "bulk_uuid": "b1bb5f91-a1bd-4d65-9468-9ee035bc1bd1",
+            "topic_name": "async.magento.catalog.api.productrepositoryinterface.save.post",
+            "serialized_data": "{\"entity_id\":null,\"entity_link\":\"\",\"meta_information\":\"{\\\"product\\\":{\\\"sku\\\":\\\"GLOBEX-001\\\",\\\"status\\\":1,\\\"custom_attributes\\\":[{\\\"attribute_code\\\":\\\"url_key\\\",\\\"value\\\":\\\"acme-001\\\"}]},\\\"saveOptions\\\":false}\",\"store_id\":\"0\"}",
+            "result_serialized_data": null,
+            "status": 4,
+            "result_message": null,
+            "error_code": null
+          }
+        ],
+        "user_type": 2,
+        "bulk_id": "b1bb5f91-a1bd-4d65-9468-9ee035bc1bd1",
+        "description": "Topic async.magento.catalog.api.productrepositoryinterface.save.post",
+        "start_time": "2026-11-17 15:52:24",
+        "user_id": 1,
+        "operation_count": 1
+      }
+    },
+    {
+      "status": 200,
+      "body": {
+        "operations_list": [
+          {
+            "id": 0,
+            "bulk_uuid": "b1bb5f91-a1bd-4d65-9468-9ee035bc1bd1",
+            "topic_name": "async.magento.catalog.api.productrepositoryinterface.save.post",
+            "serialized_data": "{\"entity_id\":null,\"entity_link\":\"\",\"meta_information\":\"{\\\"product\\\":{\\\"sku\\\":\\\"GLOBEX-001\\\",\\\"status\\\":1,\\\"custom_attributes\\\":[{\\\"attribute_code\\\":\\\"url_key\\\",\\\"value\\\":\\\"acme-001\\\"}]},\\\"saveOptions\\\":false}\",\"store_id\":\"0\"}",
+            "result_serialized_data": null,
+            "status": 3,
+            "result_message": "URL key for specified store already exists.",
+            "error_code": 0
+          }
+        ],
+        "user_type": 2,
+        "bulk_id": "b1bb5f91-a1bd-4d65-9468-9ee035bc1bd1",
+        "description": "Topic async.magento.catalog.api.productrepositoryinterface.save.post",
+        "start_time": "2026-11-17 15:52:24",
+        "user_id": 1,
+        "operation_count": 1
+      }
+    }
+  ],
+  "verify": {
+    "request": {
+      "method": "GET",
+      "path": "/V1/products",
+      "query": {
+        "searchCriteria[filter_groups][0][filters][0][field]": "brand",
+        "searchCriteria[filter_groups][0][filters][0][value]": "globex",
+        "searchCriteria[filter_groups][0][filters][0][condition_type]": "eq",
+        "searchCriteria[filter_groups][1][filters][0][field]": "sku",
+        "searchCriteria[filter_groups][1][filters][0][value]": "GLOBEX-001",
+        "searchCriteria[filter_groups][1][filters][0][condition_type]": "in",
+        "searchCriteria[pageSize]": "100"
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": 4,
+            "sku": "GLOBEX-001",
+            "name": "Globex Hammock",
+            "attribute_set_id": 4,
+            "price": 59,
+            "status": 1,
+            "visibility": 4,
+            "type_id": "simple",
+            "created_at": "2026-11-16 22:21:39",
+            "updated_at": "2026-11-17 15:52:23",
+            "weight": 1,
+            "extension_attributes": {
+              "website_ids": [
+                1
+              ]
+            },
+            "product_links": [],
+            "options": [],
+            "media_gallery_entries": [],
+            "tier_prices": [],
+            "custom_attributes": [
+              {
+                "attribute_code": "options_container",
+                "value": "container2"
+              },
+              {
+                "attribute_code": "cost",
+                "value": "25.000000"
+              },
+              {
+                "attribute_code": "url_key",
+                "value": "globex-001"
+              },
+              {
+                "attribute_code": "msrp_display_actual_price_type",
+                "value": "0"
+              },
+              {
+                "attribute_code": "required_options",
+                "value": "0"
+              },
+              {
+                "attribute_code": "has_options",
+                "value": "0"
+              },
+              {
+                "attribute_code": "meta_keyword",
+                "value": "contract bulk one"
+              },
+              {
+                "attribute_code": "tax_class_id",
+                "value": "2"
+              },
+              {
+                "attribute_code": "category_ids",
+                "value": []
+              },
+              {
+                "attribute_code": "short_description",
+                "value": "Globex Hammock"
+              },
+              {
+                "attribute_code": "mageos_shopping_feed_skip_submit",
+                "value": "0"
+              },
+              {
+                "attribute_code": "brand",
+                "value": "globex"
+              },
+              {
+                "attribute_code": "description",
+                "value": "A hammock for long afternoons."
+              }
+            ]
+          }
+        ],
+        "search_criteria": {
+          "filter_groups": [
+            {
+              "filters": [
+                {
+                  "field": "brand",
+                  "value": "globex",
+                  "condition_type": "eq"
+                }
+              ]
+            },
+            {
+              "filters": [
+                {
+                  "field": "sku",
+                  "value": "GLOBEX-001",
+                  "condition_type": "in"
+                }
+              ]
+            }
+          ],
+          "page_size": 100
+        },
+        "total_count": 1
+      }
+    }
+  }
+}

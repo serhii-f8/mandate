@@ -13,7 +13,7 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { ChangeSetStats, ChangeSetStatus, ExclusionReason, ItemStatus } from '@aiops/core';
+import type { ChangeSetStats, ChangeSetStatus, ExclusionReason, ItemStatus, PlanEntry, TaskKind } from '@aiops/core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => 'bytea',
@@ -110,15 +110,29 @@ export const changeSet = pgTable(
     status: text('status').$type<ChangeSetStatus>().notNull(),
     stats: jsonb('stats').$type<ChangeSetStats>().notNull(),
     errorCode: text('error_code'),
+    // Upstream HTTP status of a failed preparation read (a number only, SEC-3).
+    errorStatus: integer('error_status'),
     configHash: text('config_hash').notNull(),
     correlationId: text('correlation_id').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     preparedAt: timestamp('prepared_at', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    // Execution request (POL-6) and cancel request (EXE-7): each group is written once, fixed by
+    // migration `0006_execution_guards`.
+    executionActor: text('execution_actor'),
+    executionGroups: jsonb('execution_groups').$type<string[]>(),
+    executionClientId: text('execution_client_id'),
+    executionCorrelationId: text('execution_correlation_id'),
+    executionStartedAt: timestamp('execution_started_at', { withTimezone: true }),
+    cancelRequestedBy: text('cancel_requested_by'),
+    cancelCorrelationId: text('cancel_correlation_id'),
+    cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
   },
   (t) => [
     index('change_set_requester_created_at_idx').on(t.requester, t.createdAt),
+    index('change_set_requester_status_idx').on(t.requester, t.status),
+    index('change_set_requester_execution_started_at_idx').on(t.requester, t.executionStartedAt),
     check(
       'change_set_status_check',
       sql`${t.status} IN ('preparing', 'prepared', 'pending_approval', 'approved', 'executing', 'completed', 'completed_with_errors', 'failed', 'rejected', 'expired', 'cancelled', 'rolling_back', 'rolled_back')`,
@@ -149,4 +163,69 @@ export const changeItem = pgTable(
     primaryKey({ columns: [t.changesetId, t.targetId] }),
     check('change_item_status_check', sql`${t.status} IN ('pending', 'excluded', 'written', 'failed', 'skipped')`),
   ],
+);
+
+/**
+ * Write batches of an execution (EXE-3). One row per batch attempt; a `done` row is frozen by
+ * migration `0006_execution_guards`. `last_target` is `COLLATE "C"` (set by that migration) so it
+ * compares by code point like `target_id`. `plan` holds target IDs, actions and codes, no values.
+ */
+export const changeBatch = pgTable(
+  'change_batch',
+  {
+    changesetId: uuid('changeset_id')
+      .notNull()
+      .references(() => changeSet.id),
+    batchNo: integer('batch_no').notNull(),
+    attempt: integer('attempt').notNull(),
+    state: text('state').$type<'open' | 'done'>().notNull(),
+    targetIds: jsonb('target_ids').$type<string[]>().notNull(),
+    lastTarget: text('last_target').notNull(),
+    upstreamBatchId: text('upstream_batch_id'),
+    plan: jsonb('plan').$type<PlanEntry[]>(),
+    written: integer('written').notNull().default(0),
+    failed: integer('failed').notNull().default(0),
+    skipped: integer('skipped').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.changesetId, t.batchNo] }),
+    check('change_batch_state_check', sql`${t.state} IN ('open', 'done')`),
+  ],
+);
+
+/**
+ * MCP Tasks (MCP-7): binds a task ID to its owner and change-set; the task state is derived from
+ * the change-set. Looked up by `(task_id, owner)` so a foreign ID is indistinguishable from an unknown one.
+ */
+export const mcpTask = pgTable(
+  'mcp_task',
+  {
+    taskId: uuid('task_id').primaryKey(),
+    owner: text('owner').notNull(),
+    clientId: text('client_id'),
+    changesetId: uuid('changeset_id')
+      .notNull()
+      .references(() => changeSet.id),
+    kind: text('kind').$type<TaskKind>().notNull(),
+    tool: text('tool').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    ttlMs: integer('ttl_ms').notNull(),
+  },
+  (t) => [
+    index('mcp_task_task_id_owner_idx').on(t.taskId, t.owner),
+    check('mcp_task_kind_check', sql`${t.kind} IN ('prepare', 'execute')`),
+  ],
+);
+
+/** Fixed-window counters for operation rate limits (POL-4). */
+export const rateBucket = pgTable(
+  'rate_bucket',
+  {
+    key: text('key').notNull(),
+    windowStart: timestamp('window_start', { withTimezone: true }).notNull(),
+    count: integer('count').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.key, t.windowStart] })],
 );

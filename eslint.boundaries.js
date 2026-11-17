@@ -52,6 +52,30 @@ export const boundaryRules = [
     },
   },
   {
+    files: ['packages/upstream/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [workspaceExcept(['core', 'config', 'connector-sdk'], 'packages/upstream depends on @aiops/core, @aiops/config and @aiops/connector-sdk only.')] },
+      ],
+    },
+  },
+  {
+    files: ['packages/upstream/src/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [workspaceExcept(['core', 'config', 'connector-sdk', 'testing'], 'packages/upstream tests may also use @aiops/testing.')] },
+      ],
+    },
+  },
+  {
+    files: ['packages/temporal/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [workspaceExcept(['core'], 'packages/temporal depends on @aiops/core only.')] }],
+    },
+  },
+  {
     files: ['presets/*/src/**/*.ts'],
     rules: {
       'no-restricted-imports': [
@@ -104,7 +128,8 @@ export const boundaryRules = [
             },
             { group: ['@nestjs/*', 'drizzle-orm', 'drizzle-orm/*', 'pg'], message: 'Workflow code does no I/O; use an activity.' },
             { regex: '^@temporalio/(?!workflow$|common$)', message: 'Workflow code may import only @temporalio/workflow and @temporalio/common.' },
-            workspaceExcept(['core'], 'Workflow code may import only @aiops/core.'),
+            // `(/|$)` rejects the package root and every other subpath of @aiops/temporal.
+            workspaceExcept(['temporal/contract'], 'Workflow code may import only @aiops/temporal/contract (it re-exports the core types it needs).'),
           ],
         },
       ],

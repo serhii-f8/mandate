@@ -10,6 +10,7 @@ const AUTH = {
   AIOPS_PUBLIC_URL: 'http://localhost:8400',
   OIDC_WEB_CLIENT_SECRET: 'dev-only-web-secret-value',
   AIOPS_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
+  AIOPS_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
 };
 const API = { DATABASE_URL: DB, ...AUTH };
 
@@ -33,6 +34,11 @@ describe('api runtime environment', () => {
       sessionMaxAgeSeconds: 28_800,
       freshAuthSeconds: 300,
       presetDirs: [],
+      temporalAddress: 'localhost:7233',
+      temporalNamespace: 'default',
+      taskQueue: 'aiops-operations',
+      temporalKeys: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
+      prepareWaitMs: 20_000,
     });
   });
 
@@ -65,6 +71,61 @@ describe('api runtime environment', () => {
 
   it('rejects a port outside 1..65535', () => {
     expect(() => parseApiEnv({ ...API, API_PORT: '70000' })).toThrow(/API_PORT/);
+  });
+});
+
+describe('MCP-7 api Temporal settings and prepare wait', () => {
+  it('parseApiEnv reads the Temporal settings and the prepare wait', () => {
+    expect(parseApiEnv(API)).toMatchObject({
+      temporalAddress: 'localhost:7233',
+      temporalNamespace: 'default',
+      taskQueue: 'aiops-operations',
+      prepareWaitMs: 20_000,
+    });
+    expect(
+      parseApiEnv({
+        ...API,
+        TEMPORAL_ADDRESS: 'temporal:7233',
+        TEMPORAL_NAMESPACE: 'ops',
+        TEMPORAL_TASK_QUEUE: 'q',
+        AIOPS_PREPARE_WAIT_MS: '0',
+      }),
+    ).toMatchObject({ temporalAddress: 'temporal:7233', temporalNamespace: 'ops', taskQueue: 'q', prepareWaitMs: 0 });
+    expect(parseApiEnv({ ...API, AIOPS_PREPARE_WAIT_MS: '300000' }).prepareWaitMs).toBe(300_000);
+  });
+
+  it('SEC-4 parseApiEnv requires AIOPS_TEMPORAL_KEYS and names it without the value', () => {
+    let error: unknown;
+    try {
+      parseApiEnv(Object.fromEntries(Object.entries(API).filter(([key]) => key !== 'AIOPS_TEMPORAL_KEYS')));
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    expect((error as EnvError).issues).toEqual([{ variable: 'AIOPS_TEMPORAL_KEYS', reason: 'is required' }]);
+    // Present but blank: still named by variable, the reason carries no value.
+    let blank: unknown;
+    try {
+      parseApiEnv({ ...API, AIOPS_TEMPORAL_KEYS: ' \t ' });
+    } catch (e) {
+      blank = e;
+    }
+    expect(blank).toBeInstanceOf(EnvError);
+    expect((blank as EnvError).issues).toEqual([{ variable: 'AIOPS_TEMPORAL_KEYS', reason: 'invalid (too_small)' }]);
+  });
+
+  it('AIOPS_PREPARE_WAIT_MS outside 0..300000 is rejected by name', () => {
+    for (const bad of ['-1', '300001', '1.5', 'soon']) {
+      let error: unknown;
+      try {
+        parseApiEnv({ ...API, AIOPS_PREPARE_WAIT_MS: bad });
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(EnvError);
+      expect((error as EnvError).issues.map((i) => i.variable)).toEqual(['AIOPS_PREPARE_WAIT_MS']);
+      expect((error as EnvError).message).not.toContain(bad);
+    }
   });
 });
 
@@ -123,19 +184,153 @@ describe('AUTH-5 page login environment', () => {
   });
 });
 
+/** `WORKER` without one variable. */
+function without(variable: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(WORKER).filter(([k]) => k !== variable));
+}
+
+const WORKER = {
+  DATABASE_URL: DB,
+  AIOPS_CONFIG_DIR: '/etc/aiops/config',
+  AIOPS_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
+  AIOPS_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
+};
+
 describe('worker runtime environment', () => {
   it('applies defaults', () => {
-    expect(parseWorkerEnv({})).toEqual({
+    expect(parseWorkerEnv(WORKER)).toEqual({
       temporalAddress: 'localhost:7233',
       temporalNamespace: 'default',
       taskQueue: 'aiops-operations',
       logLevel: 'info',
+      databaseUrl: DB,
+      configDir: '/etc/aiops/config',
+      presetDirs: [],
+      masterKeys: WORKER.AIOPS_MASTER_KEYS,
+      temporalKeys: WORKER.AIOPS_TEMPORAL_KEYS,
+      activityTuning: { prepareTimeoutMs: 3_600_000, batchHeartbeatMs: 30_000, batchTimeoutMs: 900_000, batchMaxAttempts: 10, retryInitialMs: 1_000, retryMaxMs: 30_000 },
     });
   });
 
   it('reads Temporal settings', () => {
     expect(
-      parseWorkerEnv({ TEMPORAL_ADDRESS: 'temporal:7233', TEMPORAL_NAMESPACE: 'ops', TEMPORAL_TASK_QUEUE: 'q' }),
+      parseWorkerEnv({ ...WORKER, TEMPORAL_ADDRESS: 'temporal:7233', TEMPORAL_NAMESPACE: 'ops', TEMPORAL_TASK_QUEUE: 'q' }),
     ).toMatchObject({ temporalAddress: 'temporal:7233', temporalNamespace: 'ops', taskQueue: 'q' });
+  });
+
+  it('NFR-4 parseWorkerEnv reads database, configuration, keys and activity tuning', () => {
+    const env = parseWorkerEnv({
+      ...WORKER,
+      AIOPS_PRESET_DIRS: '/app/presets: /opt/presets',
+      AIOPS_PREPARE_TIMEOUT_MS: '7200000',
+      AIOPS_BATCH_HEARTBEAT_MS: '15000',
+      AIOPS_BATCH_TIMEOUT_MS: '60000',
+      AIOPS_BATCH_MAX_ATTEMPTS: '3',
+      AIOPS_RETRY_INITIAL_MS: '200',
+      AIOPS_RETRY_MAX_MS: '2000',
+    });
+    expect(env).toMatchObject({
+      databaseUrl: DB,
+      configDir: '/etc/aiops/config',
+      presetDirs: ['/app/presets', '/opt/presets'],
+      masterKeys: WORKER.AIOPS_MASTER_KEYS,
+      temporalKeys: WORKER.AIOPS_TEMPORAL_KEYS,
+      activityTuning: { prepareTimeoutMs: 7_200_000, batchHeartbeatMs: 15_000, batchTimeoutMs: 60_000, batchMaxAttempts: 3, retryInitialMs: 200, retryMaxMs: 2_000 },
+    });
+    for (const required of ['DATABASE_URL', 'AIOPS_CONFIG_DIR', 'AIOPS_MASTER_KEYS']) {
+      expect(() => parseWorkerEnv(without(required))).toThrow(new RegExp(`${required}: is required`));
+    }
+  });
+
+  it('SEC-3 a missing AIOPS_TEMPORAL_KEYS is reported by name without values', () => {
+    let error: unknown;
+    try {
+      parseWorkerEnv(without('AIOPS_TEMPORAL_KEYS'));
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    expect((error as EnvError).issues).toEqual([{ variable: 'AIOPS_TEMPORAL_KEYS', reason: 'is required' }]);
+    const message = (error as EnvError).message;
+    expect(message).not.toContain(WORKER.AIOPS_MASTER_KEYS);
+    expect(message).not.toContain('dev-only-secret-value');
+  });
+
+  it('NFR-4 activity tuning must be positive integers', () => {
+    for (const variable of ['AIOPS_PREPARE_TIMEOUT_MS', 'AIOPS_BATCH_HEARTBEAT_MS', 'AIOPS_BATCH_TIMEOUT_MS', 'AIOPS_BATCH_MAX_ATTEMPTS', 'AIOPS_RETRY_INITIAL_MS', 'AIOPS_RETRY_MAX_MS']) {
+      for (const bad of ['0', '-5', '1.5', 'many']) {
+        expect(() => parseWorkerEnv({ ...WORKER, [variable]: bad })).toThrow(new RegExp(`${variable}: invalid`));
+      }
+    }
+  });
+
+  it('NFR-4 the retry initial interval must not exceed the retry maximum interval, reported without values', () => {
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_RETRY_INITIAL_MS: '2000', AIOPS_RETRY_MAX_MS: '2000' }).activityTuning).toMatchObject({
+      retryInitialMs: 2_000,
+      retryMaxMs: 2_000,
+    });
+    let error: unknown;
+    try {
+      parseWorkerEnv({ ...WORKER, AIOPS_RETRY_INITIAL_MS: '45678', AIOPS_RETRY_MAX_MS: '12345' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    expect((error as EnvError).issues).toEqual([
+      { variable: 'AIOPS_RETRY_INITIAL_MS', reason: 'must not exceed AIOPS_RETRY_MAX_MS' },
+    ]);
+    expect((error as EnvError).message).not.toMatch(/45678|12345/);
+    // Only the default of the other variable can be exceeded, too.
+    expect(() => parseWorkerEnv({ ...WORKER, AIOPS_RETRY_INITIAL_MS: '30001' })).toThrow(
+      /AIOPS_RETRY_INITIAL_MS: must not exceed AIOPS_RETRY_MAX_MS/,
+    );
+  });
+
+  it('EXE-4 the batch heartbeat timeout must exceed the longest poll pause plus a margin (10000 ms), reported without values', () => {
+    let error: unknown;
+    try {
+      parseWorkerEnv({ ...WORKER, AIOPS_BATCH_HEARTBEAT_MS: '9999' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    expect((error as EnvError).issues).toEqual([
+      { variable: 'AIOPS_BATCH_HEARTBEAT_MS', reason: 'must be greater than 10000 (the longest status poll pause plus a margin)' },
+    ]);
+    expect((error as EnvError).message).not.toContain('9999');
+    expect(() => parseWorkerEnv({ ...WORKER, AIOPS_BATCH_HEARTBEAT_MS: '10000' })).toThrow(/AIOPS_BATCH_HEARTBEAT_MS: must be greater than 10000/);
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_BATCH_HEARTBEAT_MS: '10001' }).activityTuning.batchHeartbeatMs).toBe(10_001);
+  });
+
+  it('NFR-7 the preparation timeout must exceed the 60000 ms preparation heartbeat timeout, reported without values', () => {
+    let error: unknown;
+    try {
+      parseWorkerEnv({ ...WORKER, AIOPS_PREPARE_TIMEOUT_MS: '60000' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    expect((error as EnvError).issues).toEqual([
+      { variable: 'AIOPS_PREPARE_TIMEOUT_MS', reason: 'must be greater than 60000 (the preparation heartbeat timeout)' },
+    ]);
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_PREPARE_TIMEOUT_MS: '60001' }).activityTuning.prepareTimeoutMs).toBe(60_001);
+  });
+
+  it('NFR-4 the batch heartbeat must be shorter than the batch timeout, reported without values', () => {
+    let error: unknown;
+    try {
+      parseWorkerEnv({ ...WORKER, AIOPS_BATCH_HEARTBEAT_MS: '54321', AIOPS_BATCH_TIMEOUT_MS: '54321' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    expect((error as EnvError).issues).toEqual([
+      { variable: 'AIOPS_BATCH_HEARTBEAT_MS', reason: 'must be less than AIOPS_BATCH_TIMEOUT_MS' },
+    ]);
+    expect((error as EnvError).message).not.toContain('54321');
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_BATCH_HEARTBEAT_MS: '54320', AIOPS_BATCH_TIMEOUT_MS: '54321' }).activityTuning).toMatchObject({
+      batchHeartbeatMs: 54_320,
+      batchTimeoutMs: 54_321,
+    });
   });
 });

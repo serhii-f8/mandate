@@ -81,4 +81,32 @@ describe('AUD-1 audit base schema', () => {
       await expect(database.pool.query(statement)).rejects.toThrow(/append-only/);
     });
   });
+
+  it('SEC-3 a failing append reports a fixed message without parameter values', async () => {
+    const log = new DrizzleAuditLog(database.db);
+    const event = {
+      id: '00000000-0000-4000-8000-0000000000d1',
+      actor: 'secret-actor-value',
+      action: 'policy.decision' as const,
+      outcome: 'denied' as const,
+      correlationId: 'secret-correlation-value',
+      details: { rule: 'secret-detail-value' },
+    };
+    await log.append(event);
+    let error: unknown;
+    try {
+      await log.append(event);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(Error);
+    const failure = error as Error & { code?: string };
+    expect(failure.message).toBe('audit append failed (sqlstate 23505)');
+    expect(failure.code).toBe('23505');
+    expect(failure.cause).toBeUndefined();
+    const text = `${failure.message} ${String(failure.stack)} ${JSON.stringify(failure)}`;
+    for (const value of ['secret-actor-value', 'secret-correlation-value', 'secret-detail-value', event.id]) {
+      expect(text).not.toContain(value);
+    }
+  });
 });

@@ -7,9 +7,9 @@
  */
 import type { ReadOutcome } from '@aiops/connector-sdk';
 import type { ReadPage, UpstreamReader } from '@aiops/core';
-import { performRead, type SingleReadDeps } from './read-invoker.js';
+import { performRead, type ReadDeps } from './read.js';
 
-export type UpstreamReaderDeps = SingleReadDeps & { readonly correlationId: string };
+export type UpstreamReaderDeps = ReadDeps & { readonly correlationId: string };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 

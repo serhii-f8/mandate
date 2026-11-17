@@ -181,9 +181,9 @@ else
   fail other-brand-denied "result=$P4 rows $CS_BEFORE → $CS_AFTER"
 fi
 
-# 6. zero writes: every upstream call of the prepare calls is a GET; description and updated_at of every acme product unchanged.
+# 6. zero writes: every upstream call of the prepare calls (logged by the api and the worker) is a GET; description and updated_at of every acme product unchanged.
 AFTER_P="$(sandbox_products "$ACME_SKUS")"
-compose logs --no-color api >"$WORK/api.log" 2>&1 || true
+compose logs --no-color api worker >"$WORK/api-worker.log" 2>&1 || true
 CIDS_JOINED="$(IFS=,; echo "${PREP_CIDS[*]}")"
 ZW="$(CIDS="$CIDS_JOINED" node -e '
   const cids = new Set(process.env.CIDS.split(",")); let total = 0; const methods = {};
@@ -191,11 +191,11 @@ ZW="$(CIDS="$CIDS_JOINED" node -e '
     const i = line.indexOf("{"); if (i < 0) continue; let o; try { o = JSON.parse(line.slice(i)); } catch { continue; }
     if (o.msg !== "upstream call completed" && o.message !== "upstream call completed") continue;
     if (!cids.has(o.correlationId)) continue; total++; methods[o.method] = (methods[o.method] ?? 0) + 1; }
-  console.log(JSON.stringify({ total, methods }));' "$WORK/api.log" 2>&1 || true)"
+  console.log(JSON.stringify({ total, methods }));' "$WORK/api-worker.log" 2>&1 || true)"
 ZW_OK="$(node -e 'const z = JSON.parse(process.argv[1]); console.log(z.total > 0 && Object.keys(z.methods).length === 1 && z.methods.GET === z.total ? "ok" : "no")' "$ZW" 2>&1 || true)"
 ZW_COVERED="$(node -e 'console.log(Object.keys(JSON.parse(process.argv[1])).sort().join(","))' "$AFTER_P" 2>&1 || true)"
 if [[ "$ZW_OK" == ok && "$BEFORE_P" == "$AFTER_P" && "$BEFORE_P" != "{}" && -n "$ACME_SKUS" && "$ZW_COVERED" == "$ACME_SKUS" ]]; then
-  pass zero-writes "upstream calls of the prepare calls: $ZW (GET only); description and updated_at unchanged for all acme SKUs: $(node -e 'const o = JSON.parse(process.argv[1]); console.log(Object.entries(o).map(([k, v]) => k + "=" + v.updated_at).join(" "))' "$AFTER_P")"
+  pass zero-writes "upstream calls of the prepare calls (api and worker): $ZW (GET only); description and updated_at unchanged for all acme SKUs: $(node -e 'const o = JSON.parse(process.argv[1]); console.log(Object.entries(o).map(([k, v]) => k + "=" + v.updated_at).join(" "))' "$AFTER_P")"
 else
   fail zero-writes "calls=$ZW covered=$ZW_COVERED seeded=$ACME_SKUS before=$BEFORE_P after=$AFTER_P"
 fi

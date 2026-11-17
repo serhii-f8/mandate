@@ -1,5 +1,9 @@
-import { CLIENT_INFO_META_KEY, Server, type AuthInfo, type McpServerFactory } from '@modelcontextprotocol/server';
+import { CLIENT_INFO_META_KEY, Server, type AuthInfo, type CallToolResult, type McpServerFactory } from '@modelcontextprotocol/server';
+import { z } from 'zod';
 import type { Caller } from '@aiops/core';
+import { declaresTasks, TASKS_EXTENSION } from './tasks/extension.js';
+import { createTaskHandlers, type TaskHandlerDeps, type TaskRequestContext } from './tasks/task-handlers.js';
+import { isTaskAnswer } from './tasks/task-result.js';
 import { callTool, listTools, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
 
 export const SERVER_INFO = { name: 'aiops', version: '0.0.0' } as const;
@@ -41,27 +45,48 @@ function contextOf(authInfo: AuthInfo | undefined): RequestContext {
 }
 
 /**
+ * Task request params: loose, so `_meta` and future fields pass through to no effect. `tasks/update`
+ * uses the same schema: the SDK exposes a request's `inputResponses` as `ctx.mcpReq.inputResponses`,
+ * and no input request is ever outstanding, so neither is read.
+ */
+const TASK_PARAMS = z.looseObject({ taskId: z.string() });
+
+/**
  * Builds a fresh low-level `Server` per HTTP request (ADR 0003, ADR 0016) whose
  * `tools/list` and `tools/call` handlers are `api`'s own, so every rejection is
  * audited. The configuration snapshot is taken once per request. Nothing
- * survives the request (NFR-3).
+ * survives the request (NFR-3). It advertises the Tasks extension in
+ * `server/discover` and serves `tasks/get|update|cancel` (MCP-7, ADR 0029).
  */
-export function createServerFactory(deps: PipelineDeps): McpServerFactory {
+export function createServerFactory(deps: PipelineDeps, tasks: TaskHandlerDeps): McpServerFactory {
+  const handlers = createTaskHandlers(tasks);
   return ({ authInfo }) => {
     const { caller, correlationId } = contextOf(authInfo);
     const snapshot = deps.snapshot();
     // `Server` is deprecated for ordinary use in favour of `McpServer`; owning the
     // tools/* handlers so every rejection is audited is the advanced use it keeps (ADR 0016).
     // eslint-disable-next-line @typescript-eslint/no-deprecated
-    const server = new Server(SERVER_INFO, { capabilities: { tools: { listChanged: false } } });
+    const server = new Server(SERVER_INFO, { capabilities: { tools: { listChanged: false }, extensions: { [TASKS_EXTENSION]: {} } } });
     const request = (envelope: object | undefined): PipelineRequest => {
       const name = declaredClientName(envelope);
-      return { caller, correlationId, snapshot, ...(name === undefined ? {} : { declaredClientName: name }) };
+      return { caller, correlationId, snapshot, tasks: declaresTasks(envelope), ...(name === undefined ? {} : { declaredClientName: name }) };
     };
     server.setRequestHandler('tools/list', async (_req, ctx) => ({ tools: await listTools(deps, request(ctx.mcpReq.envelope)) }));
-    server.setRequestHandler('tools/call', async (req, ctx) =>
-      server.projectCallToolResult(await callTool(deps, request(ctx.mcpReq.envelope), req.params.name, req.params.arguments), undefined),
-    );
+    server.setRequestHandler('tools/call', async (req, ctx) => {
+      const answer = await callTool(deps, request(ctx.mcpReq.envelope), req.params.name, req.params.arguments);
+      // `projectCallToolResult` takes a CallToolResult, and a task answer is not one, so it is returned as it is
+      // (ADR 0003, ADR 0029). SDK 2.4.0: `stampResultType` lets resultType 'task' pass on tools/call; the wrapper
+      // still adds an empty `content` (normalizeContentlessToolResult). The handler's declared result type has no
+      // task variant, hence the cast.
+      return isTaskAnswer(answer) ? (answer as unknown as CallToolResult) : server.projectCallToolResult(answer, undefined);
+    });
+    // The 3-argument (custom-schema) form: on 2026-07-28, `tasks/get` and `tasks/cancel` are
+    // extension methods, which the SDK dispatches only when registered this way (ADR 0029).
+    const taskContext = (envelope: object | undefined): TaskRequestContext => ({ caller, correlationId, declared: declaresTasks(envelope) });
+    // Spread into an object literal: the SDK's result type has an index signature an interface lacks.
+    server.setRequestHandler('tasks/get', { params: TASK_PARAMS }, async (params, ctx) => ({ ...(await handlers.get(params, taskContext(ctx.mcpReq.envelope))) }));
+    server.setRequestHandler('tasks/update', { params: TASK_PARAMS }, (params, ctx) => handlers.update(params, taskContext(ctx.mcpReq.envelope)));
+    server.setRequestHandler('tasks/cancel', { params: TASK_PARAMS }, (params, ctx) => handlers.cancel(params, taskContext(ctx.mcpReq.envelope)));
     return server;
   };
 }

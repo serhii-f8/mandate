@@ -62,8 +62,12 @@ describeExecutorContract('postgres', () => {
   const repository = new PostgresChangeSetRepository(database.db);
   const writer = new ScriptedWriter();
   const batchSize = 2;
-  const executor = new InMemoryExecutor({ repository, writer, batchSizeOf: () => batchSize });
-  const prepared = async (items: number, opts: { expiresAt?: Date } = {}): Promise<ChangeSetRecord> => {
+  const failureThreshold = 0.5;
+  const executor = new InMemoryExecutor({ repository, writer, batchSizeOf: () => batchSize, failureThreshold });
+  const prepared = async (
+    items: number,
+    opts: { expiresAt?: Date; requester?: string } = {},
+  ): Promise<ChangeSetRecord> => {
     const id = randomUUID();
     const now = new Date();
     await repository.create(
@@ -71,7 +75,7 @@ describeExecutorContract('postgres', () => {
         id,
         operation: 'catalog.update',
         connection: 'shop',
-        requester: 'alice',
+        requester: opts.requester ?? 'alice',
         args: {},
         configHash: 'cfg',
         correlationId: 'corr-prep',
@@ -98,5 +102,13 @@ describeExecutorContract('postgres', () => {
     if (record === undefined) throw new Error('preparation failed');
     return record;
   };
-  return Promise.resolve({ executor, repository, writer, batchSize, prepared, auditEvents: allAuditEvents });
+  return Promise.resolve({
+    executor,
+    repository,
+    writer,
+    batchSize,
+    failureThreshold,
+    prepared,
+    auditEvents: allAuditEvents,
+  });
 });

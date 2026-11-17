@@ -5,11 +5,17 @@ import type { ManifestDefinition, OperationDefinition } from '../policy-model.js
 import { compareTargetIds, normalizeArgs } from './canonical.js';
 import { ChangeSetHasher } from './hash.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats, ExclusionReason } from './model.js';
-import type { ChangeSetRepository, ItemsPageQuery, NewChangeSet, ReadPage, UpstreamReader } from './ports.js';
-import { prepareChangeSet, type PrepareDeps, type PrepareRequest } from './prepare.js';
+import type { ItemsPageQuery, NewChangeSet, PreparationRepository, ReadPage, UpstreamReader } from './ports.js';
+import {
+  createChangeSet,
+  prepareChangeSet,
+  runPreparation,
+  type PrepareDeps,
+  type PrepareRequest,
+} from './prepare.js';
 
 /** Minimal Map-based repository with the contract's compare-and-set semantics. */
-class FakeRepository implements ChangeSetRepository {
+class FakeRepository implements PreparationRepository {
   readonly sets = new Map<string, ChangeSetRecord>();
   readonly items = new Map<string, Map<string, ChangeItemRecord>>();
   readonly audit: AuditEventInput[] = [];
@@ -66,7 +72,7 @@ class FakeRepository implements ChangeSetRepository {
     id: string,
     outcome:
       | { status: 'prepared'; hash: string; stats: ChangeSetStats; preparedAt: Date }
-      | { status: 'failed'; errorCode: string },
+      | { status: 'failed'; errorCode: string; upstreamStatus?: number },
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined> {
     const cs = this.sets.get(id);
@@ -74,7 +80,12 @@ class FakeRepository implements ChangeSetRepository {
     const next: ChangeSetRecord =
       outcome.status === 'prepared'
         ? { ...cs, status: 'prepared', hash: outcome.hash, stats: outcome.stats, preparedAt: outcome.preparedAt }
-        : { ...cs, status: 'failed', errorCode: outcome.errorCode };
+        : {
+            ...cs,
+            status: 'failed',
+            errorCode: outcome.errorCode,
+            ...(outcome.upstreamStatus === undefined ? {} : { errorStatus: outcome.upstreamStatus }),
+          };
     this.sets.set(id, next);
     this.audit.push(audit);
     return Promise.resolve(next);
@@ -316,7 +327,8 @@ describe('CS-1 CS-2 CS-4 preparation', () => {
     const { deps, repository } = setup(reader);
     const out = await prepareChangeSet(deps, request(explicitArgs));
     expect(out).toEqual({ ok: false, changesetId: 'id-1', code: 'http_status', status: 404 });
-    expect(repository.sets.get('id-1')).toMatchObject({ status: 'failed', errorCode: 'http_status' });
+    // Stored with the code, so an answer rebuilt from the change-set names it too (design §5 step 4).
+    expect(repository.sets.get('id-1')).toMatchObject({ status: 'failed', errorCode: 'http_status', errorStatus: 404 });
   });
 
   it('CS-1 a truncated read fails incomplete_read', async () => {
@@ -618,5 +630,84 @@ describe('OPS-4 selector pages are complete or the preparation fails', () => {
     });
     const { deps } = setup(reader);
     expect(await prepareChangeSet(deps, request(selectorArgs))).toMatchObject({ ok: false, code: 'incomplete_read' });
+  });
+});
+
+describe('EXE-1 preparation split', () => {
+  function runRequest(id: string, args: Record<string, unknown> = explicitArgs) {
+    const r = request(args);
+    return {
+      changesetId: id,
+      operation: r.operation,
+      readFieldsArg: r.readFieldsArg,
+      actor: 'alice',
+      clientId: 'client-1',
+      correlationId: 'corr-1',
+    };
+  }
+
+  it('EXE-1 createChangeSet stores a preparing row with its audit and reads nothing', async () => {
+    const reader = new ScriptedReader({ A: product('A'), B: product('B') });
+    const { deps, repository } = setup(reader);
+    const out = await createChangeSet(deps, request(explicitArgs));
+    if (!out.ok) throw new Error(`expected created, got ${out.code}`);
+    expect(reader.calls).toHaveLength(0);
+    expect(repository.sets.get(out.changeset.id)?.status).toBe('preparing');
+    expect(repository.audit.map((a) => [a.details.from, a.details.to])).toEqual([[null, 'preparing']]);
+  });
+
+  it('EXE-1 createChangeSet refuses an empty ids argument without creating a row', async () => {
+    const { deps, repository } = setup(new ScriptedReader({}));
+    expect(await createChangeSet(deps, request({ ...explicitArgs, skus: [] }))).toEqual({
+      ok: false,
+      code: 'targets_missing',
+    });
+    expect(repository.sets.size).toBe(0);
+  });
+
+  it('EXE-1 runPreparation prepares a created change-set with the same hash as prepareChangeSet', async () => {
+    const products = { A: product('A'), B: product('B') };
+    const one = setup(new ScriptedReader(products));
+    const two = setup(new ScriptedReader(products));
+    const whole = await prepareChangeSet(one.deps, request(explicitArgs));
+    const created = await createChangeSet(two.deps, request(explicitArgs));
+    if (!whole.ok || !created.ok) throw new Error('expected prepared');
+    const split = await runPreparation(two.deps, runRequest(created.changeset.id));
+    if (!split.ok) throw new Error(`expected prepared, got ${split.code}`);
+    expect(split.changeset.hash).toBe(whole.changeset.hash);
+    expect(split.changeset.stats).toEqual(whole.changeset.stats);
+  });
+
+  it('NFR-2 runPreparation on a change-set that is already prepared returns it without reading', async () => {
+    const reader = new ScriptedReader({ A: product('A'), B: product('B') });
+    const { deps } = setup(reader);
+    const first = await prepareChangeSet(deps, request(explicitArgs));
+    if (!first.ok) throw new Error('expected prepared');
+    const readsBefore = reader.calls.length;
+    const again = await runPreparation(deps, runRequest(first.changeset.id));
+    expect(again.ok).toBe(true);
+    expect(reader.calls).toHaveLength(readsBefore);
+  });
+
+  it('NFR-2 runPreparation on a cancelled change-set returns cancelled', async () => {
+    const reader = new ScriptedReader({ A: product('A'), B: product('B') });
+    const { deps, repository } = setup(reader);
+    const created = await createChangeSet(deps, request(explicitArgs));
+    if (!created.ok) throw new Error('expected created');
+    repository.sets.set(created.changeset.id, { ...created.changeset, status: 'cancelled' });
+    expect(await runPreparation(deps, runRequest(created.changeset.id))).toMatchObject({ ok: false, code: 'cancelled' });
+    expect(reader.calls).toHaveLength(0);
+  });
+
+  it('NFR-2 runPreparation fails preparation_interrupted when items from an earlier attempt exist', async () => {
+    const reader = new ScriptedReader({ A: product('A'), B: product('B') });
+    const { deps, repository } = setup(reader);
+    const created = await createChangeSet(deps, request(explicitArgs));
+    if (!created.ok) throw new Error('expected created');
+    const id = created.changeset.id;
+    await repository.appendItems(id, [{ targetId: 'A', status: 'pending', before: {}, after: {} }]);
+    expect(await runPreparation(deps, runRequest(id))).toMatchObject({ ok: false, code: 'preparation_interrupted' });
+    expect(repository.sets.get(id)?.status).toBe('failed');
+    expect(reader.calls).toHaveLength(0);
   });
 });

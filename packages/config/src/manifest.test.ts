@@ -8,7 +8,7 @@ connections:
   - { id: other, adapter: openapi, base_url: https://other.example.test/rest }
 `;
 
-const FIELD_ENUM = '[sku, brand, name, description, price]';
+const FIELD_ENUM = '[sku, brand, name, description, price, status]';
 const READS = `version: 1
 operations:
   - id: catalog.get_products_by_sku
@@ -293,11 +293,11 @@ describe('OPS-3 rollback strategy', () => {
 
 describe('CS-6 change-set expiry setting', () => {
   it('CS-6 defaults expireAfterHours to 72', async () => {
-    expect(ok(await load()).changesets).toEqual({ expireAfterHours: 72 });
+    expect(ok(await load()).changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.5, itemsPerWorkflowRun: 2000 });
   });
 
   it('CS-6 reads changesets.expire_after_hours and checks its range', async () => {
-    expect(ok(await load({ 'changesets.yaml': 'version: 1\nchangesets: { expire_after_hours: 24 }\n' })).changesets).toEqual({ expireAfterHours: 24 });
+    expect(ok(await load({ 'changesets.yaml': 'version: 1\nchangesets: { expire_after_hours: 24 }\n' })).changesets).toEqual({ expireAfterHours: 24, failureThreshold: 0.5, itemsPerWorkflowRun: 2000 });
     const found = issues(await load({ 'changesets.yaml': 'version: 1\nchangesets: { expire_after_hours: 5000 }\n' }));
     expect(found).toEqual([expect.objectContaining({ file: 'changesets.yaml', path: 'changesets.expire_after_hours' })]);
     expect(found[0]?.message).not.toContain('5000');
@@ -313,5 +313,106 @@ describe('CS-6 change-set expiry setting', () => {
     expect(found).toEqual([expect.objectContaining({ file: 'more.yaml', path: 'changesets' })]);
     expect(found[0]?.message).toContain('changesets.yaml');
     expect(found[0]?.message).not.toContain('48');
+  });
+});
+
+const BULK_BLOCK = `
+      bulk:
+        body:
+          wrap: product
+          nest: { path: custom_attributes, key: attribute_code, value: value, keep: [sku, name, status] }
+        batch_id: bulk_uuid
+        status:
+          method: GET
+          path: /V1/bulk/{batch_id}/detailed-status
+          items: operations_list
+          index: id
+          state: status
+          states: { ok: [1], retriable: [2], failed: [3, 5], open: [4] }`;
+const withBulk = (t: string): string =>
+  t.replace('upstream: { method: POST, path: /async/bulk/V1/products }', `upstream:\n      method: POST\n      path: /async/bulk/V1/products${BULK_BLOCK}`);
+const withCarry = (t: string, fields = 'status'): string => t.replace('      rollback:', `      write: { carry_fields: [${fields}] }\n      rollback:`);
+const U = 'operations[0].upstream';
+
+describe('OPS-6 bulk binding configuration', () => {
+  it('OPS-6 loads a bulk binding and converts it to the SDK type', async () => {
+    const config = ok(await load({ 'write.yaml': withBulk(WRITE) }));
+    expect(config.bindings.get('catalog.update_content')?.mapping.bulk).toEqual({
+      body: { wrap: 'product', nest: { path: 'custom_attributes', key: 'attribute_code', value: 'value', keep: ['sku', 'name', 'status'] } },
+      batchId: 'bulk_uuid',
+      status: {
+        method: 'GET',
+        path: '/V1/bulk/{batch_id}/detailed-status',
+        items: 'operations_list',
+        index: 'id',
+        state: 'status',
+        states: { ok: [1], retriable: [2], failed: [3, 5], open: [4] },
+      },
+    });
+  });
+  it('OPS-6 a write operation without bulk still loads (Phase 4 configuration stays valid)', async () => {
+    expect(ok(await load()).bindings.get('catalog.update_content')?.mapping.bulk).toBeUndefined();
+  });
+  it('OPS-6 CFG-2 status path without {batch_id} is located', () =>
+    expectIssue((t) => withBulk(t).replace('/V1/bulk/{batch_id}/detailed-status', '/V1/bulk/{uuid}/detailed-status'), `${U}.bulk.status.path`, 'uuid'));
+  it('OPS-6 CFG-2 status path with an extra placeholder is located', () =>
+    expectIssue((t) => withBulk(t).replace('/V1/bulk/{batch_id}/detailed-status', '/V1/{batch_id}/{more}'), `${U}.bulk.status.path`, 'more'));
+  it('OPS-6 CFG-2 a state in two lists is located at its later occurrence', () =>
+    expectIssue((t) => withBulk(t).replace('failed: [3, 5]', 'failed: [3, 1]'), `${U}.bulk.status.states.failed[1]`, '1'));
+  it('OPS-6 states compare by type and value: 1 and "1" are different states', async () => {
+    ok(await load({ 'write.yaml': withBulk(WRITE).replace('failed: [3, 5]', "failed: [3, '1']") }));
+  });
+  it.each([
+    ['batch_id', 'bulk.batch_id'],
+    ['items', 'bulk.status.items'],
+    ['index', 'bulk.status.index'],
+    ['state', 'bulk.status.state'],
+  ])('OPS-6 CFG-2 an empty path segment in %s is refused', async (key, suffix) => {
+    const edited = withBulk(WRITE).replace(new RegExp(`( ${key}): \\w+`), '$1: a..b');
+    expect(edited).not.toBe(withBulk(WRITE));
+    const found = issues(await load({ 'write.yaml': edited }));
+    expect(found.some((i) => i.path === `${U}.${suffix}` && i.message.includes('empty path segments'))).toBe(true);
+  });
+  it('OPS-6 CFG-2 empty path segments in body.wrap and body.nest.path are refused', async () => {
+    const found = issues(await load({ 'write.yaml': withBulk(WRITE).replace('wrap: product', 'wrap: a..b').replace('path: custom_attributes', 'path: a..b') }));
+    const paths = found.filter((i) => i.message.includes('empty path segments')).map((i) => i.path);
+    expect(paths).toEqual([`${U}.bulk.body.wrap`, `${U}.bulk.body.nest.path`]);
+  });
+  it('OPS-6 CFG-2 a GET binding with bulk is refused at upstream.method', () =>
+    expectIssue((t) => withBulk(t).replace('method: POST', 'method: GET'), `${U}.method`, 'GET'));
+  it('OPS-6 CFG-2 bulk on a read operation is refused at upstream.bulk', async () => {
+    const reads = READS.replace(
+      'upstream: { method: GET, path: /V1/plain, query: { skus: { arg: skus } } }',
+      `upstream:\n      method: GET\n      path: /V1/plain${BULK_BLOCK}`,
+    );
+    const found = issues(await load({ 'reads.yaml': reads }));
+    const hit = found.filter((i) => i.path === 'operations[3].upstream.bulk');
+    expect(hit).toHaveLength(1);
+    expect(hit[0]?.message).toBe('is allowed on write operations only');
+  });
+  it('OPS-6 CFG-2 body together with bulk is refused at upstream.body', () =>
+    expectIssue((t) => withBulk(t).replace('      path: /async/bulk/V1/products\n', '      path: /async/bulk/V1/products\n      body: { arg: changes }\n'), `${U}.body`, 'changes'));
+  it('OPS-6 CFG-2 an argument template in a bulk binding is refused at its path', () =>
+    expectIssue((t) => withBulk(t).replace('      path: /async/bulk/V1/products\n', '      path: /async/bulk/V1/products\n      query: { brand: { arg: brand } }\n'), `${U}.query.brand`, 'brand'));
+  it('OPS-6 CFG-2 unknown keys inside bulk are refused', async () => {
+    const found = issues(await load({ 'write.yaml': withBulk(WRITE).replace('batch_id: bulk_uuid', 'batch_id: bulk_uuid\n        extra: 1') }));
+    expect(found.length).toBeGreaterThan(0);
+  });
+});
+
+describe('OPS-6 manifest write.carry_fields', () => {
+  it('OPS-6 converts carry_fields to write.carryFields', async () => {
+    const config = ok(await load({ 'write.yaml': withCarry(WRITE) }));
+    expect(config.policy.operations.find((o) => o.id === 'catalog.update_content')?.manifest).toMatchObject({ write: { carryFields: ['status'] } });
+  });
+  it('OPS-6 CFG-2 a carry field the read operation cannot return is located', () =>
+    expectIssue((t) => withCarry(t, 'colour'), `${M}.write.carry_fields[0]`, 'colour'));
+  it('OPS-6 CFG-2 a carry field that is a diff field is located', async () => {
+    const issue = await expectIssue((t) => withCarry(t, 'name'), `${M}.write.carry_fields[0]`, 'name');
+    expect(issue.message).toBe('must not be one of fields');
+  });
+  it('OPS-6 an empty carry_fields list is refused by the schema', async () => {
+    const found = issues(await load({ 'write.yaml': withCarry(WRITE, '') }));
+    expect(found.some((i) => i.path === `${M}.write.carry_fields`)).toBe(true);
   });
 });

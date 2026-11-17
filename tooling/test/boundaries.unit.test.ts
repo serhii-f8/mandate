@@ -79,8 +79,26 @@ describe('package boundaries (CLAUDE.md engineering conventions)', () => {
     }
   });
 
+  it('EXE-1 packages/upstream depends on core, config and the connector SDK only', async () => {
+    for (const spec of ['@aiops/db', '@aiops/adapters', '@aiops/api']) {
+      expect(await restrictedImportErrors('packages/upstream/src/probe.ts', spec)).toBe(1);
+    }
+    for (const spec of ['@aiops/core', '@aiops/config', '@aiops/connector-sdk']) {
+      expect(await restrictedImportErrors('packages/upstream/src/probe.ts', spec)).toBe(0);
+    }
+    expect(await restrictedImportErrors('packages/upstream/src/probe.test.ts', '@aiops/testing')).toBe(0);
+    expect(await restrictedImportErrors('packages/upstream/src/probe.ts', '@aiops/testing')).toBe(1);
+  });
+
+  it('SEC-4 packages/temporal imports core only', async () => {
+    for (const spec of ['@aiops/db', '@aiops/config', '@aiops/upstream', '@aiops/api']) {
+      expect(await restrictedImportErrors('packages/temporal/src/probe.ts', spec)).toBe(1);
+    }
+    expect(await restrictedImportErrors('packages/temporal/src/probe.ts', '@aiops/core')).toBe(0);
+  });
+
   describe('Temporal workflow code stays deterministic (EXE-10)', () => {
-    it.each(['node:fs', 'fs', '@aiops/db', '@nestjs/common', 'drizzle-orm', '@aiops/adapters'])(
+    it.each(['node:fs', 'fs', '@aiops/db', '@nestjs/common', 'drizzle-orm', '@aiops/adapters', '@aiops/core'])(
       'rejects an import of %s',
       async (specifier) => {
         expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', specifier)).toBe(1);
@@ -89,6 +107,13 @@ describe('package boundaries (CLAUDE.md engineering conventions)', () => {
 
     it('allows @temporalio/workflow', async () => {
       expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@temporalio/workflow')).toBe(0);
+    });
+
+    it('EXE-10 workflow code may import @aiops/temporal/contract but not @aiops/temporal', async () => {
+      expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@aiops/temporal/contract')).toBe(0);
+      expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@aiops/temporal')).toBe(1);
+      expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@aiops/temporal/codec')).toBe(1);
+      expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@aiops/temporal/contract-extra')).toBe(1);
     });
   });
 

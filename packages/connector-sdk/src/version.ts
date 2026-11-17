@@ -1,2 +1,2 @@
 /** Connector SDK version; public interfaces are versioned (NFR-18). */
-export const CONNECTOR_SDK_VERSION = '0.2.0';
+export const CONNECTOR_SDK_VERSION = '0.3.0';

@@ -11,7 +11,7 @@ import { pathToString } from './issues.js';
 import type { OverrideConfig, PresetOperationConfig } from './schema.js';
 import type { SourceDocument } from './yaml-source.js';
 import { toManifestDefinition } from './manifest.js';
-import { hasTemplates, pathPlaceholders, templateArgs, toResponse, toUpstreamMapping } from './upstream-schema.js';
+import { hasTemplates, pathPlaceholders, templateArgs, toBulkMapping, toResponse, toUpstreamMapping } from './upstream-schema.js';
 
 export interface Located<T> {
   readonly value: T;
@@ -167,6 +167,13 @@ export function buildRegistry(input: RegistryInput): Registry {
     if (op.risk === 'read' && method !== undefined && method !== 'GET') {
       at(source, [...path, 'risk'], 'read operations must use GET; writes need change-sets');
     }
+    if (u.bulk !== undefined) {
+      if (op.risk !== 'write') upstreamAt(['bulk'], 'is allowed on write operations only');
+      if (method !== undefined && method !== 'POST' && method !== 'PUT') {
+        upstreamAt([u.method === undefined ? 'operation' : 'method'], 'must be POST or PUT for a bulk binding');
+      }
+      for (const ref of templateArgs(u)) upstreamAt(ref.path, 'cannot reference arguments in a bulk binding');
+    }
     const override = overrideByOp.get(op.id)?.value;
     // OPS-2: `fields_arg` of a manifest operation defaults to `values_arg`.
     const fieldsArg = op.fields_arg ?? op.manifest?.values_arg;
@@ -256,6 +263,7 @@ function bindingOf(connection: string, op: PresetOperationConfig, entry: Catalog
       method: entry.method,
       path: entry.path,
       response: u.response === undefined ? base.response : toResponse(u.response),
+      ...(u.bulk === undefined ? {} : { bulk: toBulkMapping(u.bulk) }),
     },
   };
 }

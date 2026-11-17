@@ -1,6 +1,6 @@
 # @aiops/magento2-catalog
 
-Magento 2 catalog preset 0.2.0 (CONN-8, OPS-2, OPS-4; designs `docs/design/phase-3-connections-read-upstream.md` §6
+Magento 2 catalog preset 0.3.0 (CONN-8, OPS-2, OPS-4; designs `docs/design/phase-3-connections-read-upstream.md` §6
 and `docs/design/phase-4-changesets.md` §8). Three read operations on `GET /V1/products`, one write
 operation with a change-set manifest, a vendored filtered spec, a default connection test and bearer auth.
 
@@ -8,7 +8,7 @@ operation with a change-set manifest, a vendored filtered spec, a default connec
 
 ```yaml
 presets:
-  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '0.2.0' }
+  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '0.3.0' }
 connections:
   - id: magento
     adapter: openapi
@@ -38,9 +38,14 @@ Changes `name`, `description`, `short_description`, `meta_title`, `meta_keyword`
 `catalog.get_products_by_sku` (batches of 100), selects with `catalog.search_products`, caps a
 change-set at 10000 targets and uses rollback `replay_previous_state`.
 
-- In Phase 4 the operation is preparation only: it creates a change-set for approval and writes
-  nothing upstream. Execution (the `POST /async/bulk/V1/products` route) arrives in Phase 5; its
-  consumer prerequisite (the Magento async-bulk consumer) remains for then.
+- Phase 4 prepares the change-set; Phase 5 executes it through `POST /async/bulk/V1/products`
+  (OPS-6) and follows `GET /V1/bulk/{batch_id}/detailed-status`. **Prerequisite: a running
+  `async.operations.all` consumer on the Magento side** (`bin/magento queue:consumers:start
+  async.operations.all`, or cron with `consumers_wait_for_messages`); restart it after attribute
+  schema changes, or it keeps its old attribute metadata. Without it, batches stay open until the
+  execution gives up.
+- `status` is carried in every record (`write.carry_fields`): Magento async writes reset an
+  omitted status (ADR 0007).
 - SKUs containing a comma are not supported (Magento's `in` filter takes a comma-separated list);
   the input schema rejects them.
 - Unset `meta_*` attributes are absent from Magento's answer and therefore from the current state.
@@ -64,6 +69,11 @@ the sandbox's answers. `pnpm --filter @aiops/magento2-catalog test` checks that 
 exactly the recorded requests and maps the recorded responses, directly and through the adapter
 against a fake upstream. With `MAGENTO_SANDBOX_URL` and `MAGENTO_SANDBOX_TOKEN` set, the cases
 also run live.
+
+The write cases (`test/write-cases.json`, `test/recordings/write/`) pin the bulk body, the recorded
+detailed-status polls (mapped to item states by index) and the verify read. Live, they submit a
+real batch that touches only the GLOBEX `meta_keyword` (or a rejected `url_key`), so the sandbox
+must run the `async.operations.all` consumer (`up.sh` starts it).
 
 Re-record (sandbox from `deploy/sandbox/magento/`):
 

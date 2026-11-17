@@ -3,7 +3,7 @@
  * connection settings and auth, the operation's `upstream` mapping, and their
  * conversion to the `@aiops/connector-sdk` types. Strict like the rest (ADR 0015).
  */
-import type { AuthSettings, ResponseMapping, TemplateValue, UpstreamMapping } from '@aiops/connector-sdk';
+import type { AuthSettings, BulkMapping, ResponseMapping, TemplateValue, UpstreamMapping } from '@aiops/connector-sdk';
 import { z } from 'zod';
 
 export const id = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
@@ -88,6 +88,60 @@ const responseSchema = z.strictObject({
   max_items: z.number().int().min(1).max(500).default(100),
 });
 
+/** A dotted path whose segments are all non-empty (`a..b`, `.a` and `a.` would never match). */
+const bulkPath = dottedPath.refine((v) => v.split('.').every((segment) => segment !== ''), { message: 'must not contain empty path segments' });
+const stateValue = z.union([z.string().max(128), z.number(), z.boolean()]);
+const STATE_LISTS = ['ok', 'failed', 'retriable', 'open'] as const;
+
+const bulkSchema = z.strictObject({
+  body: z
+    .strictObject({
+      wrap: bulkPath.optional(),
+      nest: z
+        .strictObject({
+          path: bulkPath,
+          key: z.string().min(1).max(128),
+          value: z.string().min(1).max(128),
+          keep: z.array(z.string().min(1).max(128)).default([]),
+        })
+        .optional(),
+    })
+    .default({}),
+  batch_id: bulkPath,
+  status: z
+    .strictObject({
+      method: z.literal('GET').default('GET'),
+      path: z.string().min(1).max(2048).regex(/^\//),
+      items: bulkPath,
+      index: bulkPath,
+      state: bulkPath,
+      states: z.strictObject({
+        ok: z.array(stateValue).min(1),
+        retriable: z.array(stateValue).default([]),
+        failed: z.array(stateValue).default([]),
+        open: z.array(stateValue).min(1),
+      }),
+    })
+    .superRefine((status, ctx) => {
+      const placeholders = pathPlaceholders(status.path);
+      if (placeholders.length !== 1 || placeholders[0] !== 'batch_id') {
+        ctx.addIssue({ code: 'custom', path: ['path'], message: 'must contain {batch_id} and no other placeholder' });
+      }
+      // Strict equality (type and value): `1` and `'1'` are different states.
+      const seen = new Set<string>();
+      for (const list of STATE_LISTS) {
+        const own = new Set<string>();
+        status.states[list].forEach((value, index) => {
+          const key = `${typeof value}:${String(value)}`;
+          if (seen.has(key)) ctx.addIssue({ code: 'custom', path: ['states', list, index], message: 'appears in more than one state list' });
+          own.add(key);
+        });
+        for (const key of own) seen.add(key);
+      }
+    }),
+});
+export type BulkConfig = z.output<typeof bulkSchema>;
+
 /**
  * Headers the platform sets itself. `authorization`, `proxy-authorization` and `cookie` are
  * caught by the CFG-5 key scan. Keep in step with `FORBIDDEN_HEADERS` in
@@ -105,6 +159,7 @@ export const upstreamSchema = z
     headers: z.record(headerName, templateValue).optional(),
     body: templateValue.optional(),
     response: responseSchema.optional(),
+    bulk: bulkSchema.optional(),
   })
   .superRefine((u, ctx) => {
     const byPath = u.method !== undefined || u.path !== undefined;
@@ -114,6 +169,7 @@ export const upstreamSchema = z
       if (u.method === undefined) ctx.addIssue({ code: 'custom', path: ['method'], message: 'is required (or give operation)' });
       if (u.path === undefined) ctx.addIssue({ code: 'custom', path: ['path'], message: 'is required (or give operation)' });
     }
+    if (u.bulk !== undefined && u.body !== undefined) ctx.addIssue({ code: 'custom', path: ['body'], message: 'is not allowed together with bulk' });
     for (const name of Object.keys(u.headers ?? {})) {
       if (PLATFORM_HEADERS.has(name.toLowerCase())) ctx.addIssue({ code: 'custom', path: ['headers', name], message: 'is set by the platform' });
     }
@@ -177,6 +233,30 @@ export function toResponse(r: UpstreamConfig['response']): ResponseMapping {
   };
 }
 
+export function toBulkMapping(b: BulkConfig): BulkMapping {
+  const { nest, wrap } = b.body;
+  return {
+    body: {
+      ...(wrap === undefined ? {} : { wrap }),
+      ...(nest === undefined ? {} : { nest: { path: nest.path, key: nest.key, value: nest.value, keep: [...nest.keep] } }),
+    },
+    batchId: b.batch_id,
+    status: {
+      method: b.status.method,
+      path: b.status.path,
+      items: b.status.items,
+      index: b.status.index,
+      state: b.status.state,
+      states: {
+        ok: [...b.status.states.ok],
+        failed: [...b.status.states.failed],
+        retriable: [...b.status.states.retriable],
+        open: [...b.status.states.open],
+      },
+    },
+  };
+}
+
 /** The YAML mapping as the SDK type (snake_case to camelCase, absent maps to `{}`). */
 export function toUpstreamMapping(u: UpstreamConfig): UpstreamMapping {
   return {
@@ -188,6 +268,7 @@ export function toUpstreamMapping(u: UpstreamConfig): UpstreamMapping {
     headers: toTemplates(u.headers),
     ...(u.body === undefined ? {} : { body: toTemplate(u.body) }),
     response: toResponse(u.response),
+    ...(u.bulk === undefined ? {} : { bulk: toBulkMapping(u.bulk) }),
   };
 }
 

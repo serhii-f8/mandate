@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { configDocumentSchema, schemaIssues } from './schema.js';
+import { changesetsSchema } from './manifest.js';
 
 export const FULL_EXAMPLE = `
 version: 1
@@ -125,5 +126,22 @@ describe('CFG-1 configuration document schema', () => {
       issuesOf('version: 1\noperations:\n  - { id: Bad Name, connection: m, risk: read, description: d, upstream: {}, input_schema: { type: object } }\n')[0]
         ?.path,
     ).toEqual(['operations', 0, 'id']);
+  });
+});
+
+describe('EXE-5 EXE-9 changesets execution settings', () => {
+  it('EXE-5 changesets.failure_threshold accepts (0, 1] and defaults to 0.5', () => {
+    expect(changesetsSchema.parse({}).failure_threshold).toBe(0.5);
+    expect(changesetsSchema.parse({ failure_threshold: 1 }).failure_threshold).toBe(1);
+    expect(changesetsSchema.parse({ failure_threshold: 0.2 }).failure_threshold).toBe(0.2);
+    expect(changesetsSchema.safeParse({ failure_threshold: 0 }).success).toBe(false);
+    expect(changesetsSchema.safeParse({ failure_threshold: 1.01 }).success).toBe(false);
+  });
+
+  it('EXE-9 changesets.items_per_workflow_run is an integer of at least 100, default 2000', () => {
+    expect(changesetsSchema.parse({}).items_per_workflow_run).toBe(2000);
+    expect(changesetsSchema.parse({ items_per_workflow_run: 150 }).items_per_workflow_run).toBe(150);
+    expect(changesetsSchema.safeParse({ items_per_workflow_run: 99 }).success).toBe(false);
+    expect(changesetsSchema.safeParse({ items_per_workflow_run: 150.5 }).success).toBe(false);
   });
 });

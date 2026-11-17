@@ -10,8 +10,20 @@ import type { Logger } from 'pino';
 import { createOpenApiAdapter } from '@aiops/adapters';
 import type { ReadAdapter } from '@aiops/connector-sdk';
 import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
-import { resolveRoles, type AuditLog, type ChangeSetRepository, type CredentialVault, type OperationInvoker } from '@aiops/core';
-import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, PostgresSessionStore, type Database } from '@aiops/db';
+import {
+  resolveRoles,
+  type AuditLog,
+  type ChangeSetExecutor,
+  type ChangeSetRepository,
+  type CredentialVault,
+  type OperationInvoker,
+  type RateCounter,
+  type TaskRepository,
+  type WorkflowStarter,
+} from '@aiops/core';
+import { clientDataConverter, parseTemporalKeys, TemporalExecutor, TemporalWorkflowStarter } from '@aiops/temporal';
+import { Client, Connection } from '@temporalio/client';
+import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, PostgresRateCounter, PostgresSessionStore, PostgresTaskRepository, type Database } from '@aiops/db';
 import { createBearerGate } from './auth/bearer-gate.js';
 import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
@@ -35,10 +47,11 @@ import {
   OIDC_CLIENT,
   PAGE_CHECKS,
   PAGE_SESSIONS,
+  TEMPORAL,
 } from './tokens.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
-import { operationInvokers } from './upstream/operation-router.js';
-import { assertFullyChecked } from './upstream/upstream-runtime.js';
+import { operationInvokers, type OperationInvokersBase } from './upstream/operation-router.js';
+import { assertFullyChecked } from '@aiops/upstream';
 import { PageAccessGuard, type PageChecks } from './web/access.js';
 import { AuthController, SessionController } from './web/auth.controller.js';
 import { ConnectionsController } from './web/connections.controller.js';
@@ -59,26 +72,46 @@ export interface AppOverrides {
   readonly vault?: CredentialVault;
   /** Signing keys; defaults to the remote JWKS at `OIDC_JWKS_URL`. */
   readonly jwks?: JWTVerifyGetKey;
+  /** Runs prepared change-sets; defaults to `TemporalExecutor` (EXE-11). */
+  readonly executor?: ChangeSetExecutor;
+  /** Starts the change-set workflow that prepares it; defaults to `TemporalWorkflowStarter` (EXE-1). */
+  readonly starter?: WorkflowStarter;
+  /** Tasks store; defaults to `PostgresTaskRepository` on the api database (MCP-7). */
+  readonly tasks?: TaskRepository;
+  /** Rate-limit counters; defaults to `PostgresRateCounter` on the api database (POL-4, NFR-3). */
+  readonly rateCounter?: RateCounter;
+}
+
+interface UpstreamIo {
+  readonly vault: CredentialVault;
+  readonly adapter: ReadAdapter;
+  readonly repository: ChangeSetRepository;
+  readonly log: NonNullable<OperationInvokersBase['log']>;
+}
+
+/** The api's Temporal client, present unless the tests replace both its users. */
+interface TemporalHandle {
+  readonly connection: Connection;
+  readonly client: Client;
 }
 
 /** The invoker per call: the override, or the risk router bound to the request's snapshot. */
 function invokerFactory(
   override: OperationInvoker | undefined,
-  vault: CredentialVault,
-  adapter: ReadAdapter,
-  repository: ChangeSetRepository,
-  logger: Logger,
+  io: UpstreamIo,
+  write: { tasks: TaskRepository; starter: WorkflowStarter; prepareWaitMs: number },
 ): PipelineDeps['invokerFor'] {
   if (override !== undefined) return () => override;
   return operationInvokers({
-    vault,
-    adapter,
-    repository,
+    vault: io.vault,
+    adapter: io.adapter,
+    repository: io.repository,
+    tasks: write.tasks,
+    starter: write.starter,
+    prepareWaitMs: write.prepareWaitMs,
     newId: randomUUID,
     now: () => new Date(),
-    log: (record) => {
-      logger.info(record, 'upstream call completed');
-    },
+    log: io.log,
   });
 }
 
@@ -87,10 +120,12 @@ class Resources implements OnApplicationShutdown {
   constructor(
     @Inject(DATABASE) private readonly database: Database,
     @Inject(MCP_HANDLER) private readonly handler: McpHttpHandler,
+    @Inject(TEMPORAL) private readonly temporal: TemporalHandle | null,
   ) {}
 
   async onApplicationShutdown(): Promise<void> {
     await this.handler.close();
+    await this.temporal?.connection.close();
     await this.database.close();
   }
 }
@@ -100,6 +135,8 @@ class AppModule {
   static forRoot(env: ApiEnv, logger: Logger, configuration: ConfigurationHolder, overrides: AppOverrides): DynamicModule {
     // Parsed eagerly so a malformed key set stops the start (SEC-2); the message names no key material.
     const keys = overrides.vault === undefined ? parseMasterKeys(env.masterKeys) : undefined;
+    // Likewise the Temporal payload keys (SEC-4), whenever a Temporal client is built.
+    const temporalKeys = overrides.executor === undefined || overrides.starter === undefined ? parseTemporalKeys(env.temporalKeys) : undefined;
     const adapter = overrides.adapter ?? createOpenApiAdapter();
     // One key set for MCP access tokens and page ID tokens: same issuer.
     const jwks = overrides.jwks ?? createRemoteJWKSet(env.oidcJwksUrl);
@@ -132,6 +169,17 @@ class AppModule {
               },
             }),
         },
+        {
+          // Lazy: the api starts, and serves everything but execution, while Temporal is down (ADR 0029).
+          // `null` when the tests replace both the executor and the starter.
+          provide: TEMPORAL,
+          useFactory: (): TemporalHandle | null => {
+            if (temporalKeys === undefined) return null;
+            const connection = Connection.lazy({ address: env.temporalAddress });
+            const client = new Client({ connection, namespace: env.temporalNamespace, dataConverter: clientDataConverter(temporalKeys) });
+            return { connection, client };
+          },
+        },
         { provide: AUDIT_LOG, inject: [DATABASE], useFactory: (d: Database) => new DrizzleAuditLog(d.db) },
         {
           provide: CREDENTIAL_VAULT,
@@ -142,19 +190,36 @@ class AppModule {
         },
         {
           provide: MCP_HANDLER,
-          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE],
-          useFactory: (audit: AuditLog, vault: CredentialVault, database: Database) => {
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, TEMPORAL],
+          useFactory: (audit: AuditLog, vault: CredentialVault, database: Database, temporal: TemporalHandle | null) => {
             // One repository for the write path and the built-in change-set tools.
             const changesets = overrides.changesets ?? new PostgresChangeSetRepository(database.db);
+            // One task store for the write path that creates tasks and the handlers that read them.
+            const tasks = overrides.tasks ?? new PostgresTaskRepository(database.db);
+            const executor = overrides.executor ?? new TemporalExecutor({ client: temporalOf(temporal).client, taskQueue: env.taskQueue, repository: changesets, newId: randomUUID, now: () => new Date() });
+            const starter = overrides.starter ?? new TemporalWorkflowStarter({ client: temporalOf(temporal).client, taskQueue: env.taskQueue });
+            const io: UpstreamIo = {
+              vault,
+              adapter,
+              repository: changesets,
+              log: (record) => {
+                logger.info(record, 'upstream call completed');
+              },
+            };
             return createMcpHandler(
-              createServerFactory({
-                snapshot: () => snapshotOf(configuration.current),
-                builtins: createBuiltinTools({ repository: changesets, newId: randomUUID, now: () => new Date() }),
-                invokerFor: invokerFactory(overrides.invoker, vault, adapter, changesets, logger),
-                audit,
-                newId: randomUUID,
-                now: () => performance.now(),
-              }),
+              createServerFactory(
+                {
+                  snapshot: () => snapshotOf(configuration.current),
+                  builtins: createBuiltinTools({ repository: changesets, newId: randomUUID, now: () => new Date(), executor, tasks, audit }),
+                  invokerFor: invokerFactory(overrides.invoker, io, { tasks, starter, prepareWaitMs: env.prepareWaitMs }),
+                  audit,
+                  newId: randomUUID,
+                  now: () => performance.now(),
+                  rateCounter: overrides.rateCounter ?? new PostgresRateCounter(database.db),
+                  wallClock: () => new Date(),
+                },
+                { tasks, repository: changesets, executor, audit, newId: randomUUID },
+              ),
               {
                 legacy: 'stateless',
                 responseMode: 'json',
@@ -189,6 +254,12 @@ class AppModule {
       ],
     };
   }
+}
+
+/** The Temporal client; built whenever an executor or starter override is missing (above). */
+function temporalOf(temporal: TemporalHandle | null): TemporalHandle {
+  if (temporal === null) throw new Error('Temporal client not configured');
+  return temporal;
 }
 
 export interface CreateAppOptions {

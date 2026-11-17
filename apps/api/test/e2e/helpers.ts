@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -7,12 +8,13 @@ import type { INestApplication } from '@nestjs/common';
 import type { Logger } from 'pino';
 import { createOpenApiAdapter, type OpenApiAdapter } from '@aiops/adapters';
 import { ConfigurationHolder, type ApiEnv } from '@aiops/config';
-import type { CredentialVault, OperationInvoker } from '@aiops/core';
-import { runMigrations } from '@aiops/db';
-import { startPostgres, TEST_WEB_CLIENT_SECRET, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import type { ChangeSetExecutor, CredentialVault, OperationInvoker, WorkflowStarter } from '@aiops/core';
+import { createDb, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, runMigrations } from '@aiops/db';
+import { InMemoryExecutor, ScriptedWriter, startPostgres, TEST_WEB_CLIENT_SECRET, type StartedPostgres, type TestIssuer } from '@aiops/testing';
 import { createApp } from '../../src/app.js';
 import { CONFIGURATION, CREDENTIAL_VAULT } from '../../src/tokens.js';
-import { configurationLoadOptions } from '../../src/upstream/upstream-runtime.js';
+import { configurationLoadOptions, createUpstreamReader } from '@aiops/upstream';
+import { InProcessStarter } from './in-process-starter.js';
 
 export const MODERN = '2026-07-28';
 export const FIXTURE_CONFIG = fileURLToPath(new URL('./fixtures/config', import.meta.url));
@@ -22,6 +24,10 @@ export interface RunningApi {
   readonly url: string;
   /** The canonical MCP URL, also the token audience. */
   readonly resource: string;
+  /** Runs prepared change-sets: an `InMemoryExecutor` on the api database unless one was passed. */
+  readonly executor: ChangeSetExecutor;
+  /** Prepares change-sets: an `InProcessStarter` on the api database unless one was passed. */
+  readonly starter: InProcessStarter | WorkflowStarter;
   close(): Promise<void>;
 }
 
@@ -59,12 +65,27 @@ export interface StartApiOptions {
   readonly adapter?: OpenApiAdapter;
   /** Directory of the web bundle to serve under /app/ (`AIOPS_WEB_DIR`). */
   readonly webDir?: string;
+  /** The executor; an `InMemoryExecutor` with a `ScriptedWriter` (batches of 100) by default. */
+  readonly executor?: ChangeSetExecutor;
+  /** The workflow starter; `'in-process'` (default) prepares in this process, without Temporal. */
+  readonly starter?: 'in-process' | WorkflowStarter;
+  /** Delay before the in-process starter prepares (ms). */
+  readonly prepareDelayMs?: number;
+  /** `AIOPS_PREPARE_WAIT_MS`; 20000 by default, as in production. */
+  readonly prepareWaitMs?: number;
 }
 
-export async function startApi(databaseUrl: string, options: StartApiOptions): Promise<RunningApi> {
-  const port = options.port ?? (await freePort());
+/** Obviously fake Temporal payload key, same format as the master keys (never reaches Temporal here). */
+const TEST_TEMPORAL_KEYS = '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=';
+
+/** The api environment the e2e tests run with, listening on `port` (Temporal settings as in Compose, fake keys). */
+export function testApiEnv(
+  databaseUrl: string,
+  port: number,
+  options: Pick<StartApiOptions, 'issuer' | 'configDir' | 'resource' | 'webDir' | 'prepareWaitMs'>,
+): ApiEnv {
   const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
-  const env: ApiEnv = {
+  return {
     databaseUrl,
     port,
     allowedHosts: ['localhost', '127.0.0.1'],
@@ -83,18 +104,73 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
     freshAuthSeconds: 300,
     ...(options.webDir === undefined ? {} : { webDir: options.webDir }),
     presetDirs: [],
+    temporalAddress: 'localhost:7233',
+    temporalNamespace: 'default',
+    taskQueue: 'aiops-operations',
+    temporalKeys: TEST_TEMPORAL_KEYS,
+    prepareWaitMs: options.prepareWaitMs ?? 20_000,
   };
+}
+
+export async function startApi(databaseUrl: string, options: StartApiOptions): Promise<RunningApi> {
+  const port = options.port ?? (await freePort());
+  const env = testApiEnv(databaseUrl, port, options);
+  // As given: the token audience must match it character for character.
+  const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
   const adapter = options.adapter ?? createOpenApiAdapter();
   // Loaded as `main.ts` loads it: with the adapter's spec resolver and the preset directories.
   const configuration = await ConfigurationHolder.load(env.configDir, configurationLoadOptions(adapter, env));
+  // The test-side execution stack has its own pool on the api database: what the worker would do.
+  // An idle connection dropped by a test (e.g. a stopped container) is not a test failure.
+  const database = createDb(databaseUrl, { onError: () => undefined });
+  const repository = new PostgresChangeSetRepository(database.db);
+  const vault = new PostgresCredentialVault(database.db, parseMasterKeys(env.masterKeys));
+  const { logger } = options;
+  const upstreamLog =
+    logger === undefined
+      ? {}
+      : {
+          log: (record: object) => {
+            logger.info(record, 'upstream call completed');
+          },
+        };
+  const starter =
+    options.starter === undefined || options.starter === 'in-process'
+      ? new InProcessStarter({
+          configuration: () => configuration.current,
+          repository,
+          // The upstream calls of a preparation are logged as the worker logs them, on the test's logger.
+          readerFor: (current, correlationId) => createUpstreamReader({ configuration: current, vault, adapter, correlationId, ...upstreamLog }),
+          newId: randomUUID,
+          now: () => new Date(),
+          ...(options.prepareDelayMs === undefined ? {} : { delayMs: options.prepareDelayMs }),
+          // A broken preparation shows up at once in the test output, not as a wait that ran out.
+          onError: (error) => {
+            console.error('in-process preparation failed', error);
+          },
+        })
+      : options.starter;
+  const executor = options.executor ?? new InMemoryExecutor({ repository, writer: new ScriptedWriter(), batchSizeOf: () => 100 });
   const app = await createApp({
     env,
     configuration,
-    overrides: { adapter, ...(options.invoker === undefined ? {} : { invoker: options.invoker }) },
+    overrides: { adapter, executor, starter, ...(options.invoker === undefined ? {} : { invoker: options.invoker }) },
     ...(options.logger === undefined ? {} : { logger: options.logger }),
   });
   await app.listen(port, '127.0.0.1');
-  return { app, url: `http://127.0.0.1:${String(port)}`, resource, close: () => app.close() };
+  return {
+    app,
+    url: `http://127.0.0.1:${String(port)}`,
+    resource,
+    executor,
+    starter,
+    async close() {
+      await app.close();
+      // Preparations still running would otherwise hit a closed pool; their failures were reported by `onError`.
+      if (starter instanceof InProcessStarter) await starter.settled().catch(() => undefined);
+      await database.close();
+    },
+  };
 }
 
 /** The running api's credential vault (the real `PostgresCredentialVault`). */

@@ -1,0 +1,81 @@
+[
+  {
+    "name": "bulk-update-globex-meta-keyword",
+    "operation": "catalog.update_content",
+    "records": [
+      { "sku": "GLOBEX-001", "status": 1, "meta_keyword": "contract bulk one" },
+      { "sku": "GLOBEX-002", "status": 1, "meta_keyword": "contract bulk two" }
+    ],
+    "request": {
+      "method": "POST",
+      "path": "/async/bulk/V1/products",
+      "body": [
+        { "product": { "sku": "GLOBEX-001", "status": 1, "custom_attributes": [{ "attribute_code": "meta_keyword", "value": "contract bulk one" }] } },
+        { "product": { "sku": "GLOBEX-002", "status": 1, "custom_attributes": [{ "attribute_code": "meta_keyword", "value": "contract bulk two" }] } }
+      ]
+    },
+    "status": { "method": "GET", "path": "/V1/bulk/{batch_id}/detailed-status" },
+    "verify": {
+      "operation": "catalog.get_products_by_sku",
+      "args": { "brand": "globex", "skus": ["GLOBEX-001", "GLOBEX-002"], "fields": ["sku", "status", "meta_keyword"] },
+      "request": {
+        "method": "GET",
+        "path": "/V1/products",
+        "query": {
+          "searchCriteria[filter_groups][0][filters][0][field]": "brand",
+          "searchCriteria[filter_groups][0][filters][0][value]": "globex",
+          "searchCriteria[filter_groups][0][filters][0][condition_type]": "eq",
+          "searchCriteria[filter_groups][1][filters][0][field]": "sku",
+          "searchCriteria[filter_groups][1][filters][0][value]": "GLOBEX-001,GLOBEX-002",
+          "searchCriteria[filter_groups][1][filters][0][condition_type]": "in",
+          "searchCriteria[pageSize]": "100"
+        }
+      }
+    },
+    "expect": {
+      "states": ["ok", "ok"],
+      "values": {
+        "GLOBEX-001": { "status": 1, "meta_keyword": "contract bulk one" },
+        "GLOBEX-002": { "status": 1, "meta_keyword": "contract bulk two" }
+      }
+    }
+  },
+  {
+    "name": "bulk-update-url-key-conflict",
+    "operation": "catalog.update_content",
+    "records": [
+      { "sku": "GLOBEX-001", "status": 1, "url_key": "acme-001" }
+    ],
+    "request": {
+      "method": "POST",
+      "path": "/async/bulk/V1/products",
+      "body": [
+        { "product": { "sku": "GLOBEX-001", "status": 1, "custom_attributes": [{ "attribute_code": "url_key", "value": "acme-001" }] } }
+      ]
+    },
+    "status": { "method": "GET", "path": "/V1/bulk/{batch_id}/detailed-status" },
+    "verify": {
+      "operation": "catalog.get_products_by_sku",
+      "args": { "brand": "globex", "skus": ["GLOBEX-001"], "fields": ["sku", "status", "url_key"] },
+      "request": {
+        "method": "GET",
+        "path": "/V1/products",
+        "query": {
+          "searchCriteria[filter_groups][0][filters][0][field]": "brand",
+          "searchCriteria[filter_groups][0][filters][0][value]": "globex",
+          "searchCriteria[filter_groups][0][filters][0][condition_type]": "eq",
+          "searchCriteria[filter_groups][1][filters][0][field]": "sku",
+          "searchCriteria[filter_groups][1][filters][0][value]": "GLOBEX-001",
+          "searchCriteria[filter_groups][1][filters][0][condition_type]": "in",
+          "searchCriteria[pageSize]": "100"
+        }
+      }
+    },
+    "expect": {
+      "states": ["failed"],
+      "values": {
+        "GLOBEX-001": { "status": 1, "url_key": "globex-001" }
+      }
+    }
+  }
+]

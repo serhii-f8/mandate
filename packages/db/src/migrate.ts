@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
@@ -31,6 +33,28 @@ export async function runMigrations(databaseUrl: string): Promise<{ applied: num
     }
   } finally {
     await client.end();
+  }
+}
+
+/** Migrations applied versus the ones shipped in this build (NFR-4). */
+export async function migrationState(databaseUrl: string): Promise<{ applied: number; expected: number }> {
+  const journal = JSON.parse(readFileSync(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+    entries: unknown[];
+  };
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    return { applied: await appliedCount(client), expected: journal.entries.length };
+  } finally {
+    await client.end();
+  }
+}
+
+/** Refuses to run against a schema older than this build; the api migrates on start (NFR-4, NFR-5). */
+export async function assertMigrated(databaseUrl: string): Promise<void> {
+  const { applied, expected } = await migrationState(databaseUrl);
+  if (applied < expected) {
+    throw new Error(`database schema is not migrated (applied ${applied} of ${expected}); start api first`);
   }
 }
 

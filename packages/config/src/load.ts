@@ -11,7 +11,7 @@ import type { ConnectionSettings, CredentialScheme, SpecIssue, UpstreamResolver 
 import type { DisabledOperation, GrantDefinition, PolicyConfiguration, RoleDefinition } from '@aiops/core';
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
 import { pathToString, type ConfigIssue } from './issues.js';
-import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS } from './manifest.js';
+import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN } from './manifest.js';
 import { readSpecFile, resolvePreset, type LoadedPreset } from './presets.js';
 import { buildRegistry, propertiesOf, sentArguments, type CatalogState, type Located, type OperationBinding, type OperationSource } from './registry.js';
 import {
@@ -70,7 +70,7 @@ export interface LoadedConfiguration {
   /** True when specs were declared but not resolved because no resolver was given. */
   readonly specChecksSkipped: boolean;
   /** CS-6: hours after which a prepared change-set expires. */
-  readonly changesets: { readonly expireAfterHours: number };
+  readonly changesets: { readonly expireAfterHours: number; readonly failureThreshold: number; readonly itemsPerWorkflowRun: number };
   /** SHA-256 over the sorted files, the preset files and the spec files (CFG-4 records it from Phase 8). */
   readonly hash: string;
 }
@@ -181,7 +181,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     return byId;
   };
   // CS-6: change-set settings come from at most one document.
-  let changesets: Located<{ expire_after_hours: number }> | undefined;
+  let changesets: Located<{ expire_after_hours: number; failure_threshold: number; items_per_workflow_run: number }> | undefined;
   for (const { source, doc } of documents) {
     if (doc.changesets === undefined) continue;
     if (changesets === undefined) changesets = { value: doc.changesets, source, path: ['changesets'] };
@@ -436,7 +436,11 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       credentialManagers,
       specChecksSkipped,
       presetChecksSkipped,
-      changesets: { expireAfterHours: changesets?.value.expire_after_hours ?? DEFAULT_EXPIRE_AFTER_HOURS },
+      changesets: {
+        expireAfterHours: changesets?.value.expire_after_hours ?? DEFAULT_EXPIRE_AFTER_HOURS,
+        failureThreshold: changesets?.value.failure_threshold ?? DEFAULT_FAILURE_THRESHOLD,
+        itemsPerWorkflowRun: changesets?.value.items_per_workflow_run ?? DEFAULT_ITEMS_PER_WORKFLOW_RUN,
+      },
       hash: hash.digest('hex'),
     },
   };

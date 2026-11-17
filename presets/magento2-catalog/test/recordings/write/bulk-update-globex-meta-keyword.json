@@ -1,0 +1,350 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/async/bulk/V1/products",
+    "body": [
+      {
+        "product": {
+          "sku": "GLOBEX-001",
+          "status": 1,
+          "custom_attributes": [
+            {
+              "attribute_code": "meta_keyword",
+              "value": "contract bulk one"
+            }
+          ]
+        }
+      },
+      {
+        "product": {
+          "sku": "GLOBEX-002",
+          "status": 1,
+          "custom_attributes": [
+            {
+              "attribute_code": "meta_keyword",
+              "value": "contract bulk two"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "response": {
+    "status": 202,
+    "body": {
+      "bulk_uuid": "dfcaeb85-b38f-4150-b8ea-058c284258cd",
+      "request_items": [
+        {
+          "id": 0,
+          "data_hash": "ab4777755336b01e24ecabff5463a33a89b564de0531dbdde7f40002437603fa",
+          "status": "accepted"
+        },
+        {
+          "id": 1,
+          "data_hash": "d0b77b2bc93c09ec96d22a2b61341050ef0c404a64fb7ffa19d7287324e27b95",
+          "status": "accepted"
+        }
+      ],
+      "errors": false
+    }
+  },
+  "polls": [
+    {
+      "status": 200,
+      "body": {
+        "operations_list": [
+          {
+            "id": 0,
+            "bulk_uuid": "dfcaeb85-b38f-4150-b8ea-058c284258cd",
+            "topic_name": "async.magento.catalog.api.productrepositoryinterface.save.post",
+            "serialized_data": "{\"entity_id\":null,\"entity_link\":\"\",\"meta_information\":\"{\\\"product\\\":{\\\"sku\\\":\\\"GLOBEX-001\\\",\\\"status\\\":1,\\\"custom_attributes\\\":[{\\\"attribute_code\\\":\\\"meta_keyword\\\",\\\"value\\\":\\\"contract bulk one\\\"}]},\\\"saveOptions\\\":false}\",\"store_id\":\"0\"}",
+            "result_serialized_data": null,
+            "status": 4,
+            "result_message": null,
+            "error_code": null
+          },
+          {
+            "id": 1,
+            "bulk_uuid": "dfcaeb85-b38f-4150-b8ea-058c284258cd",
+            "topic_name": "async.magento.catalog.api.productrepositoryinterface.save.post",
+            "serialized_data": "{\"entity_id\":null,\"entity_link\":\"\",\"meta_information\":\"{\\\"product\\\":{\\\"sku\\\":\\\"GLOBEX-002\\\",\\\"status\\\":1,\\\"custom_attributes\\\":[{\\\"attribute_code\\\":\\\"meta_keyword\\\",\\\"value\\\":\\\"contract bulk two\\\"}]},\\\"saveOptions\\\":false}\",\"store_id\":\"0\"}",
+            "result_serialized_data": null,
+            "status": 4,
+            "result_message": null,
+            "error_code": null
+          }
+        ],
+        "user_type": 2,
+        "bulk_id": "dfcaeb85-b38f-4150-b8ea-058c284258cd",
+        "description": "Topic async.magento.catalog.api.productrepositoryinterface.save.post",
+        "start_time": "2026-11-17 15:52:21",
+        "user_id": 1,
+        "operation_count": 2
+      }
+    },
+    {
+      "status": 200,
+      "body": {
+        "operations_list": [
+          {
+            "id": 0,
+            "bulk_uuid": "dfcaeb85-b38f-4150-b8ea-058c284258cd",
+            "topic_name": "async.magento.catalog.api.productrepositoryinterface.save.post",
+            "serialized_data": "{\"entity_id\":null,\"entity_link\":\"\",\"meta_information\":\"{\\\"product\\\":{\\\"sku\\\":\\\"GLOBEX-001\\\",\\\"status\\\":1,\\\"custom_attributes\\\":[{\\\"attribute_code\\\":\\\"meta_keyword\\\",\\\"value\\\":\\\"contract bulk one\\\"}]},\\\"saveOptions\\\":false}\",\"store_id\":\"0\"}",
+            "result_serialized_data": null,
+            "status": 4,
+            "result_message": null,
+            "error_code": null
+          },
+          {
+            "id": 1,
+            "bulk_uuid": "dfcaeb85-b38f-4150-b8ea-058c284258cd",
+            "topic_name": "async.magento.catalog.api.productrepositoryinterface.save.post",
+            "serialized_data": "{\"entity_id\":null,\"entity_link\":\"\",\"meta_information\":\"{\\\"product\\\":{\\\"sku\\\":\\\"GLOBEX-002\\\",\\\"status\\\":1,\\\"custom_attributes\\\":[{\\\"attribute_code\\\":\\\"meta_keyword\\\",\\\"value\\\":\\\"contract bulk two\\\"}]},\\\"saveOptions\\\":false}\",\"store_id\":\"0\"}",
+            "result_serialized_data": null,
+            "status": 4,
+            "result_message": null,
+            "error_code": null
+          }
+        ],
+        "user_type": 2,
+        "bulk_id": "dfcaeb85-b38f-4150-b8ea-058c284258cd",
+        "description": "Topic async.magento.catalog.api.productrepositoryinterface.save.post",
+        "start_time": "2026-11-17 15:52:21",
+        "user_id": 1,
+        "operation_count": 2
+      }
+    },
+    {
+      "status": 200,
+      "body": {
+        "operations_list": [
+          {
+            "id": 0,
+            "bulk_uuid": "dfcaeb85-b38f-4150-b8ea-058c284258cd",
+            "topic_name": "async.magento.catalog.api.productrepositoryinterface.save.post",
+            "serialized_data": null,
+            "result_serialized_data": "{\"id\":4,\"sku\":\"GLOBEX-001\",\"name\":\"Globex Hammock\",\"attribute_set_id\":4,\"price\":59,\"status\":1,\"visibility\":4,\"type_id\":\"simple\",\"created_at\":\"2026-11-16 22:21:39\",\"updated_at\":\"2026-11-17 15:52:23\",\"weight\":1,\"extension_attributes\":{\"website_ids\":[1],\"stock_item\":{\"item_id\":4,\"product_id\":4,\"stock_id\":1,\"qty\":100,\"is_in_stock\":true,\"is_qty_decimal\":false,\"show_default_notification_message\":false,\"use_config_min_qty\":true,\"min_qty\":0,\"use_config_min_sale_qty\":1,\"min_sale_qty\":1,\"use_config_max_sale_qty\":true,\"max_sale_qty\":10000,\"use_config_backorders\":true,\"backorders\":0,\"use_config_notify_stock_qty\":true,\"notify_stock_qty\":1,\"use_config_qty_increments\":true,\"qty_increments\":0,\"use_config_enable_qty_inc\":true,\"enable_qty_increments\":false,\"use_config_manage_stock\":true,\"manage_stock\":true,\"low_stock_date\":null,\"is_decimal_divided\":false,\"stock_status_changed_auto\":0}},\"product_links\":[],\"options\":[],\"media_gallery_entries\":[],\"tier_prices\":[],\"custom_attributes\":[{\"attribute_code\":\"options_container\",\"value\":\"container2\"},{\"attribute_code\":\"cost\",\"value\":\"25.000000\"},{\"attribute_code\":\"url_key\",\"value\":\"globex-001\"},{\"attribute_code\":\"msrp_display_actual_price_type\",\"value\":\"0\"},{\"attribute_code\":\"required_options\",\"value\":\"0\"},{\"attribute_code\":\"has_options\",\"value\":\"0\"},{\"attribute_code\":\"meta_keyword\",\"value\":\"contract bulk one\"},{\"attribute_code\":\"tax_class_id\",\"value\":\"2\"},{\"attribute_code\":\"category_ids\",\"value\":[]},{\"attribute_code\":\"short_description\",\"value\":\"Globex Hammock\"},{\"attribute_code\":\"mageos_shopping_feed_skip_submit\",\"value\":\"0\"},{\"attribute_code\":\"brand\",\"value\":\"globex\"},{\"attribute_code\":\"description\",\"value\":\"A hammock for long afternoons.\"}]}",
+            "status": 1,
+            "result_message": "Service execution success Magento\\Catalog\\Model\\ProductRepository\\Interceptor::save",
+            "error_code": null
+          },
+          {
+            "id": 1,
+            "bulk_uuid": "dfcaeb85-b38f-4150-b8ea-058c284258cd",
+            "topic_name": "async.magento.catalog.api.productrepositoryinterface.save.post",
+            "serialized_data": null,
+            "result_serialized_data": "{\"id\":5,\"sku\":\"GLOBEX-002\",\"name\":\"Globex Desk Lamp\",\"attribute_set_id\":4,\"price\":35,\"status\":1,\"visibility\":4,\"type_id\":\"simple\",\"created_at\":\"2026-11-16 22:21:39\",\"updated_at\":\"2026-11-17 15:52:23\",\"weight\":1,\"extension_attributes\":{\"website_ids\":[1],\"stock_item\":{\"item_id\":5,\"product_id\":5,\"stock_id\":1,\"qty\":100,\"is_in_stock\":true,\"is_qty_decimal\":false,\"show_default_notification_message\":false,\"use_config_min_qty\":true,\"min_qty\":0,\"use_config_min_sale_qty\":1,\"min_sale_qty\":1,\"use_config_max_sale_qty\":true,\"max_sale_qty\":10000,\"use_config_backorders\":true,\"backorders\":0,\"use_config_notify_stock_qty\":true,\"notify_stock_qty\":1,\"use_config_qty_increments\":true,\"qty_increments\":0,\"use_config_enable_qty_inc\":true,\"enable_qty_increments\":false,\"use_config_manage_stock\":true,\"manage_stock\":true,\"low_stock_date\":null,\"is_decimal_divided\":false,\"stock_status_changed_auto\":0}},\"product_links\":[],\"options\":[],\"media_gallery_entries\":[],\"tier_prices\":[],\"custom_attributes\":[{\"attribute_code\":\"options_container\",\"value\":\"container2\"},{\"attribute_code\":\"cost\",\"value\":\"12.250000\"},{\"attribute_code\":\"url_key\",\"value\":\"globex-002\"},{\"attribute_code\":\"msrp_display_actual_price_type\",\"value\":\"0\"},{\"attribute_code\":\"required_options\",\"value\":\"0\"},{\"attribute_code\":\"has_options\",\"value\":\"0\"},{\"attribute_code\":\"meta_keyword\",\"value\":\"contract bulk two\"},{\"attribute_code\":\"tax_class_id\",\"value\":\"2\"},{\"attribute_code\":\"category_ids\",\"value\":[]},{\"attribute_code\":\"short_description\",\"value\":\"Globex Desk Lamp\"},{\"attribute_code\":\"mageos_shopping_feed_skip_submit\",\"value\":\"0\"},{\"attribute_code\":\"brand\",\"value\":\"globex\"},{\"attribute_code\":\"description\",\"value\":\"A warm desk lamp with a heavy base.\"}]}",
+            "status": 1,
+            "result_message": "Service execution success Magento\\Catalog\\Model\\ProductRepository\\Interceptor::save",
+            "error_code": null
+          }
+        ],
+        "user_type": 2,
+        "bulk_id": "dfcaeb85-b38f-4150-b8ea-058c284258cd",
+        "description": "Topic async.magento.catalog.api.productrepositoryinterface.save.post",
+        "start_time": "2026-11-17 15:52:21",
+        "user_id": 1,
+        "operation_count": 2
+      }
+    }
+  ],
+  "verify": {
+    "request": {
+      "method": "GET",
+      "path": "/V1/products",
+      "query": {
+        "searchCriteria[filter_groups][0][filters][0][field]": "brand",
+        "searchCriteria[filter_groups][0][filters][0][value]": "globex",
+        "searchCriteria[filter_groups][0][filters][0][condition_type]": "eq",
+        "searchCriteria[filter_groups][1][filters][0][field]": "sku",
+        "searchCriteria[filter_groups][1][filters][0][value]": "GLOBEX-001,GLOBEX-002",
+        "searchCriteria[filter_groups][1][filters][0][condition_type]": "in",
+        "searchCriteria[pageSize]": "100"
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": 4,
+            "sku": "GLOBEX-001",
+            "name": "Globex Hammock",
+            "attribute_set_id": 4,
+            "price": 59,
+            "status": 1,
+            "visibility": 4,
+            "type_id": "simple",
+            "created_at": "2026-11-16 22:21:39",
+            "updated_at": "2026-11-17 15:52:23",
+            "weight": 1,
+            "extension_attributes": {
+              "website_ids": [
+                1
+              ]
+            },
+            "product_links": [],
+            "options": [],
+            "media_gallery_entries": [],
+            "tier_prices": [],
+            "custom_attributes": [
+              {
+                "attribute_code": "options_container",
+                "value": "container2"
+              },
+              {
+                "attribute_code": "cost",
+                "value": "25.000000"
+              },
+              {
+                "attribute_code": "url_key",
+                "value": "globex-001"
+              },
+              {
+                "attribute_code": "msrp_display_actual_price_type",
+                "value": "0"
+              },
+              {
+                "attribute_code": "required_options",
+                "value": "0"
+              },
+              {
+                "attribute_code": "has_options",
+                "value": "0"
+              },
+              {
+                "attribute_code": "meta_keyword",
+                "value": "contract bulk one"
+              },
+              {
+                "attribute_code": "tax_class_id",
+                "value": "2"
+              },
+              {
+                "attribute_code": "category_ids",
+                "value": []
+              },
+              {
+                "attribute_code": "short_description",
+                "value": "Globex Hammock"
+              },
+              {
+                "attribute_code": "mageos_shopping_feed_skip_submit",
+                "value": "0"
+              },
+              {
+                "attribute_code": "brand",
+                "value": "globex"
+              },
+              {
+                "attribute_code": "description",
+                "value": "A hammock for long afternoons."
+              }
+            ]
+          },
+          {
+            "id": 5,
+            "sku": "GLOBEX-002",
+            "name": "Globex Desk Lamp",
+            "attribute_set_id": 4,
+            "price": 35,
+            "status": 1,
+            "visibility": 4,
+            "type_id": "simple",
+            "created_at": "2026-11-16 22:21:39",
+            "updated_at": "2026-11-17 15:52:23",
+            "weight": 1,
+            "extension_attributes": {
+              "website_ids": [
+                1
+              ]
+            },
+            "product_links": [],
+            "options": [],
+            "media_gallery_entries": [],
+            "tier_prices": [],
+            "custom_attributes": [
+              {
+                "attribute_code": "options_container",
+                "value": "container2"
+              },
+              {
+                "attribute_code": "cost",
+                "value": "12.250000"
+              },
+              {
+                "attribute_code": "url_key",
+                "value": "globex-002"
+              },
+              {
+                "attribute_code": "msrp_display_actual_price_type",
+                "value": "0"
+              },
+              {
+                "attribute_code": "required_options",
+                "value": "0"
+              },
+              {
+                "attribute_code": "has_options",
+                "value": "0"
+              },
+              {
+                "attribute_code": "meta_keyword",
+                "value": "contract bulk two"
+              },
+              {
+                "attribute_code": "tax_class_id",
+                "value": "2"
+              },
+              {
+                "attribute_code": "category_ids",
+                "value": []
+              },
+              {
+                "attribute_code": "short_description",
+                "value": "Globex Desk Lamp"
+              },
+              {
+                "attribute_code": "mageos_shopping_feed_skip_submit",
+                "value": "0"
+              },
+              {
+                "attribute_code": "brand",
+                "value": "globex"
+              },
+              {
+                "attribute_code": "description",
+                "value": "A warm desk lamp with a heavy base."
+              }
+            ]
+          }
+        ],
+        "search_criteria": {
+          "filter_groups": [
+            {
+              "filters": [
+                {
+                  "field": "brand",
+                  "value": "globex",
+                  "condition_type": "eq"
+                }
+              ]
+            },
+            {
+              "filters": [
+                {
+                  "field": "sku",
+                  "value": "GLOBEX-001,GLOBEX-002",
+                  "condition_type": "in"
+                }
+              ]
+            }
+          ],
+          "page_size": 100
+        },
+        "total_count": 2
+      }
+    }
+  }
+}

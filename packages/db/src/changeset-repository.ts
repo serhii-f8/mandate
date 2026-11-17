@@ -1,25 +1,36 @@
-import { and, asc, DrizzleQueryError, eq, gt, inArray, lte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, lte, sql, type SQL } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type {
   AuditEventInput,
   AuditLog,
+  BatchCounts,
+  BatchRecord,
+  BatchSubmission,
+  CancelRequest,
   ChangeItemRecord,
   ChangeSetRecord,
   ChangeSetRepository,
   ChangeSetStats,
   ChangeSetStatus,
   ExclusionReason,
+  ExecutionUsage,
   ItemOutcome,
   ItemsPageQuery,
   NewChangeSet,
 } from '@aiops/core';
-import { EMPTY_STATS } from '@aiops/core';
+import { EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
 import { DrizzleAuditLog } from './audit-log.js';
+import { guarded } from './errors.js';
 import type { Db, DbExecutor } from './client.js';
-import { changeItem, changeSet } from './schema.js';
+import { changeBatch, changeItem, changeSet } from './schema.js';
 
 const MAX_PAGE = 500;
+const MAX_BATCH = 1000;
+const DAY_MS = 24 * 3_600_000;
+/** First key of the two-key advisory lock `startExecution` takes per requester ('aex1'). */
+const START_LOCK_NAMESPACE = 0x6165_7831;
 const OUTCOMES_REFUSED = 'item outcomes rejected: change-set is not executing';
+const BATCH_REFUSED = 'batch outcomes rejected: change-set is not executing';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface PostgresChangeSetRepositoryOptions {
@@ -29,6 +40,12 @@ export interface PostgresChangeSetRepositoryOptions {
 
 type ChangeSetRow = typeof changeSet.$inferSelect;
 type ChangeItemRow = typeof changeItem.$inferSelect;
+type ChangeBatchRow = typeof changeBatch.$inferSelect;
+type StartRequestOf = Parameters<ChangeSetRepository['startExecution']>[0];
+type StartResult = Awaited<ReturnType<ChangeSetRepository['startExecution']>>;
+type ClaimResult = Awaited<ReturnType<ChangeSetRepository['claimBatch']>>;
+type CancelResult = Awaited<ReturnType<ChangeSetRepository['requestCancel']>>;
+type CompleteResult = Awaited<ReturnType<ChangeSetRepository['completeBatch']>>;
 
 function toRecord(row: ChangeSetRow): ChangeSetRecord {
   return {
@@ -42,12 +59,53 @@ function toRecord(row: ChangeSetRow): ChangeSetRecord {
     status: row.status,
     stats: row.stats,
     ...(row.errorCode === null ? {} : { errorCode: row.errorCode }),
+    ...(row.errorStatus === null ? {} : { errorStatus: row.errorStatus }),
     configHash: row.configHash,
     correlationId: row.correlationId,
     createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
     ...(row.preparedAt === null ? {} : { preparedAt: row.preparedAt }),
     expiresAt: row.expiresAt,
+    ...(row.executionActor === null ||
+    row.executionGroups === null ||
+    row.executionCorrelationId === null ||
+    row.executionStartedAt === null
+      ? {}
+      : {
+          executionRequest: {
+            actor: row.executionActor,
+            groups: row.executionGroups,
+            ...(row.executionClientId === null ? {} : { clientId: row.executionClientId }),
+            correlationId: row.executionCorrelationId,
+            startedAt: row.executionStartedAt,
+          },
+        }),
+    ...(row.cancelRequestedBy === null || row.cancelCorrelationId === null || row.cancelRequestedAt === null
+      ? {}
+      : {
+          cancelRequest: {
+            actor: row.cancelRequestedBy,
+            correlationId: row.cancelCorrelationId,
+            requestedAt: row.cancelRequestedAt,
+          },
+        }),
   };
+}
+
+function toBatch(row: ChangeBatchRow): BatchRecord {
+  return {
+    changesetId: row.changesetId,
+    batchNo: row.batchNo,
+    attempt: row.attempt,
+    targetIds: row.targetIds,
+    ...(row.upstreamBatchId === null || row.plan === null
+      ? {}
+      : { submission: { upstreamBatchId: row.upstreamBatchId, plan: row.plan } }),
+  };
+}
+
+function countsOf(row: ChangeBatchRow): BatchCounts {
+  return { written: row.written, failed: row.failed, skipped: row.skipped };
 }
 
 function toItem(row: ChangeItemRow): ChangeItemRecord {
@@ -59,36 +117,6 @@ function toItem(row: ChangeItemRow): ChangeItemRecord {
     after: row.after,
     ...(row.error === null ? {} : { error: row.error }),
   };
-}
-
-/** Postgres error code of `error` or of its cause (drizzle wraps driver errors). */
-function pgCode(error: unknown): string | undefined {
-  for (let e: unknown = error; typeof e === 'object' && e !== null; e = (e as { cause?: unknown }).cause) {
-    const code = (e as { code?: unknown }).code;
-    if (typeof code === 'string') return code;
-  }
-  return undefined;
-}
-
-/**
- * A database error leaves as a fixed message carrying only its code, without `cause`:
- * drizzle's error quotes the statement and its parameters (target IDs, outcome texts,
- * cursors, error codes), and the driver's `detail` quotes key values (SEC-3). Errors of
- * our own (validation, an injected audit failure) pass unchanged.
- */
-function databaseError(what: string, error: unknown): unknown {
-  const code = pgCode(error);
-  if (code === undefined && !(error instanceof DrizzleQueryError)) return error;
-  const message = code === '23505' && what === 'change-set create' ? 'change-set already exists' : `${what} failed`;
-  return Object.assign(new Error(code === undefined ? message : `${message} (sqlstate ${code})`), code === undefined ? {} : { code });
-}
-
-async function guarded<T>(what: string, run: () => Promise<T>): Promise<T> {
-  try {
-    return await run();
-  } catch (error) {
-    throw databaseError(what, error);
-  }
 }
 
 /**
@@ -215,7 +243,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     changesetId: string,
     outcome:
       | { status: 'prepared'; hash: string; stats: ChangeSetStats; preparedAt: Date }
-      | { status: 'failed'; errorCode: string },
+      | { status: 'failed'; errorCode: string; upstreamStatus?: number },
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined> {
     if (!UUID.test(changesetId)) return undefined;
@@ -228,7 +256,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
             preparedAt: outcome.preparedAt,
             updatedAt: sql`now()`,
           }
-        : { status: 'failed' as const, errorCode: outcome.errorCode, updatedAt: sql`now()` };
+        : { status: 'failed' as const, errorCode: outcome.errorCode, errorStatus: outcome.upstreamStatus ?? null, updatedAt: sql`now()` };
     return this.compareAndSet(changesetId, ['preparing'], set, audit);
   }
 
@@ -237,7 +265,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     from: readonly ChangeSetStatus[],
     to: ChangeSetStatus,
     audit: AuditEventInput,
-    extra?: { errorCode?: string; expiredBefore?: Date },
+    extra?: { errorCode?: string; expiredBefore?: Date; unlessBatches?: boolean },
   ): Promise<ChangeSetRecord | undefined> {
     if (!UUID.test(changesetId) || from.length === 0) return undefined;
     const set: PgUpdateSetSource<typeof changeSet> = {
@@ -245,7 +273,21 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
       ...(extra?.errorCode === undefined ? {} : { errorCode: extra.errorCode }),
       updatedAt: sql`now()`,
     };
-    return this.compareAndSet(changesetId, from, set, audit, extra?.expiredBefore);
+    return this.compareAndSet(changesetId, from, set, audit, extra?.expiredBefore, extra?.unlessBatches === true);
+  }
+
+  async errorCounts(changesetId: string): Promise<Readonly<Record<string, number>>> {
+    if (!UUID.test(changesetId)) return {};
+    const rows = await guarded('item error counts', () =>
+      this.db
+        .select({ error: changeItem.error, n: sql<number>`count(*)::int` })
+        .from(changeItem)
+        .where(and(eq(changeItem.changesetId, changesetId), sql`${changeItem.error} is not null`))
+        .groupBy(changeItem.error),
+    );
+    const counts: Record<string, number> = {};
+    for (const { error, n } of rows) if (error !== null) counts[error] = n;
+    return counts;
   }
 
   async recordItemOutcomes(changesetId: string, outcomes: readonly ItemOutcome[]): Promise<void> {
@@ -285,6 +327,254 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     );
   }
 
+  async startExecution(req: StartRequestOf): Promise<StartResult> {
+    if (!UUID.test(req.changesetId)) return { ok: false, reason: 'not_found' };
+    return guarded('change-set start', () =>
+      this.db.transaction(
+        async (tx): Promise<StartResult> => {
+          // The row lock serializes starts of one change-set: a second start finds it executing.
+          const [row] = await tx.select().from(changeSet).where(eq(changeSet.id, req.changesetId)).for('update');
+          if (row === undefined) return { ok: false, reason: 'not_found' };
+          const record = toRecord(row);
+          if (isExpiryDue(record, req.now)) {
+            await tx
+              .update(changeSet)
+              .set({ status: 'expired', updatedAt: sql`now()` })
+              .where(eq(changeSet.id, req.changesetId));
+            await this.auditFor(tx).append(req.event({ kind: 'expired', from: record.status }, record));
+            return { ok: false, reason: 'expired' };
+          }
+          if (record.hash === undefined) return { ok: false, reason: 'not_executable' };
+          if (record.hash !== req.expectedHash) return { ok: false, reason: 'hash_mismatch' };
+          if (record.status !== 'prepared' && record.status !== 'approved') return { ok: false, reason: 'not_executable' };
+          // Starts of one requester serialize here, before the usage is read (POL-4). At READ
+          // COMMITTED each later statement sees the starts that committed while this one waited.
+          await tx.execute(
+            sql`SELECT pg_advisory_xact_lock(${START_LOCK_NAMESPACE}::int4, hashtext(${record.requester}))`,
+          );
+          if (req.limits !== undefined) {
+            const since = new Date(req.now.getTime() - DAY_MS);
+            const limit = evaluateLimits(req.limits, record.stats.included, await usageOf(tx, record.requester, since));
+            if (limit !== undefined) {
+              await this.auditFor(tx).append(req.event({ kind: 'limit_denied', limit, role: req.limits.role }, record));
+              return { ok: false, reason: 'limit_exceeded', limit };
+            }
+          }
+          const [updated] = await tx
+            .update(changeSet)
+            .set({
+              status: 'executing',
+              executionActor: req.request.actor,
+              executionGroups: [...req.request.groups],
+              executionClientId: req.request.clientId ?? null,
+              executionCorrelationId: req.request.correlationId,
+              executionStartedAt: req.now,
+              updatedAt: sql`now()`,
+            })
+            .where(and(eq(changeSet.id, req.changesetId), inArray(changeSet.status, ['prepared', 'approved'])))
+            .returning();
+          if (updated === undefined) return { ok: false, reason: 'not_executable' };
+          await this.auditFor(tx).append(req.event({ kind: 'executing', from: record.status }, record));
+          return { ok: true, changeset: toRecord(updated) };
+        },
+        { isolationLevel: 'read committed' },
+      ),
+    );
+  }
+
+  async requestCancel(changesetId: string, cancel: CancelRequest): Promise<CancelResult> {
+    if (!UUID.test(changesetId)) return { ok: false };
+    return guarded('change-set cancel request', () =>
+      this.db.transaction(async (tx): Promise<CancelResult> => {
+        const [row] = await tx.select().from(changeSet).where(eq(changeSet.id, changesetId)).for('update');
+        if (row === undefined) return { ok: false };
+        if (row.status !== 'executing') return { ok: false, status: row.status };
+        // The first request wins: a later one answers the stored request unchanged.
+        if (row.cancelRequestedBy !== null) return { ok: true, changeset: toRecord(row) };
+        const [updated] = await tx
+          .update(changeSet)
+          .set({
+            cancelRequestedBy: cancel.actor,
+            cancelCorrelationId: cancel.correlationId,
+            cancelRequestedAt: cancel.requestedAt,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(changeSet.id, changesetId))
+          .returning();
+        if (updated === undefined) throw new Error('cancel request update returned no row');
+        return { ok: true, changeset: toRecord(updated) };
+      }),
+    );
+  }
+
+  async usage(requester: string, since: Date): Promise<ExecutionUsage> {
+    return guarded('execution usage', () => usageOf(this.db, requester, since));
+  }
+
+  async claimBatch(changesetId: string, batchNo: number, attempt: number, size: number): Promise<ClaimResult> {
+    if (!Number.isInteger(size) || size < 1 || size > MAX_BATCH) {
+      throw new Error(`batch size must be between 1 and ${MAX_BATCH}`);
+    }
+    if (!UUID.test(changesetId)) return { kind: 'empty' };
+    return guarded('batch claim', () =>
+      this.db.transaction(async (tx): Promise<ClaimResult> => {
+        // The change-set row lock serializes claims and completions of one change-set, and holds
+        // off a status change until this claim commits: no batch is claimed after it left executing.
+        const [parent] = await tx
+          .select({ status: changeSet.status })
+          .from(changeSet)
+          .where(eq(changeSet.id, changesetId))
+          .for('update');
+        if (parent === undefined) return { kind: 'empty' };
+        const executing = parent.status === 'executing';
+        let row = await readBatch(tx, changesetId, batchNo);
+        if (row === undefined) {
+          if (!executing) return { kind: 'fenced' };
+          // Continue after the last target of the highest existing batch.
+          const [highest] = await tx
+            .select({ lastTarget: changeBatch.lastTarget })
+            .from(changeBatch)
+            .where(eq(changeBatch.changesetId, changesetId))
+            .orderBy(desc(changeBatch.batchNo))
+            .limit(1);
+          const conditions: SQL[] = [eq(changeItem.changesetId, changesetId), eq(changeItem.status, 'pending')];
+          if (highest !== undefined) conditions.push(gt(changeItem.targetId, highest.lastTarget));
+          const items = await tx
+            .select()
+            .from(changeItem)
+            .where(and(...conditions))
+            .orderBy(asc(changeItem.targetId))
+            .limit(size);
+          const last = items[items.length - 1];
+          if (last === undefined) return { kind: 'empty' };
+          const [inserted] = await tx
+            .insert(changeBatch)
+            .values({
+              changesetId,
+              batchNo,
+              attempt,
+              state: 'open',
+              targetIds: items.map((i) => i.targetId),
+              lastTarget: last.targetId,
+            })
+            .onConflictDoNothing()
+            .returning();
+          if (inserted !== undefined) return { kind: 'claimed', batch: toBatch(inserted), items: items.map(toItem) };
+          // Another claim inserted it first: answer as for an existing batch.
+          row = await readBatch(tx, changesetId, batchNo);
+          if (row === undefined) throw new Error('batch claim found no row after a conflict');
+        }
+        if (row.state === 'done') return { kind: 'done', counts: countsOf(row) };
+        if (!executing || row.attempt >= attempt) return { kind: 'fenced' };
+        const [taken] = await tx
+          .update(changeBatch)
+          .set({ attempt, updatedAt: sql`now()` })
+          .where(
+            and(
+              eq(changeBatch.changesetId, changesetId),
+              eq(changeBatch.batchNo, batchNo),
+              lt(changeBatch.attempt, attempt),
+              eq(changeBatch.state, 'open'),
+            ),
+          )
+          .returning();
+        if (taken === undefined) {
+          // Lost to a completion or a newer attempt between the read and the update.
+          const current = await readBatch(tx, changesetId, batchNo);
+          return current?.state === 'done' ? { kind: 'done', counts: countsOf(current) } : { kind: 'fenced' };
+        }
+        const items = await tx
+          .select()
+          .from(changeItem)
+          .where(and(eq(changeItem.changesetId, changesetId), inArray(changeItem.targetId, taken.targetIds)))
+          .orderBy(asc(changeItem.targetId));
+        return { kind: 'claimed', batch: toBatch(taken), items: items.map(toItem) };
+      }),
+    );
+  }
+
+  async recordSubmission(
+    changesetId: string,
+    batchNo: number,
+    attempt: number,
+    submission: BatchSubmission,
+  ): Promise<boolean> {
+    if (!UUID.test(changesetId)) return false;
+    const rows = await guarded('batch submission record', () =>
+      this.db
+        .update(changeBatch)
+        .set({ upstreamBatchId: submission.upstreamBatchId, plan: [...submission.plan], updatedAt: sql`now()` })
+        .where(
+          and(
+            eq(changeBatch.changesetId, changesetId),
+            eq(changeBatch.batchNo, batchNo),
+            eq(changeBatch.attempt, attempt),
+            eq(changeBatch.state, 'open'),
+          ),
+        )
+        .returning({ batchNo: changeBatch.batchNo }),
+    );
+    return rows.length > 0;
+  }
+
+  async completeBatch(
+    changesetId: string,
+    batchNo: number,
+    attempt: number,
+    outcomes: readonly ItemOutcome[],
+    audit: AuditEventInput,
+  ): Promise<CompleteResult> {
+    if (!UUID.test(changesetId)) return { ok: false };
+    return guarded('batch complete', () =>
+      this.db.transaction(async (tx): Promise<CompleteResult> => {
+        // Same lock order as claimBatch: the change-set row, then the batch row.
+        const [parent] = await tx
+          .select({ status: changeSet.status })
+          .from(changeSet)
+          .where(eq(changeSet.id, changesetId))
+          .for('update');
+        if (parent === undefined) return { ok: false };
+        const [row] = await tx
+          .select()
+          .from(changeBatch)
+          .where(and(eq(changeBatch.changesetId, changesetId), eq(changeBatch.batchNo, batchNo)))
+          .for('update');
+        if (row?.attempt !== attempt || row.state !== 'open') return { ok: false };
+        if (parent.status !== 'executing') throw new Error(BATCH_REFUSED);
+        // The first outcome per target of this batch; outcomes for other targets are ignored.
+        const inBatch = new Set(row.targetIds);
+        const seen = new Set<string>();
+        const rows: Record<string, unknown>[] = [];
+        for (const o of outcomes) {
+          if (!inBatch.has(o.targetId) || seen.has(o.targetId)) continue;
+          seen.add(o.targetId);
+          rows.push({ target_id: o.targetId, status: o.status, error: o.error ?? null });
+        }
+        const counts: { -readonly [K in keyof BatchCounts]: number } = { written: 0, failed: 0, skipped: 0 };
+        if (rows.length > 0) {
+          // Only pending items change, and only those count.
+          const applied = await tx.execute<{ status: ItemOutcome['status'] }>(sql`
+            UPDATE change_item AS ci
+            SET status = o.status, error = COALESCE(o.error, ci.error), updated_at = now()
+            FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS o(target_id text, status text, error text)
+            WHERE ci.changeset_id = ${changesetId}::uuid
+              AND ci.target_id = o.target_id
+              AND ci.status = 'pending'
+            RETURNING ci.status`);
+          for (const r of applied.rows) counts[r.status] += 1;
+        }
+        const stats = await computeStats(tx, changesetId);
+        await tx.update(changeSet).set({ stats, updatedAt: sql`now()` }).where(eq(changeSet.id, changesetId));
+        await tx
+          .update(changeBatch)
+          .set({ state: 'done', ...counts, updatedAt: sql`now()` })
+          .where(and(eq(changeBatch.changesetId, changesetId), eq(changeBatch.batchNo, batchNo)));
+        await this.auditFor(tx).append(audit);
+        return { ok: true, counts };
+      }),
+    );
+  }
+
   /** Compare-and-set on status; no matching row writes no audit event and returns undefined. */
   private async compareAndSet(
     changesetId: string,
@@ -292,9 +582,21 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     set: PgUpdateSetSource<typeof changeSet>,
     audit: AuditEventInput,
     expiredBefore?: Date,
+    unlessBatches = false,
   ): Promise<ChangeSetRecord | undefined> {
     return guarded('change-set update', () =>
       this.db.transaction(async (tx) => {
+        if (unlessBatches) {
+          // The parent row lock claimBatch takes: a claim either committed before (its batch is seen
+          // by the next statement, read committed) or waits until this change committed (and fences).
+          await tx.select({ id: changeSet.id }).from(changeSet).where(eq(changeSet.id, changesetId)).for('update');
+          const [batch] = await tx
+            .select({ batchNo: changeBatch.batchNo })
+            .from(changeBatch)
+            .where(eq(changeBatch.changesetId, changesetId))
+            .limit(1);
+          if (batch !== undefined) return undefined;
+        }
         const conditions: SQL[] = [eq(changeSet.id, changesetId), inArray(changeSet.status, [...from])];
         if (expiredBefore !== undefined) conditions.push(lte(changeSet.expiresAt, expiredBefore));
         const [row] = await tx
@@ -308,6 +610,32 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
       }),
     );
   }
+}
+
+async function readBatch(db: DbExecutor, changesetId: string, batchNo: number): Promise<ChangeBatchRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(changeBatch)
+    .where(and(eq(changeBatch.changesetId, changesetId), eq(changeBatch.batchNo, batchNo)));
+  return row;
+}
+
+/**
+ * Included records of the requester's executions started at or after `since`, and its executing
+ * count (POL-4). The two branches of the filter use the indexes on (requester, execution_started_at)
+ * and (requester, status).
+ */
+async function usageOf(db: Db | DbExecutor, requester: string, since: Date): Promise<ExecutionUsage> {
+  const startedSince = sql`${changeSet.executionStartedAt} >= ${since}`;
+  const isExecuting = sql`${changeSet.status} = 'executing'`;
+  const [row] = await db
+    .select({
+      recordsSince: sql<number>`coalesce(sum((${changeSet.stats}->>'included')::int) filter (where ${startedSince}), 0)::int`,
+      executing: sql<number>`(count(*) filter (where ${isExecuting}))::int`,
+    })
+    .from(changeSet)
+    .where(and(eq(changeSet.requester, requester), sql`(${startedSince} or ${isExecuting})`));
+  return { recordsSince: row?.recordsSince ?? 0, executing: row?.executing ?? 0 };
 }
 
 async function computeStats(db: Db | DbExecutor, changesetId: string): Promise<ChangeSetStats> {

@@ -6,7 +6,7 @@
 import type { ConnectionTestReport, ReadAdapter, ReadErrorCode, ScopeReport } from '@aiops/connector-sdk';
 import type { LoadedConfiguration } from '@aiops/config';
 import type { AuditLog, CredentialVault } from '@aiops/core';
-import { connectionCredential } from './read-invoker.js';
+import { connectionCredential } from '@aiops/upstream';
 
 export const NO_TEST_DECLARED = 'no connection test is declared';
 export const CONNECTION_UNKNOWN = 'connection is not configured';

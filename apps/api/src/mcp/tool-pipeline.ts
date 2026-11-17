@@ -8,18 +8,21 @@ import { ProtocolError, ProtocolErrorCode, type CallToolResult, type Tool } from
 import type { LoadedConfiguration } from '@aiops/config';
 import {
   createPolicyEngine,
-  policyDecisionAuditEvent,
   resolveRoles,
   toolCallAuditEvent,
   type AuditLog,
   type Caller,
-  type DenyReason,
   type OperationDefinition,
   type OperationInvoker,
   type PolicyDecision,
   type PolicyEngine,
+  type RateCounter,
 } from '@aiops/core';
+import { allowingRole } from '../changesets/allowing-role.js';
+import { toCallToolResult } from '../changesets/results.js';
+import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
+import { deniedResult, recordDecision } from './policy-answers.js';
 import type { BuiltinTool } from './tool-catalog.js';
 
 /** One configuration and its engine, taken once per HTTP request. */
@@ -40,13 +43,29 @@ export interface PipelineDeps {
   readonly newId: () => string;
   /** Monotonic milliseconds. */
   readonly now: () => number;
+  /** Counts calls per (user, role) and UTC minute (POL-4, NFR-3: shared across instances). */
+  readonly rateCounter: RateCounter;
+  /** Wall-clock time, for the rate-limit window only. */
+  readonly wallClock: () => Date;
 }
+
+/** The start of the UTC minute containing `now`. */
+export function minuteWindow(now: Date): Date {
+  return new Date(Math.floor(now.getTime() / 60_000) * 60_000);
+}
+
+const RATE_LIMIT_UNAVAILABLE: CallToolResult = {
+  isError: true,
+  content: [{ type: 'text', text: 'Rate limit check unavailable; the call was not completed.' }],
+};
 
 export interface PipelineRequest {
   readonly caller: Caller;
   readonly correlationId: string;
   readonly declaredClientName?: string;
   readonly snapshot: Snapshot;
+  /** The request declared the Tasks extension (MCP-7, MCP-1). */
+  readonly tasks: boolean;
 }
 
 const engines = new WeakMap<LoadedConfiguration, PolicyEngine>();
@@ -95,45 +114,7 @@ export async function listTools(deps: PipelineDeps, req: PipelineRequest): Promi
   return tools;
 }
 
-const REASON_TEXT: Readonly<Record<DenyReason, (detail: string) => string>> = {
-  no_grant: () => 'the operation is not granted to you',
-  unknown_tool: () => 'the operation is not granted to you',
-  scope_argument_missing: (d) => `argument '${d}' is required by your scope`,
-  out_of_scope: (d) => `argument '${d}' is outside your scope`,
-  denied_field: (d) => `field '${d}' is denied`,
-  field_not_allowed: (d) => `field '${d}' is not allowed`,
-};
-
-function deniedResult(decision: PolicyDecision): CallToolResult {
-  const reason = REASON_TEXT[decision.reason ?? 'no_grant'](decision.detail ?? '');
-  return { isError: true, content: [{ type: 'text', text: `Denied by policy: ${reason} (rule ${decision.rule})` }] };
-}
-
-async function recordDecision(
-  deps: PipelineDeps,
-  req: PipelineRequest,
-  tool: string,
-  decision: PolicyDecision,
-  operation?: OperationDefinition,
-): Promise<boolean> {
-  try {
-    await deps.audit.append(
-      policyDecisionAuditEvent({
-        id: deps.newId(),
-        caller: req.caller,
-        tool,
-        ...(operation === undefined ? {} : { operation: operation.id }),
-        decision,
-        correlationId: req.correlationId,
-      }),
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: string, rawArgs: unknown): Promise<CallToolResult> {
+export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: string, rawArgs: unknown): Promise<ToolAnswer> {
   const { configuration, engine } = req.snapshot;
   const builtin = deps.builtins.find((t) => t.name === name);
   const operation = builtin === undefined ? engine.grantedOperations(req.caller).find((op) => op.toolName === name) : undefined;
@@ -192,12 +173,37 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
   const validArgs = args as Readonly<Record<string, unknown>>;
 
   // 3. Decision (POL-1..3), audited before anything runs (POL-8).
-  const decision: PolicyDecision =
+  let decision: PolicyDecision =
     builtin !== undefined
       ? { effect: 'allow', rule: 'builtin', roles: resolveRoles(req.caller.groups, configuration.policy.roleMapping) }
       : // Step 1 returned unless a built-in or a granted operation was found.
         engine.evaluate({ caller: req.caller, operationId: operation?.id ?? name, args: validArgs });
-  const recorded = await recordDecision(deps, req, name, decision, operation);
+  // POL-4: calls_per_minute per (user, role). Over the limit the deny replaces the allow, so the
+  // call still writes exactly one policy.decision row (POL-8). Built-ins are not counted.
+  if (builtin === undefined && decision.effect === 'allow') {
+    const role = allowingRole(decision.rule);
+    const limit = role === undefined ? undefined : configuration.limits.get(role)?.calls_per_minute;
+    if (role !== undefined && limit !== undefined) {
+      try {
+        const count = await deps.rateCounter.hit(`${req.caller.subject}|${role}`, minuteWindow(deps.wallClock()));
+        if (count > limit) {
+          decision = { effect: 'deny', rule: `role:${role}/limit:calls_per_minute`, reason: 'limit_exceeded', detail: 'calls_per_minute', roles: decision.roles };
+        }
+      } catch {
+        // Fail closed; the error may name the caller, so nothing of it is kept (SEC-3). One
+        // best-effort deny row keeps POL-8 (exactly one decision per call).
+        await recordDecision(
+          deps,
+          req,
+          name,
+          { effect: 'deny', rule: `role:${role}/limit:calls_per_minute`, reason: 'limit_exceeded', detail: 'calls_per_minute_unavailable', roles: decision.roles },
+          operation === undefined ? {} : { operation: operation.id },
+        );
+        return RATE_LIMIT_UNAVAILABLE;
+      }
+    }
+  }
+  const recorded = await recordDecision(deps, req, name, decision, operation === undefined ? {} : { operation: operation.id });
   if (decision.effect === 'deny') return deniedResult(decision);
   if (!recorded) return AUDIT_UNAVAILABLE;
 
@@ -208,20 +214,24 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
       if (builtin !== undefined) {
         // A change-set ID is an identifier, not argument content, so it may be audited.
         if (typeof validArgs.changeset_id === 'string') report({ changesetId: validArgs.changeset_id });
-        return builtin.handler(validArgs, { caller: req.caller, snapshot: req.snapshot, correlationId: req.correlationId });
+        const answer = await builtin.handler(validArgs, { caller: req.caller, snapshot: req.snapshot, correlationId: req.correlationId, tasks: req.tasks, report });
+        // Never a task for a request that did not declare the extension, whoever built it (MCP-1).
+        if (isTaskAnswer(answer) && !req.tasks) throw new Error('task answer for a request without the Tasks declaration');
+        return answer;
       }
       // Step 1 returned unless a built-in or a granted operation was found.
       if (operation === undefined) throw new Error('no operation after lookup');
       report({ operation: operation.id });
-      const result = await deps.invokerFor(configuration, req.correlationId).invoke({ operation, args: validArgs, caller: req.caller });
+      const result = await deps.invokerFor(configuration, req.correlationId).invoke({ operation, args: validArgs, caller: req.caller, asTask: req.tasks, report });
       // The operation ID stays authoritative over whatever the invoker reports.
       if (result.auditDetails !== undefined) report({ ...result.auditDetails, operation: operation.id });
-      return {
-        // MCP-4: summary first; the data again as JSON for clients that ignore structuredContent.
-        content: [{ type: 'text', text: result.text }, ...(result.dataText === undefined ? [] : [{ type: 'text' as const, text: result.dataText }])],
-        ...(result.structured === undefined ? {} : { structuredContent: { ...result.structured } }),
-        ...(result.isError === true ? { isError: true } : {}),
-      };
+      if (result.task !== undefined) {
+        // A task for a request that did not declare the extension is a server bug; it must not reach the client (MCP-1).
+        if (!req.tasks) throw new Error('task created for a request without the Tasks declaration');
+        report({ taskId: result.task.taskId });
+        return createTaskResult(result.task);
+      }
+      return toCallToolResult(result);
     },
     runDeps,
   );

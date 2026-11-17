@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
 import type { ReadAdapter, ReadOutcome } from '@aiops/connector-sdk';
 import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
-import type { UpstreamCallLog } from './read-invoker.js';
+import type { UpstreamCallLog } from './read.js';
 import { createUpstreamReader } from './upstream-reader.js';
 
 const SOURCES = {

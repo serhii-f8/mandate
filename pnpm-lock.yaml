@@ -53,6 +53,12 @@ importers:
       '@aiops/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@aiops/temporal':
+        specifier: workspace:*
+        version: link:../../packages/temporal
+      '@aiops/upstream':
+        specifier: workspace:*
+        version: link:../../packages/upstream
       '@modelcontextprotocol/node':
         specifier: 2.1.2
         version: 2.1.2(@modelcontextprotocol/server@2.4.0)
@@ -68,6 +74,9 @@ importers:
       '@nestjs/platform-express':
         specifier: 12.5.0
         version: 12.5.0(@nestjs/common@12.5.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/core@12.5.0)(rxjs@7.8.2)(supports-color@8.1.1)
+      '@temporalio/client':
+        specifier: 1.25.0
+        version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       jose:
         specifier: 6.2.17
         version: 6.2.17
@@ -90,6 +99,9 @@ importers:
       '@modelcontextprotocol/client':
         specifier: 2.4.0
         version: 2.4.0
+      '@modelcontextprotocol/ext-tasks':
+        specifier: 0.2.3
+        version: 0.2.3(@modelcontextprotocol/client@2.4.0)
       '@swc/core':
         specifier: 1.16.22
         version: 1.16.22
@@ -139,10 +151,31 @@ importers:
 
   apps/worker:
     dependencies:
+      '@aiops/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
       '@aiops/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@aiops/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connector-sdk
+      '@aiops/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aiops/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@aiops/temporal':
+        specifier: workspace:*
+        version: link:../../packages/temporal
+      '@aiops/upstream':
+        specifier: workspace:*
+        version: link:../../packages/upstream
       '@temporalio/activity':
+        specifier: 1.25.0
+        version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/client':
         specifier: 1.25.0
         version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)
       '@temporalio/common':
@@ -158,9 +191,12 @@ importers:
         specifier: 10.4.0
         version: 10.4.0
     devDependencies:
-      '@temporalio/client':
-        specifier: 1.25.0
-        version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@aiops/magento2-catalog':
+        specifier: workspace:*
+        version: link:../../presets/magento2-catalog
+      '@aiops/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
       '@temporalio/testing':
         specifier: 1.25.0
         version: 1.25.0(esbuild@0.28.2)(lightningcss@1.33.0)(long@5.3.2)(postcss@8.5.33)(protobufjs@8.8.1)
@@ -248,6 +284,21 @@ importers:
         specifier: 0.31.11
         version: 0.31.11
 
+  packages/temporal:
+    dependencies:
+      '@aiops/core':
+        specifier: workspace:*
+        version: link:../core
+      '@temporalio/client':
+        specifier: 1.25.0
+        version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/common':
+        specifier: 1.25.0
+        version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/proto':
+        specifier: 1.25.0
+        version: 1.25.0
+
   packages/testing:
     dependencies:
       '@aiops/connector-sdk':
@@ -265,6 +316,18 @@ importers:
       testcontainers:
         specifier: 12.2.1
         version: 12.2.1(bare-buffer@3.7.2)(supports-color@8.1.1)
+
+  packages/upstream:
+    dependencies:
+      '@aiops/config':
+        specifier: workspace:*
+        version: link:../config
+      '@aiops/connector-sdk':
+        specifier: workspace:*
+        version: link:../connector-sdk
+      '@aiops/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/widgets: {}
 
@@ -1039,6 +1102,14 @@ packages:
   '@modelcontextprotocol/core@2.4.0':
     resolution: {integrity: sha512-z8QBKqdfXLPzkLQuG4xp8hrVEMm1PZ1IgxMN2sMbJiFiAKOWXnAzogXn2W4aqIBlP1ea6U5yiqVquvUNM1Cj6Q==}
     engines: {node: '>=20'}
+
+  '@modelcontextprotocol/ext-tasks@0.2.3':
+    resolution: {integrity: sha512-MZKxyGKXDyZuc54GlnvzYBecBAlKNlYI/WgrTuIXLKV6h3ebDZU2sTpQpe7kKgKLJz0TTDIxmnM7HAmXL0GOcA==}
+    peerDependencies:
+      '@modelcontextprotocol/client': ^2.2.0
+    peerDependenciesMeta:
+      '@modelcontextprotocol/client':
+        optional: true
 
   '@modelcontextprotocol/node@2.1.2':
     resolution: {integrity: sha512-IIcIqBpr6NCQQs5DgJTgvbSOAw+3iaR/uquqg+e0nXCdudfjPg/80x0TseUnQx14AUAtE4fsJCEpJKPyb6WPVA==}
@@ -4204,6 +4275,12 @@ snapshots:
   '@modelcontextprotocol/core@2.4.0':
     dependencies:
       zod: 4.6.7
+
+  '@modelcontextprotocol/ext-tasks@0.2.3(@modelcontextprotocol/client@2.4.0)':
+    dependencies:
+      zod: 4.6.7
+    optionalDependencies:
+      '@modelcontextprotocol/client': 2.4.0
 
   '@modelcontextprotocol/node@2.1.2(@modelcontextprotocol/server@2.4.0)':
     dependencies:

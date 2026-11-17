@@ -3,7 +3,8 @@ import { createOpenApiAdapter } from '@aiops/adapters';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
 import type { ReadAdapter, ReadOutcome } from '@aiops/connector-sdk';
 import { READ_RESULT_TEXT, type Caller, type CredentialHandle, type CredentialStatus, type CredentialVault, type OperationDefinition } from '@aiops/core';
-import { DirectReadInvoker, directReadInvokers, NOT_DIRECT_READ, type UpstreamCallLog } from './read-invoker.js';
+import type { UpstreamCallLog } from '@aiops/upstream';
+import { DirectReadInvoker, directReadInvokers, NOT_DIRECT_READ } from './read-invoker.js';
 
 const SOURCES = {
   'connections.yaml': `version: 1

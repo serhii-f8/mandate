@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import type { AuditEventInput, ChangeSetExecutor, ChangeSetRecord, ChangeSetRepository } from '@aiops/core';
+import type {
+  AuditEventInput,
+  ChangeSetExecutor,
+  ChangeSetRecord,
+  ChangeSetRepository,
+  ExecutionLimits,
+} from '@aiops/core';
 import type { ScriptedWriter } from './in-memory-executor.js';
 
 /**
@@ -15,8 +21,13 @@ export interface ExecutorHarness {
   readonly writer: ScriptedWriter;
   /** The batch size the executor was built with (at least 2). */
   readonly batchSize: number;
-  /** Creates a prepared change-set with `items` pending items; its hash is `EXECUTOR_CONTRACT_HASH`. */
-  readonly prepared: (items: number, opts?: { expiresAt?: Date }) => Promise<ChangeSetRecord>;
+  /** The failure threshold the executor was built with (below 1). */
+  readonly failureThreshold: number;
+  /**
+   * Creates a prepared change-set with `items` pending items; its hash is `EXECUTOR_CONTRACT_HASH`.
+   * The requester defaults to `alice`.
+   */
+  readonly prepared: (items: number, opts?: { expiresAt?: Date; requester?: string }) => Promise<ChangeSetRecord>;
   readonly auditEvents: () => Promise<readonly AuditEventInput[]>;
   readonly close?: () => Promise<void>;
 }
@@ -37,6 +48,20 @@ export function describeExecutorContract(label: string, setup: () => Promise<Exe
     const start = (h: ExecutorHarness, changesetId: string, expectedHash = EXECUTOR_CONTRACT_HASH) =>
       h.executor.start({ changesetId, expectedHash, actor: 'alice', correlationId: 'corr-exec' });
     const status = async (h: ExecutorHarness, id: string) => (await h.repository.get(id))?.status;
+    const startWith = (
+      h: ExecutorHarness,
+      changesetId: string,
+      opts: { limits?: ExecutionLimits; groups?: readonly string[] },
+    ) =>
+      h.executor.start({
+        changesetId,
+        expectedHash: EXECUTOR_CONTRACT_HASH,
+        actor: 'alice',
+        correlationId: 'corr-exec',
+        ...opts,
+      });
+    // Limits count per requester; a fresh one per case keeps a shared database from adding up usage.
+    const freshRequester = () => `alice-${randomUUID()}`;
 
     it('EXE-11 refuses a wrong hash and leaves the status unchanged', async () => {
       await withExec(async (h) => {
@@ -346,6 +371,183 @@ export function describeExecutorContract(label: string, setup: () => Promise<Exe
         const exec = (await h.auditEvents()).find((e) => e.changesetId === cs.id && e.details.to === 'executing');
         expect(exec?.actor).toBe('alice');
         expect(exec?.correlationId).toBe('corr-exec');
+      });
+    });
+
+    it('POL-4 refuses a start over records_per_operation, audits the deny and leaves the change-set prepared', async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(3, { requester: freshRequester() });
+        expect(await startWith(h, cs.id, { limits: { role: 'editor', recordsPerOperation: 2 } })).toEqual({
+          ok: false,
+          reason: 'limit_exceeded',
+          limit: 'records_per_operation',
+        });
+        expect(await status(h, cs.id)).toBe('prepared');
+        const denies = (await h.auditEvents()).filter(
+          (e) => e.changesetId === cs.id && e.action === 'policy.decision',
+        );
+        expect(denies.map((e) => [e.outcome, e.details.reason])).toEqual([['denied', 'limit_exceeded']]);
+        expect(h.writer.calls).toBe(0);
+      });
+    });
+
+    it('POL-4 refuses a start over concurrent_executions while another run of the requester executes', async () => {
+      await withExec(async (h) => {
+        const requester = freshRequester();
+        const a = await h.prepared(h.batchSize * 2, { requester });
+        const b = await h.prepared(1, { requester });
+        const pause = h.writer.pauseAt(0);
+        expect(await start(h, a.id)).toEqual({ ok: true });
+        await pause.reached;
+        expect(await startWith(h, b.id, { limits: { role: 'editor', concurrentExecutions: 1 } })).toEqual({
+          ok: false,
+          reason: 'limit_exceeded',
+          limit: 'concurrent_executions',
+        });
+        pause.release();
+        await h.executor.settled(a.id);
+        expect(await status(h, a.id)).toBe('completed');
+        expect(await status(h, b.id)).toBe('prepared');
+      });
+    });
+
+    it('POL-4 refuses a start over records_per_day', async () => {
+      await withExec(async (h) => {
+        const requester = freshRequester();
+        const a = await h.prepared(3, { requester });
+        const b = await h.prepared(2, { requester });
+        expect(await start(h, a.id)).toEqual({ ok: true });
+        await h.executor.settled(a.id);
+        expect(await startWith(h, b.id, { limits: { role: 'editor', recordsPerDay: 4 } })).toEqual({
+          ok: false,
+          reason: 'limit_exceeded',
+          limit: 'records_per_day',
+        });
+        expect(await status(h, b.id)).toBe('prepared');
+      });
+    });
+
+    it("POL-6 stores the execution request with the starter's groups", async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(1);
+        expect(await startWith(h, cs.id, { groups: ['g1'] })).toEqual({ ok: true });
+        await h.executor.settled(cs.id);
+        const request = (await h.repository.get(cs.id))?.executionRequest;
+        expect(request?.groups).toEqual(['g1']);
+        expect(request?.actor).toBe('alice');
+        expect(request?.correlationId).toBe('corr-exec');
+      });
+    });
+
+    it('EXE-5 stops remaining batches when the failure rate exceeds the threshold', async () => {
+      await withExec(async (h) => {
+        expect(h.failureThreshold).toBeLessThan(1);
+        const cs = await h.prepared(h.batchSize * 3);
+        for (let i = 1; i <= h.batchSize; i++) h.writer.setOutcome(`t-${String(i).padStart(4, '0')}`, 'failed');
+        await start(h, cs.id);
+        await h.executor.settled(cs.id);
+        const record = await h.repository.get(cs.id);
+        expect(record?.status).toBe('failed');
+        expect(record?.errorCode).toBe('failure_threshold');
+        expect(h.writer.batches).toHaveLength(1);
+        expect(record?.stats.failed).toBe(h.batchSize);
+        const pending = await h.repository.itemsPage(cs.id, { status: 'pending', limit: 500 });
+        expect(pending).toHaveLength(2 * h.batchSize);
+      });
+    });
+
+    it('EXE-7 stores the first cancel request of an executing change-set and ends cancelled by its actor', async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(h.batchSize * 3);
+        const pause = h.writer.pauseAt(0);
+        await start(h, cs.id);
+        await pause.reached;
+        expect(await h.executor.cancel({ changesetId: cs.id, actor: 'bob', correlationId: 'corr-bob' })).toEqual({
+          ok: true,
+          status: 'executing',
+        });
+        expect(await h.executor.cancel({ changesetId: cs.id, actor: 'carol', correlationId: 'corr-carol' })).toEqual({
+          ok: true,
+          status: 'executing',
+        });
+        const stored = (await h.repository.get(cs.id))?.cancelRequest;
+        expect(stored?.actor).toBe('bob');
+        expect(stored?.correlationId).toBe('corr-bob');
+        pause.release();
+        await h.executor.settled(cs.id);
+        expect(await status(h, cs.id)).toBe('cancelled');
+        const events = (await h.auditEvents()).filter((e) => e.changesetId === cs.id && e.details.to === 'cancelled');
+        expect(events.map((e) => [e.actor, e.correlationId])).toEqual([['bob', 'corr-bob']]);
+      });
+    });
+
+    it('AUD-1 EXE-3 audits one changeset.batch event per batch with counts and no values', async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(2 * h.batchSize + 1);
+        h.writer.setOutcome('t-0001', 'failed');
+        await start(h, cs.id);
+        await h.executor.settled(cs.id);
+        const batches = (await h.auditEvents()).filter(
+          (e) => e.changesetId === cs.id && e.action === 'changeset.batch',
+        );
+        expect(batches.map((e) => e.details.batchNo)).toEqual([0, 1, 2]);
+        for (const e of batches) {
+          expect(Object.keys(e.details).sort()).toEqual(['batchNo', 'failed', 'operation', 'skipped', 'written']);
+          expect(e.actor).toBe('system');
+          expect(e.correlationId).toBe('corr-exec');
+        }
+        expect(batches.map((e) => [e.details.written, e.details.failed])).toEqual([
+          [h.batchSize - 1, 1],
+          [h.batchSize, 0],
+          [1, 0],
+        ]);
+      });
+    });
+
+    it('EXE-5 EXE-6 a run whose last batch fails every item finishes done: failed without an error code', async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(h.batchSize);
+        for (let i = 1; i <= h.batchSize; i++) h.writer.setOutcome(`t-${String(i).padStart(4, '0')}`, 'failed');
+        await start(h, cs.id);
+        await h.executor.settled(cs.id);
+        const record = await h.repository.get(cs.id);
+        expect(record?.status).toBe('failed');
+        expect(record?.errorCode).toBeUndefined();
+      });
+    });
+
+    it('EXE-7 a cancel stored while the final batch is in flight ends completed', async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(h.batchSize);
+        const pause = h.writer.pauseAt(0);
+        await start(h, cs.id);
+        await pause.reached;
+        expect(await h.executor.cancel({ changesetId: cs.id, actor: 'bob', correlationId: 'corr-bob' })).toEqual({
+          ok: true,
+          status: 'executing',
+        });
+        pause.release();
+        await h.executor.settled(cs.id);
+        const record = await h.repository.get(cs.id);
+        expect(record?.status).toBe('completed');
+        expect(record?.stats.written).toBe(h.batchSize);
+      });
+    });
+
+    it('EXE-7 EXE-5 a stored cancel wins over an exceeded failure threshold while work remains', async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(h.batchSize * 3);
+        for (let i = 1; i <= h.batchSize; i++) h.writer.setOutcome(`t-${String(i).padStart(4, '0')}`, 'failed');
+        const pause = h.writer.pauseAt(0);
+        await start(h, cs.id);
+        await pause.reached;
+        await h.executor.cancel({ changesetId: cs.id, actor: 'bob', correlationId: 'corr-bob' });
+        pause.release();
+        await h.executor.settled(cs.id);
+        const record = await h.repository.get(cs.id);
+        expect(record?.status).toBe('cancelled');
+        expect(record?.errorCode).toBeUndefined();
+        expect(h.writer.batches).toHaveLength(1);
       });
     });
   });

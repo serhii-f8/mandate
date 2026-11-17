@@ -94,6 +94,30 @@ describe('SEC-3 preparation error results', () => {
     expect(preparationErrorResult(op, 'something_else').text).toBe(READ_RESULT_TEXT.unknown(op));
   });
 
+  it('SEC-3 EXE-4 execution-era failure codes have fixed value-free texts', () => {
+    const op = 'catalog.update_content';
+    const codes = [
+      'config_changed',
+      'preparation_interrupted',
+      'operation_unavailable',
+      'executor_error',
+      'executor_unavailable',
+      'workflow_closed',
+    ] as const;
+    for (const code of codes) {
+      const base = CHANGESET_TEXT.errors[code](op);
+      expect(base).toContain(op);
+      expect(base).not.toBe(READ_RESULT_TEXT.unknown(op));
+      expect(preparationErrorResult(op, code, 'cs-1')).toMatchObject({
+        text: `${base.replace(/\.$/, '')} (change-set cs-1).`,
+        isError: true,
+      });
+    }
+    expect(CHANGESET_TEXT.errors.executor_unavailable(op)).toBe(
+      `${op} could not be prepared: the execution service is unavailable.`,
+    );
+  });
+
   it('MCP-4 SEC-3 a failure with a change-set carries its id, status and code as structured data, nothing else', () => {
     const op = 'catalog.update_content';
     const failed = preparationErrorResult(op, 'http_status', 'cs-1', 404);

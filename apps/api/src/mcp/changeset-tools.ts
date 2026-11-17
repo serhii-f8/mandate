@@ -1,7 +1,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { createSchemaCompiler } from '@aiops/config';
 import {
-  CANCELLABLE,
+  ExecutorUnavailable,
   READ_RESULT_TEXT,
   changesetTransitionEvent,
   decodeCursor,
@@ -9,13 +9,18 @@ import {
   isExpiryDue,
   type Caller,
   type ChangeSetRecord,
+  type ChangeSetStatus,
+  type ChangeSetExecutor,
   type ChangeSetRepository,
+  type ExecutionProgress,
   type ItemStatus,
 } from '@aiops/core';
+import { executionSummaryText } from '../changesets/results.js';
 import type { BuiltinTool } from './tool-catalog.js';
 
 export interface ChangesetToolDeps {
   readonly repository: ChangeSetRepository;
+  readonly executor: ChangeSetExecutor;
   readonly newId: () => string;
   readonly now: () => Date;
 }
@@ -44,10 +49,29 @@ const CANCEL_SCHEMA = {
 const compile = createSchemaCompiler();
 
 const error = (text: string): CallToolResult => ({ isError: true, content: [{ type: 'text', text }] });
-const notFound = (id: string): CallToolResult => error(`Change-set ${id} was not found.`);
+/** The one answer for unknown and foreign change-sets alike (SEC-1). */
+export const notFound = (id: string): CallToolResult => error(`Change-set ${id} was not found.`);
+
+const PROGRESS_STATUSES: readonly ChangeSetStatus[] = ['executing', 'completed', 'completed_with_errors', 'rolling_back', 'rolled_back'];
+
+/** Progress exists once execution ran: those statuses, or a prepared change-set that later failed or was cancelled. */
+function hasProgress(record: ChangeSetRecord): boolean {
+  return PROGRESS_STATUSES.includes(record.status) || ((record.status === 'failed' || record.status === 'cancelled') && record.preparedAt !== undefined);
+}
+
+async function progressOf(deps: ChangesetToolDeps, record: ChangeSetRecord): Promise<ExecutionProgress | undefined> {
+  if (!hasProgress(record)) return undefined;
+  try {
+    return await deps.executor.progress(record.id);
+  } catch (e) {
+    // Progress is an extra; the stored state still answers.
+    if (e instanceof ExecutorUnavailable) return undefined;
+    throw e;
+  }
+}
 
 /** The change-set when the caller requested it; unknown and foreign IDs look the same. Expires it lazily (CS-6). */
-async function load(deps: ChangesetToolDeps, caller: Caller, correlationId: string, id: string): Promise<ChangeSetRecord | undefined> {
+export async function load(deps: ChangesetToolDeps, caller: Caller, correlationId: string, id: string): Promise<ChangeSetRecord | undefined> {
   let record = await deps.repository.get(id);
   if (record?.requester !== caller.subject) return undefined;
   const now = deps.now();
@@ -92,6 +116,9 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
       const last = items.at(-1);
       const nextCursor = rows.length > limit && last !== undefined ? encodeCursor(last.targetId) : undefined;
       const excluded = Object.values(record.stats.excluded).reduce((sum, n) => sum + n, 0);
+      const progress = await progressOf(deps, record);
+      const summarised = record.status === 'completed' || record.status === 'completed_with_errors' || (record.status === 'failed' && record.preparedAt !== undefined);
+      const summary = summarised ? ` ${executionSummaryText(record.status, record.stats, (await deps.repository.errorCounts(id)).drift ?? 0)}` : '';
       const structured: Record<string, unknown> = {
         changeset: {
           id: record.id,
@@ -104,12 +131,13 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
           ...(record.preparedAt === undefined ? {} : { preparedAt: record.preparedAt.toISOString() }),
           ...(record.errorCode === undefined ? {} : { errorCode: record.errorCode }),
         },
+        ...(progress === undefined ? {} : { progress: { total: progress.total, done: progress.done, failed: progress.failed, skipped: progress.skipped } }),
         items,
         ...(nextCursor === undefined ? {} : { nextCursor }),
       };
       const text =
         `Change-set ${record.id} (${record.operation}) is ${record.status}: ${String(record.stats.included)} change(s), ` +
-        `${String(excluded)} excluded. Showing ${String(items.length)} item(s)${nextCursor === undefined ? '' : '; more with cursor'}. ${READ_RESULT_TEXT.dataNote}`;
+        `${String(excluded)} excluded. Showing ${String(items.length)} item(s)${nextCursor === undefined ? '' : '; more with cursor'}.${summary} ${READ_RESULT_TEXT.dataNote}`;
       return { content: [{ type: 'text', text }, { type: 'text', text: JSON.stringify(structured) }], structuredContent: structured };
     },
   };
@@ -128,28 +156,25 @@ function cancelChangeset(deps: ChangesetToolDeps): BuiltinTool {
       const id = args.changeset_id as string;
       const record = await load(deps, caller, correlationId, id);
       if (record === undefined) return notFound(id);
-      let current = record;
-      if (CANCELLABLE.includes(record.status)) {
-        const done = await deps.repository.transition(
-          id,
-          CANCELLABLE,
-          'cancelled',
-          changesetTransitionEvent({
-            id: deps.newId(),
-            actor: caller.subject,
-            ...(caller.clientId === undefined ? {} : { clientId: caller.clientId }),
-            changeset: record,
-            from: record.status,
-            to: 'cancelled',
-            correlationId,
-          }),
-        );
-        if (done !== undefined) {
-          return { content: [{ type: 'text', text: `Change-set ${id} was cancelled.` }], structuredContent: { changeset: { id, status: done.status } } };
-        }
-        // Lost a race: answer with what the change-set is now.
-        current = (await deps.repository.get(id)) ?? record;
+      let outcome: Awaited<ReturnType<ChangeSetExecutor['cancel']>>;
+      try {
+        outcome = await deps.executor.cancel({ changesetId: id, actor: caller.subject, correlationId });
+      } catch (e) {
+        if (!(e instanceof ExecutorUnavailable)) throw e;
+        return error(`Change-set ${id} could not be cancelled: the execution service is unavailable.`);
       }
+      if (outcome.ok) {
+        if (outcome.status === 'executing') {
+          return {
+            content: [{ type: 'text', text: 'Cancellation requested; the current batch finishes first.' }],
+            structuredContent: { changeset: { id, status: 'executing', cancelRequested: true } },
+          };
+        }
+        return { content: [{ type: 'text', text: `Change-set ${id} was cancelled.` }], structuredContent: { changeset: { id, status: outcome.status } } };
+      }
+      if (outcome.reason === 'not_found') return notFound(id);
+      // Not cancellable: say what it is now.
+      const current = (await deps.repository.get(id)) ?? record;
       return error(`Change-set ${id} cannot be cancelled in status ${current.status}.`);
     },
   };

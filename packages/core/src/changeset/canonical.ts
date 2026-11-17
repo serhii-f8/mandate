@@ -1,3 +1,11 @@
+/** A value canonical JSON cannot encode. A `TypeError`, so callers that catch that keep working. */
+export class CanonicalJsonError extends TypeError {
+  constructor(reason: string) {
+    super(`canonicalJson: ${reason}`);
+    this.name = 'CanonicalJsonError';
+  }
+}
+
 /** Deterministic JSON: sorted keys (UTF-16 code unit order), no whitespace. Used for hashing (CS-4). */
 export function canonicalJson(value: unknown): string {
   if (value === null) return 'null';
@@ -7,25 +15,25 @@ export function canonicalJson(value: unknown): string {
     case 'boolean':
       return value ? 'true' : 'false';
     case 'number':
-      if (!Number.isFinite(value)) throw new TypeError('canonicalJson: non-finite number');
+      if (!Number.isFinite(value)) throw new CanonicalJsonError('non-finite number');
       return JSON.stringify(value);
     case 'object': {
       if (Array.isArray(value)) {
         const parts: string[] = [];
         for (let i = 0; i < value.length; i++) {
-          if (!(i in value)) throw new TypeError('canonicalJson: sparse array');
+          if (!(i in value)) throw new CanonicalJsonError('sparse array');
           parts.push(canonicalJson(value[i]));
         }
         return `[${parts.join(',')}]`;
       }
       const proto: unknown = Object.getPrototypeOf(value);
-      if (proto !== Object.prototype && proto !== null) throw new TypeError('canonicalJson: non-plain object');
+      if (proto !== Object.prototype && proto !== null) throw new CanonicalJsonError('non-plain object');
       const record = value as Record<string, unknown>;
       const keys = Object.keys(record).sort();
       return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(record[k])}`).join(',')}}`;
     }
     default:
-      throw new TypeError(`canonicalJson: unsupported value of type ${typeof value}`);
+      throw new CanonicalJsonError(`unsupported value of type ${typeof value}`);
   }
 }
 

@@ -16,6 +16,15 @@ export const CHANGESET_TEXT = {
       `${op} could not prepare a change-set: the current state could not be read completely.`,
     cancelled: (op: string) =>
       `${op} could not prepare a change-set: it was cancelled or expired during preparation.`,
+    config_changed: (op: string) =>
+      `${op} could not be prepared: the configuration changed during preparation. Call it again.`,
+    preparation_interrupted: (op: string) =>
+      `${op} could not be prepared: an earlier preparation attempt was interrupted. Call it again.`,
+    operation_unavailable: (op: string) =>
+      `${op} could not be prepared: the operation is no longer available in the configuration.`,
+    executor_error: (op: string) => `${op} could not be completed: the execution service reported an error.`,
+    executor_unavailable: (op: string) => `${op} could not be prepared: the execution service is unavailable.`,
+    workflow_closed: (op: string) => `${op} could not be completed: its execution closed unexpectedly.`,
     internal: (op: string) => `${op} could not be prepared because of an internal error.`,
   },
 } as const;

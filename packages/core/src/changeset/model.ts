@@ -26,6 +26,20 @@ export interface ChangeSetStats {
   readonly skipped: number;
 }
 
+export interface ExecutionRequest {
+  readonly actor: string;
+  readonly groups: readonly string[];
+  readonly clientId?: string;
+  readonly correlationId: string;
+  readonly startedAt: Date;
+}
+
+export interface CancelRequest {
+  readonly actor: string;
+  readonly correlationId: string;
+  readonly requestedAt: Date;
+}
+
 export interface ChangeSetRecord {
   readonly id: string;
   readonly operation: string;
@@ -37,11 +51,17 @@ export interface ChangeSetRecord {
   readonly status: ChangeSetStatus;
   readonly stats: ChangeSetStats;
   readonly errorCode?: string;
+  /** Upstream HTTP status of a failed preparation read, stored with `errorCode` (never upstream text, SEC-3). */
+  readonly errorStatus?: number;
   readonly configHash: string;
   readonly correlationId: string;
   readonly createdAt: Date;
+  /** Latest transition or outcome time (MCP-7 task `lastUpdatedAt`). */
+  readonly updatedAt?: Date;
   readonly preparedAt?: Date;
   readonly expiresAt: Date;
+  readonly executionRequest?: ExecutionRequest;
+  readonly cancelRequest?: CancelRequest;
 }
 
 export interface ChangeItemRecord {

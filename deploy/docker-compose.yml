@@ -154,6 +154,10 @@ services:
         condition: service_healthy
       keycloak-setup:
         condition: service_completed_successfully
+      # The api starts with a lazy Temporal connection (ADR 0029); waiting here only spares the
+      # first change-set of a fresh installation a failed start.
+      temporal-namespace:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://aiops:${AIOPS_DB_PASSWORD:-dev-only-aiops-db-password}@postgres:5432/aiops
       API_PORT: "8080"
@@ -174,6 +178,14 @@ services:
       # Built into the image: the trusted pages' bundle and the shipped presets (CONN-8).
       AIOPS_WEB_DIR: /app/web
       AIOPS_PRESET_DIRS: /app/presets
+      # Execution on Temporal (EXE-11): the same frontend, namespace, task queue and payload keys
+      # (SEC-4, development-only default) as the worker.
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-aiops-operations}
+      AIOPS_TEMPORAL_KEYS: ${AIOPS_TEMPORAL_KEYS:-1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=}
+      # How long a write call without Tasks waits for its preparation (MCP-7).
+      AIOPS_PREPARE_WAIT_MS: ${AIOPS_PREPARE_WAIT_MS:-20000}
     volumes:
       - ./config:/etc/aiops/config:ro
     ports:
@@ -193,6 +205,11 @@ services:
       target: worker
     image: aiops-worker:local
     depends_on:
+      postgres:
+        condition: service_healthy
+      # The worker refuses an unmigrated schema; api applies the migrations before it is healthy (NFR-5).
+      api:
+        condition: service_healthy
       temporal-namespace:
         condition: service_completed_successfully
     environment:
@@ -200,6 +217,16 @@ services:
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
       TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-aiops-operations}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://aiops:${AIOPS_DB_PASSWORD:-dev-only-aiops-db-password}@postgres:5432/aiops
+      # The same configuration and presets as api (CFG-1, CONN-8); the presets are built into the image.
+      AIOPS_CONFIG_DIR: /etc/aiops/config
+      AIOPS_PRESET_DIRS: /app/presets
+      AIOPS_MASTER_KEYS: ${AIOPS_MASTER_KEYS:-1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=}
+      # Temporal payload encryption keys (SEC-4), development-only default. Activity tuning
+      # (AIOPS_PREPARE_TIMEOUT_MS, AIOPS_BATCH_*, AIOPS_RETRY_*) keeps its built-in defaults unless set here with a value.
+      AIOPS_TEMPORAL_KEYS: ${AIOPS_TEMPORAL_KEYS:-1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=}
+    volumes:
+      - ./config:/etc/aiops/config:ro
     restart: unless-stopped
 
 volumes:

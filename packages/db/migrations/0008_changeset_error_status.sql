@@ -1,0 +1,1 @@
+ALTER TABLE "change_set" ADD COLUMN "error_status" integer;

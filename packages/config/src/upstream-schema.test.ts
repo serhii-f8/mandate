@@ -79,3 +79,22 @@ describe('MCP-4 response mapping', () => {
     expect(issuesOf({ operation: 'x', response: { item: 'items' } })).toEqual([['response', 'unknown key: item']]);
   });
 });
+
+describe('OPS-6 bulk mapping', () => {
+  const bulk = {
+    batch_id: 'id',
+    status: { path: '/s/{batch_id}', items: 'l', index: 'i', state: 's', states: { ok: [1], open: [2] } },
+  };
+  it('OPS-6 toUpstreamMapping carries bulk only when present', () => {
+    expect(toUpstreamMapping(parse({ method: 'POST', path: '/p' })).bulk).toBeUndefined();
+    expect(toUpstreamMapping(parse({ method: 'POST', path: '/p', bulk })).bulk).toEqual({
+      body: {},
+      batchId: 'id',
+      status: { method: 'GET', path: '/s/{batch_id}', items: 'l', index: 'i', state: 's', states: { ok: [1], failed: [], retriable: [], open: [2] } },
+    });
+  });
+  it('OPS-6 rejects unknown keys inside bulk', () => {
+    expect(issuesOf({ method: 'POST', path: '/p', bulk: { ...bulk, extra: 1 } })).not.toEqual([]);
+    expect(issuesOf({ method: 'POST', path: '/p', bulk: { ...bulk, status: { ...bulk.status, extra: 1 } } })).not.toEqual([]);
+  });
+});

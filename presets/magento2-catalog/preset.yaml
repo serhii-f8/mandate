@@ -1,4 +1,6 @@
-# Magento 2 catalog preset 0.2.0 (CONN-8, OPS-2, OPS-4; ADR 0007: scope `all`; Phase 4 design §8).
+# Magento 2 catalog preset 0.3.0 (CONN-8, OPS-2, OPS-4, OPS-6; ADR 0007: scope `all`; Phase 4 design §8,
+# Phase 5 design §6). catalog.update_content executes through POST /async/bulk/V1/products, which
+# needs a running `async.operations.all` consumer on the Magento side.
 # Bind it to an openapi connection whose base_url ends in /rest/all, for example
 #   base_url: http://magento-sandbox/rest/all
 # The read operations use GET /V1/products with search criteria. The brand filter is always
@@ -198,7 +200,21 @@ operations:
       # whose input_schema has a top-level combinator (ADR 0026).
       minProperties: 3
       maxProperties: 3
-    upstream: { method: POST, path: /async/bulk/V1/products }
+    upstream:
+      method: POST
+      path: /async/bulk/V1/products
+      bulk:
+        body:
+          wrap: product
+          nest: { path: custom_attributes, key: attribute_code, value: value, keep: [sku, name, status] }
+        batch_id: bulk_uuid
+        status:
+          method: GET
+          path: /V1/bulk/{batch_id}/detailed-status
+          items: operations_list
+          index: id
+          state: status
+          states: { ok: [1], retriable: [2], failed: [3, 5], open: [4] }
     manifest:
       id_field: sku
       ids_arg: skus
@@ -217,4 +233,6 @@ operations:
         page_size: 100
       batch_size: 100
       max_targets: 10000
+      # Async writes reset an omitted status (ADR 0007), so every record carries the current one.
+      write: { carry_fields: [status] }
       rollback: { strategy: replay_previous_state }
