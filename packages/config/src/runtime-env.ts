@@ -38,6 +38,14 @@ export interface ApiEnv {
   readonly webDir?: string;
   /** Directories of presets (colon-separated in the environment). */
   readonly presetDirs: readonly string[];
+  /** Temporal frontend the api starts, signals and queries workflows on (EXE-11). */
+  readonly temporalAddress: string;
+  readonly temporalNamespace: string;
+  readonly taskQueue: string;
+  /** Raw `AIOPS_TEMPORAL_KEYS`; parsed at api start-up with `parseTemporalKeys` (SEC-4). */
+  readonly temporalKeys: string;
+  /** How long a write call without Tasks waits for its preparation, in ms (MCP-7). */
+  readonly prepareWaitMs: number;
 }
 
 /** Activity timeouts and retries of the operation workflow (same shape as `ActivityTuning` of `@aiops/temporal`). */
@@ -124,6 +132,11 @@ const apiSchema = z.object({
   AIOPS_FRESH_AUTH_SECONDS: z.coerce.number().int().min(1).default(300),
   AIOPS_WEB_DIR: z.string().trim().min(1).optional(),
   AIOPS_PRESET_DIRS: presetDirs,
+  TEMPORAL_ADDRESS: nonEmpty('localhost:7233'),
+  TEMPORAL_NAMESPACE: nonEmpty('default'),
+  TEMPORAL_TASK_QUEUE: nonEmpty('aiops-operations'),
+  AIOPS_TEMPORAL_KEYS: z.string().trim().min(1),
+  AIOPS_PREPARE_WAIT_MS: z.coerce.number().int().min(0).max(300_000).default(20_000),
 });
 
 const workerSchema = z.object({
@@ -190,6 +203,11 @@ export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
     freshAuthSeconds: e.AIOPS_FRESH_AUTH_SECONDS,
     ...(e.AIOPS_WEB_DIR === undefined ? {} : { webDir: e.AIOPS_WEB_DIR }),
     presetDirs: e.AIOPS_PRESET_DIRS,
+    temporalAddress: e.TEMPORAL_ADDRESS,
+    temporalNamespace: e.TEMPORAL_NAMESPACE,
+    taskQueue: e.TEMPORAL_TASK_QUEUE,
+    temporalKeys: e.AIOPS_TEMPORAL_KEYS,
+    prepareWaitMs: e.AIOPS_PREPARE_WAIT_MS,
   };
 }
 

@@ -7,6 +7,7 @@
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import {
+  ExecutorUnavailable,
   isTaskId,
   type AuditLog,
   type Caller,
@@ -91,7 +92,14 @@ export function createTaskHandlers(deps: TaskHandlerDeps): TaskHandlers {
 
   async function statusMessageOf(task: TaskRecord, state: TaskState): Promise<string | undefined> {
     if (task.kind !== 'execute' || state.status !== 'working') return undefined;
-    const p = await deps.executor.progress(task.changesetId);
+    let p: Awaited<ReturnType<ChangeSetExecutor['progress']>>;
+    try {
+      p = await deps.executor.progress(task.changesetId);
+    } catch (e) {
+      // Progress is an extra; the status derived from the change-set still answers.
+      if (e instanceof ExecutorUnavailable) return undefined;
+      throw e;
+    }
     return p === undefined ? undefined : `${String(p.done)} of ${String(p.total)} done, ${String(p.failed)} failed, ${String(p.skipped)} skipped`;
   }
 
@@ -128,7 +136,14 @@ export function createTaskHandlers(deps: TaskHandlerDeps): TaskHandlers {
       const task = await owned(params.taskId, ctx);
       const { caller, correlationId } = ctx;
       // Cooperative (EXE-7): acknowledged whatever the outcome; a finished task keeps its status.
-      const outcome = await deps.executor.cancel({ changesetId: task.changesetId, actor: caller.subject, correlationId });
+      let outcome: Awaited<ReturnType<ChangeSetExecutor['cancel']>> | { ok: false; reason: 'executor_unavailable' };
+      try {
+        outcome = await deps.executor.cancel({ changesetId: task.changesetId, actor: caller.subject, correlationId });
+      } catch (e) {
+        // Nothing was stored; the request is still acknowledged, and the audit row says why it did nothing.
+        if (!(e instanceof ExecutorUnavailable)) throw e;
+        outcome = { ok: false, reason: 'executor_unavailable' };
+      }
       await deps.audit.append({
         id: deps.newId(),
         actor: caller.subject,

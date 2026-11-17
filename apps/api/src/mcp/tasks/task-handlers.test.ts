@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ProtocolError } from '@modelcontextprotocol/server';
 import {
+  ExecutorUnavailable,
   TASK_TTL_MS,
   type Caller,
   type ChangeSetExecutor,
@@ -25,6 +26,8 @@ class StubExecutor implements ChangeSetExecutor {
   readonly cancels: Parameters<ChangeSetExecutor['cancel']>[0][] = [];
   cancelAnswer: CancelAnswer = { ok: true, status: 'executing' };
   progressAnswer: ExecutionProgress | undefined;
+  /** When set, `cancel` and `progress` reject with it (an unreachable executor). */
+  failure: Error | undefined;
 
   start(): ReturnType<ChangeSetExecutor['start']> {
     return Promise.reject(new Error('not used'));
@@ -32,11 +35,11 @@ class StubExecutor implements ChangeSetExecutor {
 
   cancel(req: Parameters<ChangeSetExecutor['cancel']>[0]): Promise<CancelAnswer> {
     this.cancels.push(req);
-    return Promise.resolve(this.cancelAnswer);
+    return this.failure === undefined ? Promise.resolve(this.cancelAnswer) : Promise.reject(this.failure);
   }
 
   progress(): Promise<ExecutionProgress | undefined> {
-    return Promise.resolve(this.progressAnswer);
+    return this.failure === undefined ? Promise.resolve(this.progressAnswer) : Promise.reject(this.failure);
   }
 }
 
@@ -163,6 +166,14 @@ describe('MCP-7 SEC-1 AUD-1 task handlers', () => {
     expect(answer).not.toHaveProperty('result');
   });
 
+  it('MCP-7 EXE-6 a working execute task omits statusMessage when the executor is unavailable', async () => {
+    const { handlers, ctx, executor } = await setup('execute', 'executing');
+    executor.failure = new ExecutorUnavailable();
+    const answer = await handlers.get({ taskId: TASK }, ctx(alice));
+    expect(answer.status).toBe('working');
+    expect(answer).not.toHaveProperty('statusMessage');
+  });
+
   it('MCP-7 CS-7 a completed execute task carries the execution summary', async () => {
     const { handlers, ctx, repository } = await setup('execute', 'completed');
     expect(await repository.errorCounts(CS)).toEqual({ drift: 1 });
@@ -181,6 +192,20 @@ describe('MCP-7 SEC-1 AUD-1 task handlers', () => {
     expect(executor.cancels).toEqual([{ changesetId: CS, actor: 'alice', correlationId: 'corr-7' }]);
     expect(audit.events).toHaveLength(1);
     expect(audit.events[0]).toMatchObject({ action: 'task.cancel', actor: 'alice', correlationId: 'corr-7', changesetId: CS, details: { taskId: TASK } });
+  });
+
+  it('MCP-7 AUD-1 tasks/cancel is acknowledged and audited as executor_unavailable when the executor is unavailable', async () => {
+    const { handlers, ctx, executor, audit } = await setup('execute', 'executing');
+    executor.failure = new ExecutorUnavailable();
+    const answer = await handlers.cancel({ taskId: TASK }, ctx(alice));
+    expect(answer).toEqual({ resultType: 'complete' });
+    expect(audit.events).toHaveLength(1);
+    expect(audit.events[0]).toMatchObject({
+      action: 'task.cancel',
+      outcome: 'error',
+      changesetId: CS,
+      details: { taskId: TASK, reason: 'executor_unavailable' },
+    });
   });
 
   it('SEC-1 tasks/cancel of a foreign task answers -32602, does not call the executor and writes no audit row', async () => {

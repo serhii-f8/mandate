@@ -44,9 +44,12 @@ function contextOf(authInfo: AuthInfo | undefined): RequestContext {
   return value as RequestContext;
 }
 
-/** Task request params: loose, so `_meta` and future fields pass through to no effect. */
+/**
+ * Task request params: loose, so `_meta` and future fields pass through to no effect. `tasks/update`
+ * uses the same schema: the SDK exposes a request's `inputResponses` as `ctx.mcpReq.inputResponses`,
+ * and no input request is ever outstanding, so neither is read.
+ */
 const TASK_PARAMS = z.looseObject({ taskId: z.string() });
-const TASK_UPDATE_PARAMS = z.looseObject({ taskId: z.string(), inputResponses: z.record(z.string(), z.unknown()).optional() });
 
 /**
  * Builds a fresh low-level `Server` per HTTP request (ADR 0003, ADR 0016) whose
@@ -82,7 +85,7 @@ export function createServerFactory(deps: PipelineDeps, tasks: TaskHandlerDeps):
     const taskContext = (envelope: object | undefined): TaskRequestContext => ({ caller, correlationId, declared: declaresTasks(envelope) });
     // Spread into an object literal: the SDK's result type has an index signature an interface lacks.
     server.setRequestHandler('tasks/get', { params: TASK_PARAMS }, async (params, ctx) => ({ ...(await handlers.get(params, taskContext(ctx.mcpReq.envelope))) }));
-    server.setRequestHandler('tasks/update', { params: TASK_UPDATE_PARAMS }, (params, ctx) => handlers.update(params, taskContext(ctx.mcpReq.envelope)));
+    server.setRequestHandler('tasks/update', { params: TASK_PARAMS }, (params, ctx) => handlers.update(params, taskContext(ctx.mcpReq.envelope)));
     server.setRequestHandler('tasks/cancel', { params: TASK_PARAMS }, (params, ctx) => handlers.cancel(params, taskContext(ctx.mcpReq.envelope)));
     return server;
   };

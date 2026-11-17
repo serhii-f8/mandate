@@ -1,6 +1,6 @@
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import type { ChangeSetExecutor } from '@aiops/core';
+import { TASK_TTL_MS, type ChangeSetExecutor } from '@aiops/core';
 import { createTaskResult } from './tasks/task-result.js';
 import type { BuiltinTool } from './tool-catalog.js';
 import { loadConfigurationSources } from '@aiops/config';
@@ -53,7 +53,7 @@ const unusedExecutor: ChangeSetExecutor = {
   progress: () => Promise.reject(new Error('not used')),
 };
 
-function handler(builtins: PipelineDeps['builtins'] = []) {
+function handler(builtins: PipelineDeps['builtins'] = [], tasks = new InMemoryTaskRepository()) {
   const audit = new InMemoryAuditLog();
   const deps: PipelineDeps = {
     snapshot: () => snapshotOf(configuration),
@@ -68,7 +68,7 @@ function handler(builtins: PipelineDeps['builtins'] = []) {
     wallClock: () => new Date(0),
   };
   const taskDeps: TaskHandlerDeps = {
-    tasks: new InMemoryTaskRepository(),
+    tasks,
     repository: new InMemoryChangeSetRepository(),
     executor: unusedExecutor,
     audit,
@@ -104,7 +104,20 @@ describe('MCP-7 server factory', () => {
     const { json } = await handler()(
       modernRequest('tasks/update', { taskId: '33333333-3333-4333-8333-333333333333', inputResponses: {} }, { extensions: { [TASKS]: {} } }),
     );
-    expect(json.error).toMatchObject({ code: -32602 });
+    expect(json.error).toMatchObject({ code: -32602, message: 'Failed to retrieve task: Task not found' });
+  });
+
+  it('MCP-7 tasks/update of an owned task answers resultType complete', async () => {
+    const tasks = new InMemoryTaskRepository();
+    const taskId = '44444444-4444-4444-8444-444444444444';
+    await tasks.create({ taskId, owner: 'alice', changesetId: '55555555-5555-4555-8555-555555555555', kind: 'prepare', tool: 'shop.update_content', createdAt: new Date(0), ttlMs: TASK_TTL_MS });
+    const { status, json } = await handler([], tasks)(modernRequest('tasks/update', { taskId, inputResponses: {} }, { extensions: { [TASKS]: {} } }));
+    expect(status).toBe(200);
+    expect(json.error).toBeUndefined();
+    // The SDK adds `_meta` (serverInfo) to every 2026-07-28 result; the handler's answer is the rest.
+    const result = json.result as Record<string, unknown>;
+    expect(Object.keys(result).filter((key) => key !== '_meta')).toEqual(['resultType']);
+    expect(result.resultType).toBe('complete');
   });
 
   const probe = (seen: boolean[]): BuiltinTool => ({

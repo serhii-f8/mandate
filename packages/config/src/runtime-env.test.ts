@@ -10,6 +10,7 @@ const AUTH = {
   AIOPS_PUBLIC_URL: 'http://localhost:8400',
   OIDC_WEB_CLIENT_SECRET: 'dev-only-web-secret-value',
   AIOPS_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
+  AIOPS_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
 };
 const API = { DATABASE_URL: DB, ...AUTH };
 
@@ -33,6 +34,11 @@ describe('api runtime environment', () => {
       sessionMaxAgeSeconds: 28_800,
       freshAuthSeconds: 300,
       presetDirs: [],
+      temporalAddress: 'localhost:7233',
+      temporalNamespace: 'default',
+      taskQueue: 'aiops-operations',
+      temporalKeys: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
+      prepareWaitMs: 20_000,
     });
   });
 
@@ -65,6 +71,53 @@ describe('api runtime environment', () => {
 
   it('rejects a port outside 1..65535', () => {
     expect(() => parseApiEnv({ ...API, API_PORT: '70000' })).toThrow(/API_PORT/);
+  });
+});
+
+describe('MCP-7 api Temporal settings and prepare wait', () => {
+  it('parseApiEnv reads the Temporal settings and the prepare wait', () => {
+    expect(parseApiEnv(API)).toMatchObject({
+      temporalAddress: 'localhost:7233',
+      temporalNamespace: 'default',
+      taskQueue: 'aiops-operations',
+      prepareWaitMs: 20_000,
+    });
+    expect(
+      parseApiEnv({
+        ...API,
+        TEMPORAL_ADDRESS: 'temporal:7233',
+        TEMPORAL_NAMESPACE: 'ops',
+        TEMPORAL_TASK_QUEUE: 'q',
+        AIOPS_PREPARE_WAIT_MS: '0',
+      }),
+    ).toMatchObject({ temporalAddress: 'temporal:7233', temporalNamespace: 'ops', taskQueue: 'q', prepareWaitMs: 0 });
+    expect(parseApiEnv({ ...API, AIOPS_PREPARE_WAIT_MS: '300000' }).prepareWaitMs).toBe(300_000);
+  });
+
+  it('SEC-4 parseApiEnv requires AIOPS_TEMPORAL_KEYS and names it without the value', () => {
+    let error: unknown;
+    try {
+      parseApiEnv(Object.fromEntries(Object.entries(API).filter(([key]) => key !== 'AIOPS_TEMPORAL_KEYS')));
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    expect((error as EnvError).issues).toEqual([{ variable: 'AIOPS_TEMPORAL_KEYS', reason: 'is required' }]);
+    expect((error as EnvError).message).not.toContain(API.AIOPS_MASTER_KEYS);
+  });
+
+  it('AIOPS_PREPARE_WAIT_MS outside 0..300000 is rejected by name', () => {
+    for (const bad of ['-1', '300001', '1.5', 'soon']) {
+      let error: unknown;
+      try {
+        parseApiEnv({ ...API, AIOPS_PREPARE_WAIT_MS: bad });
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(EnvError);
+      expect((error as EnvError).issues.map((i) => i.variable)).toEqual(['AIOPS_PREPARE_WAIT_MS']);
+      expect((error as EnvError).message).not.toContain(bad);
+    }
   });
 });
 
