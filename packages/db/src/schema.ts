@@ -116,9 +116,21 @@ export const changeSet = pgTable(
     preparedAt: timestamp('prepared_at', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    // Execution request (POL-6) and cancel request (EXE-7): each group is written once, fixed by
+    // migration `0006_execution_guards`.
+    executionActor: text('execution_actor'),
+    executionGroups: jsonb('execution_groups').$type<string[]>(),
+    executionClientId: text('execution_client_id'),
+    executionCorrelationId: text('execution_correlation_id'),
+    executionStartedAt: timestamp('execution_started_at', { withTimezone: true }),
+    cancelRequestedBy: text('cancel_requested_by'),
+    cancelCorrelationId: text('cancel_correlation_id'),
+    cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
   },
   (t) => [
     index('change_set_requester_created_at_idx').on(t.requester, t.createdAt),
+    index('change_set_requester_status_idx').on(t.requester, t.status),
+    index('change_set_requester_execution_started_at_idx').on(t.requester, t.executionStartedAt),
     check(
       'change_set_status_check',
       sql`${t.status} IN ('preparing', 'prepared', 'pending_approval', 'approved', 'executing', 'completed', 'completed_with_errors', 'failed', 'rejected', 'expired', 'cancelled', 'rolling_back', 'rolled_back')`,
@@ -149,4 +161,45 @@ export const changeItem = pgTable(
     primaryKey({ columns: [t.changesetId, t.targetId] }),
     check('change_item_status_check', sql`${t.status} IN ('pending', 'excluded', 'written', 'failed', 'skipped')`),
   ],
+);
+
+/**
+ * Write batches of an execution (EXE-3). One row per batch attempt; a `done` row is frozen by
+ * migration `0006_execution_guards`. `last_target` is `COLLATE "C"` (set by that migration) so it
+ * compares by code point like `target_id`. `plan` holds target IDs, actions and codes, no values.
+ */
+export const changeBatch = pgTable(
+  'change_batch',
+  {
+    changesetId: uuid('changeset_id')
+      .notNull()
+      .references(() => changeSet.id),
+    batchNo: integer('batch_no').notNull(),
+    attempt: integer('attempt').notNull(),
+    state: text('state').$type<'open' | 'done'>().notNull(),
+    targetIds: jsonb('target_ids').$type<string[]>().notNull(),
+    lastTarget: text('last_target').notNull(),
+    upstreamBatchId: text('upstream_batch_id'),
+    plan: jsonb('plan').$type<unknown[]>(),
+    written: integer('written').notNull().default(0),
+    failed: integer('failed').notNull().default(0),
+    skipped: integer('skipped').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.changesetId, t.batchNo] }),
+    check('change_batch_state_check', sql`${t.state} IN ('open', 'done')`),
+  ],
+);
+
+/** Fixed-window counters for operation rate limits (POL-4). */
+export const rateBucket = pgTable(
+  'rate_bucket',
+  {
+    key: text('key').notNull(),
+    windowStart: timestamp('window_start', { withTimezone: true }).notNull(),
+    count: integer('count').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.key, t.windowStart] })],
 );

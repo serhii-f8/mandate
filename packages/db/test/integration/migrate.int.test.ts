@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startPostgres, type StartedPostgres } from '@aiops/testing';
-import { runMigrations } from '../../src/migrate.js';
+import { assertMigrated, migrationState, runMigrations } from '../../src/migrate.js';
 
 const migrationFiles = readdirSync(fileURLToPath(new URL('../../migrations/', import.meta.url))).filter((f) =>
   f.endsWith('.sql'),
@@ -28,6 +28,19 @@ async function query<T extends pg.QueryResultRow>(url: string, sql: string): Pro
     await client.end();
   }
 }
+
+describe('NFR-4 assertMigrated', () => {
+  it('NFR-4 assertMigrated refuses a database without migrations and accepts a migrated one', async () => {
+    const url = await postgres.createDatabase();
+    await expect(assertMigrated(url)).rejects.toThrow(
+      `database schema is not migrated (applied 0 of ${migrationFiles.length}); start api first`,
+    );
+    expect(await migrationState(url)).toEqual({ applied: 0, expected: migrationFiles.length });
+    await runMigrations(url);
+    await expect(assertMigrated(url)).resolves.toBeUndefined();
+    expect(await migrationState(url)).toEqual({ applied: migrationFiles.length, expected: migrationFiles.length });
+  });
+});
 
 describe('NFR-5 migrations run on start', () => {
   it('apply every migration to a fresh database and create audit_event', async () => {
