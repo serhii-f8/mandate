@@ -1,5 +1,8 @@
 import { CLIENT_INFO_META_KEY, Server, type AuthInfo, type McpServerFactory } from '@modelcontextprotocol/server';
+import { z } from 'zod';
 import type { Caller } from '@aiops/core';
+import { declaresTasks, TASKS_EXTENSION } from './tasks/extension.js';
+import { createTaskHandlers, type TaskHandlerDeps, type TaskRequestContext } from './tasks/task-handlers.js';
 import { callTool, listTools, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
 
 export const SERVER_INFO = { name: 'aiops', version: '0.0.0' } as const;
@@ -40,20 +43,26 @@ function contextOf(authInfo: AuthInfo | undefined): RequestContext {
   return value as RequestContext;
 }
 
+/** Task request params: loose, so `_meta` and future fields pass through to no effect. */
+const TASK_PARAMS = z.looseObject({ taskId: z.string() });
+const TASK_UPDATE_PARAMS = z.looseObject({ taskId: z.string(), inputResponses: z.record(z.string(), z.unknown()).optional() });
+
 /**
  * Builds a fresh low-level `Server` per HTTP request (ADR 0003, ADR 0016) whose
  * `tools/list` and `tools/call` handlers are `api`'s own, so every rejection is
  * audited. The configuration snapshot is taken once per request. Nothing
- * survives the request (NFR-3).
+ * survives the request (NFR-3). It advertises the Tasks extension in
+ * `server/discover` and serves `tasks/get|update|cancel` (MCP-7, ADR 0029).
  */
-export function createServerFactory(deps: PipelineDeps): McpServerFactory {
+export function createServerFactory(deps: PipelineDeps, tasks: TaskHandlerDeps): McpServerFactory {
+  const handlers = createTaskHandlers(tasks);
   return ({ authInfo }) => {
     const { caller, correlationId } = contextOf(authInfo);
     const snapshot = deps.snapshot();
     // `Server` is deprecated for ordinary use in favour of `McpServer`; owning the
     // tools/* handlers so every rejection is audited is the advanced use it keeps (ADR 0016).
     // eslint-disable-next-line @typescript-eslint/no-deprecated
-    const server = new Server(SERVER_INFO, { capabilities: { tools: { listChanged: false } } });
+    const server = new Server(SERVER_INFO, { capabilities: { tools: { listChanged: false }, extensions: { [TASKS_EXTENSION]: {} } } });
     const request = (envelope: object | undefined): PipelineRequest => {
       const name = declaredClientName(envelope);
       return { caller, correlationId, snapshot, ...(name === undefined ? {} : { declaredClientName: name }) };
@@ -62,6 +71,13 @@ export function createServerFactory(deps: PipelineDeps): McpServerFactory {
     server.setRequestHandler('tools/call', async (req, ctx) =>
       server.projectCallToolResult(await callTool(deps, request(ctx.mcpReq.envelope), req.params.name, req.params.arguments), undefined),
     );
+    // The 3-argument (custom-schema) form: on 2026-07-28, `tasks/get` and `tasks/cancel` are
+    // extension methods, which the SDK dispatches only when registered this way (ADR 0029).
+    const taskContext = (envelope: object | undefined): TaskRequestContext => ({ caller, correlationId, declared: declaresTasks(envelope) });
+    // Spread into an object literal: the SDK's result type has an index signature an interface lacks.
+    server.setRequestHandler('tasks/get', { params: TASK_PARAMS }, async (params, ctx) => ({ ...(await handlers.get(params, taskContext(ctx.mcpReq.envelope))) }));
+    server.setRequestHandler('tasks/update', { params: TASK_UPDATE_PARAMS }, (params, ctx) => handlers.update(params, taskContext(ctx.mcpReq.envelope)));
+    server.setRequestHandler('tasks/cancel', { params: TASK_PARAMS }, (params, ctx) => handlers.cancel(params, taskContext(ctx.mcpReq.envelope)));
     return server;
   };
 }

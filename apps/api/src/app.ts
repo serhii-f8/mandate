@@ -10,8 +10,8 @@ import type { Logger } from 'pino';
 import { createOpenApiAdapter } from '@aiops/adapters';
 import type { ReadAdapter } from '@aiops/connector-sdk';
 import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
-import { resolveRoles, type AuditLog, type ChangeSetRepository, type CredentialVault, type OperationInvoker } from '@aiops/core';
-import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, PostgresSessionStore, type Database } from '@aiops/db';
+import { ExecutorUnavailable, resolveRoles, type AuditLog, type ChangeSetExecutor, type ChangeSetRepository, type CredentialVault, type OperationInvoker } from '@aiops/core';
+import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, PostgresSessionStore, PostgresTaskRepository, type Database } from '@aiops/db';
 import { createBearerGate } from './auth/bearer-gate.js';
 import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
@@ -60,6 +60,16 @@ export interface AppOverrides {
   /** Signing keys; defaults to the remote JWKS at `OIDC_JWKS_URL`. */
   readonly jwks?: JWTVerifyGetKey;
 }
+
+/**
+ * Placeholder until the Temporal executor is wired (Phase 5 tasks plan, Task 10). Unreachable in
+ * the meantime: no task rows are created yet, so every `tasks/*` call ends at "Task not found".
+ */
+const UNWIRED_EXECUTOR: ChangeSetExecutor = {
+  start: () => Promise.reject(new ExecutorUnavailable()),
+  cancel: () => Promise.reject(new ExecutorUnavailable()),
+  progress: () => Promise.reject(new ExecutorUnavailable()),
+};
 
 /** The invoker per call: the override, or the risk router bound to the request's snapshot. */
 function invokerFactory(
@@ -147,14 +157,17 @@ class AppModule {
             // One repository for the write path and the built-in change-set tools.
             const changesets = overrides.changesets ?? new PostgresChangeSetRepository(database.db);
             return createMcpHandler(
-              createServerFactory({
-                snapshot: () => snapshotOf(configuration.current),
-                builtins: createBuiltinTools({ repository: changesets, newId: randomUUID, now: () => new Date() }),
-                invokerFor: invokerFactory(overrides.invoker, vault, adapter, changesets, logger),
-                audit,
-                newId: randomUUID,
-                now: () => performance.now(),
-              }),
+              createServerFactory(
+                {
+                  snapshot: () => snapshotOf(configuration.current),
+                  builtins: createBuiltinTools({ repository: changesets, newId: randomUUID, now: () => new Date() }),
+                  invokerFor: invokerFactory(overrides.invoker, vault, adapter, changesets, logger),
+                  audit,
+                  newId: randomUUID,
+                  now: () => performance.now(),
+                },
+                { tasks: new PostgresTaskRepository(database.db), repository: changesets, executor: UNWIRED_EXECUTOR, audit, newId: randomUUID },
+              ),
               {
                 legacy: 'stateless',
                 responseMode: 'json',
