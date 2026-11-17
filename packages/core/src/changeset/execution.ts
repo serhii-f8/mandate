@@ -1,4 +1,5 @@
 import type { AuditEventInput } from '../audit.js';
+import type { Caller } from '../caller.js';
 import { policyDecisionAuditEvent } from '../policy-audit.js';
 import { changesetTransitionEvent } from './audit.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats } from './model.js';
@@ -57,17 +58,21 @@ export interface StartEventContext {
   readonly clientId?: string;
   readonly groups: readonly string[];
   readonly correlationId: string;
+  /** Whose request this execution is, when it differs from the actor (the approver starts it, POL-6). */
+  readonly requester?: Caller;
 }
 
 /** Audit events written with the transitions and denials of a start (AUD-1). No argument values (SEC-3). */
 export function startEventFactory(ctx: StartEventContext): (e: StartEvent, cs: ChangeSetRecord) => AuditEventInput {
   const clientId = ctx.clientId === undefined ? {} : { clientId: ctx.clientId };
+  // A limit denial is audited for whoever's limits applied: the requester when one is given.
+  const denied: Caller = ctx.requester ?? { subject: ctx.actor, groups: ctx.groups, ...clientId };
   return (e, cs) => {
     if (e.kind === 'limit_denied') {
       return {
         ...policyDecisionAuditEvent({
           id: ctx.newId(),
-          caller: { subject: ctx.actor, groups: ctx.groups, ...clientId },
+          caller: denied,
           tool: cs.operation,
           operation: cs.operation,
           decision: {

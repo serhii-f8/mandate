@@ -44,6 +44,10 @@ class StubExecutor implements ChangeSetExecutor {
     return { ok: true, status: 'cancelled' };
   }
 
+  wake(): Promise<void> {
+    return Promise.resolve();
+  }
+
   progress(id: string): Promise<ExecutionProgress | undefined> {
     this.progressCalls.push(id);
     return this.progressAnswer === 'unavailable' ? Promise.reject(new ExecutorUnavailable()) : Promise.resolve(this.progressAnswer);

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { changesetTransitionEvent } from '@aiops/core';
 import type {
   AuditEventInput,
   ChangeSetExecutor,
@@ -265,6 +266,85 @@ export function describeExecutorContract(label: string, setup: () => Promise<Exe
         expect(await start(h, cs.id)).toEqual({ ok: true });
         await h.executor.settled(cs.id);
         expect(await status(h, cs.id)).toBe('completed');
+      });
+    });
+
+    it('POL-6 a start with requester stores the requester as execution request and audits the approver', async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(2);
+        await approve(h, cs.id);
+        const started = await h.executor.start({
+          changesetId: cs.id,
+          expectedHash: EXECUTOR_CONTRACT_HASH,
+          actor: 'dave',
+          groups: ['content-leads'],
+          correlationId: 'corr-approve',
+          requester: { subject: 'alice', groups: ['content'], clientId: 'cl-alice' },
+        });
+        expect(started).toEqual({ ok: true });
+        await h.executor.settled(cs.id);
+        const stored = await h.repository.get(cs.id);
+        expect(stored?.executionRequest).toMatchObject({
+          actor: 'alice',
+          groups: ['content'],
+          clientId: 'cl-alice',
+          correlationId: 'corr-approve',
+        });
+        expect(await transitionActors(h, cs.id, 'executing')).toEqual(['dave']);
+      });
+    });
+
+    it('SEC-9 a start from approved without approvals answers not_approved', async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(1);
+        const moved = await h.repository.transition(
+          cs.id,
+          ['prepared'],
+          'approved',
+          changesetTransitionEvent({
+            id: randomUUID(),
+            actor: 'system',
+            changeset: cs,
+            from: 'prepared',
+            to: 'approved',
+            correlationId: 'c',
+          }),
+        );
+        expect(moved?.status).toBe('approved');
+        expect(await start(h, cs.id)).toEqual({ ok: false, reason: 'not_approved' });
+        expect(await status(h, cs.id)).toBe('approved');
+      });
+    });
+
+    it('POL-6 a start with submission stores it', async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(1);
+        const at = new Date('2026-01-02T03:04:05Z');
+        const submission = {
+          actor: 'alice',
+          groups: ['content'],
+          correlationId: 'corr-sub',
+          at,
+          role: 'editor',
+          rule: 'role:editor/approval:never',
+        };
+        expect(
+          await h.executor.start({
+            changesetId: cs.id,
+            expectedHash: EXECUTOR_CONTRACT_HASH,
+            actor: 'alice',
+            correlationId: 'corr-exec',
+            submission,
+          }),
+        ).toEqual({ ok: true });
+        await h.executor.settled(cs.id);
+        expect((await h.repository.get(cs.id))?.submission).toEqual(submission);
+      });
+    });
+
+    it('wake on an unknown change-set resolves', async () => {
+      await withExec(async (h) => {
+        await expect(h.executor.wake(randomUUID())).resolves.toBeUndefined();
       });
     });
 

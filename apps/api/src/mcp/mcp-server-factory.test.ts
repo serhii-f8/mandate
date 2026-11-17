@@ -51,6 +51,7 @@ const unusedExecutor: ChangeSetExecutor = {
   start: () => Promise.reject(new Error('not used')),
   cancel: () => Promise.reject(new Error('not used')),
   progress: () => Promise.reject(new Error('not used')),
+  wake: () => Promise.resolve(),
 };
 
 function handler(builtins: PipelineDeps['builtins'] = [], tasks = new InMemoryTaskRepository()) {

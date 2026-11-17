@@ -134,6 +134,19 @@ describe('AUD-1 execution audit events', () => {
     expect(e.details.reason).toBe('limit_exceeded');
     expect(JSON.stringify(e.details)).not.toContain('args');
   });
+  it('POL-6 AUD-1 a limit denial is audited for the requester, transitions for the actor', () => {
+    const asApprover = startEventFactory({
+      newId: () => 'e2',
+      actor: 'dave',
+      groups: ['content-leads'],
+      correlationId: 'corr2',
+      requester: { subject: 'alice', groups: ['content'], clientId: 'cl-alice' },
+    });
+    const denied = asApprover({ kind: 'limit_denied', limit: 'records_per_day', role: 'editor' }, cs);
+    expect(denied).toMatchObject({ action: 'policy.decision', actor: 'alice', clientId: 'cl-alice' });
+    const started = asApprover({ kind: 'executing', from: 'approved' }, cs);
+    expect(started).toMatchObject({ action: 'changeset.transition', actor: 'dave' });
+  });
   it('AUD-1 audits a batch with counts only', () => {
     const e = changesetBatchEvent({
       id: 'b1',

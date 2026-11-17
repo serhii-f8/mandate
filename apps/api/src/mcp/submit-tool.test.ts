@@ -128,6 +128,10 @@ class StubExecutor implements ChangeSetExecutor {
     return Promise.reject(new Error('not used'));
   }
 
+  wake(): Promise<void> {
+    return Promise.resolve();
+  }
+
   progress(): Promise<ExecutionProgress | undefined> {
     return Promise.reject(new Error('not used'));
   }

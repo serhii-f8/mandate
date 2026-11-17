@@ -257,6 +257,13 @@ export interface StartRequest {
   groups?: readonly string[];
   limits?: ExecutionLimits;
   clientId?: string;
+  /**
+   * Whose request the execution is when `actor` is the approver who starts it (POL-6): stored as the
+   * execution request, and the identity limits are charged to and audited for.
+   */
+  requester?: { subject: string; groups: readonly string[]; clientId?: string };
+  /** Stored when starting from `prepared` without approval (POL-6). */
+  submission?: Submission;
 }
 
 export interface WorkflowStarter {
@@ -322,4 +329,6 @@ export interface ChangeSetExecutor {
     correlationId: string;
   }): Promise<{ ok: true; status: ChangeSetStatus } | { ok: false; reason: 'not_found' | 'not_cancellable' }>;
   progress(changesetId: string): Promise<ExecutionProgress | undefined>;
+  /** Nudges the change-set's run to re-read its status (an approval, a cancel). Best effort; resolves for an unknown change-set. */
+  wake(changesetId: string): Promise<void>;
 }
