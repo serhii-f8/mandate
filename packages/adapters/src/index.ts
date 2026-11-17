@@ -4,6 +4,7 @@ export { toJsonSchema2020, MAX_REF_DEPTH, type TranslateContext } from './openap
 export { deriveCatalog, operationLabel } from './openapi/derive.js';
 export { buildRequest, MappingError, type HttpRequestSpec } from './openapi/request.js';
 export { mapResponse } from './openapi/response.js';
+export { buildBulkBody, extractBatchId, isSafeBatchId, mapBulkStatus } from './openapi/bulk.js';
 export { assertEgressAllowed, isBlockedAddress, allowedHostsOf, createGuardedLookup, EgressDeniedError, type Resolver } from './http/egress.js';
 export { createScrubber, REDACTED, type Scrubber } from './http/scrub.js';
 export {

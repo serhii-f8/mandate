@@ -14,6 +14,28 @@ export interface ResponseMapping {
   maxItems: number;
 }
 
+export type StateValue = string | number | boolean;
+
+export interface BulkMapping {
+  body: { wrap?: string; nest?: { path: string; key: string; value: string; keep: readonly string[] } };
+  /** Dotted path of the batch ID in the submit response. */
+  batchId: string;
+  status: {
+    method: 'GET';
+    /** Contains `{batch_id}`. */
+    path: string;
+    items: string;
+    index: string;
+    state: string;
+    states: {
+      ok: readonly StateValue[];
+      failed: readonly StateValue[];
+      retriable: readonly StateValue[];
+      open: readonly StateValue[];
+    };
+  };
+}
+
 export interface UpstreamMapping {
   operation?: string;
   method?: HttpMethod;
@@ -23,4 +45,6 @@ export interface UpstreamMapping {
   headers: Record<string, TemplateValue>;
   body?: TemplateValue;
   response: ResponseMapping;
+  /** since 0.3.0, additive */
+  bulk?: BulkMapping;
 }
