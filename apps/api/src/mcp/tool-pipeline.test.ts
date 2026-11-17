@@ -447,20 +447,34 @@ describe('POL-4 calls_per_minute', () => {
     expect(decisions).toHaveLength(3);
     expect(decisions[2]).toMatchObject({ decision: 'deny', details: { rule: 'role:content_manager/limit:calls_per_minute', reason: 'limit_exceeded' } });
     expect(decisions[0]).toMatchObject({ decision: 'allow' });
+    expect(decisions[1]).toMatchObject({ decision: 'allow' });
   });
 
   it('a new UTC minute opens a new bucket', async () => {
     expect(minuteWindow(new Date('2026-11-17T12:00:59.999Z')).getTime()).not.toBe(minuteWindow(new Date('2026-11-17T12:01:00.000Z')).getTime());
     const keys: string[] = [];
-    const counter: RateCounter = { hit: (key) => { keys.push(key); return Promise.resolve(1); } };
+    const windows: Date[] = [];
+    const counter: RateCounter = {
+      hit: (key, windowStart) => {
+        keys.push(key);
+        windows.push(windowStart);
+        return Promise.resolve(1);
+      },
+    };
     const { deps, req } = limitedSetup(counter);
     await callTool(deps, req(alice), 'catalog.search_products', SEARCH);
     expect(keys).toEqual(['alice-id|content_manager']);
+    expect(windows.map((w) => w.toISOString())).toEqual(['2026-11-17T12:00:00.000Z']);
   });
 
   it('built-ins are not counted', async () => {
     const hits: string[] = [];
-    const { deps, req } = limitedSetup({ hit: (key) => { hits.push(key); return Promise.resolve(1); } });
+    const { deps, req } = limitedSetup({
+      hit: (key) => {
+        hits.push(key);
+        return Promise.resolve(1);
+      },
+    });
     for (let i = 0; i < 3; i++) await callTool(deps, req(alice), 'ping', {});
     expect(hits).toEqual([]);
   });
@@ -468,16 +482,28 @@ describe('POL-4 calls_per_minute', () => {
   it('a role without calls_per_minute never calls the counter', async () => {
     const hits: string[] = [];
     const { deps, req } = setup();
-    const counted: PipelineDeps = { ...deps, rateCounter: { hit: (key) => { hits.push(key); return Promise.resolve(1); } } };
+    const counted: PipelineDeps = { ...deps, rateCounter: {
+        hit: (key) => {
+          hits.push(key);
+          return Promise.resolve(1);
+        },
+      },
+    };
     await callTool(counted, req(alice), 'catalog.search_products', SEARCH);
     expect(hits).toEqual([]);
   });
 
   it('a failing counter fails closed', async () => {
-    const { deps, req, invoker } = limitedSetup({ hit: () => Promise.reject(new Error('db down')) });
+    const { deps, req, invoker, audit } = limitedSetup({ hit: () => Promise.reject(new Error('db down')) });
     const answer = plain(await callTool(deps, req(alice), 'catalog.search_products', SEARCH));
     expect(answer.isError).toBe(true);
     expect(text(answer)).toBe('Rate limit check unavailable; the call was not completed.');
     expect(invoker.calls).toEqual([]);
+    const decisions = audit.events.filter((e) => e.action === 'policy.decision');
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({
+      decision: 'deny',
+      details: { rule: 'role:content_manager/limit:calls_per_minute', reason: 'limit_exceeded', detail: 'calls_per_minute_unavailable' },
+    });
   });
 });

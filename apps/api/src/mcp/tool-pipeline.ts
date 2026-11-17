@@ -230,7 +230,15 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
           decision = { effect: 'deny', rule: `role:${role}/limit:calls_per_minute`, reason: 'limit_exceeded', detail: 'calls_per_minute', roles: decision.roles };
         }
       } catch {
-        // Fail closed; the error may name the caller, so nothing of it is kept (SEC-3).
+        // Fail closed; the error may name the caller, so nothing of it is kept (SEC-3). One
+        // best-effort deny row keeps POL-8 (exactly one decision per call).
+        await recordDecision(
+          deps,
+          req,
+          name,
+          { effect: 'deny', rule: `role:${role}/limit:calls_per_minute`, reason: 'limit_exceeded', detail: 'calls_per_minute_unavailable', roles: decision.roles },
+          operation,
+        );
         return RATE_LIMIT_UNAVAILABLE;
       }
     }
