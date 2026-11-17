@@ -193,6 +193,11 @@ services:
       target: worker
     image: aiops-worker:local
     depends_on:
+      postgres:
+        condition: service_healthy
+      # The worker refuses an unmigrated schema; api applies the migrations before it is healthy (NFR-5).
+      api:
+        condition: service_healthy
       temporal-namespace:
         condition: service_completed_successfully
     environment:
@@ -200,6 +205,16 @@ services:
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
       TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-aiops-operations}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://aiops:${AIOPS_DB_PASSWORD:-dev-only-aiops-db-password}@postgres:5432/aiops
+      # The same configuration and presets as api (CFG-1, CONN-8); the presets are built into the image.
+      AIOPS_CONFIG_DIR: /etc/aiops/config
+      AIOPS_PRESET_DIRS: /app/presets
+      AIOPS_MASTER_KEYS: ${AIOPS_MASTER_KEYS:-1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=}
+      # Temporal payload encryption keys (SEC-4), development-only default. Activity tuning
+      # (AIOPS_BATCH_*, AIOPS_RETRY_*) keeps its built-in defaults unless set here with a value.
+      AIOPS_TEMPORAL_KEYS: ${AIOPS_TEMPORAL_KEYS:-1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=}
+    volumes:
+      - ./config:/etc/aiops/config:ro
     restart: unless-stopped
 
 volumes:

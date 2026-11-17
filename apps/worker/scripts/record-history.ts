@@ -48,8 +48,15 @@ const catalogReader: UpstreamReader = {
   },
 };
 
+/**
+ * Temporal identity of the recording client and worker. The SDK default (`<pid>@<hostname>`)
+ * would put the recording machine's name into the committed histories (identities and sticky
+ * task queue names); identity is not replay-relevant.
+ */
+const RECORDER_IDENTITY = 'aiops-recorder';
+
 async function withWorker<T>(infra: Infra, opts: TestWorkerOptions, fn: (worker: TestWorker) => Promise<T>): Promise<T> {
-  const worker = await startTestWorker(infra, opts);
+  const worker = await startTestWorker(infra, { ...opts, identity: RECORDER_IDENTITY });
   try {
     return await fn(worker);
   } finally {
@@ -348,7 +355,7 @@ if (existing.length > 0 && !force) {
   throw new Error(`${existing.join(', ')} exists; fixtures are not regenerated (pass --force only when a patch is removed)`);
 }
 
-const infra = await startInfrastructure();
+const infra = await startInfrastructure({ identity: RECORDER_IDENTITY });
 try {
   const recorded = await scenario.run(infra);
   mkdirSync(outDir, { recursive: true });

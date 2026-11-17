@@ -41,4 +41,6 @@ CMD ["node", "dist/main.js"]
 
 FROM runtime AS worker
 COPY --from=build --chown=node:node /out/worker ./
+# The worker loads the configuration exactly as the api does, presets included (AIOPS_PRESET_DIRS).
+COPY --from=build --chown=node:node /out/presets ./presets
 CMD ["node", "dist/main.js"]

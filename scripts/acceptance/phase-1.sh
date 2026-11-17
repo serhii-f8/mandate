@@ -61,10 +61,9 @@ ROWS="$(compose exec -T postgres psql -U aiops -d aiops -tAc \
   "select count(*) from audit_event where correlation_id = '${CID}' and action = 'tool.call' and subject = 'ping' and outcome = 'ok'" 2>&1 || true)"
 if [[ -n "$CID" && "$ROWS" == "1" ]]; then pass audit-row "correlation_id=$CID"; else fail audit-row "rows=$ROWS cid=$CID"; fi
 
-# Worker runs the trivial workflow.
-WF="$(compose run --rm --no-deps -T --entrypoint temporal temporal-namespace workflow execute \
-  --address temporal:7233 --type smokeWorkflow --task-queue aiops-operations \
-  --workflow-id "accept-$$" --input '{"message":"accept"}' 2>&1 || true)"
+# Worker runs the trivial workflow. Since Phase 5 every payload is encrypted (SEC-4), so the
+# workflow is started from the worker image with the codec, not with the plaintext Temporal CLI.
+WF="$(compose exec -T worker node dist/smoke-cli.js accept 2>&1 || true)"
 if grep -q '"echoed":"accept"' <<<"$WF"; then pass smoke-workflow "COMPLETED {\"echoed\":\"accept\"}"; else fail smoke-workflow "$(tail -5 <<<"$WF")"; fi
 
 # Keycloak serves the realm.

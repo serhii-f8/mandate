@@ -56,6 +56,21 @@ const REQUIRED_CHANGESET_FIXTURES = [
   'expire-retry',
 ];
 
+/** Every payload's `metadata.encoding` in a history JSON (base64 in the proto JSON form), decoded. */
+function payloadEncodings(node: unknown): string[] {
+  if (Array.isArray(node)) return node.flatMap(payloadEncodings);
+  if (node === null || typeof node !== 'object') return [];
+  const found: string[] = [];
+  for (const [key, value] of Object.entries(node) as [string, unknown][]) {
+    if (key === 'metadata' && value !== null && typeof value === 'object') {
+      const encoding: unknown = (value as { encoding?: unknown }).encoding;
+      if (typeof encoding === 'string') found.push(Buffer.from(encoding, 'base64').toString('utf8'));
+    }
+    found.push(...payloadEncodings(value));
+  }
+  return found;
+}
+
 describe('EXE-10 workflow replay gate', () => {
   it('has at least one recorded history', () => {
     expect(fixtures.map((f) => `${f.type}/${f.name}`)).toContain('smokeWorkflow/completed.json');
@@ -64,6 +79,16 @@ describe('EXE-10 workflow replay gate', () => {
   it('EXE-10 has the required changesetWorkflow fixtures', () => {
     const names = fixtures.filter((f) => f.type === 'changesetWorkflow').map((f) => f.name.replace(/\.json$/, ''));
     expect(names).toEqual(expect.arrayContaining(REQUIRED_CHANGESET_FIXTURES));
+  });
+
+  it('SEC-4 no changesetWorkflow fixture carries a json/plain payload', () => {
+    const encodings = new Set<string>();
+    for (const fixture of fixtures.filter((f) => f.type === 'changesetWorkflow')) {
+      for (const encoding of payloadEncodings(JSON.parse(readFileSync(fixture.path, 'utf8')))) encodings.add(encoding);
+    }
+    // Non-vacuous: the walk does find the encrypted payloads.
+    expect(encodings).toContain('binary/encrypted');
+    expect(encodings).not.toContain('json/plain');
   });
 
   it.each(fixtures)('EXE-10 replays $type/$name with the current workflow code', async ({ type, path, name }) => {

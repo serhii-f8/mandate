@@ -26,7 +26,7 @@
         },
         "workflowTaskTimeout": "10s",
         "originalExecutionRunId": "149fbf14-13db-42f0-bd62-a0736c29a68e",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "firstExecutionRunId": "149fbf14-13db-42f0-bd62-a0736c29a68e",
         "attempt": 1,
         "firstWorkflowTaskBackoff": "0s",
@@ -42,7 +42,7 @@
       "workflowExecutionSignaledEventAttributes": {
         "signalName": "wake",
         "input": {},
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "header": {},
         "requestId": "55b35720-2dc0-4f58-9934-9d21580ca9c9"
       }
@@ -68,7 +68,7 @@
       "taskId": "1048593",
       "workflowTaskStartedEventAttributes": {
         "scheduledEventId": "3",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "requestId": "26696d92-2096-49f1-829a-2d11116de6df",
         "historySizeBytes": "577",
         "workerVersion": {
@@ -84,7 +84,7 @@
       "workflowTaskCompletedEventAttributes": {
         "scheduledEventId": "3",
         "startedEventId": "4",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "workerVersion": {
           "buildId": "@temporalio/worker@1.25.0+edcaa8293ba507afe52cda76b4e496dfda99a7986467051a17b3ddfdd7795340"
         },
@@ -150,7 +150,7 @@
       "taskId": "1048603",
       "activityTaskStartedEventAttributes": {
         "scheduledEventId": "6",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "requestId": "c19381b2-6dbd-4126-b5cb-1c3cec152565",
         "attempt": 1,
         "workerVersion": {
@@ -177,7 +177,7 @@
         },
         "scheduledEventId": "6",
         "startedEventId": "7",
-        "identity": "43056@serhii"
+        "identity": "aiops-recorder"
       }
     },
     {
@@ -187,7 +187,7 @@
       "taskId": "1048605",
       "workflowTaskScheduledEventAttributes": {
         "taskQueue": {
-          "name": "43056@serhii-a6251b7c84d840b5ba4e05d3ac5981d4",
+          "name": "aiops-recorder-a6251b7c84d840b5ba4e05d3ac5981d4",
           "kind": "TASK_QUEUE_KIND_STICKY",
           "normalName": "test-c2841efe-832e-43e7-b87d-030a900a565f"
         },
@@ -202,7 +202,7 @@
       "taskId": "1048609",
       "workflowTaskStartedEventAttributes": {
         "scheduledEventId": "9",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "requestId": "70fabd65-85cd-49e0-b527-68f0e660d8e8",
         "historySizeBytes": "1895",
         "workerVersion": {
@@ -218,7 +218,7 @@
       "workflowTaskCompletedEventAttributes": {
         "scheduledEventId": "9",
         "startedEventId": "10",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "workerVersion": {
           "buildId": "@temporalio/worker@1.25.0+edcaa8293ba507afe52cda76b4e496dfda99a7986467051a17b3ddfdd7795340"
         },
@@ -280,7 +280,7 @@
       "taskId": "1048618",
       "activityTaskStartedEventAttributes": {
         "scheduledEventId": "12",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "requestId": "9dde95e5-34a2-4807-a87f-d8d1c17167c0",
         "attempt": 1,
         "workerVersion": {
@@ -307,7 +307,7 @@
         },
         "scheduledEventId": "12",
         "startedEventId": "13",
-        "identity": "43056@serhii"
+        "identity": "aiops-recorder"
       }
     },
     {
@@ -317,7 +317,7 @@
       "taskId": "1048620",
       "workflowTaskScheduledEventAttributes": {
         "taskQueue": {
-          "name": "43056@serhii-a6251b7c84d840b5ba4e05d3ac5981d4",
+          "name": "aiops-recorder-a6251b7c84d840b5ba4e05d3ac5981d4",
           "kind": "TASK_QUEUE_KIND_STICKY",
           "normalName": "test-c2841efe-832e-43e7-b87d-030a900a565f"
         },
@@ -332,7 +332,7 @@
       "taskId": "1048624",
       "workflowTaskStartedEventAttributes": {
         "scheduledEventId": "15",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "requestId": "3208cdeb-2f24-48fc-9f06-3969760e5f55",
         "historySizeBytes": "3223",
         "workerVersion": {
@@ -348,7 +348,7 @@
       "workflowTaskCompletedEventAttributes": {
         "scheduledEventId": "15",
         "startedEventId": "16",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "workerVersion": {
           "buildId": "@temporalio/worker@1.25.0+edcaa8293ba507afe52cda76b4e496dfda99a7986467051a17b3ddfdd7795340"
         },
@@ -410,7 +410,7 @@
       "taskId": "1048633",
       "activityTaskStartedEventAttributes": {
         "scheduledEventId": "18",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "requestId": "b404e52d-c85f-44c8-a44f-499317ba17f1",
         "attempt": 1,
         "workerVersion": {
@@ -437,7 +437,7 @@
         },
         "scheduledEventId": "18",
         "startedEventId": "19",
-        "identity": "43056@serhii"
+        "identity": "aiops-recorder"
       }
     },
     {
@@ -447,7 +447,7 @@
       "taskId": "1048635",
       "workflowTaskScheduledEventAttributes": {
         "taskQueue": {
-          "name": "43056@serhii-a6251b7c84d840b5ba4e05d3ac5981d4",
+          "name": "aiops-recorder-a6251b7c84d840b5ba4e05d3ac5981d4",
           "kind": "TASK_QUEUE_KIND_STICKY",
           "normalName": "test-c2841efe-832e-43e7-b87d-030a900a565f"
         },
@@ -462,7 +462,7 @@
       "taskId": "1048639",
       "workflowTaskStartedEventAttributes": {
         "scheduledEventId": "21",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "requestId": "9da61598-7370-4fcf-b82a-f49bd20a22c5",
         "historySizeBytes": "4520",
         "workerVersion": {
@@ -478,7 +478,7 @@
       "workflowTaskCompletedEventAttributes": {
         "scheduledEventId": "21",
         "startedEventId": "22",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "workerVersion": {
           "buildId": "@temporalio/worker@1.25.0+edcaa8293ba507afe52cda76b4e496dfda99a7986467051a17b3ddfdd7795340"
         },
@@ -540,7 +540,7 @@
       "taskId": "1048658",
       "activityTaskStartedEventAttributes": {
         "scheduledEventId": "24",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "requestId": "87dc2f87-aca6-4408-8332-10675959e43c",
         "attempt": 3,
         "lastFailure": {
@@ -584,7 +584,7 @@
         },
         "scheduledEventId": "24",
         "startedEventId": "25",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "retryState": "RETRY_STATE_MAXIMUM_ATTEMPTS_REACHED"
       }
     },
@@ -595,7 +595,7 @@
       "taskId": "1048660",
       "workflowTaskScheduledEventAttributes": {
         "taskQueue": {
-          "name": "43056@serhii-a6251b7c84d840b5ba4e05d3ac5981d4",
+          "name": "aiops-recorder-a6251b7c84d840b5ba4e05d3ac5981d4",
           "kind": "TASK_QUEUE_KIND_STICKY",
           "normalName": "test-c2841efe-832e-43e7-b87d-030a900a565f"
         },
@@ -610,7 +610,7 @@
       "taskId": "1048664",
       "workflowTaskStartedEventAttributes": {
         "scheduledEventId": "27",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "requestId": "15f4c118-5a78-475a-9553-52a54b94797f",
         "historySizeBytes": "9494",
         "workerVersion": {
@@ -626,7 +626,7 @@
       "workflowTaskCompletedEventAttributes": {
         "scheduledEventId": "27",
         "startedEventId": "28",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "workerVersion": {
           "buildId": "@temporalio/worker@1.25.0+edcaa8293ba507afe52cda76b4e496dfda99a7986467051a17b3ddfdd7795340"
         },
@@ -687,7 +687,7 @@
       "taskId": "1048673",
       "activityTaskStartedEventAttributes": {
         "scheduledEventId": "30",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "requestId": "f0303633-1d6a-4705-bacd-d309545fe640",
         "attempt": 1,
         "workerVersion": {
@@ -714,7 +714,7 @@
         },
         "scheduledEventId": "30",
         "startedEventId": "31",
-        "identity": "43056@serhii"
+        "identity": "aiops-recorder"
       }
     },
     {
@@ -724,7 +724,7 @@
       "taskId": "1048675",
       "workflowTaskScheduledEventAttributes": {
         "taskQueue": {
-          "name": "43056@serhii-a6251b7c84d840b5ba4e05d3ac5981d4",
+          "name": "aiops-recorder-a6251b7c84d840b5ba4e05d3ac5981d4",
           "kind": "TASK_QUEUE_KIND_STICKY",
           "normalName": "test-c2841efe-832e-43e7-b87d-030a900a565f"
         },
@@ -739,7 +739,7 @@
       "taskId": "1048679",
       "workflowTaskStartedEventAttributes": {
         "scheduledEventId": "33",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "requestId": "b9a1d0ee-983c-4ad1-9665-d41ca221072f",
         "historySizeBytes": "10715",
         "workerVersion": {
@@ -755,7 +755,7 @@
       "workflowTaskCompletedEventAttributes": {
         "scheduledEventId": "33",
         "startedEventId": "34",
-        "identity": "43056@serhii",
+        "identity": "aiops-recorder",
         "workerVersion": {
           "buildId": "@temporalio/worker@1.25.0+edcaa8293ba507afe52cda76b4e496dfda99a7986467051a17b3ddfdd7795340"
         },

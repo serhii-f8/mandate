@@ -43,11 +43,16 @@ export interface Infra {
  * runtime is a per-process singleton that must be installed before the first worker or
  * connection, and its options are remembered when it is re-created.
  */
-function quietTemporalLogs(): void {
+export function quietTemporalLogs(): void {
   if (Runtime._instance === undefined) Runtime.install({ logger: new DefaultLogger('WARN') });
 }
 
-export async function startInfrastructure(): Promise<Infra> {
+export interface InfraOptions {
+  /** The client's Temporal identity. Default: the SDK's (`<pid>@<hostname>`). */
+  readonly identity?: string;
+}
+
+export async function startInfrastructure(opts: InfraOptions = {}): Promise<Infra> {
   quietTemporalLogs();
   const postgres = await startTestPostgres();
   let env: TestWorkflowEnvironment | undefined;
@@ -58,6 +63,7 @@ export async function startInfrastructure(): Promise<Infra> {
       connection: started.connection,
       namespace: 'default',
       dataConverter: clientDataConverter(parseTemporalKeys(TEST_TEMPORAL_KEYS)),
+      ...(opts.identity === undefined ? {} : { identity: opts.identity }),
     });
     return {
       env: started,
@@ -113,6 +119,8 @@ export interface TestWorkerOptions {
   readonly connection?: NativeConnection;
   /** Default: the SDK's. 0 sends every workflow task through the shared queue instead of a sticky one. */
   readonly maxCachedWorkflows?: number;
+  /** The worker's Temporal identity. Default: the SDK's (`<pid>@<hostname>`). */
+  readonly identity?: string;
   /** Called with the activity name before every activity invocation. */
   readonly spy?: (activity: string) => void;
 }
@@ -171,6 +179,7 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
     dataConverter: workerDataConverter(parseTemporalKeys(TEST_TEMPORAL_KEYS)),
     ...(opts.shutdownForceTime === undefined ? {} : { shutdownForceTime: opts.shutdownForceTime }),
     ...(opts.maxCachedWorkflows === undefined ? {} : { maxCachedWorkflows: opts.maxCachedWorkflows }),
+    ...(opts.identity === undefined ? {} : { identity: opts.identity }),
   });
   const running = worker.run();
   // A failed run is reported by stop(); until then it must not count as an unhandled rejection.

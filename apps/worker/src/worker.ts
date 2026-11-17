@@ -37,6 +37,8 @@ export interface CreateWorkerOptions {
   readonly shutdownForceTime?: Duration;
   /** Default: the SDK's. 0 keeps no workflow sticky to this worker (tests spread workflow tasks over workers). */
   readonly maxCachedWorkflows?: number;
+  /** Default: the SDK's (`<pid>@<hostname>`); the history recorder sets a fixed one. */
+  readonly identity?: string;
 }
 
 export function createWorker(options: CreateWorkerOptions): Promise<Worker> {
@@ -51,5 +53,6 @@ export function createWorker(options: CreateWorkerOptions): Promise<Worker> {
     ...(options.shutdownGraceTime === undefined ? {} : { shutdownGraceTime: options.shutdownGraceTime }),
     ...(options.shutdownForceTime === undefined ? {} : { shutdownForceTime: options.shutdownForceTime }),
     ...(options.maxCachedWorkflows === undefined ? {} : { maxCachedWorkflows: options.maxCachedWorkflows }),
+    ...(options.identity === undefined ? {} : { identity: options.identity }),
   });
 }
