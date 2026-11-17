@@ -165,7 +165,8 @@ export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): 
       const selector = manifest.selector;
       const selectorArgs = resolveTemplates(selector.args, args);
       const selectorFieldsArg = req.readFieldsArg(selector.operation);
-      let seen = 0;
+      // Unique selector ids the store accepted: duplicates across pages do not count towards the total.
+      let unique = 0;
       for (let pageNo = 1; ; pageNo++) {
         const page = okPage(
           await reader.read(selector.operation, {
@@ -187,14 +188,15 @@ export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): 
         ];
         let inserted = 0;
         for (const chunk of chunks(ids, manifest.batchSize)) inserted += await processChunk(chunk);
-        seen += page.items.length;
-        const totalReached = page.total !== undefined && seen >= page.total;
-        if (page.items.length < selector.pageSize) {
-          // A short (or empty) page ends the list only when it agrees with the reported total.
-          if (page.total !== undefined && !totalReached) throw new Failure('incomplete_read');
-          break;
+        unique += inserted;
+        const lastPage = page.items.length < selector.pageSize || inserted === 0;
+        if (page.total === undefined) {
+          if (lastPage) break;
+          continue;
         }
-        if (inserted === 0 || totalReached) break;
+        if (unique >= page.total) break;
+        // The list ended (short, empty or nothing new) before the reported total: never a silently short set.
+        if (lastPage) throw new Failure('incomplete_read');
       }
       if (stored === 0) throw new Failure('targets_missing');
     }

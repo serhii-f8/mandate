@@ -549,6 +549,51 @@ describe('OPS-4 selector pages are complete or the preparation fails', () => {
     });
   });
 
+  const totalPage = (ids: string[], total: number): ReadPage => ({
+    ok: true,
+    items: ids.map((sku) => ({ sku })),
+    total,
+    truncated: false,
+  });
+  const four = Object.fromEntries(['A', 'B', 'C', 'D'].map((s) => [s, product(s)]));
+
+  it('OPS-4 the same full page forever with a reported total fails incomplete_read', async () => {
+    const reader = new ScriptedReader(all, { selector: () => totalPage(['A', 'B'], 5) });
+    const { deps } = setup(reader);
+    expect(await prepareChangeSet(deps, request(selectorArgs))).toEqual({
+      ok: false,
+      changesetId: 'id-1',
+      code: 'incomplete_read',
+    });
+  });
+
+  it('OPS-4 overlapping pages count unique ids against the total and keep paging', async () => {
+    const pages: Record<number, string[]> = { 1: ['A', 'B'], 2: ['B', 'C'], 3: ['D'] };
+    const reader = new ScriptedReader(four, { selector: (p) => totalPage(pages[p] ?? [], 4) });
+    const { deps } = setup(reader);
+    const out = await prepareChangeSet(deps, request(selectorArgs));
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(reader.readsOf('catalog.search_products').map((c) => c.args.current_page)).toEqual([1, 2, 3]);
+    expect(out.changeset.stats.total).toBe(4);
+  });
+
+  it('OPS-4 overlapping pages that end short of the total fail incomplete_read', async () => {
+    const pages: Record<number, string[]> = { 1: ['A', 'B'], 2: ['B', 'C'] };
+    const reader = new ScriptedReader(four, { selector: (p) => totalPage(pages[p] ?? [], 4) });
+    const { deps } = setup(reader);
+    expect(await prepareChangeSet(deps, request(selectorArgs))).toMatchObject({ ok: false, code: 'incomplete_read' });
+  });
+
+  it('OPS-4 overlapping pages that reach the total are prepared', async () => {
+    const pages: Record<number, string[]> = { 1: ['A', 'B'], 2: ['B', 'C'], 3: ['X'] };
+    const reader = new ScriptedReader(four, { selector: (p) => totalPage(pages[p] ?? [], 3) });
+    const { deps } = setup(reader);
+    const out = await prepareChangeSet(deps, request(selectorArgs));
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(reader.readsOf('catalog.search_products')).toHaveLength(2);
+    expect(out.changeset.stats.total).toBe(3);
+  });
+
   it('OPS-4 an empty selector page before the reported total fails incomplete_read', async () => {
     const pages: Record<number, string[]> = { 1: ['A', 'B'] };
     const reader = new ScriptedReader(all, {
