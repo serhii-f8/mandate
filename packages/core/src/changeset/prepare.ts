@@ -2,15 +2,15 @@ import type { Caller } from '../caller.js';
 import type { ManifestDefinition, ManifestTemplate, OperationDefinition } from '../policy-model.js';
 import { changesetTransitionEvent } from './audit.js';
 import { normalizeArgs } from './canonical.js';
-import { ChangeSetHasher } from './hash.js';
 import { buildItems, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStatus } from './model.js';
-import type { ChangeSetRepository, PrepareFailure, ReadPage, UpstreamReader } from './ports.js';
+import type { PreparationRepository, PrepareFailure, ReadPage, UpstreamReader } from './ports.js';
+import { hashStoredItems } from './verify.js';
 
 export type { PrepareFailure } from './ports.js';
 
 export interface PrepareDeps {
-  readonly repository: ChangeSetRepository;
+  readonly repository: PreparationRepository;
   readonly reader: UpstreamReader;
   readonly newId: () => string;
   readonly now: () => Date;
@@ -38,7 +38,18 @@ export type PrepareOutcome =
       readonly status?: number;
     };
 
-const HASH_PAGE = 500;
+/** Everything `createChangeSet` needs: a prepare request without the read-operation lookup. */
+export type CreateRequest = Omit<PrepareRequest, 'readFieldsArg'>;
+
+export interface RunPreparationRequest {
+  readonly changesetId: string;
+  readonly operation: OperationDefinition & { readonly manifest: ManifestDefinition };
+  readonly readFieldsArg: (readOperationId: string) => string | undefined;
+  readonly actor: string;
+  readonly clientId?: string;
+  readonly correlationId: string;
+}
+
 const FIRST_ITEMS = 20;
 const HOUR_MS = 3_600_000;
 
@@ -84,13 +95,13 @@ function okPage(page: ReadPage): Extract<ReadPage, { ok: true }> {
 }
 
 /**
- * Prepares a change-set from the operation's manifest (design §4.1): resolves targets,
- * reads current state in chunks, stores one item per target, then hashes the stored items
- * page by page. Nothing is written upstream (CS-1); memory holds at most one selector page
- * and one read chunk (NFR-7).
+ * Creates the change-set row in `preparing` and audits `null -> preparing` (EXE-1). Reads nothing,
+ * so it can run in the API call while `runPreparation` runs later, in a workflow activity.
  */
-export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): Promise<PrepareOutcome> {
-  const { repository, reader } = deps;
+export async function createChangeSet(
+  deps: Pick<PrepareDeps, 'repository' | 'newId' | 'now'>,
+  req: CreateRequest,
+): Promise<{ ok: true; changeset: ChangeSetRecord } | { ok: false; code: PrepareFailure }> {
   const { operation, caller, correlationId } = req;
   const manifest = operation.manifest;
   const args = normalizeArgs(req.args, manifest.idsArg);
@@ -101,21 +112,8 @@ export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): 
   if (explicitIds === undefined && manifest.selector === undefined) return { ok: false, code: 'targets_missing' };
 
   const id = deps.newId();
-  const ref = { id, operation: operation.id };
-  const event = (from: ChangeSetStatus | null, to: ChangeSetStatus, details?: Record<string, string | number>) =>
-    changesetTransitionEvent({
-      id: deps.newId(),
-      actor: caller.subject,
-      ...(caller.clientId === undefined ? {} : { clientId: caller.clientId }),
-      changeset: ref,
-      from,
-      to,
-      correlationId,
-      ...(details === undefined ? {} : { details }),
-    });
-
   const createdAt = deps.now();
-  await repository.create(
+  const changeset = await deps.repository.create(
     {
       id,
       operation: operation.id,
@@ -128,8 +126,83 @@ export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): 
       createdAt,
       expiresAt: new Date(createdAt.getTime() + req.expireAfterHours * HOUR_MS),
     },
-    event(null, 'preparing'),
+    changesetTransitionEvent({
+      id: deps.newId(),
+      actor: caller.subject,
+      ...(caller.clientId === undefined ? {} : { clientId: caller.clientId }),
+      changeset: { id, operation: operation.id },
+      from: null,
+      to: 'preparing',
+      correlationId,
+    }),
   );
+  return { ok: true, changeset };
+}
+
+/** Creates the change-set, then prepares it in the same call (the pre-workflow path, CS-1). */
+export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): Promise<PrepareOutcome> {
+  const created = await createChangeSet(deps, req);
+  if (!created.ok) return created;
+  return runPreparation(deps, {
+    changesetId: created.changeset.id,
+    operation: req.operation,
+    readFieldsArg: req.readFieldsArg,
+    actor: req.caller.subject,
+    ...(req.caller.clientId === undefined ? {} : { clientId: req.caller.clientId }),
+    correlationId: req.correlationId,
+  });
+}
+
+/**
+ * Prepares a created change-set from the operation's manifest (design §4.1): reads current state in
+ * chunks, stores one item per target, then hashes the stored items page by page. Safe to call again
+ * after the change-set left `preparing` (NFR-2). Nothing is written upstream (CS-1); memory holds at
+ * most one selector page and one read chunk (NFR-7).
+ */
+export async function runPreparation(deps: PrepareDeps, req: RunPreparationRequest): Promise<PrepareOutcome> {
+  const { repository, reader } = deps;
+  const { operation } = req;
+  const manifest = operation.manifest;
+  const id = req.changesetId;
+
+  const current = await repository.get(id);
+  if (current === undefined) return { ok: false, code: 'not_found' };
+  if (current.status === 'prepared') {
+    return { ok: true, changeset: current, firstItems: await repository.itemsPage(id, { limit: FIRST_ITEMS }) };
+  }
+  if (current.status === 'cancelled' || current.status === 'expired') {
+    return { ok: false, changesetId: id, code: 'cancelled' };
+  }
+  if (current.status !== 'preparing') {
+    return { ok: false, changesetId: id, code: current.errorCode ?? 'internal' };
+  }
+
+  const args = current.args;
+  const rawIds = manifest.idsArg === undefined ? undefined : args[manifest.idsArg];
+  const explicitIds = Array.isArray(rawIds) ? (rawIds as string[]) : undefined;
+  const ref = { id, operation: operation.id };
+  const event = (from: ChangeSetStatus | null, to: ChangeSetStatus, details?: Record<string, string | number>) =>
+    changesetTransitionEvent({
+      id: deps.newId(),
+      actor: req.actor,
+      ...(req.clientId === undefined ? {} : { clientId: req.clientId }),
+      changeset: ref,
+      from,
+      to,
+      correlationId: req.correlationId,
+      ...(details === undefined ? {} : { details }),
+    });
+
+  // Items from an earlier attempt mean the reads cannot be replayed safely: fail fast.
+  if ((await repository.stats(id)).total > 0) {
+    const failed = await repository.completePreparation(
+      id,
+      { status: 'failed', errorCode: 'preparation_interrupted' },
+      event('preparing', 'failed', { errorCode: 'preparation_interrupted' }),
+    );
+    if (failed === undefined) return { ok: false, changesetId: id, code: 'cancelled' };
+    return { ok: false, changesetId: id, code: 'preparation_interrupted' };
+  }
 
   const readFieldsArg = req.readFieldsArg(manifest.readBefore.operation);
   const readFields = [
@@ -213,19 +286,11 @@ export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): 
     }
 
     const stats = await repository.stats(id);
-    const hasher = new ChangeSetHasher(operation.id, args);
-    let after: string | undefined;
-    for (;;) {
-      const page = await repository.itemsPage(id, { limit: HASH_PAGE, ...(after === undefined ? {} : { after }) });
-      for (const item of page) hasher.add(item);
-      const last = page.at(-1);
-      if (last === undefined || page.length < HASH_PAGE) break;
-      after = last.targetId;
-    }
+    const hash = await hashStoredItems(repository, current);
     const excluded = Object.values(stats.excluded).reduce((sum, n) => sum + n, 0);
     changeset = await repository.completePreparation(
       id,
-      { status: 'prepared', hash: hasher.digest(), stats, preparedAt: deps.now() },
+      { status: 'prepared', hash, stats, preparedAt: deps.now() },
       event('preparing', 'prepared', { included: stats.included, excluded }),
     );
   } catch (err) {

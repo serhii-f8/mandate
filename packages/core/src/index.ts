@@ -48,6 +48,7 @@ export type {
   ItemOutcome,
   ItemsPageQuery,
   NewChangeSet,
+  PreparationRepository,
   PrepareFailure,
   ReadPage,
   StartRefusal,
@@ -55,7 +56,17 @@ export type {
 } from './changeset/ports.js';
 export { changesetTransitionEvent, type ChangesetTransitionInput } from './changeset/audit.js';
 export { buildItems, touchedFields } from './changeset/items.js';
-export { prepareChangeSet, type PrepareDeps, type PrepareOutcome, type PrepareRequest } from './changeset/prepare.js';
+export {
+  createChangeSet,
+  prepareChangeSet,
+  runPreparation,
+  type CreateRequest,
+  type PrepareDeps,
+  type PrepareOutcome,
+  type PrepareRequest,
+  type RunPreparationRequest,
+} from './changeset/prepare.js';
+export { hashStoredItems } from './changeset/verify.js';
 export {
   CHANGESET_TEXT,
   decodeCursor,

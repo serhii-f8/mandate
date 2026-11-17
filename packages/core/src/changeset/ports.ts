@@ -56,6 +56,12 @@ export interface ChangeSetRepository {
   recordItemOutcomes(changesetId: string, outcomes: readonly ItemOutcome[]): Promise<void>;
 }
 
+/** The repository operations preparation uses; later port growth does not touch its fakes. */
+export type PreparationRepository = Pick<
+  ChangeSetRepository,
+  'create' | 'appendItems' | 'stats' | 'get' | 'itemsPage' | 'completePreparation'
+>;
+
 export type ReadPage =
   | {
       readonly ok: true;
