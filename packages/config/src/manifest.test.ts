@@ -293,11 +293,11 @@ describe('OPS-3 rollback strategy', () => {
 
 describe('CS-6 change-set expiry setting', () => {
   it('CS-6 defaults expireAfterHours to 72', async () => {
-    expect(ok(await load()).changesets).toEqual({ expireAfterHours: 72 });
+    expect(ok(await load()).changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.5, itemsPerWorkflowRun: 2000 });
   });
 
   it('CS-6 reads changesets.expire_after_hours and checks its range', async () => {
-    expect(ok(await load({ 'changesets.yaml': 'version: 1\nchangesets: { expire_after_hours: 24 }\n' })).changesets).toEqual({ expireAfterHours: 24 });
+    expect(ok(await load({ 'changesets.yaml': 'version: 1\nchangesets: { expire_after_hours: 24 }\n' })).changesets).toEqual({ expireAfterHours: 24, failureThreshold: 0.5, itemsPerWorkflowRun: 2000 });
     const found = issues(await load({ 'changesets.yaml': 'version: 1\nchangesets: { expire_after_hours: 5000 }\n' }));
     expect(found).toEqual([expect.objectContaining({ file: 'changesets.yaml', path: 'changesets.expire_after_hours' })]);
     expect(found[0]?.message).not.toContain('5000');
