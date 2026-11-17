@@ -77,9 +77,19 @@ roles:
   - id: other_role
     grants:
       - { operation: catalog.update_content, id: all }
+  - id: always_role
+    grants:
+      - { operation: catalog.update_content, id: all }
+    approval: { required: always, approver_role: content_manager }
+  - id: threshold_role
+    grants:
+      - { operation: catalog.update_content, id: all }
+    approval: { required: above_threshold, record_threshold: 1, approver_role: content_manager }
 role_mapping:
   - { group: content, roles: [content_manager] }
   - { group: other, roles: [other_role] }
+  - { group: always, roles: [always_role] }
+  - { group: threshold, roles: [threshold_role] }
 `,
   };
 }
@@ -282,6 +292,21 @@ describe('MCP-8 POL-6 POL-5 POL-4 submit_for_approval', () => {
     expect((await repository.get(ID))?.status).toBe('prepared');
     expect(executor.starts).toEqual([]);
     expect(reportedAll().errorCode).toBe('approval_required');
+  });
+
+  it.each([
+    ['always', 'always'],
+    ['above_threshold', 'threshold'],
+  ])('POL-5 approval.required %s answers approval_required and never starts', async (_mode, group) => {
+    const { tool, ctx, executor, repository, tasks, reportedAll } = await setup({ requester: group });
+    const caller: Caller = { subject: group, groups: [group] };
+    const result = plain(await tool.handler(args(), ctx(caller, { tasks: true })));
+    expect(result.isError).toBe(true);
+    expect(text(result)).toBe('This change-set requires approval, which this installation cannot grant yet.');
+    expect(reportedAll().errorCode).toBe('approval_required');
+    expect((await repository.get(ID))?.status).toBe('prepared');
+    expect(executor.starts).toEqual([]);
+    expect(tasks.created).toEqual([]);
   });
 
   it('POL-4 start receives groups, clientId and the allowing role\'s limits', async () => {
