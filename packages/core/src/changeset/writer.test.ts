@@ -7,6 +7,7 @@ import {
   type BulkWriter,
   type Clock,
   ManifestBatchWriter,
+  POLL_GIVE_UP_MS,
   RetryableWriteError,
   UnsupportedWriter,
   type WriteOutcomeCode,
@@ -77,6 +78,7 @@ class FakeBatch implements BatchContext {
   recordSubmission(s: BatchSubmission): Promise<void> {
     this.events.push('record');
     this.recorded.push(s);
+    this.submission = s;
     return Promise.resolve();
   }
   heartbeat(): void {
@@ -413,6 +415,8 @@ describe('EXE-4 CS-7 NFR-2 manifest batch writer', () => {
       BatchFenced,
     );
     expect(bulk.statusCalls).toEqual([]);
+    expect(batch.heartbeats).toBe(0);
+    expect(batch.submission).toBeUndefined();
   });
 
   it('OPS-6 a carry field missing from the current record is not sent', async () => {
@@ -470,6 +474,187 @@ describe('EXE-4 CS-7 NFR-2 manifest batch writer', () => {
     expect(errors.length).toBeGreaterThan(0);
     for (const e of errors) expect(FIXED_CODES).toContain(e);
     expect(JSON.stringify({ outcomes, recorded: batch.recorded })).not.toContain('script');
+  });
+});
+
+const DONE: StatusResult = { ok: true, items: [{ index: 0, state: 'ok' }] };
+
+function withThrowingDescription(sku: string): Record<string, unknown> {
+  const record = product(sku, null);
+  Object.defineProperty(record, 'description', {
+    enumerable: true,
+    get(): never {
+      throw new TypeError('programming error');
+    },
+  });
+  return record;
+}
+
+describe('EXE-4 resume and polling', () => {
+  it('EXE-4 with a recorded submission it polls the recorded batch and never reads before or resubmits', async () => {
+    const { events, reader, bulk, batch, writer } = setup();
+    batch.submission = {
+      upstreamBatchId: 'u-7',
+      plan: [
+        { targetId: 'B', action: 'outcome', status: 'skipped', error: 'drift' },
+        { targetId: 'A', action: 'write' },
+      ],
+    };
+    reader.pages = [page(product('A', 'new'))];
+    bulk.statuses = [DONE];
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(['A', 'B']), items: [item('A'), item('B')], batch });
+    expect(bulk.submitted).toEqual([]);
+    expect(batch.recorded).toEqual([]);
+    expect(bulk.statusCalls).toEqual(['u-7']);
+    // The verify read only, of the one submitted item, after the poll.
+    expect(reader.calls).toHaveLength(1);
+    expect(reader.calls[0]?.args).toMatchObject({ skus: ['A'] });
+    expect(events.indexOf('read')).toBeGreaterThan(events.indexOf('status'));
+    expect(outcomes).toEqual([
+      { targetId: 'B', status: 'skipped', error: 'drift' },
+      { targetId: 'A', status: 'written' },
+    ]);
+  });
+
+  it('EXE-4 NFR-2 a verify read that failed after recordSubmission is retried without a second submit: outcomes from the stored plan and polling', async () => {
+    const { reader, bulk, batch, writer } = setup();
+    const ids = ['A', 'B'];
+    reader.pages = [page(product('A', 'old'), product('B', 'new')), { ok: false, code: 'network' }, page(product('A', 'new'))];
+    bulk.statuses = [DONE];
+    await expect(writer.writeBatch({ changeset: changesetFor(ids), items: ids.map(item), batch })).rejects.toMatchObject({
+      name: 'RetryableWriteError',
+      code: 'read_failed',
+    });
+    expect(batch.submission).toEqual({
+      upstreamBatchId: 'u-1',
+      plan: [
+        { targetId: 'A', action: 'write' },
+        { targetId: 'B', action: 'outcome', status: 'written', error: 'already_applied' },
+      ],
+    });
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(ids), items: ids.map(item), batch });
+    expect(bulk.submitted).toHaveLength(1);
+    expect(batch.recorded).toHaveLength(1);
+    expect(bulk.statusCalls).toEqual(['u-1', 'u-1']);
+    expect(reader.calls.map((c) => c.args.skus)).toEqual([ids, ['A'], ['A']]);
+    expect(outcomes).toEqual([
+      { targetId: 'A', status: 'written' },
+      { targetId: 'B', status: 'written', error: 'already_applied' },
+    ]);
+  });
+
+  it('EXE-4 polling waits 1000, 1500, 2250, 3375, 5000, 5000, 5000 ms and heartbeats once every round', async () => {
+    const { events, reader, bulk, clock, batch, writer } = setup();
+    reader.pages = [page(product('A', 'old')), page(product('A', 'new'))];
+    bulk.statuses = [...Array<StatusResult>(6).fill(OPEN), DONE];
+    await writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch });
+    expect(clock.sleeps).toEqual([1000, 1500, 2250, 3375, 5000, 5000, 5000]);
+    expect(bulk.statusCalls).toHaveLength(7);
+    expect(batch.heartbeats).toBe(7);
+    const polling = events.filter((e) => e === 'heartbeat' || e === 'sleep' || e === 'status');
+    expect(polling).toEqual(Array.from({ length: 7 }, () => ['heartbeat', 'sleep', 'status']).flat());
+  });
+
+  it('EXE-4 still open after 10 minutes throws poll_timeout (retryable); a retry with the recorded submission resumes polling', async () => {
+    const { reader, bulk, clock, batch, writer } = setup();
+    reader.pages = [page(product('A', 'old')), page(product('A', 'new'))];
+    bulk.statuses = [OPEN];
+    const run = writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch });
+    await expect(run).rejects.toBeInstanceOf(RetryableWriteError);
+    await expect(run).rejects.toMatchObject({ code: 'poll_timeout', message: 'batch write interrupted: poll_timeout' });
+    const total = clock.sleeps.reduce((a, b) => a + b, 0);
+    const lastSleep = clock.sleeps.at(-1) ?? 0;
+    // It gives up on the first round at or past 10 minutes, not earlier.
+    expect(total).toBeGreaterThanOrEqual(POLL_GIVE_UP_MS);
+    expect(total - lastSleep).toBeLessThan(POLL_GIVE_UP_MS);
+    expect(bulk.statusCalls).toHaveLength(clock.sleeps.length);
+    expect(batch.heartbeats).toBe(clock.sleeps.length);
+
+    const before = bulk.statusCalls.length;
+    bulk.statuses = [DONE];
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch });
+    expect(bulk.submitted).toHaveLength(1);
+    expect(batch.recorded).toHaveLength(1);
+    expect(bulk.statusCalls.slice(before)).toEqual(['u-1']);
+    expect(outcomes).toEqual([{ targetId: 'A', status: 'written' }]);
+  });
+
+  it('EXE-4 a retriable status failure throws status_failed after the submission was recorded; the retry polls again', async () => {
+    const { reader, bulk, batch, writer } = setup();
+    reader.pages = [page(product('A', 'old')), page(product('A', 'new'))];
+    bulk.statuses = [{ ok: false, code: 'busy', retriable: true }, DONE];
+    await expect(writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch })).rejects.toMatchObject({
+      name: 'RetryableWriteError',
+      code: 'status_failed',
+    });
+    expect(batch.recorded).toHaveLength(1);
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch });
+    expect(bulk.submitted).toHaveLength(1);
+    expect(bulk.statusCalls).toEqual(['u-1', 'u-1']);
+    expect(outcomes).toEqual([{ targetId: 'A', status: 'written' }]);
+  });
+
+  it('EXE-5 a non-retriable status failure (upstream no longer knows the batch) fails every submitted item with no_outcome (Review Focus 4)', async () => {
+    const { reader, bulk, batch, writer } = setup();
+    const ids = ['A', 'B', 'C'];
+    reader.pages = [page(product('A', 'old'), product('B', 'new'), product('C', 'old'))];
+    bulk.statuses = [{ ok: false, code: 'not_found', retriable: false }];
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(ids), items: ids.map(item), batch });
+    // No verify read: only the pre-write read happened.
+    expect(reader.calls).toHaveLength(1);
+    expect(outcomes).toEqual([
+      { targetId: 'A', status: 'failed', error: 'no_outcome' },
+      { targetId: 'B', status: 'written', error: 'already_applied' },
+      { targetId: 'C', status: 'failed', error: 'no_outcome' },
+    ]);
+  });
+
+  it('EXE-4 a status answer with an empty item list counts as still open', async () => {
+    const { reader, bulk, batch, writer } = setup();
+    reader.pages = [page(product('A', 'old')), page(product('A', 'new'))];
+    bulk.statuses = [{ ok: true, items: [] }, { ok: true, items: [] }, DONE];
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch });
+    expect(bulk.statusCalls).toHaveLength(3);
+    expect(outcomes).toEqual([{ targetId: 'A', status: 'written' }]);
+  });
+
+  it('EXE-4 an upstream that only ever answers an empty item list is given up with poll_timeout', async () => {
+    const { reader, bulk, batch, writer } = setup();
+    reader.pages = [page(product('A', 'old'))];
+    bulk.statuses = [{ ok: true, items: [] }];
+    await expect(writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch })).rejects.toMatchObject({
+      code: 'poll_timeout',
+    });
+  });
+
+  it('EXE-5 in a non-empty answer a submitted index that is absent becomes no_outcome once no listed item is open', async () => {
+    const { reader, bulk, batch, writer } = setup();
+    const ids = ['A', 'B'];
+    reader.pages = [page(product('A', 'old'), product('B', 'old')), page(product('A', 'new'))];
+    bulk.statuses = [{ ok: true, items: [{ index: 0, state: 'open' }] }, DONE];
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(ids), items: ids.map(item), batch });
+    expect(bulk.statusCalls).toHaveLength(2);
+    expect(outcomes).toEqual([
+      { targetId: 'A', status: 'written' },
+      { targetId: 'B', status: 'failed', error: 'no_outcome' },
+    ]);
+  });
+
+  it('CS-7 only canonical JSON encoding errors count as drift: another error in the pre-write comparison propagates', async () => {
+    const { reader, bulk, batch, writer } = setup();
+    reader.pages = [page(withThrowingDescription('A'))];
+    await expect(writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch })).rejects.toThrow(
+      'programming error',
+    );
+    expect(bulk.submitted).toEqual([]);
+  });
+
+  it('CS-7 only canonical JSON encoding errors count as drift: another error in the verify comparison propagates', async () => {
+    const { reader, batch, writer } = setup();
+    reader.pages = [page(product('A', 'old')), page(withThrowingDescription('A'))];
+    await expect(writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch })).rejects.toThrow(
+      'programming error',
+    );
   });
 });
 

@@ -1,5 +1,5 @@
 import type { ManifestDefinition, OperationDefinition } from '../policy-model.js';
-import { canonicalJson } from './canonical.js';
+import { CanonicalJsonError, canonicalJson } from './canonical.js';
 import { inScope, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord } from './model.js';
 import type { BatchContext, ChangeWriter, ItemOutcome, PlanEntry, ReadPage, UpstreamReader } from './ports.js';
@@ -119,6 +119,13 @@ export class ManifestBatchWriter implements ChangeWriter {
 
   async writeBatch(input: WriteInput): Promise<readonly ItemOutcome[]> {
     const { changeset, items, batch } = input;
+    // Resume (EXE-4): a recorded submission is never resubmitted and nothing is read before polling.
+    if (batch.submission !== undefined) {
+      const { upstreamBatchId, plan } = batch.submission;
+      const writeCount = plan.filter((e) => e.action === 'write').length;
+      const polled = await this.poll(this.deps.bulkFor(changeset), upstreamBatchId, writeCount, batch);
+      return this.finish(changeset, plan, polled, items, this.deps.readerFor(changeset));
+    }
     const touched = touchedFields(this.manifest, changeset.args);
     // With nothing to compare every item would look already applied; fail them instead.
     if (touched.length === 0) {
@@ -189,25 +196,38 @@ export class ManifestBatchWriter implements ChangeWriter {
     throw new RetryableWriteError('submit_failed');
   }
 
-  /** Polls until no submitted index is open; answers the worst state per index in 0..writeCount-1. */
+  /**
+   * Polls until no submitted index is open; answers the worst state per index in 0..writeCount-1.
+   * One heartbeat per round; waits 1 s growing x1.5 up to 5 s; still open after 10 min throws
+   * `poll_timeout` (the retry resumes from the recorded submission). An empty item list counts as
+   * still open. A non-retriable status failure (the upstream no longer knows the batch) answers no
+   * states, so every submitted item ends `failed/no_outcome` and nothing is verified (EXE-5).
+   */
   private async poll(
     bulk: BulkWriter,
     batchId: string,
     writeCount: number,
     batch: BatchContext,
   ): Promise<Map<number, BulkItemState>> {
+    const clock = this.deps.clock;
+    const start = clock.now();
     for (let round = 0; ; round++) {
       batch.heartbeat();
-      await this.deps.clock.sleep(Math.min(POLL_MAX_MS, POLL_INITIAL_MS * POLL_FACTOR ** round));
+      await clock.sleep(Math.min(POLL_MAX_MS, POLL_INITIAL_MS * POLL_FACTOR ** round));
       const res = await bulk.status(batchId);
-      if (!res.ok) throw new RetryableWriteError('status_failed');
+      if (!res.ok) {
+        if (res.retriable) throw new RetryableWriteError('status_failed');
+        return new Map();
+      }
       const states = new Map<number, BulkItemState>();
       for (const { index, state } of res.items) {
         if (!Number.isInteger(index) || index < 0 || index >= writeCount) continue;
         const prev = states.get(index);
         if (prev === undefined || STATE_RANK[state] > STATE_RANK[prev]) states.set(index, state);
       }
-      if (![...states.values()].includes('open')) return states;
+      const open = res.items.length === 0 || [...states.values()].includes('open');
+      if (!open) return states;
+      if (clock.now() - start >= POLL_GIVE_UP_MS) throw new RetryableWriteError('poll_timeout');
     }
   }
 
@@ -274,7 +294,10 @@ export class ManifestBatchWriter implements ChangeWriter {
   }
 }
 
-/** A value canonical JSON cannot encode (NaN, Date, ...) is drift, never a thrown batch (CS-7). */
+/**
+ * A value canonical JSON cannot encode (NaN, Date, ...) is drift, never a thrown batch (CS-7).
+ * Only `CanonicalJsonError` is caught: any other error is a bug and propagates.
+ */
 function safeClassify(
   manifest: ManifestDefinition,
   args: Readonly<Record<string, unknown>>,
@@ -284,7 +307,7 @@ function safeClassify(
   try {
     return classifyForWrite({ manifest, args, item, current });
   } catch (err) {
-    if (err instanceof TypeError) return { action: 'outcome', status: 'skipped', error: 'drift' };
+    if (err instanceof CanonicalJsonError) return { action: 'outcome', status: 'skipped', error: 'drift' };
     throw err;
   }
 }
@@ -297,7 +320,7 @@ function safeEquals(
   try {
     return fields.every((f) => canonicalJson(current[f] ?? null) === canonicalJson(expected[f] ?? null));
   } catch (err) {
-    if (err instanceof TypeError) return false;
+    if (err instanceof CanonicalJsonError) return false;
     throw err;
   }
 }
