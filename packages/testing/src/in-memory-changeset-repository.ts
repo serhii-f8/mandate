@@ -179,7 +179,10 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
 
   recordItemOutcomes(changesetId: string, outcomes: readonly ItemOutcome[]): Promise<void> {
     const entry = this.entries.get(changesetId);
-    if (entry === undefined) return Promise.resolve();
+    // Item statuses are hashed content: they change only while executing or rolling back (CS-4).
+    if (entry === undefined || !OUTCOME_STATUSES.has(entry.record.status)) {
+      return Promise.reject(new Error('item outcomes rejected: change-set is not executing'));
+    }
     for (const o of outcomes) {
       const current = entry.items.get(o.targetId);
       if (current?.status !== 'pending') continue;
@@ -193,6 +196,8 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     return Promise.resolve();
   }
 }
+
+const OUTCOME_STATUSES: ReadonlySet<ChangeSetStatus> = new Set<ChangeSetStatus>(['executing', 'rolling_back']);
 
 function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetStats {
   const excluded: Partial<Record<ExclusionReason, number>> = {};

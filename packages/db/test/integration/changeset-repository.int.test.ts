@@ -115,6 +115,12 @@ async function preparedWithItems(): Promise<string> {
   return id;
 }
 
+async function executingWithItems(): Promise<string> {
+  const id = await preparedWithItems();
+  await new PostgresChangeSetRepository(database.db).transition(id, ['prepared'], 'executing', audit(id));
+  return id;
+}
+
 /** The statement must be refused by an immutability trigger (every trigger message says "rejected"). */
 async function sqlRejects(text: string, params: unknown[]): Promise<void> {
   await expect(database.pool.query(text, params)).rejects.toThrow(/rejected/);
@@ -151,8 +157,16 @@ describe('CS-4 change-sets are immutable after prepared', () => {
     await sqlRejects(`UPDATE change_item SET status = 'excluded' WHERE changeset_id = $1 AND target_id = 'p1'`, [id]);
   });
 
-  it('CS-4 execution columns of non-excluded items stay updatable', async () => {
+  it('CS-4 item status and error cannot change while the change-set is not executing', async () => {
     const id = await preparedWithItems();
+    await sqlRejects(`UPDATE change_item SET status = 'written' WHERE changeset_id = $1 AND target_id = 'p1'`, [id]);
+    await sqlRejects(`UPDATE change_item SET error = 'x' WHERE changeset_id = $1 AND target_id = 'p1'`, [id]);
+    await database.pool.query(`UPDATE change_set SET status = 'cancelled' WHERE id = $1`, [id]);
+    await sqlRejects(`UPDATE change_item SET status = 'written' WHERE changeset_id = $1 AND target_id = 'p1'`, [id]);
+  });
+
+  it('CS-4 execution columns of non-excluded items stay updatable while executing', async () => {
+    const id = await executingWithItems();
     const res = await database.pool.query(
       `UPDATE change_item SET status = 'written', error = NULL WHERE changeset_id = $1 AND target_id = 'p1'`,
       [id],
@@ -280,7 +294,7 @@ describe('SEC-3 database errors never quote statement parameters', () => {
   });
 
   it('SEC-3 recordItemOutcomes refused by the database throws a fixed message with the SQLSTATE only', async () => {
-    const id = await preparedWithItems();
+    const id = await executingWithItems();
     const repo = new PostgresChangeSetRepository(database.db);
     // Not a valid outcome status: forces the trigger refusal (no item becomes excluded).
     const outcome = { targetId: 'p1', status: 'excluded', error: 'secret-upstream-text-77' } as unknown as ItemOutcome;

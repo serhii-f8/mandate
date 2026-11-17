@@ -22,6 +22,8 @@ $$;
 --> statement-breakpoint
 CREATE FUNCTION change_item_guard_update() RETURNS trigger
 LANGUAGE plpgsql AS $$
+DECLARE
+  parent_status text;
 BEGIN
   IF NEW.changeset_id IS DISTINCT FROM OLD.changeset_id
      OR NEW.target_id IS DISTINCT FROM OLD.target_id
@@ -34,6 +36,14 @@ BEGIN
   IF (OLD.status = 'excluded') <> (NEW.status = 'excluded') THEN
     RAISE EXCEPTION 'change_item update rejected: exclusion is immutable'
       USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  -- Item statuses are hashed content: execution columns change only while executing or rolling back.
+  IF NEW.status IS DISTINCT FROM OLD.status OR NEW.error IS DISTINCT FROM OLD.error THEN
+    SELECT status INTO parent_status FROM change_set WHERE id = NEW.changeset_id FOR SHARE;
+    IF parent_status IS NULL OR parent_status NOT IN ('executing', 'rolling_back') THEN
+      RAISE EXCEPTION 'change_item update rejected: change-set is not executing'
+        USING ERRCODE = 'integrity_constraint_violation';
+    END IF;
   END IF;
   RETURN NEW;
 END;

@@ -369,10 +369,46 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         expect(await c.events()).toHaveLength(before);
       }));
 
-    it('recordItemOutcomes updates only pending items and recomputes written/failed/skipped', async () =>
+    /** Created with the given items, prepared and moved to executing: the only time outcomes are recorded. */
+    async function executing(c: Ctx, items: readonly ChangeItemRecord[]): Promise<void> {
+      await created(c);
+      await c.repository.appendItems(c.id, items);
+      await c.repository.completePreparation(
+        c.id,
+        { status: 'prepared', hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
+        auditEvent(c.id),
+      );
+      await c.repository.transition(c.id, ['prepared'], 'executing', auditEvent(c.id));
+    }
+
+    it('CS-4 recordItemOutcomes is refused unless the change-set is executing or rolling back', async () =>
       withRepo(async (c) => {
         await created(c);
-        await c.repository.appendItems(c.id, [
+        await c.repository.appendItems(c.id, [item('a')]);
+        await expect(c.repository.recordItemOutcomes(c.id, [{ targetId: 'a', status: 'written' }])).rejects.toThrow();
+        await c.repository.completePreparation(
+          c.id,
+          { status: 'prepared', hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
+          auditEvent(c.id),
+        );
+        for (const status of ['prepared', 'pending_approval', 'approved'] as const) {
+          if (status !== 'prepared') await c.repository.transition(c.id, ['prepared', 'pending_approval'], status, auditEvent(c.id));
+          await expect(c.repository.recordItemOutcomes(c.id, [{ targetId: 'a', status: 'written' }])).rejects.toThrow();
+        }
+        await expect(
+          c.repository.recordItemOutcomes(randomUUID(), [{ targetId: 'a', status: 'written' }]),
+        ).rejects.toThrow();
+        expect((await c.repository.itemsPage(c.id, { limit: 10 }))[0]?.status).toBe('pending');
+        expect((await c.repository.get(c.id))?.stats.written).toBe(0);
+        await c.repository.transition(c.id, ['approved'], 'executing', auditEvent(c.id));
+        await c.repository.transition(c.id, ['executing'], 'rolling_back', auditEvent(c.id));
+        await c.repository.recordItemOutcomes(c.id, [{ targetId: 'a', status: 'written' }]);
+        expect((await c.repository.itemsPage(c.id, { limit: 10 }))[0]?.status).toBe('written');
+      }));
+
+    it('recordItemOutcomes updates only pending items and recomputes written/failed/skipped', async () =>
+      withRepo(async (c) => {
+        await executing(c, [
           item('a'),
           item('b'),
           item('c'),

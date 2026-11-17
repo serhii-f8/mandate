@@ -19,6 +19,7 @@ import type { Db, DbExecutor } from './client.js';
 import { changeItem, changeSet } from './schema.js';
 
 const MAX_PAGE = 500;
+const OUTCOMES_REFUSED = 'item outcomes rejected: change-set is not executing';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface PostgresChangeSetRepositoryOptions {
@@ -248,7 +249,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
   }
 
   async recordItemOutcomes(changesetId: string, outcomes: readonly ItemOutcome[]): Promise<void> {
-    if (!UUID.test(changesetId)) return;
+    if (!UUID.test(changesetId)) throw new Error(OUTCOMES_REFUSED);
     // The first outcome per target wins, as later ones would find the item no longer pending.
     const seen = new Set<string>();
     const rows: Record<string, unknown>[] = [];
@@ -261,11 +262,14 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
       this.db.transaction(async (tx) => {
         // Serializes outcome batches per change-set so the recomputed stats see every batch.
         const [parent] = await tx
-          .select({ id: changeSet.id })
+          .select({ status: changeSet.status })
           .from(changeSet)
           .where(eq(changeSet.id, changesetId))
           .for('update');
-        if (parent === undefined) return;
+        // Item statuses are hashed content: they change only while executing or rolling back (CS-4).
+        if (parent === undefined || (parent.status !== 'executing' && parent.status !== 'rolling_back')) {
+          throw new Error(OUTCOMES_REFUSED);
+        }
         if (rows.length > 0) {
           await tx.execute(sql`
             UPDATE change_item AS ci
