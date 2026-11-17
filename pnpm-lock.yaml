@@ -251,6 +251,21 @@ importers:
         specifier: 0.31.11
         version: 0.31.11
 
+  packages/temporal:
+    dependencies:
+      '@aiops/core':
+        specifier: workspace:*
+        version: link:../core
+      '@temporalio/client':
+        specifier: 1.25.0
+        version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/common':
+        specifier: 1.25.0
+        version: 1.25.0(long@5.3.2)(protobufjs@8.8.1)
+      '@temporalio/proto':
+        specifier: 1.25.0
+        version: 1.25.0
+
   packages/testing:
     dependencies:
       '@aiops/connector-sdk':

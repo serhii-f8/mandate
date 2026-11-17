@@ -28,6 +28,7 @@ export { MAX_AUDITED_TOOL_NAME, policyDecisionAuditEvent, type PolicyDecisionRec
 export type { InvocationRequest, InvocationResult, OperationInvoker } from './operation-invoker.js';
 export { readErrorResult, readToolResult, READ_RESULT_TEXT, type ReadToolResultInput } from './read-result.js';
 export type { CredentialHandle, CredentialStatus, CredentialVault } from './credential-vault.js';
+export { parseVersionedKeys, type VersionedKeys } from './keys.js';
 export { canonicalJson, compareTargetIds, normalizeArgs } from './changeset/canonical.js';
 export { ChangeSetHasher, type HashableItem } from './changeset/hash.js';
 export type {
