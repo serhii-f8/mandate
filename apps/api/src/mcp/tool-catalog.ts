@@ -20,6 +20,8 @@ export interface BuiltinTool {
   readonly description: string;
   /** JSON Schema published in `tools/list`. */
   readonly inputSchema: Readonly<Record<string, unknown>>;
+  /** Announced in `tools/list`; a built-in that changes state declares false. Default true. */
+  readonly readOnlyHint?: boolean;
   validate(args: unknown): ArgumentCheck;
   /** Receives arguments that passed `validate`. */
   handler(args: Readonly<Record<string, unknown>>, ctx: BuiltinContext): Promise<CallToolResult>;

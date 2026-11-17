@@ -122,6 +122,16 @@ describe('MCP-8 built-in change-set tools', () => {
     }
   });
 
+  it('MCP-8 cancel_changeset is announced as not read-only; the reading built-ins stay read-only', async () => {
+    const client = await connectClient({ era: 'modern', baseUrls: [api.url], token: bob });
+    try {
+      const hints = Object.fromEntries((await client.listTools()).tools.map((t) => [t.name, t.annotations?.readOnlyHint]));
+      expect(hints).toMatchObject({ ping: true, list_my_operations: true, get_changeset: true, cancel_changeset: false });
+    } finally {
+      await client.close();
+    }
+  });
+
   it('MCP-8 get_changeset gives the header and pages with a cursor, and filters by status', async () => {
     const id = await prepare();
     const first = await call(alice, 'get_changeset', { changeset_id: id, page_size: 3 });

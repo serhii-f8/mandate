@@ -120,6 +120,8 @@ function cancelChangeset(deps: ChangesetToolDeps): BuiltinTool {
     name: 'cancel_changeset',
     description: 'Cancel a change-set you prepared, before it is executed.',
     inputSchema: CANCEL_SCHEMA,
+    // It changes a change-set's status, so clients must not treat it as a pure read.
+    readOnlyHint: false,
     validate: compile(CANCEL_SCHEMA),
     async handler(args, { caller, correlationId }) {
       // `validate` guarantees the shape.

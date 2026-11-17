@@ -73,7 +73,7 @@ function operationTool(op: OperationDefinition): Tool {
 }
 
 function builtinTool(tool: BuiltinTool): Tool {
-  return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema as Tool['inputSchema'], annotations: { readOnlyHint: true } };
+  return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema as Tool['inputSchema'], annotations: { readOnlyHint: tool.readOnlyHint ?? true } };
 }
 
 export async function listTools(deps: PipelineDeps, req: PipelineRequest): Promise<Tool[]> {
