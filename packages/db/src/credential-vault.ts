@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
-import type { AuditEventInput, AuditLog, CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
+import type { AuditEventInput, CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
+import { DrizzleAuditLog } from './audit-log.js';
 import type { Db } from './client.js';
 import { openSealed, rewrap, seal, type SealedCredential } from './envelope.js';
 import type { KeyProvider } from './keyring.js';
@@ -39,7 +40,7 @@ export class PostgresCredentialVault implements CredentialVault {
     scheme: string;
     secret: Readonly<Record<string, string>>;
     actor: string;
-    audit?: { log: AuditLog; event: (keyVersion: number) => AuditEventInput };
+    audit?: { event: (keyVersion: number) => AuditEventInput };
   }): Promise<{ keyVersion: number }> {
     const plaintext = Buffer.from(JSON.stringify(input.secret), 'utf8');
     let record: SealedCredential;
@@ -55,8 +56,10 @@ export class PostgresCredentialVault implements CredentialVault {
         .insert(credential)
         .values({ ref: input.ref, ...values })
         .onConflictDoUpdate({ target: credential.ref, set: values });
-      // Throws to roll the write back when the audit cannot be written (AUD-1), like `rotate`.
-      if (audit !== undefined) await audit.log.append(audit.event(record.keyVersion));
+      // On the same transaction (not the pool): the write and its audit row commit together
+      // or not at all, and the append never waits for a second pooled connection (AUD-1).
+      // Throws to roll the write back when the audit cannot be written, like `rotate`.
+      if (audit !== undefined) await new DrizzleAuditLog(tx).append(audit.event(record.keyVersion));
     });
     return { keyVersion: record.keyVersion };
   }
@@ -114,14 +117,13 @@ export class PostgresCredentialVault implements CredentialVault {
   /**
    * Re-wraps every data key that is not under the current master key version (the
    * ciphertext is untouched), one row per transaction, idempotent. Each re-wrapped row is
-   * audited as `credential.rotate` inside its transaction: if the append fails the row
+   * audited as `credential.rotate` on its own transaction: if the append fails the row
    * rolls back, stays on its old version and a re-run retries it. Rows whose key version
    * is not configured or that do not authenticate are left alone and listed by ref in
    * `failed`. `onOldVersions` counts every row still not on the current version.
    */
   async rotate(
     actor: string,
-    audit: AuditLog,
     correlationId: string,
   ): Promise<{ rewrapped: number; onOldVersions: number; failed: readonly string[] }> {
     const toVersion = this.keys.current().version;
@@ -154,8 +156,9 @@ export class PostgresCredentialVault implements CredentialVault {
             .update(credential)
             .set({ wrappedKey: next.wrappedKey, keyNonce: next.keyNonce, keyVersion: next.keyVersion })
             .where(eq(credential.ref, ref));
-          // Throws to roll the row back when the audit cannot be written (AUD-1).
-          await audit.append({
+          // On the same transaction: throws to roll the row back when the audit cannot be
+          // written, and a failure at commit drops both (AUD-1).
+          await new DrizzleAuditLog(tx).append({
             id: randomUUID(),
             actor,
             action: 'credential.rotate',

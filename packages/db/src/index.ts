@@ -4,6 +4,6 @@ export { PostgresCredentialVault } from './credential-vault.js';
 export { PostgresSessionStore, type LoginRow, type SessionRow } from './web-sessions.js';
 export type { SealedCredential } from './envelope.js';
 export { parseMasterKeys, type KeyProvider } from './keyring.js';
-export { createDb, type Database, type Db } from './client.js';
+export { createDb, type Database, type Db, type DbExecutor } from './client.js';
 export { MIGRATION_LOCK_KEY, runMigrations } from './migrate.js';
 export { auditEvent, credential, webLogin, webSession } from './schema.js';

@@ -1,6 +1,6 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { InMemoryAuditLog, startPostgres, type StartedPostgres } from '@aiops/testing';
+import { startPostgres, type StartedPostgres } from '@aiops/testing';
 import { createDb, type Database } from '../../src/client.js';
 import { PostgresCredentialVault } from '../../src/credential-vault.js';
 import { parseMasterKeys } from '../../src/keyring.js';
@@ -18,7 +18,44 @@ beforeAll(async () => {
   const url = await postgres.createDatabase();
   await runMigrations(url);
   database = createDb(url, { onError: () => undefined });
+  // Test-only: a deferred constraint trigger that fails the commit of any transaction that
+  // wrote the ref `fail_at_commit`, i.e. a failure after every statement (the audit insert
+  // included) has run inside the transaction.
+  await database.pool.query(`
+    CREATE FUNCTION test_fail_at_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN RAISE EXCEPTION 'test failure at commit'; END; $$;
+    CREATE CONSTRAINT TRIGGER test_fail_at_commit AFTER INSERT OR UPDATE ON credential
+      DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.ref = 'fail_at_commit')
+      EXECUTE FUNCTION test_fail_at_commit();
+    CREATE FUNCTION test_fail_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN RAISE EXCEPTION 'audit unavailable'; END; $$;
+    CREATE TRIGGER test_fail_audit BEFORE INSERT ON audit_event
+      FOR EACH ROW WHEN (NEW.correlation_id LIKE 'fail-audit%')
+      EXECUTE FUNCTION test_fail_audit();
+  `);
 });
+
+async function auditCount(where: string, params: unknown[]): Promise<number> {
+  const result = await database.pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM audit_event WHERE ${where}`, params);
+  return result.rows[0]?.n ?? -1;
+}
+
+interface AuditRow {
+  actor: string;
+  action: string;
+  subject: string | null;
+  outcome: string;
+  correlation_id: string;
+  details: Record<string, unknown>;
+}
+
+async function auditRowsOf(correlationId: string): Promise<AuditRow[]> {
+  const result = await database.pool.query<AuditRow>(
+    'SELECT actor, action, subject, outcome, correlation_id, details FROM audit_event WHERE correlation_id = $1 ORDER BY seq',
+    [correlationId],
+  );
+  return result.rows;
+}
 
 afterAll(async () => {
   await database.close();
@@ -103,34 +140,36 @@ describe('SEC-2 credential vault in PostgreSQL', () => {
 
     const both = new PostgresCredentialVault(database.db, parseMasterKeys(`2:${KEY_2},1:${KEY_1}`));
     await both.put({ ref: 'c', scheme: 'bearer', secret: { token: 'dev-only-c' }, actor: 'alice' });
-    const audit = new InMemoryAuditLog();
+    const first = randomUUID();
 
-    await expect(both.rotate('cli', audit, 'corr-rotate-1')).resolves.toEqual({
+    await expect(both.rotate('cli', first)).resolves.toEqual({
       rewrapped: 2,
       onOldVersions: 0,
       failed: [],
     });
-    expect(audit.events).toHaveLength(2);
-    const subjects = audit.events.map((event) => event.subject).sort();
+    const events = await auditRowsOf(first);
+    expect(events).toHaveLength(2);
+    const subjects = events.map((event) => event.subject).sort();
     expect(subjects).toEqual(['a', 'b']);
-    for (const event of audit.events) {
+    for (const event of events) {
       expect(event).toMatchObject({
         actor: 'cli',
         action: 'credential.rotate',
         outcome: 'ok',
-        correlationId: 'corr-rotate-1',
+        correlation_id: first,
         details: { fromVersion: 1, toVersion: 2 },
       });
       const serialized = JSON.stringify(event);
       for (const material of [KEY_1, KEY_2, 'dev-only-a', 'dev-only-b']) expect(serialized).not.toContain(material);
     }
 
-    await expect(both.rotate('cli', audit, 'corr-rotate-2')).resolves.toEqual({
+    const second = randomUUID();
+    await expect(both.rotate('cli', second)).resolves.toEqual({
       rewrapped: 0,
       onOldVersions: 0,
       failed: [],
     });
-    expect(audit.events).toHaveLength(2);
+    expect(await auditRowsOf(second)).toHaveLength(0);
 
     const v2 = new PostgresCredentialVault(database.db, parseMasterKeys(`2:${KEY_2}`));
     await expect((await v2.handle('a'))?.open()).resolves.toEqual({ token: 'dev-only-a' });
@@ -142,13 +181,13 @@ describe('SEC-2 credential vault in PostgreSQL', () => {
     const v1 = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
     await v1.put({ ref: 'a', scheme: 'bearer', secret: { token: 'dev-only-a' }, actor: 'alice' });
     const v2 = new PostgresCredentialVault(database.db, parseMasterKeys(`2:${KEY_2}`));
-    const audit = new InMemoryAuditLog();
-    await expect(v2.rotate('cli', audit, 'corr')).resolves.toEqual({
+    const correlationId = randomUUID();
+    await expect(v2.rotate('cli', correlationId)).resolves.toEqual({
       rewrapped: 0,
       onOldVersions: 1,
       failed: ['a'],
     });
-    expect(audit.events).toHaveLength(0);
+    expect(await auditRowsOf(correlationId)).toHaveLength(0);
   });
 
   it('rotate reports rows that fail authentication as failed, by ref only', async () => {
@@ -159,73 +198,68 @@ describe('SEC-2 credential vault in PostgreSQL', () => {
       `UPDATE credential SET wrapped_key = set_byte(wrapped_key, 0, get_byte(wrapped_key, 0) # 255) WHERE ref = 'broken'`,
     );
     const both = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1},2:${KEY_2}`));
-    const audit = new InMemoryAuditLog();
-    const result = await both.rotate('cli', audit, 'corr');
+    const correlationId = randomUUID();
+    const result = await both.rotate('cli', correlationId);
     expect(result).toEqual({ rewrapped: 1, onOldVersions: 1, failed: ['broken'] });
     expect(JSON.stringify(result)).not.toContain('dev-only');
-    expect(audit.events.map((event) => event.subject)).toEqual(['good']);
+    expect((await auditRowsOf(correlationId)).map((event) => event.subject)).toEqual(['good']);
   });
 
   it('SEC-2 AUD-1 put with an audit appends the event with the stored key version', async () => {
     const vault = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
-    const audit = new InMemoryAuditLog();
+    const correlationId = randomUUID();
     const result = await vault.put({
       ref: 'r',
       scheme: 'bearer',
       secret: { token: SECRET_VALUE },
       actor: 'carol',
       audit: {
-        log: audit,
-        event: (keyVersion) => ({ id: 'e1', actor: 'carol', action: 'credential.set', outcome: 'ok', correlationId: 'c', details: { ref: 'r', keyVersion } }),
+        event: (keyVersion) => ({ id: randomUUID(), actor: 'carol', action: 'credential.set', outcome: 'ok', correlationId, details: { ref: 'r', keyVersion } }),
       },
     });
     expect(result).toEqual({ keyVersion: 1 });
-    expect(audit.events).toEqual([expect.objectContaining({ action: 'credential.set', details: { ref: 'r', keyVersion: 1 } })]);
+    expect(await auditRowsOf(correlationId)).toEqual([expect.objectContaining({ action: 'credential.set', details: { ref: 'r', keyVersion: 1 } })]);
   });
 
   it('SEC-2 AUD-1 put rolls back when its audit append fails: a new ref is not stored, an old value is kept', async () => {
     const vault = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
-    const audit = new InMemoryAuditLog();
-    const event = (keyVersion: number) => ({ id: 'e', actor: 'carol', action: 'credential.set' as const, outcome: 'ok' as const, correlationId: 'c', details: { keyVersion } });
+    // The test trigger refuses audit inserts with this correlation id.
+    const correlationId = `fail-audit-${randomUUID()}`;
+    const event = (keyVersion: number) => ({ id: randomUUID(), actor: 'carol', action: 'credential.set' as const, outcome: 'ok' as const, correlationId, details: { keyVersion } });
 
-    audit.failNext = new Error('audit unavailable');
-    await expect(vault.put({ ref: 'new', scheme: 'bearer', secret: { token: 'dev-only-new' }, actor: 'carol', audit: { log: audit, event } })).rejects.toThrow(
-      'audit unavailable',
-    );
+    await expect(vault.put({ ref: 'new', scheme: 'bearer', secret: { token: 'dev-only-new' }, actor: 'carol', audit: { event } })).rejects.toThrow();
     await expect(vault.handle('new')).resolves.toBeUndefined();
 
     await vault.put({ ref: 'old', scheme: 'bearer', secret: { token: 'dev-only-old' }, actor: 'alice' });
-    audit.failNext = new Error('audit unavailable');
-    await expect(vault.put({ ref: 'old', scheme: 'bearer', secret: { token: 'dev-only-replaced' }, actor: 'carol', audit: { log: audit, event } })).rejects.toThrow(
-      'audit unavailable',
-    );
+    await expect(vault.put({ ref: 'old', scheme: 'bearer', secret: { token: 'dev-only-replaced' }, actor: 'carol', audit: { event } })).rejects.toThrow();
     await expect((await vault.handle('old'))?.open()).resolves.toEqual({ token: 'dev-only-old' });
     expect((await vault.describe(['old']))[0]?.updatedBy).toBe('alice');
-    expect(audit.events).toEqual([]);
+    expect(await auditRowsOf(correlationId)).toEqual([]);
   });
 
   it('rotate rolls a row back when its audit append fails, and a re-run retries it', async () => {
     const v1 = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
     await v1.put({ ref: 'a', scheme: 'bearer', secret: { token: 'dev-only-a' }, actor: 'alice' });
     const both = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1},2:${KEY_2}`));
-    const audit = new InMemoryAuditLog();
-    audit.failNext = new Error('audit unavailable');
+    // The test trigger refuses audit inserts with this correlation id.
+    const failing = `fail-audit-${randomUUID()}`;
 
-    await expect(both.rotate('cli', audit, 'corr-1')).resolves.toEqual({
+    await expect(both.rotate('cli', failing)).resolves.toEqual({
       rewrapped: 0,
       onOldVersions: 1,
       failed: [],
     });
     const [status] = await both.describe(['a']);
     expect(status?.keyVersion).toBe(1);
-    expect(audit.events).toHaveLength(0);
+    expect(await auditRowsOf(failing)).toHaveLength(0);
 
-    await expect(both.rotate('cli', audit, 'corr-2')).resolves.toEqual({
+    const retry = randomUUID();
+    await expect(both.rotate('cli', retry)).resolves.toEqual({
       rewrapped: 1,
       onOldVersions: 0,
       failed: [],
     });
-    expect(audit.events).toHaveLength(1);
+    expect(await auditRowsOf(retry)).toHaveLength(1);
     await expect((await both.handle('a'))?.open()).resolves.toEqual({ token: 'dev-only-a' });
   });
 
@@ -241,5 +275,53 @@ describe('SEC-2 credential vault in PostgreSQL', () => {
     expect(status?.updatedAt).toBeInstanceOf(Date);
     expect(JSON.stringify(statuses)).not.toContain(SECRET_VALUE);
     await expect(vault.describe([])).resolves.toEqual([]);
+  });
+
+  it('SEC-2 AUD-1 put: a failure after the audit insert, at commit, leaves neither the credential nor the audit row', async () => {
+    const vault = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
+    const id = randomUUID();
+    await expect(
+      vault.put({
+        ref: 'fail_at_commit',
+        scheme: 'bearer',
+        secret: { token: 'dev-only-x' },
+        actor: 'carol',
+        audit: { event: (keyVersion) => ({ id, actor: 'carol', action: 'credential.set', outcome: 'ok', correlationId: 'c', details: { keyVersion } }) },
+      }),
+    ).rejects.toThrow();
+    await expect(vault.handle('fail_at_commit')).resolves.toBeUndefined();
+    expect(await auditCount('id = $1', [id])).toBe(0);
+  });
+
+  it('SEC-2 AUD-1 put: 15 concurrent audited puts against a pool of 10 all succeed and are all audited', async () => {
+    const vault = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
+    const correlationId = randomUUID();
+    const refs = Array.from({ length: 15 }, (_, i) => `concurrent_${String(i)}`);
+    const results = await Promise.allSettled(
+      refs.map((ref) =>
+        vault.put({
+          ref,
+          scheme: 'bearer',
+          secret: { token: 'dev-only-c' },
+          actor: 'carol',
+          audit: { event: (keyVersion) => ({ id: randomUUID(), actor: 'carol', action: 'credential.set', subject: ref, outcome: 'ok', correlationId, details: { keyVersion } }) },
+        }),
+      ),
+    );
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(0);
+    expect(await auditCount('correlation_id = $1', [correlationId])).toBe(15);
+    expect((await vault.describe(refs)).every((status) => status.set)).toBe(true);
+  }, 30_000);
+
+  it('SEC-2 AUD-1 rotate: a failure after the audit insert, at commit, leaves the row on its old version and no audit row', async () => {
+    const v1 = new PostgresCredentialVault(database.db, parseMasterKeys(`1:${KEY_1}`));
+    await database.pool.query('ALTER TABLE credential DISABLE TRIGGER test_fail_at_commit');
+    await v1.put({ ref: 'fail_at_commit', scheme: 'bearer', secret: { token: 'dev-only-r' }, actor: 'alice' });
+    await database.pool.query('ALTER TABLE credential ENABLE TRIGGER test_fail_at_commit');
+    const both = new PostgresCredentialVault(database.db, parseMasterKeys(`2:${KEY_2},1:${KEY_1}`));
+    const correlationId = randomUUID();
+    await expect(both.rotate('cli', correlationId)).resolves.toEqual({ rewrapped: 0, onOldVersions: 1, failed: [] });
+    expect((await both.describe(['fail_at_commit']))[0]?.keyVersion).toBe(1);
+    expect(await auditCount('correlation_id = $1', [correlationId])).toBe(0);
   });
 });

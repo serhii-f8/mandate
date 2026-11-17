@@ -68,14 +68,14 @@ export class CredentialsController {
     }
     const { session } = request.page;
     const correlationId = request.correlationId;
-    // Stored and audited in one transaction: a secret whose change cannot be audited is not stored (AUD-1).
+    // The vault stores the secret and appends this audit event in one database transaction:
+    // a secret whose change cannot be audited is not stored (AUD-1).
     await this.vault.put({
       ref,
       scheme: declared.scheme,
       secret: parsed.secret,
       actor: session.subject,
       audit: {
-        log: this.audit,
         event: (keyVersion) => ({
           id: randomUUID(),
           actor: session.subject,

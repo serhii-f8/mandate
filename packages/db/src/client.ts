@@ -4,6 +4,9 @@ import * as schema from './schema.js';
 
 export type Db = NodePgDatabase<typeof schema>;
 
+/** A transaction of `Db`: statements on it run inside that transaction. */
+export type DbExecutor = Parameters<Parameters<Db['transaction']>[0]>[0];
+
 export interface Database {
   readonly db: Db;
   readonly pool: pg.Pool;

@@ -146,7 +146,7 @@ async function openStoreDefault(input: { databaseUrl: string; masterKeys: string
   return {
     vault,
     audit,
-    rotate: (actor, correlationId) => vault.rotate(actor, audit, correlationId),
+    rotate: (actor, correlationId) => vault.rotate(actor, correlationId),
     close: () => database.close(),
   };
 }

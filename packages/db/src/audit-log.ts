@@ -1,10 +1,13 @@
 import type { AuditEventInput, AuditLog } from '@aiops/core';
-import type { Db } from './client.js';
+import type { Db, DbExecutor } from './client.js';
 import { auditEvent } from './schema.js';
 
-/** PostgreSQL implementation of the core `AuditLog` port. Insert only (AUD-3). */
+/**
+ * PostgreSQL implementation of the core `AuditLog` port. Insert only (AUD-3). Built on a
+ * transaction, its appends are part of that transaction.
+ */
 export class DrizzleAuditLog implements AuditLog {
-  constructor(private readonly db: Db) {}
+  constructor(private readonly db: Db | DbExecutor) {}
 
   async append(event: AuditEventInput): Promise<void> {
     await this.db.insert(auditEvent).values({
