@@ -503,5 +503,52 @@ export function describeExecutorContract(label: string, setup: () => Promise<Exe
         ]);
       });
     });
+
+    it('EXE-5 EXE-6 a run whose last batch fails every item finishes done: failed without an error code', async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(h.batchSize);
+        for (let i = 1; i <= h.batchSize; i++) h.writer.setOutcome(`t-${String(i).padStart(4, '0')}`, 'failed');
+        await start(h, cs.id);
+        await h.executor.settled(cs.id);
+        const record = await h.repository.get(cs.id);
+        expect(record?.status).toBe('failed');
+        expect(record?.errorCode).toBeUndefined();
+      });
+    });
+
+    it('EXE-7 a cancel stored while the final batch is in flight ends completed', async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(h.batchSize);
+        const pause = h.writer.pauseAt(0);
+        await start(h, cs.id);
+        await pause.reached;
+        expect(await h.executor.cancel({ changesetId: cs.id, actor: 'bob', correlationId: 'corr-bob' })).toEqual({
+          ok: true,
+          status: 'executing',
+        });
+        pause.release();
+        await h.executor.settled(cs.id);
+        const record = await h.repository.get(cs.id);
+        expect(record?.status).toBe('completed');
+        expect(record?.stats.written).toBe(h.batchSize);
+      });
+    });
+
+    it('EXE-7 EXE-5 a stored cancel wins over an exceeded failure threshold while work remains', async () => {
+      await withExec(async (h) => {
+        const cs = await h.prepared(h.batchSize * 3);
+        for (let i = 1; i <= h.batchSize; i++) h.writer.setOutcome(`t-${String(i).padStart(4, '0')}`, 'failed');
+        const pause = h.writer.pauseAt(0);
+        await start(h, cs.id);
+        await pause.reached;
+        await h.executor.cancel({ changesetId: cs.id, actor: 'bob', correlationId: 'corr-bob' });
+        pause.release();
+        await h.executor.settled(cs.id);
+        const record = await h.repository.get(cs.id);
+        expect(record?.status).toBe('cancelled');
+        expect(record?.errorCode).toBeUndefined();
+        expect(h.writer.batches).toHaveLength(1);
+      });
+    });
   });
 }

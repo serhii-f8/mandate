@@ -107,11 +107,14 @@ export class InMemoryExecutor implements ChangeSetExecutor {
     }
   }
 
-  /** Runs batches until none is left, a cancel is stored or the failure threshold is exceeded. */
+  /** Runs batches until no item is pending; with work remaining, a stored cancel or the failure threshold stops it. */
   private async runBatches(changesetId: string, size: number, correlationId: string): Promise<FinishOutcome> {
     for (let batchNo = 0; ; batchNo++) {
       const current = await this.repository.get(changesetId);
       if (current === undefined) throw new Error('change-set vanished');
+      // Nothing left finishes done; only then may a stored cancel (first) or the threshold stop the run.
+      const { included, written, failed, skipped } = current.stats;
+      if (included - written - failed - skipped <= 0) return 'done';
       if (current.cancelRequest !== undefined) return 'cancelled';
       if (failureThresholdExceeded(current.stats, this.failureThreshold)) return 'failure_threshold';
       const claim = await this.repository.claimBatch(changesetId, batchNo, ATTEMPT, size);
@@ -131,7 +134,9 @@ export class InMemoryExecutor implements ChangeSetExecutor {
       let outcomes: readonly ItemOutcome[];
       try {
         outcomes = await this.writer.writeBatch({ changeset: current, items: claim.items, batch });
-      } catch {
+      } catch (error) {
+        // A superseded attempt is not a writer failure: the run ends failed/executor_error.
+        if (error instanceof BatchFenced) throw error;
         return 'writer_error';
       }
       const covered = coverBatch(claim.items, outcomes);

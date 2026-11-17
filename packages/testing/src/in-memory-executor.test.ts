@@ -146,6 +146,24 @@ describe('EXE-11 in-memory executor', () => {
     expect(h.audit.events.filter((e) => e.changesetId === cs.id && e.details.to === 'cancelled')).toHaveLength(0);
   });
 
+  it('NFR-2 a fenced submission ends the run failed/executor_error, not writer_error', async () => {
+    const h = build({
+      wrap: (r) =>
+        new Proxy(r, {
+          get(target, prop, receiver) {
+            if (prop === 'recordSubmission') return () => Promise.resolve(false);
+            return Reflect.get(target, prop, receiver) as unknown;
+          },
+        }),
+    });
+    const cs = await h.prepared(2);
+    await h.executor.start({ changesetId: cs.id, ...START });
+    await h.executor.settled(cs.id);
+    const record = await h.repository.get(cs.id);
+    expect(record?.status).toBe('failed');
+    expect(record?.errorCode).toBe('executor_error');
+  });
+
   it.each([0, 1.5, Number.NaN])('EXE-11 batch size %s fails the run with executor_error', async (size) => {
     const h = build({ batchSize: size });
     const cs = await h.prepared(2);
