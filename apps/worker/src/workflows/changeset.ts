@@ -37,6 +37,13 @@ import {
 /** Statuses in which the workflow waits for a wake (a start or a cancel) until the change-set expires. */
 const WAITING: readonly ChangeSetStatus[] = ['prepared', 'pending_approval', 'approved'];
 
+/** Outer-loop turns (inspect and act) per run before continuing as new; keeps a run's history small. */
+const MAX_TURNS_PER_RUN = 50;
+/** Pause before inspecting a change-set again whose preparation failed on infrastructure. */
+const PREPARE_RETRY_PAUSE_MS = 60_000;
+/** Pause before calling `expire` again after one that changed nothing. */
+const EXPIRE_RETRY_PAUSE_MS = 5_000;
+
 const wakeSignal = defineSignal(WAKE_SIGNAL);
 const progressQuery = defineQuery<WorkflowProgress>(PROGRESS_QUERY);
 
@@ -70,7 +77,16 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
   });
   setHandler(progressQuery, () => progress);
 
+  // Whether the previous turn called `expire` (reset by any turn that does not).
+  let expireTried = false;
+  let turns = 0;
   for (;;) {
+    // Bounded history outside execution: a fresh run re-reads everything from PostgreSQL, so it
+    // carries the change-set ID only (execution continues as new with its resume state below).
+    if (turns >= MAX_TURNS_PER_RUN || workflowInfo().continueAsNewSuggested) {
+      await continueAsNew<typeof changesetWorkflow>({ changesetId: id });
+    }
+    turns += 1;
     // Reset before inspect: a wake that arrives while inspect runs is not lost.
     woken = false;
     const s = await db.inspect(id);
@@ -85,20 +101,27 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
       },
     });
 
-    if (s.status === 'preparing') {
-      try {
-        await slow.prepare(id);
-      } catch (e) {
-        if (!(e instanceof ActivityFailure)) throw e;
-        // The change-set stays `preparing`; inspect again after a pause.
-        await sleep('1 minute');
-      }
-      continue;
-    }
-
-    if (WAITING.includes(s.status)) {
+    if (s.status === 'preparing' || WAITING.includes(s.status)) {
       const left = s.expiresAtMs - Date.now(); // workflow time
-      if (left <= 0 || !(await condition(() => woken, left))) await db.expire(id);
+      if (left > 0) {
+        expireTried = false;
+        if (s.status === 'preparing') {
+          try {
+            await slow.prepare(id);
+          } catch (e) {
+            if (!(e instanceof ActivityFailure)) throw e;
+            // Still `preparing` (an infrastructure failure): inspect again after a pause, never past expiry.
+            await sleep(Math.min(PREPARE_RETRY_PAUSE_MS, left));
+          }
+          continue;
+        }
+        if (await condition(() => woken, left)) continue;
+      }
+      // Due by workflow time. An earlier expire that changed nothing (the worker's clock is behind
+      // workflow time) is retried after a pause instead of in a busy loop.
+      if (expireTried) await sleep(EXPIRE_RETRY_PAUSE_MS);
+      await db.expire(id);
+      expireTried = true;
       continue;
     }
 
@@ -152,9 +175,11 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
         failed: progress.failed + r.failed,
         skipped: progress.skipped + r.skipped,
       };
-      // Stop order as the in-memory executor: nothing left, then a stored cancel, then the threshold.
+      // Nothing left finishes done; with work remaining, a stored cancel wins over the threshold, as
+      // in the in-memory executor. The empty-claim check between them is this workflow's own (the
+      // in-memory executor treats an empty claim as done): a batch that took nothing while items
+      // remain would loop forever, so it fails closed, deliberately before a stored cancel.
       if (r.remaining === 0) return finish('done');
-      // A batch that took nothing while items remain would loop forever: fail closed.
       if (processed === 0) return finish('executor_error');
       if (r.cancelRequested) return finish('cancelled');
       if (r.thresholdExceeded) return finish('failure_threshold');

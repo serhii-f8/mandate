@@ -18,7 +18,7 @@ import { ScriptedWriter } from '@aiops/testing';
 import { Client } from '@temporalio/client';
 import type { Duration } from '@temporalio/common';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
-import type { Worker } from '@temporalio/worker';
+import { DefaultLogger, Runtime, type Worker } from '@temporalio/worker';
 import { createActivities, createExecutionGuard, echo, type ExecutionSettings } from '../../src/activities/index.js';
 import { createWorker } from '../../src/worker.js';
 import { testConfiguration } from './configuration.js';
@@ -36,7 +36,17 @@ export interface Infra {
   close(): Promise<void>;
 }
 
+/**
+ * The SDK logs every bundle and worker state change at INFO; tests keep WARN and above. The
+ * runtime is a per-process singleton that must be installed before the first worker or
+ * connection, and its options are remembered when it is re-created.
+ */
+function quietTemporalLogs(): void {
+  if (Runtime._instance === undefined) Runtime.install({ logger: new DefaultLogger('WARN') });
+}
+
 export async function startInfrastructure(): Promise<Infra> {
+  quietTemporalLogs();
   const postgres = await startTestPostgres();
   let env: TestWorkflowEnvironment | undefined;
   try {
@@ -83,6 +93,10 @@ export const TEST_SETTINGS: ExecutionSettings = { batchSize: 2, failureThreshold
 export interface TestWorkerOptions {
   readonly writer?: ChangeWriter;
   readonly reader?: UpstreamReader;
+  /** Replaces the reader factory, e.g. to fail every preparation before any read (an infrastructure failure). */
+  readonly readerFor?: () => UpstreamReader;
+  /** The activities' clock (default: the real one), e.g. to put the worker behind workflow time. */
+  readonly now?: () => Date;
   /** Default: the production guard over the test configuration. */
   readonly guard?: ExecutionGuard;
   readonly settings?: Partial<ExecutionSettings>;
@@ -128,12 +142,12 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
     repository: infra.repository,
     configuration: () => infra.configuration,
     writerFor: () => writer,
-    readerFor: () => reader,
+    readerFor: opts.readerFor ?? (() => reader),
     guardFor,
     settingsFor: () => settings,
     tuning: { ...FAST_TUNING, ...opts.tuning },
     newId: randomUUID,
-    now: () => new Date(),
+    now: opts.now ?? (() => new Date()),
   });
   const worker = await createWorker({
     connection: infra.env.nativeConnection,

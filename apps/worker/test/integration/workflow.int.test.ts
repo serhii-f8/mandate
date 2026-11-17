@@ -4,7 +4,7 @@ import { ScriptedWriter } from '@aiops/testing';
 import type { WorkflowHandle } from '@temporalio/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { changesetWorkflow } from '../../src/workflows/changeset.js';
-import { createPrepared, startExecutionOf } from '../support/changesets.js';
+import { createPrepared, createPreparing, startExecutionOf } from '../support/changesets.js';
 import { startInfrastructure, startTestWorker, type Infra, type TestWorker } from '../support/harness.js';
 import { auditEventsOf } from '../support/postgres.js';
 
@@ -167,6 +167,45 @@ describe('changesetWorkflow', () => {
     expect(last).toMatchObject({ actor: 'system' });
     expect(last?.details).toMatchObject({ from: 'prepared', to: 'expired' });
   });
+
+  it('EXE-1 a preparation that keeps failing ends expired at expiresAt instead of retrying forever', async () => {
+    const cs = await createPreparing(infra.repository, {
+      configHash: infra.configuration.hash,
+      expiresAt: new Date(Date.now() + 3_000),
+    });
+    let attempts = 0;
+    const readerFor = (): never => {
+      attempts += 1;
+      throw new Error('infrastructure unavailable');
+    };
+    await withWorker({ readerFor }, async (worker) => {
+      const handle = await signalWithStart(worker, cs.id);
+      await expect(handle.result()).resolves.toEqual({ status: 'expired' });
+    });
+    expect(attempts).toBeGreaterThan(0);
+    expect(await record(cs.id)).toEqual({ status: 'expired' });
+    const last = (await auditEventsOf(infra.database, cs.id)).at(-1);
+    expect(last).toMatchObject({ actor: 'system' });
+    expect(last?.details).toMatchObject({ from: 'preparing', to: 'expired' });
+  }, 30_000);
+
+  it('EXE-1 an expire that changes nothing (worker clock behind) is retried after a pause, not in a busy loop', async () => {
+    const cs = await createPrepared(infra.repository, 1, { expiresAt: new Date(Date.now() + 1_000) });
+    let expireCalls = 0;
+    const spy = (activity: string): void => {
+      if (activity === 'expire') expireCalls += 1;
+    };
+    // The worker's clock is 8 s behind: its expiry check (expiredBefore = now) holds only ~9 s from now.
+    const now = (): Date => new Date(Date.now() - 8_000);
+    await withWorker({ spy, now }, async (worker) => {
+      const handle = await signalWithStart(worker, cs.id);
+      await expect(handle.result()).resolves.toEqual({ status: 'expired' });
+    });
+    // Expire at ~1 s, ~6 s and ~11 s; a busy loop would call it hundreds of times.
+    expect(expireCalls).toBeGreaterThanOrEqual(2);
+    expect(expireCalls).toBeLessThanOrEqual(4);
+    expect(await record(cs.id)).toEqual({ status: 'expired' });
+  }, 30_000);
 
   it('EXE-1 a waiting workflow runs the change-set once it is started and woken', async () => {
     const writer = new ScriptedWriter();
