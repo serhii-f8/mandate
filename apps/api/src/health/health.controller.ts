@@ -2,9 +2,11 @@ import { Controller, Get, HttpCode, Inject, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { Database } from '@aiops/db';
 import { DATABASE } from '../tokens.js';
+import { Public } from '../web/access.js';
 
 /** Liveness and readiness for Compose healthchecks (the NFR-10 requirement itself is Phase 8). */
 @Controller()
+@Public()
 export class HealthController {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 

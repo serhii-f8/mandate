@@ -1,0 +1,49 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Mini catalog", "version": "1.0.0" },
+  "servers": [{ "url": "https://shop.example.test/rest" }],
+  "paths": {
+    "/V1/products/{sku}": {
+      "parameters": [
+        { "name": "sku", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Product SKU" }
+      ],
+      "put": {
+        "operationId": "putProduct",
+        "summary": "Replace a product",
+        "parameters": [
+          { "name": "q", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "authorization", "in": "header", "required": false, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json; charset=utf-8": { "schema": { "$ref": "#/components/schemas/ProductBody" } }
+          }
+        },
+        "responses": { "200": { "description": "ok" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ProductBody": {
+        "type": "object",
+        "required": ["product"],
+        "properties": {
+          "product": { "$ref": "#/components/schemas/Product" }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "required": ["sku", "missing"],
+        "properties": {
+          "sku": { "type": "string", "examples": ["24-MB01"] },
+          "price": { "type": "number", "exclusiveMinimum": 0 },
+          "status": { "type": "integer", "enum": [1, 2] },
+          "x-magento-note": { "type": "string" }
+        },
+        "x-vendor": true
+      }
+    }
+  }
+}

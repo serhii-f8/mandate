@@ -10,7 +10,7 @@ export default tseslint.config(
   },
   js.configs.recommended,
   {
-    files: ['**/*.ts'],
+    files: ['**/*.ts', '**/*.tsx'],
     extends: [tseslint.configs.strictTypeChecked, tseslint.configs.stylisticTypeChecked],
     languageOptions: {
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
@@ -21,6 +21,11 @@ export default tseslint.config(
       // NestJS modules are decorated classes with static factories.
       '@typescript-eslint/no-extraneous-class': ['error', { allowWithDecorator: true }],
     },
+  },
+  {
+    // The web bundle runs in the browser.
+    files: ['apps/web/**/*.ts', 'apps/web/**/*.tsx'],
+    languageOptions: { globals: globals.browser },
   },
   {
     files: ['**/*.js', '**/*.mjs'],

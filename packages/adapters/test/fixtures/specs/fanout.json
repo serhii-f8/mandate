@@ -1,0 +1,803 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Fan-out",
+    "version": "1"
+  },
+  "paths": {
+    "/things": {
+      "post": {
+        "operationId": "saveThing",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/D0"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/small": {
+      "get": {
+        "operationId": "small",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "D0": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "one_1": {
+          "$ref": "#/definitions/D1"
+        },
+        "many_1": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D1"
+          }
+        },
+        "map_1": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D1"
+          }
+        },
+        "one_2": {
+          "$ref": "#/definitions/D2"
+        },
+        "many_2": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D2"
+          }
+        },
+        "map_2": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D2"
+          }
+        },
+        "one_3": {
+          "$ref": "#/definitions/D3"
+        },
+        "many_3": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D3"
+          }
+        },
+        "map_3": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D3"
+          }
+        },
+        "one_4": {
+          "$ref": "#/definitions/D4"
+        },
+        "many_4": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D4"
+          }
+        },
+        "map_4": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D4"
+          }
+        },
+        "one_5": {
+          "$ref": "#/definitions/D5"
+        },
+        "many_5": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D5"
+          }
+        },
+        "map_5": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D5"
+          }
+        },
+        "one_6": {
+          "$ref": "#/definitions/D6"
+        },
+        "many_6": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D6"
+          }
+        },
+        "map_6": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D6"
+          }
+        },
+        "one_7": {
+          "$ref": "#/definitions/D7"
+        },
+        "many_7": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "map_7": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "one_8": {
+          "$ref": "#/definitions/D8"
+        },
+        "many_8": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "map_8": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "one_9": {
+          "$ref": "#/definitions/D9"
+        },
+        "many_9": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D9"
+          }
+        },
+        "map_9": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D9"
+          }
+        }
+      }
+    },
+    "D1": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "one_2": {
+          "$ref": "#/definitions/D2"
+        },
+        "many_2": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D2"
+          }
+        },
+        "map_2": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D2"
+          }
+        },
+        "one_3": {
+          "$ref": "#/definitions/D3"
+        },
+        "many_3": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D3"
+          }
+        },
+        "map_3": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D3"
+          }
+        },
+        "one_4": {
+          "$ref": "#/definitions/D4"
+        },
+        "many_4": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D4"
+          }
+        },
+        "map_4": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D4"
+          }
+        },
+        "one_5": {
+          "$ref": "#/definitions/D5"
+        },
+        "many_5": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D5"
+          }
+        },
+        "map_5": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D5"
+          }
+        },
+        "one_6": {
+          "$ref": "#/definitions/D6"
+        },
+        "many_6": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D6"
+          }
+        },
+        "map_6": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D6"
+          }
+        },
+        "one_7": {
+          "$ref": "#/definitions/D7"
+        },
+        "many_7": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "map_7": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "one_8": {
+          "$ref": "#/definitions/D8"
+        },
+        "many_8": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "map_8": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "one_9": {
+          "$ref": "#/definitions/D9"
+        },
+        "many_9": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D9"
+          }
+        },
+        "map_9": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D9"
+          }
+        }
+      }
+    },
+    "D2": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "one_3": {
+          "$ref": "#/definitions/D3"
+        },
+        "many_3": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D3"
+          }
+        },
+        "map_3": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D3"
+          }
+        },
+        "one_4": {
+          "$ref": "#/definitions/D4"
+        },
+        "many_4": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D4"
+          }
+        },
+        "map_4": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D4"
+          }
+        },
+        "one_5": {
+          "$ref": "#/definitions/D5"
+        },
+        "many_5": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D5"
+          }
+        },
+        "map_5": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D5"
+          }
+        },
+        "one_6": {
+          "$ref": "#/definitions/D6"
+        },
+        "many_6": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D6"
+          }
+        },
+        "map_6": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D6"
+          }
+        },
+        "one_7": {
+          "$ref": "#/definitions/D7"
+        },
+        "many_7": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "map_7": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "one_8": {
+          "$ref": "#/definitions/D8"
+        },
+        "many_8": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "map_8": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "one_9": {
+          "$ref": "#/definitions/D9"
+        },
+        "many_9": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D9"
+          }
+        },
+        "map_9": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D9"
+          }
+        }
+      }
+    },
+    "D3": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "one_4": {
+          "$ref": "#/definitions/D4"
+        },
+        "many_4": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D4"
+          }
+        },
+        "map_4": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D4"
+          }
+        },
+        "one_5": {
+          "$ref": "#/definitions/D5"
+        },
+        "many_5": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D5"
+          }
+        },
+        "map_5": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D5"
+          }
+        },
+        "one_6": {
+          "$ref": "#/definitions/D6"
+        },
+        "many_6": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D6"
+          }
+        },
+        "map_6": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D6"
+          }
+        },
+        "one_7": {
+          "$ref": "#/definitions/D7"
+        },
+        "many_7": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "map_7": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "one_8": {
+          "$ref": "#/definitions/D8"
+        },
+        "many_8": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "map_8": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "one_9": {
+          "$ref": "#/definitions/D9"
+        },
+        "many_9": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D9"
+          }
+        },
+        "map_9": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D9"
+          }
+        }
+      }
+    },
+    "D4": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "one_5": {
+          "$ref": "#/definitions/D5"
+        },
+        "many_5": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D5"
+          }
+        },
+        "map_5": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D5"
+          }
+        },
+        "one_6": {
+          "$ref": "#/definitions/D6"
+        },
+        "many_6": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D6"
+          }
+        },
+        "map_6": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D6"
+          }
+        },
+        "one_7": {
+          "$ref": "#/definitions/D7"
+        },
+        "many_7": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "map_7": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "one_8": {
+          "$ref": "#/definitions/D8"
+        },
+        "many_8": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "map_8": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "one_9": {
+          "$ref": "#/definitions/D9"
+        },
+        "many_9": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D9"
+          }
+        },
+        "map_9": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D9"
+          }
+        }
+      }
+    },
+    "D5": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "one_6": {
+          "$ref": "#/definitions/D6"
+        },
+        "many_6": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D6"
+          }
+        },
+        "map_6": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D6"
+          }
+        },
+        "one_7": {
+          "$ref": "#/definitions/D7"
+        },
+        "many_7": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "map_7": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "one_8": {
+          "$ref": "#/definitions/D8"
+        },
+        "many_8": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "map_8": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "one_9": {
+          "$ref": "#/definitions/D9"
+        },
+        "many_9": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D9"
+          }
+        },
+        "map_9": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D9"
+          }
+        }
+      }
+    },
+    "D6": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "one_7": {
+          "$ref": "#/definitions/D7"
+        },
+        "many_7": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "map_7": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D7"
+          }
+        },
+        "one_8": {
+          "$ref": "#/definitions/D8"
+        },
+        "many_8": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "map_8": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "one_9": {
+          "$ref": "#/definitions/D9"
+        },
+        "many_9": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D9"
+          }
+        },
+        "map_9": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D9"
+          }
+        }
+      }
+    },
+    "D7": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "one_8": {
+          "$ref": "#/definitions/D8"
+        },
+        "many_8": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "map_8": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D8"
+          }
+        },
+        "one_9": {
+          "$ref": "#/definitions/D9"
+        },
+        "many_9": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D9"
+          }
+        },
+        "map_9": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D9"
+          }
+        }
+      }
+    },
+    "D8": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "one_9": {
+          "$ref": "#/definitions/D9"
+        },
+        "many_9": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/D9"
+          }
+        },
+        "map_9": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/D9"
+          }
+        }
+      }
+    },
+    "D9": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

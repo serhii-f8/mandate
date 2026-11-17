@@ -25,12 +25,26 @@ const TOOL_FAILED: CallToolResult = { isError: true, content: [{ type: 'text', t
  * unaudited call is never presented as done (ADR 0013). Failures are not echoed
  * to the client, since their text can carry upstream detail (SEC-3).
  */
-export async function auditedRun(tool: string, run: () => Promise<CallToolResult>, deps: AuditedRunDeps): Promise<CallToolResult> {
+export type AuditDetails = Readonly<Record<string, string | number | boolean>>;
+
+/**
+ * `run` may call `report` with non-sensitive details (operation ID, upstream status) to
+ * add to the `tool.call` event; later calls add to earlier ones.
+ */
+export async function auditedRun(
+  tool: string,
+  run: (report: (details: AuditDetails) => void) => Promise<CallToolResult>,
+  deps: AuditedRunDeps,
+): Promise<CallToolResult> {
   const started = deps.now();
+  let details: AuditDetails = {};
+  const report = (more: AuditDetails): void => {
+    details = { ...details, ...more };
+  };
   let result: CallToolResult;
   let outcome: AuditOutcome;
   try {
-    result = await run();
+    result = await run(report);
     outcome = result.isError === true ? 'error' : 'ok';
   } catch {
     result = TOOL_FAILED;
@@ -43,6 +57,7 @@ export async function auditedRun(tool: string, run: () => Promise<CallToolResult
     outcome,
     correlationId: deps.correlationId,
     durationMs: deps.now() - started,
+    ...(Object.keys(details).length === 0 ? {} : { details }),
     ...(result === TOOL_FAILED ? { errorCode: 'handler_failed' } : {}),
     ...(deps.declaredClientName === undefined ? {} : { declaredClientName: deps.declaredClientName }),
   });

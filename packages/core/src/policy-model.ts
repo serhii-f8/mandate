@@ -10,8 +10,11 @@ export type RiskClass = 'read' | 'write' | 'write_opaque' | 'destructive';
 export type ScopeValue = string | number | boolean;
 
 export interface OperationDefinition {
-  /** Also the MCP tool name. */
   readonly id: string;
+  /** The MCP tool name. */
+  readonly toolName: string;
+  /** Where the operation came from: `config` or `preset:<id>`. */
+  readonly source: string;
   readonly connection: string;
   readonly risk: RiskClass;
   readonly title?: string;
@@ -20,6 +23,16 @@ export interface OperationDefinition {
   readonly inputSchema: Readonly<Record<string, unknown>>;
   /** Argument naming the fields a call touches: object keys or string elements (POL-3). */
   readonly fieldsArg?: string;
+}
+
+/** A catalogue entry the operator has not enabled (visible to admins only). */
+export interface DisabledOperation {
+  readonly key: string;
+  readonly connection: string;
+  readonly method: string;
+  readonly path: string;
+  readonly operationId?: string;
+  readonly summary?: string;
 }
 
 export interface GrantDefinition {

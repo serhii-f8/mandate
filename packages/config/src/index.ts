@@ -9,7 +9,9 @@ export {
   type ConnectionConfig,
   type NotificationConfig,
   type OperationConfig,
+  type OverrideConfig,
   type PresetConfig,
+  type PresetOperationConfig,
   type RoleApproval,
   type RoleConfig,
   type RoleLimits,
@@ -22,5 +24,9 @@ export {
   loadConfigurationSources,
   type LoadedConfiguration,
   type LoadOptions,
+  type OperationBinding,
   type LoadResult,
 } from './load.js';
+export { presetDocumentSchema, resolvePreset, type LoadedPreset, type PresetEntryLocation, type PresetResult } from './presets.js';
+export { PLACEHOLDER_SCHEMA } from './registry.js';
+export { toUpstreamMapping, type AuthConfig, type ConnectionTestConfig, type UpstreamConfig } from './upstream-schema.js';

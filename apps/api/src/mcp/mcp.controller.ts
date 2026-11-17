@@ -10,6 +10,7 @@ import type { BearerGate } from '../auth/bearer-gate.js';
 import { hostAllowed, originAllowed } from '../http/host-origin.js';
 import { API_ENV, AUDIT_LOG, BEARER_GATE, LOGGER, MCP_HANDLER } from '../tokens.js';
 import { authInfoFor } from './mcp-server-factory.js';
+import { Public } from '../web/access.js';
 
 async function sendWebResponse(res: Response, response: globalThis.Response): Promise<void> {
   response.headers.forEach((value, key) => {
@@ -20,6 +21,8 @@ async function sendWebResponse(res: Response, response: globalThis.Response): Pr
 
 /** The single MCP endpoint (MCP-1): stateless Streamable HTTP, POST only, a protected resource (AUTH-1). */
 @Controller('mcp')
+// Bearer-protected by its own gate (AUTH-1), not by page sessions.
+@Public()
 export class McpController {
   constructor(
     @Inject(MCP_HANDLER) private readonly handler: McpHttpHandler,

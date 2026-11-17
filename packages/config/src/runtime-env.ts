@@ -21,6 +21,23 @@ export interface ApiEnv {
   readonly oidcIssuer: string;
   /** Where `api` fetches the issuer's signing keys (may be an internal URL). */
   readonly oidcJwksUrl: URL;
+  /** Public origin of the api (no path); base of page and callback URLs (AUTH-5). */
+  readonly publicUrl: URL;
+  /** OIDC client used for trusted-page login (AUTH-5). */
+  readonly webClientId: string;
+  readonly webClientSecret: string;
+  /** Browser-facing authorization endpoint (public issuer). */
+  readonly oidcAuthorizationUrl: URL;
+  /** Token endpoint the api calls (may be an internal URL). */
+  readonly oidcTokenUrl: URL;
+  /** Raw `AIOPS_MASTER_KEYS`; parsed at api start-up with `parseMasterKeys` (SEC-2). */
+  readonly masterKeys: string;
+  readonly sessionMaxAgeSeconds: number;
+  readonly freshAuthSeconds: number;
+  /** Directory of the built web bundle, when the api serves it. */
+  readonly webDir?: string;
+  /** Directories of presets (colon-separated in the environment). */
+  readonly presetDirs: readonly string[];
 }
 
 export interface WorkerEnv {
@@ -64,6 +81,27 @@ const apiSchema = z.object({
   AIOPS_MCP_RESOURCE: httpUrl.refine((v) => !v.includes('#'), { message: 'must not contain a fragment' }),
   OIDC_ISSUER: httpUrl,
   OIDC_JWKS_URL: httpUrl,
+  AIOPS_PUBLIC_URL: httpUrl.refine(
+    (v) => {
+      // Runs even after `z.url()` failed; that failure is already reported.
+      if (!URL.canParse(v)) return true;
+      const u = new URL(v);
+      return u.pathname === '/' && u.search === '' && u.hash === '' && !v.includes('?') && !v.includes('#');
+    },
+    { message: 'must be an origin without path, query or fragment' },
+  ),
+  OIDC_WEB_CLIENT_ID: nonEmpty('aiops-web'),
+  OIDC_WEB_CLIENT_SECRET: z.string().min(1),
+  OIDC_AUTHORIZATION_URL: httpUrl.optional(),
+  OIDC_TOKEN_URL: httpUrl.optional(),
+  AIOPS_MASTER_KEYS: z.string().trim().min(1),
+  AIOPS_SESSION_MAX_AGE_SECONDS: z.coerce.number().int().min(1).default(28_800),
+  AIOPS_FRESH_AUTH_SECONDS: z.coerce.number().int().min(1).default(300),
+  AIOPS_WEB_DIR: z.string().trim().min(1).optional(),
+  AIOPS_PRESET_DIRS: z
+    .string()
+    .default('')
+    .transform((v) => v.split(':').map((d) => d.trim()).filter((d) => d.length > 0)),
 });
 
 const workerSchema = z.object({
@@ -88,6 +126,7 @@ function parse<S extends z.ZodType>(schema: S, env: NodeJS.ProcessEnv): z.output
 
 export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
   const e = parse(apiSchema, env);
+  const issuerBase = e.OIDC_ISSUER.replace(/\/+$/, '');
   return {
     databaseUrl: e.DATABASE_URL,
     port: e.API_PORT,
@@ -97,6 +136,16 @@ export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
     mcpResource: new URL(e.AIOPS_MCP_RESOURCE),
     oidcIssuer: e.OIDC_ISSUER,
     oidcJwksUrl: new URL(e.OIDC_JWKS_URL),
+    publicUrl: new URL(e.AIOPS_PUBLIC_URL),
+    webClientId: e.OIDC_WEB_CLIENT_ID,
+    webClientSecret: e.OIDC_WEB_CLIENT_SECRET,
+    oidcAuthorizationUrl: new URL(e.OIDC_AUTHORIZATION_URL ?? `${issuerBase}/protocol/openid-connect/auth`),
+    oidcTokenUrl: new URL(e.OIDC_TOKEN_URL ?? `${issuerBase}/protocol/openid-connect/token`),
+    masterKeys: e.AIOPS_MASTER_KEYS,
+    sessionMaxAgeSeconds: e.AIOPS_SESSION_MAX_AGE_SECONDS,
+    freshAuthSeconds: e.AIOPS_FRESH_AUTH_SECONDS,
+    ...(e.AIOPS_WEB_DIR === undefined ? {} : { webDir: e.AIOPS_WEB_DIR }),
+    presetDirs: e.AIOPS_PRESET_DIRS,
   };
 }
 

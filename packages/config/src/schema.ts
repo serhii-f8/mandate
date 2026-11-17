@@ -1,42 +1,54 @@
 /**
  * Schema of one configuration document (CFG-1, ADR 0015). Every object is strict:
  * an unknown key is an error, so typos and pasted secrets do not pass silently.
- * `upstream` (adapter-specific until Phase 3) and `input_schema` (checked by Ajv)
- * are the only open objects.
+ * `input_schema` (checked by Ajv) and connection test `args` are the only open
+ * objects; `upstream` is strict since Phase 3 (ADR 0017).
  */
 import { z } from 'zod';
+import {
+  connectionSettingsFields,
+  httpUrl,
+  id,
+  openApiSchema,
+  openObject,
+  operationId,
+  OPERATION_ID,
+  upstreamSchema,
+} from './upstream-schema.js';
 
-const id = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
-/** Operation IDs are also MCP tool names. */
-export const OPERATION_ID = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/;
-const operationId = z.string().max(64).regex(OPERATION_ID);
+export { OPERATION_ID };
 const credentialRef = id;
-const httpUrl = z.url({ protocol: /^https?$/ }).refine(
-  (v) => {
-    const url = new URL(v);
-    return url.username === '' && url.password === '';
-  },
-  // CFG-5: a URL with credentials in it is a secret in configuration.
-  { message: 'must not contain a user name or password; reference a credential by name' },
-);
-const openObject = z.record(z.string(), z.unknown());
 const positiveInt = z.number().int().positive();
 
-const connectionBase = { id, credential_ref: credentialRef.optional(), preset: id.optional() };
+const connectionBase = { id, credential_ref: credentialRef.optional(), preset: id.optional(), ...connectionSettingsFields };
 const connection = z.discriminatedUnion('adapter', [
-  z.strictObject({ ...connectionBase, adapter: z.literal('openapi'), base_url: httpUrl }),
+  z.strictObject({ ...connectionBase, adapter: z.literal('openapi'), base_url: httpUrl, openapi: openApiSchema.optional() }),
   z.strictObject({ ...connectionBase, adapter: z.literal('mcp'), mcp_url: httpUrl }),
 ]);
 
-const operation = z.strictObject({
+const title = z.string().min(1).max(200);
+const description = z.string().min(1).max(2000);
+const operationFields = {
   id: operationId,
-  connection: id,
   risk: z.enum(['read', 'write', 'write_opaque', 'destructive']),
-  title: z.string().min(1).max(200).optional(),
-  description: z.string().min(1).max(2000),
-  upstream: openObject,
-  input_schema: openObject,
+  title: title.optional(),
+  description,
+  upstream: upstreamSchema,
+  /** Absent: derived from the connection's spec (CONN-2). */
+  input_schema: openObject.optional(),
   fields_arg: z.string().min(1).max(128).optional(),
+};
+const operation = z.strictObject({ ...operationFields, connection: id });
+/** A preset operation: bound to the connection that applies the preset. */
+export const presetOperationSchema = z.strictObject(operationFields);
+
+/** MCP-9 and OPS-1: tool name, texts and enabling of an operation, applied after presets. */
+const override = z.strictObject({
+  operation: operationId,
+  tool_name: operationId.optional(),
+  title: title.optional(),
+  description: description.optional(),
+  enabled: z.boolean().optional(),
 });
 
 const scopeValue = z.union([z.string(), z.number(), z.boolean()]);
@@ -68,6 +80,8 @@ const role = z.strictObject({
   grants: z.array(grant),
   limits: limits.optional(),
   approval: approval.optional(),
+  /** Credential references the role may set and test on the trusted page; `*` for all. */
+  manage_credentials: z.array(z.union([z.literal('*'), credentialRef])).optional(),
 });
 
 const roleMapping = z.strictObject({ group: z.string().min(1).max(255), roles: z.array(id).min(1) });
@@ -87,6 +101,7 @@ export const configDocumentSchema = z.strictObject({
   role_mapping: z.array(roleMapping).optional(),
   presets: z.array(preset).optional(),
   notifications: z.array(notification).optional(),
+  overrides: z.array(override).optional(),
 });
 
 export type ConfigDocument = z.output<typeof configDocumentSchema>;
@@ -96,12 +111,21 @@ export type RoleConfig = z.output<typeof role>;
 export type RoleLimits = z.output<typeof limits>;
 export type RoleApproval = z.output<typeof approval>;
 export type PresetConfig = z.output<typeof preset>;
+export type PresetOperationConfig = z.output<typeof presetOperationSchema>;
+export type OverrideConfig = z.output<typeof override>;
 export type NotificationConfig = z.output<typeof notification>;
 
 export interface SchemaIssue {
   readonly path: readonly PropertyKey[];
   readonly message: string;
 }
+
+/**
+ * Parse parameters for configuration documents. Zod 4 leaves `input` out of issues
+ * unless asked; `messageFor` needs it to tell a missing key from a wrong value. The
+ * input never reaches a message: `schemaIssues` keeps only path and message.
+ */
+export const PARSE_PARAMS = { reportInput: true } as const;
 
 /** Turns a Zod result into value-free issues: Zod's own messages can quote the input. */
 export function schemaIssues(result: { success: true } | { success: false; error: z.ZodError }): SchemaIssue[] {

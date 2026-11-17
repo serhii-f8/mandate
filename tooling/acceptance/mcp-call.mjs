@@ -4,7 +4,8 @@
 //   mcp-call.mjs <mcp-url> [message] [--token T]
 //       calls `ping`, fails unless it answers `pong: <message>`  → {"correlationId","text"}
 //   mcp-call.mjs <mcp-url> --token T --list                      → {"correlationId","tools":[...]}
-//   mcp-call.mjs <mcp-url> --token T --tool NAME --args JSON     → {"correlationId","text","isError"}
+//   mcp-call.mjs <mcp-url> --token T --tool NAME --args JSON     → {"correlationId","text","isError","content","structuredContent"}
+//       `text` joins every text part; `content` lists them one by one (MCP-4: summary first).
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
 const positional = [];
@@ -43,7 +44,15 @@ if (flags.list) {
 } else if (flags.tool) {
   const result = await client.callTool({ name: flags.tool, arguments: JSON.parse(flags.args ?? '{}') });
   await client.close();
-  console.log(JSON.stringify({ correlationId: lastCorrelationId, text: textOf(result), isError: result.isError === true }));
+  console.log(
+    JSON.stringify({
+      correlationId: lastCorrelationId,
+      text: textOf(result),
+      isError: result.isError === true,
+      content: (result.content ?? []).map((c) => c.text ?? ''),
+      ...(result.structuredContent === undefined ? {} : { structuredContent: result.structuredContent }),
+    }),
+  );
 } else {
   const tools = await client.listTools();
   if (!tools.tools.some((t) => t.name === 'ping')) throw new Error('ping is not in the tool list');

@@ -12,6 +12,9 @@
       "default": "./dist/index.js"
     }
   },
+  "bin": {
+    "aiops": "dist/cli.js"
+  },
   "files": [
     "dist"
   ],
@@ -33,7 +36,9 @@
     "unplugin-swc": "2.0.0"
   },
   "dependencies": {
+    "@aiops/adapters": "workspace:*",
     "@aiops/config": "workspace:*",
+    "@aiops/connector-sdk": "workspace:*",
     "@aiops/core": "workspace:*",
     "@aiops/db": "workspace:*",
     "@modelcontextprotocol/node": "2.1.2",

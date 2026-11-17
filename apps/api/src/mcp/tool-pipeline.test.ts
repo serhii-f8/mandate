@@ -1,17 +1,16 @@
 import { ProtocolError } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import type { AuditEventInput, Caller } from '@aiops/core';
+import type { AuditEventInput, Caller, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
 import { FakeInvoker, InMemoryAuditLog } from '@aiops/testing';
 import { callerFromAuthInfo } from '../auth/caller-from-auth.js';
 import { pingTool } from './builtin-tools.js';
-import { NoAdapterInvoker } from './no-adapter-invoker.js';
 import { callTool, listTools, snapshotOf, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
 
 const SOURCES = {
   'connections.yaml': `version: 1
 connections:
-  - { id: magento, adapter: openapi, base_url: https://shop.example.test/rest, credential_ref: magento-integration }
+  - { id: magento, adapter: openapi, base_url: https://shop.example.test/rest, credential_ref: magento-integration, auth: { scheme: bearer } }
 `,
   'operations.yaml': `version: 1
 operations:
@@ -19,7 +18,7 @@ operations:
     connection: magento
     risk: read
     description: Search the catalog by brand.
-    upstream: { method: GET, path: /V1/products }
+    upstream: { method: GET, path: /V1/products, query: { brand: { arg: brand } }, response: { items: items, fields_from_arg: fields } }
     input_schema:
       type: object
       properties: { brand: { type: string }, fields: { type: array, items: { type: string } } }
@@ -47,10 +46,12 @@ role_mapping:
 `,
 };
 
+const loaded = await loadConfigurationSources(Object.entries(SOURCES).map(([file, text]) => ({ file, text })));
+if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
+const LOADED: LoadedConfiguration = loaded.configuration;
+
 function configuration(): LoadedConfiguration {
-  const result = loadConfigurationSources(Object.entries(SOURCES).map(([file, text]) => ({ file, text })));
-  if (!result.ok) throw new Error(JSON.stringify(result.issues));
-  return result.configuration;
+  return LOADED;
 }
 
 const TOKEN = 'eyJhbGciOiJSUzI1NiJ9.do-not-leak-this-token.sig';
@@ -65,7 +66,7 @@ function setup() {
   const deps: PipelineDeps = {
     snapshot: () => snapshotOf(config),
     builtins: [pingTool],
-    invoker,
+    invokerFor: () => invoker,
     audit,
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
     now: () => 0,
@@ -197,15 +198,132 @@ describe('AUTH-7 the invoker never receives the token', () => {
   });
 });
 
-describe('NoAdapterInvoker', () => {
-  it('explains that no adapter can run the operation yet', async () => {
-    const config = configuration();
-    const invoker = new NoAdapterInvoker(() => config.connections);
-    const operation = config.policy.operations[0];
-    if (operation === undefined) throw new Error('fixture');
-    expect(await invoker.invoke({ operation, args: {}, caller: alice })).toEqual({
-      isError: true,
-      text: 'Operation catalog.search_products cannot run: no adapter is available for connection magento (adapter openapi).',
+/** An invoker that answers like the direct read invoker: summary, data and audit details. */
+class ReadLikeInvoker implements OperationInvoker {
+  readonly calls: InvocationRequest[] = [];
+  invoke(request: InvocationRequest): Promise<InvocationResult> {
+    this.calls.push(request);
+    return Promise.resolve({
+      text: `${request.operation.id} returned 1 item(s).`,
+      structured: { operation: request.operation.id, items: [{ sku: 'a' }], returned: 1, truncated: false },
+      dataText: '{"operation":"x","items":[{"sku":"a"}]}',
+      auditDetails: { operation: request.operation.id, connection: 'magento', upstreamStatus: 200, itemCount: 1, upstreamMs: 3 },
     });
+  }
+}
+
+const OVERRIDE_SOURCES = {
+  ...SOURCES,
+  'overrides.yaml': `version: 1
+overrides:
+  - { operation: support.lookup_order, tool_name: support.find_order, title: Find an order }
+`,
+};
+const overridden = await loadConfigurationSources(Object.entries(OVERRIDE_SOURCES).map(([file, text]) => ({ file, text })));
+if (!overridden.ok) throw new Error(JSON.stringify(overridden.issues));
+const OVERRIDDEN: LoadedConfiguration = overridden.configuration;
+
+function setupWith(config: LoadedConfiguration, invoker: OperationInvoker) {
+  const audit = new InMemoryAuditLog();
+  let n = 0;
+  const deps: PipelineDeps = {
+    snapshot: () => snapshotOf(config),
+    builtins: [pingTool],
+    invokerFor: () => invoker,
+    audit,
+    newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
+    now: () => 0,
+  };
+  const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot() });
+  return { audit, deps, req };
+}
+
+describe('MCP-9 tools are published and called by their tool name', () => {
+  it('MCP-9 lists the overridden tool name and title', async () => {
+    const { deps, req } = setupWith(OVERRIDDEN, new FakeInvoker());
+    const tools = await listTools(deps, req(bob));
+    expect(tools.map((t) => t.name)).toEqual(['ping', 'support.find_order']);
+    expect(tools[1]?.title).toBe('Find an order');
+  });
+
+  it('MCP-9 calls the operation by its tool name; audit subject is the tool name, details.operation the operation ID', async () => {
+    const invoker = new FakeInvoker();
+    const { deps, req, audit } = setupWith(OVERRIDDEN, invoker);
+    const result = await callTool(deps, req(bob), 'support.find_order', { order_number: '100' });
+    expect(text(result)).toBe('ran support.lookup_order');
+    expect(invoker.calls[0]?.operation.id).toBe('support.lookup_order');
+    expect(audit.events).toEqual([
+      expect.objectContaining({ action: 'policy.decision', decision: 'allow', subject: 'support.find_order', details: expect.objectContaining({ operation: 'support.lookup_order' }) as unknown }),
+      expect.objectContaining({ action: 'tool.call', outcome: 'ok', subject: 'support.find_order', details: expect.objectContaining({ operation: 'support.lookup_order' }) as unknown }),
+    ]);
+  });
+
+  it('MCP-9 the operation ID of an overridden operation is not a tool name', async () => {
+    const invoker = new FakeInvoker();
+    const { deps, req, audit } = setupWith(OVERRIDDEN, invoker);
+    await expect(callTool(deps, req(bob), 'support.lookup_order', { order_number: '100' })).rejects.toThrow('Tool support.lookup_order not found');
+    expect(audit.events[0]?.details).toMatchObject({ reason: 'unknown_tool' });
+    expect(invoker.calls).toEqual([]);
+  });
+
+  it('MCP-9 records the operation ID on a policy denial and on invalid arguments', async () => {
+    const { deps, req, audit } = setupWith(LOADED, new FakeInvoker());
+    await callTool(deps, req(alice), 'catalog.search_products', { brand: 'initech', fields: [] });
+    await callTool(deps, req(alice), 'catalog.search_products', { brand: 5, fields: [] });
+    expect(audit.events.map((e) => e.details.operation)).toEqual(['catalog.search_products', 'catalog.search_products']);
+  });
+
+  it('MCP-9 built-in tools carry no operation in their audit details', async () => {
+    const { deps, req, audit } = setupWith(LOADED, new FakeInvoker());
+    await callTool(deps, req(bob), 'ping', {});
+    expect(audit.events.map((e) => e.details.operation)).toEqual([undefined, undefined]);
+  });
+});
+
+describe('MCP-4 read results reach the client as summary, data block and structured content', () => {
+  it('MCP-4 puts the summary first and the data JSON in a second text block', async () => {
+    const { deps, req } = setupWith(LOADED, new ReadLikeInvoker());
+    const result = await callTool(deps, req(alice), 'catalog.search_products', { brand: 'acme', fields: ['sku'] });
+    expect(result.content).toEqual([
+      { type: 'text', text: 'catalog.search_products returned 1 item(s).' },
+      { type: 'text', text: '{"operation":"x","items":[{"sku":"a"}]}' },
+    ]);
+    expect(result.structuredContent).toEqual({ operation: 'catalog.search_products', items: [{ sku: 'a' }], returned: 1, truncated: false });
+  });
+
+  it('AUD-1 merges the invoker audit details into the tool.call event', async () => {
+    const { deps, req, audit } = setupWith(LOADED, new ReadLikeInvoker());
+    await callTool(deps, req(alice), 'catalog.search_products', { brand: 'acme', fields: ['sku'] });
+    expect(audit.events[1]).toMatchObject({
+      action: 'tool.call',
+      details: { operation: 'catalog.search_products', connection: 'magento', upstreamStatus: 200, itemCount: 1, upstreamMs: 3, durationMs: 0 },
+    });
+    expect(JSON.stringify(audit.events)).not.toContain('acme');
+  });
+});
+
+describe('SEC-1 POL-2 the operation runs under the snapshot the decision used', () => {
+  it('SEC-1 hands the request snapshot configuration and correlation ID to the invoker factory, not the current one', async () => {
+    const invoker = new FakeInvoker();
+    const seen: [LoadedConfiguration, string][] = [];
+    let current: LoadedConfiguration = LOADED;
+    const audit = new InMemoryAuditLog();
+    const deps: PipelineDeps = {
+      snapshot: () => snapshotOf(current),
+      builtins: [pingTool],
+      invokerFor: (configuration, correlationId) => {
+        seen.push([configuration, correlationId]);
+        return invoker;
+      },
+      audit,
+      newId: () => '00000000-0000-4000-8000-000000000001',
+      now: () => 0,
+    };
+    const req: PipelineRequest = { caller: alice, correlationId: 'corr-9', snapshot: deps.snapshot() };
+    current = OVERRIDDEN; // a reload lands while the request is in flight
+    await callTool(deps, req, 'catalog.search_products', { brand: 'acme', fields: ['sku'] });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.[0]).toBe(LOADED);
+    expect(seen[0]?.[1]).toBe('corr-9');
   });
 });

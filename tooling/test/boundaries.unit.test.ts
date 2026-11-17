@@ -53,10 +53,30 @@ describe('package boundaries (CLAUDE.md engineering conventions)', () => {
     expect(await restrictedImportErrors('packages/adapters/src/probe.ts', '@aiops/connector-sdk')).toBe(0);
   });
 
+  it('adapter tests may also use the shared fakes, production code may not', async () => {
+    expect(await restrictedImportErrors('packages/adapters/src/probe.ts', '@aiops/testing')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/src/http/probe.test.ts', '@aiops/testing')).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/src/http/probe.test.ts', '@aiops/core')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/test/probe.ts', '@aiops/testing')).toBe(0);
+  });
+
   it('presets use only the connector SDK and the configuration schema', async () => {
     expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@aiops/core')).toBe(1);
     expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@aiops/config')).toBe(0);
     expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@aiops/connector-sdk')).toBe(0);
+    expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@aiops/adapters')).toBe(1);
+    expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@aiops/testing')).toBe(1);
+  });
+
+  it('NFR-17 preset contract tests may also use the adapters and the shared fakes, nothing else', async () => {
+    for (const file of ['presets/magento2-catalog/test/probe.unit.test.ts', 'presets/magento2-catalog/src/probe.test.ts']) {
+      expect(await restrictedImportErrors(file, '@aiops/adapters')).toBe(0);
+      expect(await restrictedImportErrors(file, '@aiops/testing')).toBe(0);
+      expect(await restrictedImportErrors(file, '@aiops/config')).toBe(0);
+      expect(await restrictedImportErrors(file, '@aiops/core')).toBe(1);
+      expect(await restrictedImportErrors(file, '@aiops/db')).toBe(1);
+      expect(await restrictedImportErrors(file, '@aiops/api')).toBe(1);
+    }
   });
 
   describe('Temporal workflow code stays deterministic (EXE-10)', () => {

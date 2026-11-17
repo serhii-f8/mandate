@@ -10,19 +10,40 @@ connections:
     base_url: https://shop.example.test/rest
     credential_ref: magento-integration
     preset: magento2-catalog
+    auth: { scheme: oauth_client_credentials, token_url: https://idp.example.test/token, scopes: [catalog] }
+    openapi: { spec: specs/shop.json, include: [catalogProductRepositoryV1GetListGet, "GET /V1/orders"] }
+    timeout_ms: 5000
+    retry: { max_attempts: 2, initial_backoff_ms: 100 }
+    max_concurrency: 2
+    allow_private_network: true
+    test: { operation: catalog.search_products, args: { brand: acme, fields: [sku] } }
 operations:
   - id: catalog.search_products
     connection: magento
     risk: read
     title: Search products
     description: Search the catalog by brand.
-    upstream: { method: GET, path: /V1/products }
+    upstream:
+      method: GET
+      path: /V1/products
+      query:
+        "searchCriteria[filter_groups][0][filters][0][field]": brand
+        "searchCriteria[filter_groups][0][filters][0][value]": { arg: brand }
+        "searchCriteria[pageSize]": { arg: page_size, default: 20 }
+      response:
+        items: items
+        total: total_count
+        flatten: { path: custom_attributes, key: attribute_code, value: value }
+        fields_from_arg: fields
+        max_items: 100
     input_schema:
       type: object
-      properties: { brand: { type: string }, fields: { type: array, items: { type: string } } }
+      properties: { brand: { type: string }, page_size: { type: integer }, fields: { type: array, items: { type: string } } }
       required: [brand, fields]
       additionalProperties: false
     fields_arg: fields
+overrides:
+  - { operation: catalog.search_products, tool_name: catalog.find_products, title: Find products, description: Find products., enabled: true }
 roles:
   - id: content_manager
     description: Edits product content.
@@ -36,13 +57,14 @@ roles:
     approval: { required: above_threshold, record_threshold: 50, approver_role: content_lead, allow_widget: false }
   - id: content_lead
     grants: []
+    manage_credentials: [magento-integration]
 role_mapping:
   - group: content
     roles: [content_manager]
 presets:
   - id: magento2-catalog
     package: "@aiops/preset-magento2-catalog"
-    version: "^0.1.0"
+    version: "0.1.0"
 notifications:
   - id: ops-email
     kind: email

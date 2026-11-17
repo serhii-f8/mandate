@@ -3,6 +3,7 @@ export type { AuditAction, AuditDecision, AuditEventInput, AuditLog, AuditOutcom
 export { ANONYMOUS_CALLER, type Caller } from './caller.js';
 export { toolCallAuditEvent, type ToolCallRecord } from './tool-call-audit.js';
 export type {
+  DisabledOperation,
   GrantDefinition,
   OperationDefinition,
   PolicyConfiguration,
@@ -21,3 +22,5 @@ export {
 } from './policy-engine.js';
 export { MAX_AUDITED_TOOL_NAME, policyDecisionAuditEvent, type PolicyDecisionRecord } from './policy-audit.js';
 export type { InvocationRequest, InvocationResult, OperationInvoker } from './operation-invoker.js';
+export { readErrorResult, readToolResult, READ_RESULT_TEXT, type ReadToolResultInput } from './read-result.js';
+export type { CredentialHandle, CredentialStatus, CredentialVault } from './credential-vault.js';

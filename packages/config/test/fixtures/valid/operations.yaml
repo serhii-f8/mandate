@@ -5,7 +5,11 @@ operations:
     risk: read
     title: Search products
     description: Search the catalog by brand.
-    upstream: { method: GET, path: /V1/products }
+    upstream:
+      method: GET
+      path: /V1/products
+      query: { "searchCriteria[filter_groups][0][filters][0][value]": { arg: brand } }
+      response: { items: items, fields_from_arg: fields }
     input_schema:
       type: object
       properties:

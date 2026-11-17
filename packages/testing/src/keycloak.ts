@@ -8,6 +8,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { GenericContainer, Wait, type StartedTestContainer } from 'testcontainers';
+import { TEST_WEB_CLIENT_SECRET } from './test-issuer.js';
 
 export const KEYCLOAK_IMAGE = 'quay.io/keycloak/keycloak:26.8.2';
 const REPO = new URL('../../../', import.meta.url);
@@ -26,13 +27,24 @@ export interface StartedKeycloak {
   stop(): Promise<void>;
 }
 
-export async function startKeycloak(options: { mcpResource: string }): Promise<StartedKeycloak> {
+export interface StartKeycloakOptions {
+  readonly mcpResource: string;
+  /** Origin of the api's pages; `aiops-web` redirects to `${publicUrl}/auth/callback`. Default `http://localhost:8400`. */
+  readonly publicUrl?: string;
+  /** Secret of `aiops-web`; default the e2e api's (`TEST_WEB_CLIENT_SECRET`). */
+  readonly webClientSecret?: string;
+}
+
+export async function startKeycloak(options: StartKeycloakOptions): Promise<StartedKeycloak> {
   const container: StartedTestContainer = await new GenericContainer(KEYCLOAK_IMAGE)
     .withCommand(['start-dev', '--import-realm', '--http-port=8080', '--features=cimd,resource-indicators'])
     .withEnvironment({
       KC_BOOTSTRAP_ADMIN_USERNAME: 'admin',
       KC_BOOTSTRAP_ADMIN_PASSWORD: ADMIN_PASSWORD,
       MCP_RESOURCE: options.mcpResource,
+      // Substituted into the realm file at import (ADR 0019).
+      AIOPS_PUBLIC_URL: options.publicUrl ?? 'http://localhost:8400',
+      AIOPS_WEB_CLIENT_SECRET: options.webClientSecret ?? TEST_WEB_CLIENT_SECRET,
     })
     .withCopyFilesToContainer([{ source: REALM_FILE, target: '/opt/keycloak/data/import/realm-aiops.json' }])
     // CIMD documents served by the test process are fetched from inside the container.
@@ -200,4 +212,104 @@ export async function registerClient(baseUrl: string, redirectUris: string[]): P
   });
   const body = (await response.json().catch(() => ({}))) as { client_id?: string };
   return { status: response.status, ...(body.client_id === undefined ? {} : { clientId: body.client_id }) };
+}
+
+/** Cookies per host name (ports share cookies, as in browsers); paths and expiry are ignored except deletion. */
+export class CookieJar {
+  private readonly byHost = new Map<string, Map<string, string>>();
+
+  header(url: URL): string {
+    return [...(this.byHost.get(url.hostname) ?? new Map<string, string>())].map(([k, v]) => `${k}=${v}`).join('; ');
+  }
+
+  store(url: URL, response: Response): void {
+    const cookies = this.byHost.get(url.hostname) ?? new Map<string, string>();
+    this.byHost.set(url.hostname, cookies);
+    for (const cookie of response.headers.getSetCookie()) {
+      const [pair = '', ...attributes] = cookie.split(';');
+      const i = pair.indexOf('=');
+      const name = pair.slice(0, i).trim();
+      const value = pair.slice(i + 1).trim();
+      const expired = attributes.some((a) => /^\s*max-age\s*=\s*0\s*$/i.test(a));
+      if (expired || value === '') cookies.delete(name);
+      else cookies.set(name, value);
+    }
+  }
+
+  get(url: URL, name: string): string | undefined {
+    return this.byHost.get(url.hostname)?.get(name);
+  }
+}
+
+export interface PageLoginOptions {
+  /** `fresh=1`: the IdP must show the login form again (SEC-8). */
+  readonly fresh?: boolean;
+  /** Keeps the IdP's SSO cookies between logins. */
+  readonly cookieJar?: CookieJar;
+  readonly returnTo?: string;
+}
+
+export interface PageLoginResult {
+  /** Ready for a `Cookie` header: `aiops_session=…`. */
+  readonly cookie: string;
+  readonly csrfToken: string;
+  /** Whether the IdP showed a login form (Keycloak); the test issuer never does. */
+  readonly formShown: boolean;
+  /** Where the api sent the browser after the callback. */
+  readonly landedAt: URL;
+}
+
+/**
+ * Logs in to the api's trusted pages like a browser (AUTH-5): `/auth/login` → IdP
+ * (posting Keycloak's login form when it appears) → `/auth/callback` → the return path.
+ * The jar carries the api's `aiops_login` cookie from `/auth/login` to `/auth/callback`
+ * (login state bound to the browser, SEC-8). Then reads the CSRF token from `GET /api/v1/session`.
+ */
+export async function pageLogin(apiBaseUrl: string, username: string, password: string, options: PageLoginOptions = {}): Promise<PageLoginResult> {
+  const jar = options.cookieJar ?? new CookieJar();
+  const api = new URL(apiBaseUrl);
+  const request = async (url: URL, form?: Record<string, string>): Promise<Response> => {
+    const response = await fetch(url, {
+      method: form === undefined ? 'GET' : 'POST',
+      redirect: 'manual',
+      headers: { cookie: jar.header(url), ...(form === undefined ? {} : { 'content-type': 'application/x-www-form-urlencoded' }) },
+      ...(form === undefined ? {} : { body: new URLSearchParams(form) }),
+    });
+    jar.store(url, response);
+    return response;
+  };
+
+  const query = new URLSearchParams({ return_to: options.returnTo ?? '/app/' });
+  if (options.fresh === true) query.set('fresh', '1');
+  let url = new URL(`/auth/login?${query.toString()}`, api);
+  let response = await request(url);
+  let formShown = false;
+  let landedAt: URL | undefined;
+  for (let i = 0; i < 20 && landedAt === undefined; i++) {
+    if (response.status >= 300 && response.status < 400) {
+      const next = new URL(response.headers.get('location') ?? '', url);
+      if (next.origin === api.origin && !next.pathname.startsWith('/auth/')) {
+        landedAt = next;
+        break;
+      }
+      url = next;
+      response = await request(url);
+      continue;
+    }
+    const page = await response.text();
+    const action = response.status === 200 && !formShown ? formAction(page, 'kc-form-login') : undefined;
+    if (action === undefined) throw new Error(`page login stopped at ${url.pathname} with HTTP ${String(response.status)}: ${pageError(page)}`);
+    formShown = true;
+    url = new URL(action, url);
+    response = await request(url, { username, password, credentialId: '' });
+  }
+  if (landedAt === undefined) throw new Error('page login: too many redirects');
+
+  const value = jar.get(api, 'aiops_session');
+  if (value === undefined) throw new Error('page login: no session cookie was set');
+  const cookie = `aiops_session=${value}`;
+  const session = await fetch(new URL('/api/v1/session', api), { headers: { cookie } });
+  const body = (await session.json()) as { csrfToken?: string };
+  if (!session.ok || body.csrfToken === undefined) throw new Error(`page login: GET /api/v1/session answered ${String(session.status)}`);
+  return { cookie, csrfToken: body.csrfToken, formShown, landedAt };
 }

@@ -103,6 +103,9 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-dev-only-keycloak-admin-password}
       # Placeholder inside the realm file: the audience of MCP access tokens.
       MCP_RESOURCE: ${AIOPS_MCP_RESOURCE:-http://localhost:8400/mcp}
+      # Placeholders of the aiops-web page client: its secret and the api's public origin (ADR 0019).
+      AIOPS_WEB_CLIENT_SECRET: ${AIOPS_WEB_CLIENT_SECRET:-dev-only-web-client-secret}
+      AIOPS_PUBLIC_URL: ${AIOPS_PUBLIC_URL:-http://localhost:8400}
     volumes:
       - ./keycloak/realm-aiops.json:/opt/keycloak/data/import/realm-aiops.json:ro
     ports:
@@ -161,6 +164,16 @@ services:
       # Tokens carry the public issuer; keys are fetched on the internal network (ADR 0014).
       OIDC_ISSUER: ${AIOPS_KEYCLOAK_PUBLIC_URL:-http://localhost:8480}/realms/aiops
       OIDC_JWKS_URL: http://keycloak:8080/realms/aiops/protocol/openid-connect/certs
+      # Trusted-page login, credential vault keys (development-only defaults).
+      AIOPS_PUBLIC_URL: ${AIOPS_PUBLIC_URL:-http://localhost:8400}
+      OIDC_WEB_CLIENT_SECRET: ${AIOPS_WEB_CLIENT_SECRET:-dev-only-web-client-secret}
+      OIDC_TOKEN_URL: http://keycloak:8080/realms/aiops/protocol/openid-connect/token
+      AIOPS_MASTER_KEYS: ${AIOPS_MASTER_KEYS:-1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=}
+      AIOPS_SESSION_MAX_AGE_SECONDS: ${AIOPS_SESSION_MAX_AGE_SECONDS:-28800}
+      AIOPS_FRESH_AUTH_SECONDS: ${AIOPS_FRESH_AUTH_SECONDS:-300}
+      # Built into the image: the trusted pages' bundle and the shipped presets (CONN-8).
+      AIOPS_WEB_DIR: /app/web
+      AIOPS_PRESET_DIRS: /app/presets
     volumes:
       - ./config:/etc/aiops/config:ro
     ports:

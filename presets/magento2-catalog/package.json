@@ -1,6 +1,6 @@
 {
   "name": "@aiops/magento2-catalog",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Curated operations and manifests for Magento 2 catalog content.",
@@ -13,13 +13,22 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "preset.yaml",
+    "spec",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --project unit --passWithNoTests"
+    "test": "vitest run --project unit --passWithNoTests",
+    "record": "node scripts/record.mjs"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@aiops/adapters": "workspace:*",
+    "@aiops/config": "workspace:*",
+    "@aiops/connector-sdk": "workspace:*",
+    "@aiops/testing": "workspace:*"
+  }
 }

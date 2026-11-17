@@ -16,7 +16,8 @@
     "test:int": "turbo run test:int --concurrency=1",
     "test:e2e": "turbo run test:e2e --concurrency=1",
     "ci": "bash scripts/ci.sh",
-    "aiops-config": "node packages/config/dist/cli.js"
+    "aiops-config": "node packages/config/dist/cli.js",
+    "aiops": "node apps/api/dist/cli.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

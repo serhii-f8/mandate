@@ -1,0 +1,32 @@
+version: 1
+spec: spec.json
+auth: { scheme: bearer }
+test: { operation: fake.search_items, args: { brand: acme, fields: [sku] } }
+operations:
+  - id: fake.search_items
+    risk: read
+    title: Search items
+    description: Search items by brand.
+    fields_arg: fields
+    input_schema:
+      type: object
+      properties:
+        brand: { type: string }
+        fields: { type: array, items: { type: string } }
+      required: [brand, fields]
+      additionalProperties: false
+    upstream:
+      operation: listItems
+      query: { brand: { arg: brand } }
+      response: { items: items, total: total, fields_from_arg: fields }
+  - id: fake.get_item
+    risk: read
+    description: Get one item by SKU.
+    input_schema:
+      type: object
+      properties: { sku: { type: string } }
+      required: [sku]
+      additionalProperties: false
+    upstream:
+      operation: getItem
+      path_params: { sku: { arg: sku } }

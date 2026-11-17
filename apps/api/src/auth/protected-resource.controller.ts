@@ -2,6 +2,7 @@ import { Controller, Get, Inject, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { ApiEnv } from '@aiops/config';
 import { API_ENV } from '../tokens.js';
+import { Public } from '../web/access.js';
 
 export interface ProtectedResourceMetadata {
   readonly resource: string;
@@ -26,6 +27,7 @@ const ROOT = '/.well-known/oauth-protected-resource';
 
 /** Served at the root well-known URL and at the one suffixed with the MCP path. */
 @Controller()
+@Public()
 export class ProtectedResourceController {
   constructor(@Inject(API_ENV) private readonly env: ApiEnv) {}
 

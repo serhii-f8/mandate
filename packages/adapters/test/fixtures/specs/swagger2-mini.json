@@ -1,0 +1,44 @@
+{
+  "swagger": "2.0",
+  "info": { "title": "Mini catalog", "version": "1.0.0" },
+  "host": "shop.example.test",
+  "basePath": "/rest",
+  "consumes": ["application/json"],
+  "paths": {
+    "/V1/products/{sku}": {
+      "parameters": [
+        { "name": "sku", "in": "path", "required": true, "type": "string", "description": "Product SKU" }
+      ],
+      "put": {
+        "operationId": "putProduct",
+        "summary": "Replace a product",
+        "parameters": [
+          { "name": "q", "in": "query", "required": false, "type": "string" },
+          { "name": "Authorization", "in": "header", "required": false, "type": "string" },
+          { "name": "body", "in": "body", "required": true, "schema": { "$ref": "#/definitions/ProductBody" } }
+        ],
+        "responses": { "200": { "description": "ok" } }
+      }
+    }
+  },
+  "definitions": {
+    "ProductBody": {
+      "type": "object",
+      "required": ["product"],
+      "properties": {
+        "product": { "$ref": "#/definitions/Product" }
+      }
+    },
+    "Product": {
+      "type": "object",
+      "required": ["sku", "missing"],
+      "properties": {
+        "sku": { "type": "string", "example": "24-MB01" },
+        "price": { "type": "number", "minimum": 0, "exclusiveMinimum": true },
+        "status": { "type": "integer", "enum": [1, 2] },
+        "x-magento-note": { "type": "string" }
+      },
+      "x-vendor": true
+    }
+  }
+}

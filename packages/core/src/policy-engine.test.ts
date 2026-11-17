@@ -7,8 +7,8 @@ const objectSchema = { type: 'object' } as const;
 
 const config: PolicyConfiguration = {
   operations: [
-    { id: 'catalog.search_products', connection: 'magento', risk: 'read', description: 'Search', inputSchema: objectSchema, fieldsArg: 'fields' },
-    { id: 'support.lookup_order', connection: 'magento', risk: 'read', description: 'Lookup', inputSchema: objectSchema },
+    { id: 'catalog.search_products', toolName: 'catalog.search_products', source: 'config', connection: 'magento', risk: 'read', description: 'Search', inputSchema: objectSchema, fieldsArg: 'fields' },
+    { id: 'support.lookup_order', toolName: 'support.lookup_order', source: 'config', connection: 'magento', risk: 'read', description: 'Lookup', inputSchema: objectSchema },
   ],
   roles: [
     {

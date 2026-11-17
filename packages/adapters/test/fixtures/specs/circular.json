@@ -1,0 +1,101 @@
+{
+  "swagger": "2.0",
+  "info": { "title": "Magento-like catalog", "version": "2.4" },
+  "host": "shop.example.test",
+  "basePath": "/rest/default",
+  "schemes": ["https"],
+  "tags": [{ "name": "catalogProductRepositoryV1" }],
+  "paths": {
+    "/V1/products": {
+      "get": {
+        "tags": ["catalogProductRepositoryV1"],
+        "operationId": "listProducts",
+        "summary": "Get product list",
+        "parameters": [
+          { "name": "searchCriteria[filterGroups][0][filters][0][field]", "in": "query", "type": "string", "description": "Field" },
+          { "name": "searchCriteria[filterGroups][0][filters][0][value]", "in": "query", "type": "string" },
+          { "name": "searchCriteria[filterGroups][0][filters][0][conditionType]", "in": "query", "type": "string" },
+          { "name": "searchCriteria[sortOrders][0][direction]", "in": "query", "type": "string" },
+          { "name": "searchCriteria[pageSize]", "in": "query", "type": "integer" },
+          { "name": "searchCriteria[currentPage]", "in": "query", "type": "integer" },
+          { "name": "ids", "in": "query", "type": "array", "items": { "type": "integer" }, "collectionFormat": "multi" },
+          { "name": "Cookie", "in": "header", "type": "string" },
+          { "name": "X-Store", "in": "header", "type": "string" }
+        ],
+        "responses": {
+          "200": { "description": "ok", "schema": { "$ref": "#/definitions/catalog-data-product-search-results-interface" } }
+        }
+      }
+    },
+    "/V1/products/{sku}": {
+      "get": {
+        "operationId": "getProduct",
+        "parameters": [
+          { "name": "sku", "in": "path", "required": true, "type": "string" },
+          { "name": "editMode", "in": "query", "type": "boolean" }
+        ],
+        "responses": { "200": { "description": "ok", "schema": { "$ref": "#/definitions/catalog-data-product-interface" } } }
+      },
+      "put": {
+        "operationId": "saveProduct",
+        "parameters": [
+          { "name": "sku", "in": "path", "required": true, "type": "string" },
+          { "name": "catalogProductRepositoryV1SavePutBody", "in": "body", "required": true, "schema": {
+            "type": "object",
+            "required": ["product"],
+            "properties": { "product": { "$ref": "#/definitions/catalog-data-product-interface" } }
+          } }
+        ],
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/V1/categories/{categoryId}": {
+      "post": {
+        "parameters": [
+          { "name": "categoryId", "in": "path", "required": true, "type": "integer" },
+          { "name": "body", "in": "body", "schema": { "$ref": "#/definitions/catalog-data-category-tree-interface" } }
+        ],
+        "responses": { "200": { "description": "ok" } }
+      }
+    }
+  },
+  "definitions": {
+    "catalog-data-product-search-results-interface": {
+      "type": "object",
+      "required": ["items"],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/definitions/catalog-data-product-interface" } },
+        "total_count": { "type": "integer" }
+      }
+    },
+    "catalog-data-product-interface": {
+      "type": "object",
+      "required": ["sku"],
+      "properties": {
+        "sku": { "type": "string" },
+        "extension_attributes": { "$ref": "#/definitions/catalog-data-product-extension-interface" },
+        "product_links": { "type": "array", "items": { "$ref": "#/definitions/catalog-data-product-link-interface" } }
+      }
+    },
+    "catalog-data-product-extension-interface": {
+      "type": "object",
+      "properties": {
+        "bundle_product_options": { "type": "array", "items": { "$ref": "#/definitions/catalog-data-product-interface" } }
+      }
+    },
+    "catalog-data-product-link-interface": {
+      "type": "object",
+      "properties": {
+        "linked_product_sku": { "type": "string" },
+        "product": { "$ref": "#/definitions/catalog-data-product-interface" }
+      }
+    },
+    "catalog-data-category-tree-interface": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "integer" },
+        "children_data": { "type": "array", "items": { "$ref": "#/definitions/catalog-data-category-tree-interface" } }
+      }
+    }
+  }
+}

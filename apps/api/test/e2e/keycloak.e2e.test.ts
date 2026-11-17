@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { loginWithPkce, registerClient, startKeycloak, type LoginResult, type StartedKeycloak, type StartedPostgres } from '@aiops/testing';
+import { CookieJar, loginWithPkce, pageLogin, registerClient, startKeycloak, type LoginResult, type StartedKeycloak, type StartedPostgres } from '@aiops/testing';
 import { connectClient, freePort, modernRequest, rawPost, startApi, startDatabase, type RunningApi } from './helpers.js';
 
 const PASSWORD = 'dev-only-password';
@@ -47,7 +47,7 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => cimdServer.listen(0, '0.0.0.0', resolve));
   cimdClientId = `http://host.docker.internal:${String((cimdServer.address() as AddressInfo).port)}/client.json`;
 
-  keycloak = await startKeycloak({ mcpResource: resource });
+  keycloak = await startKeycloak({ mcpResource: resource, publicUrl: `http://127.0.0.1:${String(port)}` });
   await keycloak.bootstrap({ AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal' });
   api = await startApi(databaseUrl, { issuer: keycloak, port, resource });
 }, 300_000);
@@ -136,5 +136,40 @@ describe('AUTH-1 AUTH-3 real Keycloak tokens at the api', () => {
     const forged = `${header ?? ''}.${Buffer.from(JSON.stringify({ ...claims, groups: ['content'] })).toString('base64url')}.${signature ?? ''}`;
     const { body, headers } = modernRequest('tools/list');
     expect((await rawPost(api.url, body, { ...headers, authorization: `Bearer ${forged}` })).status).toBe(401);
+  });
+});
+
+describe('AUTH-5 login through aiops-web in the shipped realm', () => {
+  interface PageSession {
+    subject: string;
+    username?: string;
+    roles: string[];
+    authTime: string;
+  }
+  const sessionOf = async (cookie: string): Promise<PageSession> => (await (await fetch(`${api.url}/api/v1/session`, { headers: { cookie } })).json()) as PageSession;
+
+  it('AUTH-5 carol logs in to the pages and gets integration_admin from group admins; fresh login shows the form again', async () => {
+    const jar = new CookieJar();
+    const first = await pageLogin(api.url, 'carol', PASSWORD, { cookieJar: jar });
+    expect(first.formShown).toBe(true);
+    expect(first.landedAt.pathname).toBe('/app/');
+    const session = await sessionOf(first.cookie);
+    expect(session.username).toBe('carol');
+    expect(session.roles).toContain('integration_admin');
+
+    // SSO: no form, same auth_time.
+    const silent = await pageLogin(api.url, 'carol', PASSWORD, { cookieJar: jar });
+    expect(silent.formShown).toBe(false);
+    expect((await sessionOf(silent.cookie)).authTime).toBe(session.authTime);
+
+    // auth_time has second granularity.
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    const fresh = await pageLogin(api.url, 'carol', PASSWORD, { cookieJar: jar, fresh: true });
+    expect(fresh.formShown).toBe(true);
+    expect(Date.parse((await sessionOf(fresh.cookie)).authTime)).toBeGreaterThan(Date.parse(session.authTime));
+  });
+
+  it('AUTH-5 a wrong password never yields a session', async () => {
+    await expect(pageLogin(api.url, 'carol', 'wrong-password')).rejects.toThrow(/page login stopped/);
   });
 });

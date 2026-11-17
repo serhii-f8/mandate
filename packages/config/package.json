@@ -24,8 +24,11 @@
     "lint": "eslint .",
     "test": "vitest run --project unit --passWithNoTests"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "@aiops/testing": "workspace:*"
+  },
   "dependencies": {
+    "@aiops/connector-sdk": "workspace:*",
     "@aiops/core": "workspace:*",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",

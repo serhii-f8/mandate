@@ -23,6 +23,7 @@
   },
   "devDependencies": {},
   "dependencies": {
+    "@aiops/connector-sdk": "workspace:*",
     "@aiops/core": "workspace:*",
     "@testcontainers/postgresql": "12.2.1",
     "jose": "6.2.17",

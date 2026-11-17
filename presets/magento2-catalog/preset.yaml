@@ -1,0 +1,107 @@
+# Magento 2 catalog preset, first cut (CONN-8, design part 1 §6, ADR 0007: scope `all`).
+# Bind it to an openapi connection whose base_url ends in /rest/all, for example
+#   base_url: http://magento-sandbox/rest/all
+# Both operations read GET /V1/products with search criteria. The brand filter is always
+# filter group 0, so a grant scoped by brand holds upstream without a pre-read; a product of
+# another brand is simply not found. Items are flattened (custom_attributes) and projected to
+# exactly the requested `fields`, so a field nobody asked for (e.g. cost) is never returned.
+version: 1
+spec: spec/magento2-catalog.swagger.json
+auth: { scheme: bearer }
+test: { operation: catalog.search_products, args: { brand: acme, fields: [sku], page_size: 1 } }
+operations:
+  - id: catalog.search_products
+    risk: read
+    title: Search products
+    description: >-
+      Search the catalog for products of one brand, optionally by name pattern. Returns only
+      the requested fields of each product, at most 100 per page.
+    input_schema:
+      type: object
+      properties:
+        brand:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: The product brand (exact match).
+        fields: &fields
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Product fields to return.
+          items:
+            type: string
+            enum: [sku, name, price, status, visibility, type_id, description, short_description, brand, cost, url_key, meta_title, updated_at]
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+          description: Products per page (1-100, default 20).
+        current_page:
+          type: integer
+          minimum: 1
+          description: Page number, starting at 1 (default 1).
+        name_like:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Product name pattern; use % as wildcard, e.g. %lamp% (default %, any name).
+      required: [brand, fields]
+      additionalProperties: false
+    fields_arg: fields
+    upstream:
+      method: GET
+      path: /V1/products
+      query:
+        searchCriteria[filter_groups][0][filters][0][field]: brand
+        searchCriteria[filter_groups][0][filters][0][value]: { arg: brand }
+        searchCriteria[filter_groups][0][filters][0][condition_type]: eq
+        # Template values cannot concatenate, so the caller passes the whole LIKE pattern.
+        # Without one the pattern is % (every name), which keeps the filter group well formed.
+        searchCriteria[filter_groups][1][filters][0][field]: name
+        searchCriteria[filter_groups][1][filters][0][value]: { arg: name_like, default: '%' }
+        searchCriteria[filter_groups][1][filters][0][condition_type]: like
+        searchCriteria[pageSize]: { arg: page_size, default: 20 }
+        searchCriteria[currentPage]: { arg: current_page, default: 1 }
+      response: &response
+        items: items
+        total: total_count
+        flatten: { path: custom_attributes, key: attribute_code, value: value }
+        fields_from_arg: fields
+        max_items: 100
+  - id: catalog.get_product
+    risk: read
+    title: Get a product
+    description: >-
+      Look up one product of a brand by SKU. A SKU of another brand is not found. Returns
+      only the requested fields.
+    input_schema:
+      type: object
+      properties:
+        brand:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: The product brand (exact match).
+        sku:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: The product SKU (exact match).
+        fields: *fields
+      required: [brand, sku, fields]
+      additionalProperties: false
+    fields_arg: fields
+    upstream:
+      method: GET
+      path: /V1/products
+      query:
+        searchCriteria[filter_groups][0][filters][0][field]: brand
+        searchCriteria[filter_groups][0][filters][0][value]: { arg: brand }
+        searchCriteria[filter_groups][0][filters][0][condition_type]: eq
+        searchCriteria[filter_groups][1][filters][0][field]: sku
+        searchCriteria[filter_groups][1][filters][0][value]: { arg: sku }
+        searchCriteria[filter_groups][1][filters][0][condition_type]: eq
+        searchCriteria[pageSize]: 1
+      response: *response

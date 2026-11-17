@@ -1,0 +1,45 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/V1/products",
+    "query": {
+      "searchCriteria[filter_groups][0][filters][0][field]": "brand",
+      "searchCriteria[filter_groups][0][filters][0][value]": "acme",
+      "searchCriteria[filter_groups][0][filters][0][condition_type]": "eq",
+      "searchCriteria[filter_groups][1][filters][0][field]": "sku",
+      "searchCriteria[filter_groups][1][filters][0][value]": "GLOBEX-001",
+      "searchCriteria[filter_groups][1][filters][0][condition_type]": "eq",
+      "searchCriteria[pageSize]": "1"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "items": [],
+      "search_criteria": {
+        "filter_groups": [
+          {
+            "filters": [
+              {
+                "field": "brand",
+                "value": "acme",
+                "condition_type": "eq"
+              }
+            ]
+          },
+          {
+            "filters": [
+              {
+                "field": "sku",
+                "value": "GLOBEX-001",
+                "condition_type": "eq"
+              }
+            ]
+          }
+        ],
+        "page_size": 1
+      },
+      "total_count": 0
+    }
+  }
+}

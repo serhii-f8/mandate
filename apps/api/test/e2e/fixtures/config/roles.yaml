@@ -10,8 +10,14 @@ roles:
   - id: support_agent
     grants:
       - operation: support.lookup_order
+  - id: integration_admin
+    description: Enters and rotates upstream credentials on the trusted credential page (SEC-1, UI-5).
+    grants: []
+    manage_credentials: [magento-integration]
 role_mapping:
   - group: content
     roles: [content_manager]
   - group: support
     roles: [support_agent]
+  - group: admins
+    roles: [integration_admin]

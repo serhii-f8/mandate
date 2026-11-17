@@ -1,0 +1,17 @@
+version: 1
+connections:
+  - id: shop
+    adapter: openapi
+    base_url: https://shop.example.test/api
+    openapi: { spec: specs/shop.json, include: [listItems, getItem, deleteItem] }
+operations:
+  - id: shop.list_items
+    connection: shop
+    risk: read
+    description: List items.
+    upstream: { operation: listItems, response: { items: items } }
+  - id: shop.get_item
+    connection: shop
+    risk: read
+    description: Get one item.
+    upstream: { operation: getItem }
