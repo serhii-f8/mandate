@@ -18,7 +18,9 @@ import {
   type OperationInvoker,
   type PolicyDecision,
   type PolicyEngine,
+  type RateCounter,
 } from '@aiops/core';
+import { allowingRole } from '../changesets/allowing-role.js';
 import { toCallToolResult } from '../changesets/results.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
@@ -42,7 +44,21 @@ export interface PipelineDeps {
   readonly newId: () => string;
   /** Monotonic milliseconds. */
   readonly now: () => number;
+  /** Counts calls per (user, role) and UTC minute (POL-4, NFR-3: shared across instances). */
+  readonly rateCounter: RateCounter;
+  /** Wall-clock time, for the rate-limit window only. */
+  readonly wallClock: () => Date;
 }
+
+/** The start of the UTC minute containing `now`. */
+export function minuteWindow(now: Date): Date {
+  return new Date(Math.floor(now.getTime() / 60_000) * 60_000);
+}
+
+const RATE_LIMIT_UNAVAILABLE: CallToolResult = {
+  isError: true,
+  content: [{ type: 'text', text: 'Rate limit check unavailable; the call was not completed.' }],
+};
 
 export interface PipelineRequest {
   readonly caller: Caller;
@@ -106,7 +122,7 @@ const REASON_TEXT: Readonly<Record<DenyReason, (detail: string) => string>> = {
   out_of_scope: (d) => `argument '${d}' is outside your scope`,
   denied_field: (d) => `field '${d}' is denied`,
   field_not_allowed: (d) => `field '${d}' is not allowed`,
-  limit_exceeded: () => 'an execution limit of your role was reached',
+  limit_exceeded: (d) => `limit ${d} reached`,
 };
 
 function deniedResult(decision: PolicyDecision): CallToolResult {
@@ -197,11 +213,28 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
   const validArgs = args as Readonly<Record<string, unknown>>;
 
   // 3. Decision (POL-1..3), audited before anything runs (POL-8).
-  const decision: PolicyDecision =
+  let decision: PolicyDecision =
     builtin !== undefined
       ? { effect: 'allow', rule: 'builtin', roles: resolveRoles(req.caller.groups, configuration.policy.roleMapping) }
       : // Step 1 returned unless a built-in or a granted operation was found.
         engine.evaluate({ caller: req.caller, operationId: operation?.id ?? name, args: validArgs });
+  // POL-4: calls_per_minute per (user, role). Over the limit the deny replaces the allow, so the
+  // call still writes exactly one policy.decision row (POL-8). Built-ins are not counted.
+  if (builtin === undefined && decision.effect === 'allow') {
+    const role = allowingRole(decision.rule);
+    const limit = role === undefined ? undefined : configuration.limits.get(role)?.calls_per_minute;
+    if (role !== undefined && limit !== undefined) {
+      try {
+        const count = await deps.rateCounter.hit(`${req.caller.subject}|${role}`, minuteWindow(deps.wallClock()));
+        if (count > limit) {
+          decision = { effect: 'deny', rule: `role:${role}/limit:calls_per_minute`, reason: 'limit_exceeded', detail: 'calls_per_minute', roles: decision.roles };
+        }
+      } catch {
+        // Fail closed; the error may name the caller, so nothing of it is kept (SEC-3).
+        return RATE_LIMIT_UNAVAILABLE;
+      }
+    }
+  }
   const recorded = await recordDecision(deps, req, name, decision, operation);
   if (decision.effect === 'deny') return deniedResult(decision);
   if (!recorded) return AUDIT_UNAVAILABLE;

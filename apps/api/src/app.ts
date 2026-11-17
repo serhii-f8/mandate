@@ -11,7 +11,7 @@ import { createOpenApiAdapter } from '@aiops/adapters';
 import type { ReadAdapter } from '@aiops/connector-sdk';
 import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
 import { ExecutorUnavailable, resolveRoles, type AuditLog, type ChangeSetExecutor, type ChangeSetRepository, type CredentialVault, type OperationInvoker } from '@aiops/core';
-import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, PostgresSessionStore, PostgresTaskRepository, type Database } from '@aiops/db';
+import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, PostgresRateCounter, PostgresSessionStore, PostgresTaskRepository, type Database } from '@aiops/db';
 import { createBearerGate } from './auth/bearer-gate.js';
 import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
@@ -165,6 +165,8 @@ class AppModule {
                   audit,
                   newId: randomUUID,
                   now: () => performance.now(),
+                  rateCounter: new PostgresRateCounter(database.db),
+                  wallClock: () => new Date(),
                 },
                 { tasks: new PostgresTaskRepository(database.db), repository: changesets, executor: UNWIRED_EXECUTOR, audit, newId: randomUUID },
               ),

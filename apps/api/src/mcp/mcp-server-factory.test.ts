@@ -64,6 +64,8 @@ function handler(builtins: PipelineDeps['builtins'] = []) {
     audit,
     newId: () => '00000000-0000-4000-8000-000000000001',
     now: () => 0,
+    rateCounter: { hit: () => Promise.reject(new Error('not used')) },
+    wallClock: () => new Date(0),
   };
   const taskDeps: TaskHandlerDeps = {
     tasks: new InMemoryTaskRepository(),

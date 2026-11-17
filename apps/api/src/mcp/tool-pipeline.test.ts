@@ -1,12 +1,12 @@
 import { ProtocolError, type CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import type { AuditEventInput, Caller, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
+import type { AuditEventInput, Caller, RateCounter, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import { FakeInvoker, InMemoryAuditLog } from '@aiops/testing';
+import { FakeInvoker, InMemoryAuditLog, InMemoryRateCounter } from '@aiops/testing';
 import { callerFromAuthInfo } from '../auth/caller-from-auth.js';
 import { pingTool } from './builtin-tools.js';
 import type { BuiltinTool } from './tool-catalog.js';
-import { callTool, listTools, snapshotOf, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
+import { callTool, listTools, minuteWindow, snapshotOf, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 
 /** Narrows an answer to a plain tool result; these tests never ask for a task. */
@@ -78,6 +78,8 @@ function setup() {
     audit,
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
     now: () => 0,
+    rateCounter: new InMemoryRateCounter(),
+    wallClock: () => new Date('2026-11-17T12:00:30.000Z'),
   };
   const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot(), tasks: false });
   return { audit, invoker, deps, req };
@@ -240,7 +242,8 @@ function setupWith(config: LoadedConfiguration, invoker: OperationInvoker) {
     invokerFor: () => invoker,
     audit,
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
-    now: () => 0,
+    now: () => 0,    rateCounter: new InMemoryRateCounter(),
+    wallClock: () => new Date(0),
   };
   const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot(), tasks: false });
   return { audit, deps, req };
@@ -326,6 +329,8 @@ describe('SEC-1 POL-2 the operation runs under the snapshot the decision used', 
       audit,
       newId: () => '00000000-0000-4000-8000-000000000001',
       now: () => 0,
+      rateCounter: new InMemoryRateCounter(),
+      wallClock: () => new Date(0),
     };
     const req: PipelineRequest = { caller: alice, correlationId: 'corr-9', snapshot: deps.snapshot(), tasks: false };
     current = OVERRIDDEN; // a reload lands while the request is in flight
@@ -406,5 +411,73 @@ describe('MCP-7 AUD-1 task answers', () => {
     await callTool({ ...deps, builtins: [probe] }, { ...req(alice), tasks: true }, 'probe', {});
     expect(seen).toEqual([true]);
     expect(audit.events.find((e) => e.action === 'tool.call')?.details).toMatchObject({ taskId: 't' });
+  });
+});
+
+const LIMITED_SOURCES = {
+  ...SOURCES,
+  'roles.yaml': SOURCES['roles.yaml'].replace(
+    '  - id: content_manager\n',
+    '  - id: content_manager\n    limits: { calls_per_minute: 2 }\n',
+  ),
+};
+const limitedLoaded = await loadConfigurationSources(Object.entries(LIMITED_SOURCES).map(([file, text]) => ({ file, text })));
+if (!limitedLoaded.ok) throw new Error(JSON.stringify(limitedLoaded.issues));
+const LIMITED: LoadedConfiguration = limitedLoaded.configuration;
+const SEARCH = { brand: 'acme', fields: ['sku'] };
+
+function limitedSetup(rateCounter?: RateCounter) {
+  const s = setup();
+  const config = LIMITED;
+  const counter = rateCounter ?? new InMemoryRateCounter();
+  const deps: PipelineDeps = { ...s.deps, snapshot: () => snapshotOf(config), rateCounter: counter };
+  return { ...s, deps, req: (c: Caller): PipelineRequest => ({ caller: c, correlationId: 'corr-1', snapshot: deps.snapshot(), tasks: false }) };
+}
+
+describe('POL-4 calls_per_minute', () => {
+  it('the third call in a minute is denied and audited with rule role:<id>/limit:calls_per_minute', async () => {
+    const { deps, req, audit, invoker } = limitedSetup();
+    await callTool(deps, req(alice), 'catalog.search_products', SEARCH);
+    await callTool(deps, req(alice), 'catalog.search_products', SEARCH);
+    const third = plain(await callTool(deps, req(alice), 'catalog.search_products', SEARCH));
+    expect(invoker.calls).toHaveLength(2);
+    expect(third.isError).toBe(true);
+    expect(text(third)).toBe('Denied by policy: limit calls_per_minute reached (rule role:content_manager/limit:calls_per_minute)');
+    const decisions = audit.events.filter((e) => e.action === 'policy.decision');
+    expect(decisions).toHaveLength(3);
+    expect(decisions[2]).toMatchObject({ decision: 'deny', details: { rule: 'role:content_manager/limit:calls_per_minute', reason: 'limit_exceeded' } });
+    expect(decisions[0]).toMatchObject({ decision: 'allow' });
+  });
+
+  it('a new UTC minute opens a new bucket', async () => {
+    expect(minuteWindow(new Date('2026-11-17T12:00:59.999Z')).getTime()).not.toBe(minuteWindow(new Date('2026-11-17T12:01:00.000Z')).getTime());
+    const keys: string[] = [];
+    const counter: RateCounter = { hit: (key) => { keys.push(key); return Promise.resolve(1); } };
+    const { deps, req } = limitedSetup(counter);
+    await callTool(deps, req(alice), 'catalog.search_products', SEARCH);
+    expect(keys).toEqual(['alice-id|content_manager']);
+  });
+
+  it('built-ins are not counted', async () => {
+    const hits: string[] = [];
+    const { deps, req } = limitedSetup({ hit: (key) => { hits.push(key); return Promise.resolve(1); } });
+    for (let i = 0; i < 3; i++) await callTool(deps, req(alice), 'ping', {});
+    expect(hits).toEqual([]);
+  });
+
+  it('a role without calls_per_minute never calls the counter', async () => {
+    const hits: string[] = [];
+    const { deps, req } = setup();
+    const counted: PipelineDeps = { ...deps, rateCounter: { hit: (key) => { hits.push(key); return Promise.resolve(1); } } };
+    await callTool(counted, req(alice), 'catalog.search_products', SEARCH);
+    expect(hits).toEqual([]);
+  });
+
+  it('a failing counter fails closed', async () => {
+    const { deps, req, invoker } = limitedSetup({ hit: () => Promise.reject(new Error('db down')) });
+    const answer = plain(await callTool(deps, req(alice), 'catalog.search_products', SEARCH));
+    expect(answer.isError).toBe(true);
+    expect(text(answer)).toBe('Rate limit check unavailable; the call was not completed.');
+    expect(invoker.calls).toEqual([]);
   });
 });
