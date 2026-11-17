@@ -22,6 +22,8 @@ export interface ChangeSetOptions {
 export interface PreparedOptions extends ChangeSetOptions {
   /** Stored instead of the hash of the stored items (to provoke a mismatch). */
   readonly hash?: string;
+  /** Builds the stored item of a target (default: `{ name }` before and after). */
+  readonly itemFor?: (targetId: string) => ChangeItemRecord;
   /** Moves the change-set to `executing` with this execution request. */
   readonly execute?: ExecuteOptions;
 }
@@ -65,7 +67,7 @@ export async function createPrepared(
   opts: PreparedOptions = {},
 ): Promise<ChangeSetRecord> {
   const created = await createPreparing(repository, opts);
-  await repository.appendItems(created.id, targetIds(items).map(pendingItem));
+  await repository.appendItems(created.id, targetIds(items).map(opts.itemFor ?? pendingItem));
   const hash = opts.hash ?? (await hashStoredItems(repository, created));
   const prepared = await repository.completePreparation(
     created.id,
