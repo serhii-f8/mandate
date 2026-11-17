@@ -22,6 +22,8 @@ let databaseUrl: string;
 let issuer: TestIssuer;
 let api: RunningApi;
 let configDir: string;
+/** Built-in tools every authenticated user sees (MCP-8). */
+const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset'];
 const invoker = new FakeInvoker();
 let alice: string;
 let bob: string;
@@ -71,8 +73,8 @@ describe('MCP-2 alice (content) and bob (support) see different tool lists', () 
     it(`MCP-2 ${era} era`, async () => {
       const a = await connectClient({ era, baseUrls: [api.url], token: alice });
       const b = await connectClient({ era, baseUrls: [api.url], token: bob });
-      expect((await a.listTools()).tools.map((t) => t.name)).toEqual(['ping', 'catalog.search_products']);
-      expect((await b.listTools()).tools.map((t) => t.name)).toEqual(['ping', 'support.lookup_order']);
+      expect((await a.listTools()).tools.map((t) => t.name)).toEqual([...BUILTIN_NAMES, 'catalog.search_products']);
+      expect((await b.listTools()).tools.map((t) => t.name)).toEqual([...BUILTIN_NAMES, 'support.lookup_order']);
       await a.close();
       await b.close();
     });

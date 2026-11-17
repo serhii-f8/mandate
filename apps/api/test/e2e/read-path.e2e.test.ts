@@ -10,6 +10,8 @@ import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPost
 import { createLogger } from '../../src/logger.js';
 import { auditRows, connectClient, modernRequest, rawPost, startApi, startDatabase, tokenFor, vaultOf, type RunningApi } from './helpers.js';
 
+/** Built-in tools every authenticated user sees (MCP-8). */
+const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset'];
 const READ_CONFIG = fileURLToPath(new URL('./fixtures/read-config', import.meta.url));
 /** Obviously fake; the tests prove it never leaves the adapter (SEC-3). */
 const UPSTREAM_TOKEN = 'e2e-only-upstream-token-0123456789';
@@ -133,7 +135,7 @@ describe('MCP-9 overridden tool name', () => {
   it('MCP-9 tools/list shows the override name and a call by it reaches the operation', async () => {
     const client = await connectClient({ era: 'modern', baseUrls: [api.url], token: bob });
     try {
-      expect((await client.listTools()).tools.map((t) => t.name)).toEqual(['ping', 'support.find_order']);
+      expect((await client.listTools()).tools.map((t) => t.name)).toEqual([...BUILTIN_NAMES, 'support.find_order']);
     } finally {
       await client.close();
     }

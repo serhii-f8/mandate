@@ -18,7 +18,7 @@ import { ProtectedResourceController } from './auth/protected-resource.controlle
 import { HealthController } from './health/health.controller.js';
 import { bodyErrorHandler } from './http/body-errors.js';
 import { createLogger, PinoNestLogger } from './logger.js';
-import { BUILTIN_TOOLS } from './mcp/builtin-tools.js';
+import { createBuiltinTools } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
 import { createServerFactory } from './mcp/mcp-server-factory.js';
 import { snapshotOf, type PipelineDeps } from './mcp/tool-pipeline.js';
@@ -143,12 +143,14 @@ class AppModule {
         {
           provide: MCP_HANDLER,
           inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE],
-          useFactory: (audit: AuditLog, vault: CredentialVault, database: Database) =>
-            createMcpHandler(
+          useFactory: (audit: AuditLog, vault: CredentialVault, database: Database) => {
+            // One repository for the write path and the built-in change-set tools.
+            const changesets = overrides.changesets ?? new PostgresChangeSetRepository(database.db);
+            return createMcpHandler(
               createServerFactory({
                 snapshot: () => snapshotOf(configuration.current),
-                builtins: BUILTIN_TOOLS,
-                invokerFor: invokerFactory(overrides.invoker, vault, adapter, overrides.changesets ?? new PostgresChangeSetRepository(database.db), logger),
+                builtins: createBuiltinTools({ repository: changesets, newId: randomUUID, now: () => new Date() }),
+                invokerFor: invokerFactory(overrides.invoker, vault, adapter, changesets, logger),
                 audit,
                 newId: randomUUID,
                 now: () => performance.now(),
@@ -160,7 +162,8 @@ class AppModule {
                   logger.warn({ err: error.message }, 'mcp request rejected');
                 },
               },
-            ),
+            );
+          },
         },
         {
           provide: CONNECTION_TEST,

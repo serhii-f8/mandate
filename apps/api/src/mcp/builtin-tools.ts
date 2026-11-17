@@ -1,4 +1,7 @@
 import { createSchemaCompiler } from '@aiops/config';
+import type { ChangeSetRepository } from '@aiops/core';
+import { createChangesetTools } from './changeset-tools.js';
+import { listMyOperationsTool } from './operations-tool.js';
 import type { BuiltinTool } from './tool-catalog.js';
 
 const PING_SCHEMA = {
@@ -24,4 +27,13 @@ export const pingTool: BuiltinTool = {
   },
 };
 
-export const BUILTIN_TOOLS: readonly BuiltinTool[] = [pingTool];
+export interface BuiltinToolDeps {
+  readonly repository: ChangeSetRepository;
+  readonly newId: () => string;
+  readonly now: () => Date;
+}
+
+/** Every built-in tool (MCP-8); their names are reserved. */
+export function createBuiltinTools(deps: BuiltinToolDeps): readonly BuiltinTool[] {
+  return [pingTool, listMyOperationsTool, ...createChangesetTools(deps)];
+}

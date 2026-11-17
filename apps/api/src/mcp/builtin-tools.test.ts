@@ -3,16 +3,18 @@ import type { Caller } from '@aiops/core';
 import { pingTool } from './builtin-tools.js';
 
 const caller: Caller = { subject: 'alice', groups: [] };
+// The ping handler uses nothing from the context but the caller.
+const ctx = { caller, snapshot: undefined as never, correlationId: 'c' };
 
 describe('ping built-in tool', () => {
   it('answers pong', async () => {
-    const result = await pingTool.handler({}, caller);
+    const result = await pingTool.handler({}, ctx);
     expect(result.content).toEqual([{ type: 'text', text: 'pong' }]);
     expect(result.structuredContent).toMatchObject({ pong: true, message: null });
   });
 
   it('echoes the message', async () => {
-    const result = await pingTool.handler({ message: 'hi' }, caller);
+    const result = await pingTool.handler({ message: 'hi' }, ctx);
     expect(result.content).toEqual([{ type: 'text', text: 'pong: hi' }]);
     expect(typeof (result.structuredContent as { serverTime: unknown }).serverTime).toBe('string');
   });
