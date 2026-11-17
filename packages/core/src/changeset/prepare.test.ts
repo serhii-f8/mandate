@@ -444,3 +444,108 @@ describe('NFR-7 preparation streams items in pages', () => {
     expect(out.changeset.hash).toBe(hasher.digest());
   });
 });
+
+describe('CS-1 CS-6 preparation fails closed on internal errors and lost races', () => {
+  const cancelAudit = {
+    id: 'x',
+    actor: 'alice',
+    action: 'changeset.transition',
+    subject: 'catalog.update_content',
+    outcome: 'ok',
+    correlationId: 'c',
+    details: {},
+  } as const;
+
+  it('CS-1 a throwing reader marks the change-set failed with internal', async () => {
+    const reader = new ScriptedReader(
+      {},
+      {
+        readOverride: () => {
+          throw new Error('socket exploded with secret detail');
+        },
+      },
+    );
+    const { deps, repository } = setup(reader);
+    const out = await prepareChangeSet(deps, request(explicitArgs));
+    expect(out).toEqual({ ok: false, changesetId: 'id-1', code: 'internal' });
+    expect(repository.sets.get('id-1')).toMatchObject({ status: 'failed', errorCode: 'internal' });
+    expect(repository.audit.at(-1)?.details).toMatchObject({ from: 'preparing', to: 'failed', errorCode: 'internal' });
+  });
+
+  it('CS-1 appendItems rejecting while still preparing marks the change-set failed with internal', async () => {
+    const reader = new ScriptedReader({ A: product('A'), B: product('B') });
+    const { deps, repository } = setup(reader);
+    repository.appendItems = () => Promise.reject(new Error('disk full'));
+    const out = await prepareChangeSet(deps, request(explicitArgs));
+    expect(out).toEqual({ ok: false, changesetId: 'id-1', code: 'internal' });
+    expect(repository.sets.get('id-1')).toMatchObject({ status: 'failed', errorCode: 'internal' });
+  });
+
+  it('CS-1 when marking failed throws too, the original error propagates', async () => {
+    const original = new Error('reader down');
+    const reader = new ScriptedReader(
+      {},
+      {
+        readOverride: () => {
+          throw original;
+        },
+      },
+    );
+    const { deps, repository } = setup(reader);
+    repository.completePreparation = () => Promise.reject(new Error('database down'));
+    await expect(prepareChangeSet(deps, request(explicitArgs))).rejects.toBe(original);
+  });
+
+  it('CS-6 a cancellation landing during hashing is reported as cancelled and not overwritten', async () => {
+    const reader = new ScriptedReader({ A: product('A'), B: product('B') });
+    const { deps, repository } = setup(reader);
+    const page = repository.itemsPage.bind(repository);
+    repository.itemsPage = async (id, query) => {
+      await repository.transition(id, ['preparing'], 'cancelled', cancelAudit);
+      return page(id, query);
+    };
+    const out = await prepareChangeSet(deps, request(explicitArgs));
+    expect(out).toEqual({ ok: false, changesetId: 'id-1', code: 'cancelled' });
+    expect(repository.sets.get('id-1')?.status).toBe('cancelled');
+    expect(repository.sets.get('id-1')?.hash).toBeUndefined();
+  });
+});
+
+describe('OPS-4 selector pages are complete or the preparation fails', () => {
+  const selectorArgs = { brand: 'acme', changes: { description: 'new' } };
+  const all = Object.fromEntries(['A', 'B', 'C'].map((s) => [s, product(s)]));
+
+  it('OPS-4 a selector row without a usable id fails incomplete_read', async () => {
+    for (const bad of [{}, { sku: null }, { sku: { nested: 1 } }]) {
+      const reader = new ScriptedReader(all, {
+        selector: () => ({ ok: true, items: [{ sku: 'A' }, bad], truncated: false }),
+      });
+      const { deps, repository } = setup(reader);
+      const out = await prepareChangeSet(deps, request(selectorArgs));
+      expect(out).toEqual({ ok: false, changesetId: 'id-1', code: 'incomplete_read' });
+      expect(repository.sets.get('id-1')?.status).toBe('failed');
+    }
+  });
+
+  it('OPS-4 a short selector page before the reported total fails incomplete_read', async () => {
+    const pages: Record<number, string[]> = { 1: ['A', 'B'], 2: ['C'] };
+    const reader = new ScriptedReader(all, {
+      selector: (p) => ({ ok: true, items: (pages[p] ?? []).map((sku) => ({ sku })), total: 5, truncated: false }),
+    });
+    const { deps } = setup(reader);
+    expect(await prepareChangeSet(deps, request(selectorArgs))).toEqual({
+      ok: false,
+      changesetId: 'id-1',
+      code: 'incomplete_read',
+    });
+  });
+
+  it('OPS-4 an empty selector page before the reported total fails incomplete_read', async () => {
+    const pages: Record<number, string[]> = { 1: ['A', 'B'] };
+    const reader = new ScriptedReader(all, {
+      selector: (p) => ({ ok: true, items: (pages[p] ?? []).map((sku) => ({ sku })), total: 3, truncated: false }),
+    });
+    const { deps } = setup(reader);
+    expect(await prepareChangeSet(deps, request(selectorArgs))).toMatchObject({ ok: false, code: 'incomplete_read' });
+  });
+});

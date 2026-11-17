@@ -16,6 +16,7 @@ export const CHANGESET_TEXT = {
       `${op} could not prepare a change-set: the current state could not be read completely.`,
     cancelled: (op: string) =>
       `${op} could not prepare a change-set: it was cancelled or expired during preparation.`,
+    internal: (op: string) => `${op} could not be prepared because of an internal error.`,
   },
 } as const;
 

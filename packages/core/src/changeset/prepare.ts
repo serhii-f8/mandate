@@ -150,6 +150,7 @@ export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): 
     return inserted;
   };
 
+  let changeset: ChangeSetRecord | undefined;
   try {
     if (explicitIds !== undefined) {
       if (explicitIds.length > manifest.maxTargets) throw new Failure('too_many_targets');
@@ -168,21 +169,26 @@ export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): 
             ...(selectorFieldsArg === undefined ? {} : { [selectorFieldsArg]: [manifest.idField] }),
           }),
         );
-        if (page.items.length === 0) break;
         const ids = [
           ...new Set(
-            page.items.flatMap((r) => {
+            page.items.map((r) => {
               const v = r[manifest.idField];
-              return typeof v === 'string' || typeof v === 'number' ? [String(v)] : [];
+              // A row we cannot identify would silently shorten the target list.
+              if (typeof v !== 'string' && typeof v !== 'number') throw new Failure('incomplete_read');
+              return String(v);
             }),
           ),
         ];
         let inserted = 0;
         for (const chunk of chunks(ids, manifest.batchSize)) inserted += await processChunk(chunk);
         seen += page.items.length;
-        if (inserted === 0) break;
-        if (page.items.length < selector.pageSize) break;
-        if (page.total !== undefined && seen >= page.total) break;
+        const totalReached = page.total !== undefined && seen >= page.total;
+        if (page.items.length < selector.pageSize) {
+          // A short (or empty) page ends the list only when it agrees with the reported total.
+          if (page.total !== undefined && !totalReached) throw new Failure('incomplete_read');
+          break;
+        }
+        if (inserted === 0 || totalReached) break;
       }
       if (stored === 0) throw new Failure('targets_missing');
     }
@@ -198,22 +204,30 @@ export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): 
       after = last.targetId;
     }
     const excluded = Object.values(stats.excluded).reduce((sum, n) => sum + n, 0);
-    const changeset = await repository.completePreparation(
+    changeset = await repository.completePreparation(
       id,
       { status: 'prepared', hash: hasher.digest(), stats, preparedAt: deps.now() },
       event('preparing', 'prepared', { included: stats.included, excluded }),
     );
-    if (changeset === undefined) return { ok: false, changesetId: id, code: 'cancelled' };
-    const firstItems = await repository.itemsPage(id, { limit: FIRST_ITEMS });
-    return { ok: true, changeset, firstItems };
   } catch (err) {
     if (err instanceof LostRace) return { ok: false, changesetId: id, code: 'cancelled' };
-    if (!(err instanceof Failure)) throw err;
-    const failed = await repository.completePreparation(
-      id,
-      { status: 'failed', errorCode: err.code },
-      event('preparing', 'failed', { errorCode: err.code }),
-    );
-    return { ok: false, changesetId: id, code: failed === undefined ? 'cancelled' : err.code };
+    // Design §4.1: any failure after creation marks the change-set failed with a fixed code.
+    const code = err instanceof Failure ? err.code : 'internal';
+    let failed: ChangeSetRecord | undefined;
+    try {
+      failed = await repository.completePreparation(
+        id,
+        { status: 'failed', errorCode: code },
+        event('preparing', 'failed', { errorCode: code }),
+      );
+    } catch {
+      // Marking is best effort; the original error is the one worth reporting.
+      throw err;
+    }
+    return { ok: false, changesetId: id, code: failed === undefined ? 'cancelled' : code };
   }
+  if (changeset === undefined) return { ok: false, changesetId: id, code: 'cancelled' };
+  // Outside the try: once prepared, the change-set must not be marked failed by a later read error.
+  const firstItems = await repository.itemsPage(id, { limit: FIRST_ITEMS });
+  return { ok: true, changeset, firstItems };
 }

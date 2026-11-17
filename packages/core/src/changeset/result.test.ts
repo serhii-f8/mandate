@@ -84,6 +84,10 @@ describe('SEC-3 preparation error results', () => {
         isError: true,
       });
     }
+    expect(preparationErrorResult(op, 'internal', 'cs-1')).toEqual({
+      text: `${op} could not be prepared because of an internal error (change-set cs-1).`,
+      isError: true,
+    });
     expect(preparationErrorResult(op, 'timeout', 'cs-1').text).toBe(
       `${READ_RESULT_TEXT.errors.timeout(op).slice(0, -1)} (change-set cs-1).`,
     );
