@@ -85,7 +85,23 @@ export {
 } from './changeset/execution.js';
 export { changesetTransitionEvent, type ChangesetTransitionInput } from './changeset/audit.js';
 export { buildItems, inScope, touchedFields } from './changeset/items.js';
-export { classifyForWrite, type WriteClassification, type WriteOutcomeCode } from './changeset/writer.js';
+export {
+  type BulkItemState,
+  type BulkWriter,
+  classifyForWrite,
+  type Clock,
+  ManifestBatchWriter,
+  type ManifestBatchWriterDeps,
+  POLL_FACTOR,
+  POLL_GIVE_UP_MS,
+  POLL_INITIAL_MS,
+  POLL_MAX_MS,
+  RetryableWriteError,
+  type RetryableWriteCode,
+  UnsupportedWriter,
+  type WriteClassification,
+  type WriteOutcomeCode,
+} from './changeset/writer.js';
 export {
   createChangeSet,
   resolveTemplates,
