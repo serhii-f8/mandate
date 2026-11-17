@@ -55,3 +55,11 @@ export type {
 } from './changeset/ports.js';
 export { changesetTransitionEvent, type ChangesetTransitionInput } from './changeset/audit.js';
 export { buildItems, touchedFields } from './changeset/items.js';
+export { prepareChangeSet, type PrepareDeps, type PrepareOutcome, type PrepareRequest } from './changeset/prepare.js';
+export {
+  CHANGESET_TEXT,
+  decodeCursor,
+  encodeCursor,
+  preparationErrorResult,
+  preparedResult,
+} from './changeset/result.js';
