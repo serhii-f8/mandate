@@ -41,7 +41,7 @@ operations:
       properties:
         brand: { type: string }
         skus: { type: array, items: { type: string } }
-        changes: { type: object, properties: { name: { type: string }, description: { type: string } } }
+        changes: { type: object, properties: { name: { type: string }, description: { type: string } }, additionalProperties: false }
       required: [brand, changes]
     manifest:
       id_field: sku

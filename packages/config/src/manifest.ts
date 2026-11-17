@@ -149,15 +149,24 @@ export function checkManifests(input: ManifestCheckInput): void {
 
     // Check 3 (write side).
     if (op.schemaKnown) {
-      if (manifest.ids_arg !== undefined && propertySchema(schema, manifest.ids_arg)?.type !== 'array') {
-        mAt(['ids_arg'], 'must name a top-level array property of input_schema');
+      if (manifest.ids_arg !== undefined) {
+        const ids = propertySchema(schema, manifest.ids_arg);
+        const items = ids?.items;
+        const itemType = typeof items === 'object' && items !== null ? (items as Record<string, unknown>).type : undefined;
+        // Target IDs are compared as strings: only string or integer items convert without loss.
+        if (ids?.type !== 'array' || (itemType !== 'string' && itemType !== 'integer')) {
+          mAt(['ids_arg'], 'must name a top-level array property of input_schema whose items are strings or integers');
+        }
       }
       const values = propertySchema(schema, manifest.values_arg);
       if (values?.type !== 'object') mAt(['values_arg'], 'must name a top-level object property of input_schema');
       else if (!requiredOf(schema).has(manifest.values_arg)) mAt(['values_arg'], 'must name a required property of input_schema');
       else {
         const declared = values.properties;
-        if (typeof declared === 'object' && declared !== null) {
+        // Keys outside fields would be dropped silently; the schema must refuse them instead.
+        if (typeof declared !== 'object' || declared === null || values.additionalProperties !== false) {
+          mAt(['values_arg'], 'must declare properties and additionalProperties: false in input_schema');
+        } else {
           const fields = new Set(manifest.fields);
           const outside = Object.keys(declared).filter((k) => !fields.has(k));
           if (outside.length > 0) mAt(['values_arg'], 'declares properties that are not in fields');
@@ -213,6 +222,9 @@ export function checkManifests(input: ManifestCheckInput): void {
         if (!known.has(manifest.id_field)) mAt(['id_field'], notReturned);
         manifest.fields.forEach((f, index) => {
           if (!known.has(f)) mAt(['fields', index], notReturned);
+        });
+        manifest.required_fields.forEach((f, index) => {
+          if (!known.has(f)) mAt(['required_fields', index], notReturned);
         });
         for (const [arg, field] of Object.entries(manifest.scope_args)) {
           if (!known.has(field)) mAt(['scope_args', arg], notReturned);

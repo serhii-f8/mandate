@@ -72,7 +72,7 @@ operations:
         brand: { type: string }
         skus: { type: array, items: { type: string } }
         name_like: { type: string }
-        changes: { type: object, properties: { name: { type: string }, description: { type: string } } }
+        changes: { type: object, properties: { name: { type: string }, description: { type: string } }, additionalProperties: false }
       required: [brand, changes]
     manifest:
       id_field: sku
@@ -225,8 +225,25 @@ describe('OPS-2 manifest configuration', () => {
     ok(await load({ 'write.yaml': WRITE.replace('rollback:', 'batch_size: 50\n      rollback:'), 'reads.yaml': READS.replace('maxItems: 100', 'maxItems: 50') }));
   });
 
-  it('OPS-2 check 3: an undeclared values_arg properties list is not checked against fields', async () => {
-    ok(await load({ 'write.yaml': WRITE.replace('changes: { type: object, properties: { name: { type: string }, description: { type: string } } }', 'changes: { type: object }') }));
+  const CHANGES = 'changes: { type: object, properties: { name: { type: string }, description: { type: string } }, additionalProperties: false }';
+
+  it('OPS-2 check 3: values_arg must declare its properties and additionalProperties false, so no key is silently dropped', async () => {
+    await expectIssue((t) => t.replace(CHANGES, 'changes: { type: object }'), `${M}.values_arg`, 'changes');
+    await expectIssue((t) => t.replace(CHANGES, 'changes: { type: object, additionalProperties: false }'), `${M}.values_arg`, 'changes');
+    await expectIssue((t) => t.replace(CHANGES, 'changes: { type: object, properties: { name: { type: string } } }'), `${M}.values_arg`, 'changes');
+    await expectIssue(
+      (t) => t.replace(CHANGES, 'changes: { type: object, properties: { name: { type: string } }, additionalProperties: true }'),
+      `${M}.values_arg`,
+      'changes',
+    );
+  });
+
+  it('OPS-2 check 3: ids_arg items are strings or integers', async () => {
+    const SKUS = 'skus: { type: array, items: { type: string } }\n        name_like';
+    await expectIssue((t) => t.replace(SKUS, 'skus: { type: array, items: { type: number } }\n        name_like'), `${M}.ids_arg`, 'skus');
+    await expectIssue((t) => t.replace(SKUS, 'skus: { type: array }\n        name_like'), `${M}.ids_arg`, 'skus');
+    await expectIssue((t) => t.replace(SKUS, 'skus: { type: array, items: { type: object } }\n        name_like'), `${M}.ids_arg`, 'skus');
+    ok(await load({ 'write.yaml': WRITE.replace(SKUS, 'skus: { type: array, items: { type: integer } }\n        name_like') }));
   });
 
   it('OPS-2 check 4: scope_args keys are write arguments referenced by the reads, and cover every grant scope argument', async () => {
@@ -248,6 +265,7 @@ describe('OPS-2 manifest configuration', () => {
     await expectIssue((t) => t.replace('id_field: sku', 'id_field: entity_code'), `${M}.id_field`, 'entity_code');
     await expectIssue((t) => t.replace('fields: [name, description]', 'fields: [name, description, meta_title]'), `${M}.fields[2]`, 'meta_title');
     await expectIssue((t) => t.replace('scope_args: { brand: brand }', 'scope_args: { brand: manufacturer }'), `${M}.scope_args.brand`, 'manufacturer');
+    await expectIssue((t) => t.replace('fields: [name, description]', 'fields: [name, description]\n      required_fields: [name, meta_title]'), `${M}.required_fields[1]`, 'meta_title');
     // Without an enum (selector op declares plain strings) nothing is checked.
     ok(await load({ 'reads.yaml': READS.replace(`items: { enum: ${FIELD_ENUM} }`, 'items: { type: string }'), 'write.yaml': WRITE.replace('id_field: sku', 'id_field: entity_code') }));
   });
