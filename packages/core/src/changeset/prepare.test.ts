@@ -250,6 +250,15 @@ describe('CS-1 CS-2 CS-4 preparation', () => {
     expect(reader.calls[0]?.args).toEqual({ brand: 'acme', skus: ['A'] });
   });
 
+  it('CS-3 required fields the call does not touch are requested from the read', async () => {
+    const reader = new ScriptedReader({ A: { ...product('A'), name: 'Name A' } });
+    const { deps } = setup(reader);
+    const out = await prepareChangeSet(deps, request({ ...explicitArgs, skus: ['A'] }, { requiredFields: ['name'] }));
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(reader.calls[0]?.args.fields).toEqual(['sku', 'brand', 'description', 'name']);
+    expect(out.firstItems.map((i) => i.status)).toEqual(['pending']);
+  });
+
   it('CS-2 firstItems holds at most 20 items in item order', async () => {
     const skus = Array.from({ length: 30 }, (_, i) => `S${String(i).padStart(2, '0')}`);
     const reader = new ScriptedReader(Object.fromEntries(skus.map((s) => [s, product(s)])));

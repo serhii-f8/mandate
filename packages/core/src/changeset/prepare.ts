@@ -122,7 +122,13 @@ export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): 
 
   const readFieldsArg = req.readFieldsArg(manifest.readBefore.operation);
   const readFields = [
-    ...new Set([manifest.idField, ...Object.values(manifest.scopeArgs), ...touchedFields(manifest, args)]),
+    // Required fields are checked on every record (CS-3), so they are read even when the call does not touch them.
+    ...new Set([
+      manifest.idField,
+      ...Object.values(manifest.scopeArgs),
+      ...touchedFields(manifest, args),
+      ...manifest.requiredFields,
+    ]),
   ];
   const readArgs = resolveTemplates(manifest.readBefore.args, args);
   let stored = 0;
