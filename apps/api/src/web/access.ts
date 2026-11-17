@@ -4,7 +4,7 @@ import type { Request, Response } from 'express';
 import type { SessionRow } from '@aiops/db';
 import { pageCorrelation } from './correlation.js';
 import { csrfAllowed } from './csrf.js';
-import { parseCookies, SESSION_COOKIE, type SessionLookup } from './session.service.js';
+import { sessionCookieValue, type SessionLookup } from './session.service.js';
 
 export const PUBLIC_KEY = 'aiops:public';
 export const PAGE_ACCESS_KEY = 'aiops:page-access';
@@ -114,8 +114,8 @@ export class PageAccessGuard implements CanActivate {
     pageCorrelation(req, res);
     if (access === 'none') throw deny(403, 'forbidden');
 
-    const cookieValue = parseCookies(req.headers.cookie).get(SESSION_COOKIE);
-    const session = cookieValue === undefined || cookieValue === '' ? undefined : await this.sessions.find(cookieValue);
+    const cookieValue = sessionCookieValue(req.headers.cookie, this.options.publicOrigin.startsWith('https:'));
+    const session = cookieValue === undefined ? undefined : await this.sessions.find(cookieValue);
     if (session === undefined) throw deny(401, 'unauthenticated');
 
     const denial = pageDenial(req.headers, session, access, this.options);

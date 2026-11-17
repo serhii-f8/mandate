@@ -9,7 +9,7 @@ import { PageAccess, pageDenial, pageOf, Public, type PageChecks, type PageReque
 import { pageCorrelation } from './correlation.js';
 import type { OidcClient } from './oidc-client.js';
 import { constantTimeEqual } from './csrf.js';
-import { clearedLoginCookie, clearedSessionCookie, LOGIN_COOKIE, loginCookie, parseCookies, sessionCookie, type SessionService } from './session.service.js';
+import { clearedLoginCookie, clearedSessionCookie, LOGIN_COOKIE, loginCookie, parseCookies, sessionCookie, sessionCookieValue, type SessionService } from './session.service.js';
 
 const DEFAULT_RETURN = '/app/';
 const MAX_RETURN_LENGTH = 2048;
@@ -118,6 +118,10 @@ export class AuthController {
       details: { fresh: login.fresh },
     });
     const { cookieValue } = await this.sessions.create(result.identity);
+    // One session per browser: the session this browser had before the re-login is deleted,
+    // not left valid next to the new one.
+    const previous = sessionCookieValue(req.headers.cookie, this.secure);
+    if (previous !== undefined && previous !== cookieValue) await this.sessions.endCookie(previous);
     res.append('set-cookie', sessionCookie(cookieValue, this.env.sessionMaxAgeSeconds, this.secure));
     res.redirect(302, login.returnTo);
   }

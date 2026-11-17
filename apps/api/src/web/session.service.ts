@@ -3,6 +3,19 @@ import type { LoginRow, PostgresSessionStore, SessionRow } from '@aiops/db';
 import { randomToken, type OidcIdentity } from './oidc-client.js';
 
 export const SESSION_COOKIE = 'aiops_session';
+/**
+ * The session cookie's name on https: the `__Host-` prefix makes the browser refuse it
+ * unless it is Secure, has Path=/ and no Domain, so a sibling host cannot plant or shadow it.
+ */
+export const HOST_SESSION_COOKIE = `__Host-${SESSION_COOKIE}`;
+
+export const sessionCookieName = (secure: boolean): string => (secure ? HOST_SESSION_COOKIE : SESSION_COOKIE);
+
+/** The session cookie's value from a `Cookie` header, by the name of the scheme; empty is none. */
+export function sessionCookieValue(header: string | undefined, secure: boolean): string | undefined {
+  const value = parseCookies(header).get(sessionCookieName(secure));
+  return value === '' ? undefined : value;
+}
 /** Binds a login's state to the browser that started it (login CSRF, SEC-8). */
 export const LOGIN_COOKIE = 'aiops_login';
 /** Login state lives 10 minutes (design §4). */
@@ -26,9 +39,12 @@ export function parseCookies(header: string | undefined): Map<string, string> {
   return cookies;
 }
 
-/** `Set-Cookie` for the session: HttpOnly, SameSite=Strict, Path=/, Secure on https (design §4). */
+/**
+ * `Set-Cookie` for the session: HttpOnly, SameSite=Strict, Path=/, no Domain; on https
+ * Secure and named `__Host-aiops_session` (design §4).
+ */
 export function sessionCookie(value: string, maxAgeSeconds: number, secure: boolean): string {
-  return `${SESSION_COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${String(maxAgeSeconds)}${secure ? '; Secure' : ''}`;
+  return `${sessionCookieName(secure)}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${String(maxAgeSeconds)}${secure ? '; Secure' : ''}`;
 }
 
 export function clearedSessionCookie(secure: boolean): string {
@@ -121,5 +137,10 @@ export class SessionService implements SessionLookup {
 
   end(session: SessionRow): Promise<void> {
     return this.store.deleteSession(session.idHash);
+  }
+
+  /** Deletes the session a cookie value names, if any (a re-login replaces it). */
+  endCookie(cookieValue: string): Promise<void> {
+    return this.store.deleteSession(hashToken(cookieValue));
   }
 }

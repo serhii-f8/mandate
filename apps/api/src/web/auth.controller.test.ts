@@ -86,6 +86,37 @@ describe('AUD-1 AUTH-5 page logins and logouts are audited before acting', () =>
     expect(events).toEqual([expect.objectContaining({ action: 'auth.login', outcome: 'error', details: { reason: 'state_unknown' } })]);
   });
 
+  it('AUTH-5 a successful callback that carries a session cookie ends that session (one session per browser)', async () => {
+    const ended: string[] = [];
+    const created: string[] = [];
+    const oidc = {
+      exchange: () => Promise.resolve({ ok: true, identity: { subject: 'carol-id', clientId: 'aiops-web', groups: [], authTime: new Date() } }),
+    } as unknown as OidcClient;
+    const sessions = {
+      consumeLogin: () => Promise.resolve({ stateHash: 'x', codeVerifier: 'v', nonce: 'n', returnTo: '/app/credentials', fresh: true, expiresAt: new Date() }),
+      create: () => {
+        created.push('new');
+        return Promise.resolve({ cookieValue: 'new-cookie', session });
+      },
+      endCookie: (value: string) => Promise.resolve(void ended.push(value)),
+    } as unknown as SessionService;
+    const audit: AuditLog = { append: () => Promise.resolve() };
+    const auth = new AuthController(env, oidc, sessions, audit, pino({ level: 'silent' }));
+    const res = new FakeResponse();
+    // https public URL: the session cookie is `__Host-aiops_session`.
+    const req = { query: { state: 's', code: 'c' }, headers: { cookie: 'aiops_login=s; __Host-aiops_session=old-cookie' } } as unknown as Request;
+    await auth.callback(req, res as unknown as Response);
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.get('location')).toEqual(['/app/credentials']);
+    expect(created).toEqual(['new']);
+    expect(ended).toEqual(['old-cookie']);
+    expect(res.headers.get('set-cookie')).toEqual([expect.stringMatching(/^aiops_login=; /), expect.stringMatching(/^__Host-aiops_session=new-cookie; /)]);
+
+    ended.length = 0;
+    await auth.callback({ query: { state: 's', code: 'c' }, headers: { cookie: 'aiops_login=s' } } as unknown as Request, new FakeResponse() as unknown as Response);
+    expect(ended).toEqual([]);
+  });
+
   it('AUD-1 logout whose audit write fails keeps the session', async () => {
     const ended: SessionRow[] = [];
     const res = new FakeResponse();

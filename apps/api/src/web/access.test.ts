@@ -98,7 +98,23 @@ async function outcome(g: PageAccessGuard, cls: abstract new () => unknown, meth
   }
 }
 
-const withCookie = (extra: Record<string, string> = {}): FakeRequest => ({ headers: { cookie: `other=1; aiops_session=${COOKIE}`, ...extra } });
+// ORIGIN is https, so the session cookie carries the `__Host-` prefix.
+const withCookie = (extra: Record<string, string> = {}): FakeRequest => ({ headers: { cookie: `other=1; __Host-aiops_session=${COOKIE}`, ...extra } });
+
+describe('AUTH-5 SEC-8 the guard reads the session cookie of the public URL scheme', () => {
+  it('AUTH-5 on https only __Host-aiops_session counts; on http only aiops_session', async () => {
+    expect(await outcome(guard(), PagesController, 'read', { headers: { cookie: `aiops_session=${COOKIE}` } })).toEqual({ status: 401, body: { error: 'unauthenticated' } });
+    expect(await outcome(guard(), PagesController, 'read', withCookie())).toBe(true);
+    const plain = new PageAccessGuard(
+      new Reflector(),
+      { find: (cookieValue) => Promise.resolve(hashToken(cookieValue) === session().idHash ? session() : undefined) },
+      () => [],
+      { publicOrigin: 'http://localhost:8400', freshAuthSeconds: 300, now: () => NOW },
+    );
+    expect(await outcome(plain, PagesController, 'read', { headers: { cookie: `aiops_session=${COOKIE}` } })).toBe(true);
+    expect(await outcome(plain, PagesController, 'read', { headers: { cookie: `__Host-aiops_session=${COOKIE}` } })).toEqual({ status: 401, body: { error: 'unauthenticated' } });
+  });
+});
 
 describe('SEC-1 every page route is authorized', () => {
   it('SEC-1 lets @Public routes through without a session, on the class or the handler', async () => {
