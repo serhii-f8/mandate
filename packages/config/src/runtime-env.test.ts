@@ -201,4 +201,44 @@ describe('worker runtime environment', () => {
       }
     }
   });
+
+  it('NFR-4 the retry initial interval must not exceed the retry maximum interval, reported without values', () => {
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_RETRY_INITIAL_MS: '2000', AIOPS_RETRY_MAX_MS: '2000' }).activityTuning).toMatchObject({
+      retryInitialMs: 2_000,
+      retryMaxMs: 2_000,
+    });
+    let error: unknown;
+    try {
+      parseWorkerEnv({ ...WORKER, AIOPS_RETRY_INITIAL_MS: '45678', AIOPS_RETRY_MAX_MS: '12345' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    expect((error as EnvError).issues).toEqual([
+      { variable: 'AIOPS_RETRY_INITIAL_MS', reason: 'must not exceed AIOPS_RETRY_MAX_MS' },
+    ]);
+    expect((error as EnvError).message).not.toMatch(/45678|12345/);
+    // Only the default of the other variable can be exceeded, too.
+    expect(() => parseWorkerEnv({ ...WORKER, AIOPS_RETRY_INITIAL_MS: '30001' })).toThrow(
+      /AIOPS_RETRY_INITIAL_MS: must not exceed AIOPS_RETRY_MAX_MS/,
+    );
+  });
+
+  it('NFR-4 the batch heartbeat must be shorter than the batch timeout, reported without values', () => {
+    let error: unknown;
+    try {
+      parseWorkerEnv({ ...WORKER, AIOPS_BATCH_HEARTBEAT_MS: '54321', AIOPS_BATCH_TIMEOUT_MS: '54321' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    expect((error as EnvError).issues).toEqual([
+      { variable: 'AIOPS_BATCH_HEARTBEAT_MS', reason: 'must be less than AIOPS_BATCH_TIMEOUT_MS' },
+    ]);
+    expect((error as EnvError).message).not.toContain('54321');
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_BATCH_HEARTBEAT_MS: '54320', AIOPS_BATCH_TIMEOUT_MS: '54321' }).activityTuning).toMatchObject({
+      batchHeartbeatMs: 54_320,
+      batchTimeoutMs: 54_321,
+    });
+  });
 });

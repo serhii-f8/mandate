@@ -1,11 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import { createOpenApiAdapter } from '@aiops/adapters';
 import { ConfigurationError, ConfigurationHolder, formatIssue, type WorkerEnv } from '@aiops/config';
 import { assertMigrated, createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault } from '@aiops/db';
-import { parseTemporalKeys, workerDataConverter } from '@aiops/temporal';
-import { assertFullyChecked, configurationLoadOptions } from '@aiops/upstream';
+import { parseTemporalKeys, workerDataConverter, type ActivityTuning } from '@aiops/temporal';
+import { assertFullyChecked, configurationLoadOptions, createUpstreamReader } from '@aiops/upstream';
+import { heartbeat } from '@temporalio/activity';
 import { NativeConnection } from '@temporalio/worker';
 import type { Logger } from 'pino';
-import { echo } from './activities/index.js';
+import { createActivities, createExecutionGuard, echo, unsupportedWriter, type WorkerActivities } from './activities/index.js';
 import { installReload } from './reload.js';
 import { createWorker } from './worker.js';
 
@@ -16,19 +18,53 @@ export interface WorkerRuntime {
   close(): Promise<void>;
 }
 
-/** What the activities are bound to; `createActivities` (Task 11) takes these. */
+/** What the activities are bound to. */
 interface RuntimeStores {
   readonly configuration: ConfigurationHolder;
   readonly adapter: ReturnType<typeof createOpenApiAdapter>;
   readonly repository: PostgresChangeSetRepository;
   readonly audit: DrizzleAuditLog;
   readonly vault: PostgresCredentialVault;
+  readonly tuning: ActivityTuning;
+  readonly logger: Logger;
 }
 
-/** Activities registered on the worker; until the change-set activities exist only `echo`. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- the change-set activities (plan Task 11) bind to these.
-function activitiesFor(_stores: RuntimeStores): object {
-  return { echo };
+/**
+ * Activities registered on the worker: `echo` and the change-set activities bound to the stores,
+ * the current configuration (it changes on SIGHUP) and the tuning from the environment. Writes
+ * fail every item until the write path exists (part 2); reads run the shared upstream read path.
+ */
+function activitiesFor(stores: RuntimeStores): WorkerActivities {
+  const { configuration, repository, vault, adapter, logger } = stores;
+  return {
+    echo,
+    ...createActivities({
+      repository,
+      configuration: () => configuration.current,
+      writerFor: () => unsupportedWriter(),
+      readerFor: (current, correlationId) =>
+        createUpstreamReader({
+          configuration: current,
+          vault,
+          adapter,
+          correlationId,
+          log: (record) => {
+            logger.info(record, 'upstream call completed');
+          },
+        }),
+      guardFor: createExecutionGuard({
+        repository,
+        audit: stores.audit,
+        newId: randomUUID,
+        heartbeat: () => {
+          heartbeat();
+        },
+      }),
+      tuning: stores.tuning,
+      newId: randomUUID,
+      now: () => new Date(),
+    }),
+  };
 }
 
 /**
@@ -71,6 +107,8 @@ export async function startWorkerRuntime(env: WorkerEnv, logger: Logger): Promis
       repository: new PostgresChangeSetRepository(database.db),
       audit: new DrizzleAuditLog(database.db),
       vault: new PostgresCredentialVault(database.db, masterKeys),
+      tuning: env.activityTuning,
+      logger,
     });
     connection = await NativeConnection.connect({ address: env.temporalAddress });
     const worker = await createWorker({
@@ -87,12 +125,20 @@ export async function startWorkerRuntime(env: WorkerEnv, logger: Logger): Promis
         await worker.run();
       },
       close: async () => {
-        await open.close();
-        await database.close();
+        // The pool is closed even when closing the Temporal connection fails.
+        try {
+          await open.close();
+        } finally {
+          await database.close();
+        }
       },
     };
   } catch (error) {
-    await connection?.close();
+    try {
+      await connection?.close();
+    } catch {
+      // The start failure is the error worth reporting; the pool is closed regardless.
+    }
     await database.close();
     throw error;
   }

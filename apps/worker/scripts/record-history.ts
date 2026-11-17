@@ -10,7 +10,7 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { historyToJSON } from '@temporalio/common/lib/proto-utils';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
-import * as activities from '../src/activities/index.js';
+import { echo } from '../src/activities/index.js';
 import { createWorker } from '../src/worker.js';
 
 const target = fileURLToPath(new URL('../test/workflow-histories/smokeWorkflow/completed.json', import.meta.url));
@@ -21,7 +21,7 @@ if (existsSync(target) && !process.argv.includes('--force')) {
 const env = await TestWorkflowEnvironment.createLocal();
 try {
   const taskQueue = `record-${randomUUID()}`;
-  const worker = await createWorker({ connection: env.nativeConnection, namespace: 'default', taskQueue, activities });
+  const worker = await createWorker({ connection: env.nativeConnection, namespace: 'default', taskQueue, activities: { echo } });
   const workflowId = `smoke-fixture-${randomUUID()}`;
   await worker.runUntil(
     env.client.workflow.execute('smokeWorkflow', { args: [{ message: 'fixture' }], taskQueue, workflowId }),

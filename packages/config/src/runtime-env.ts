@@ -141,6 +141,15 @@ const workerSchema = z.object({
   AIOPS_BATCH_MAX_ATTEMPTS: positiveInt(10),
   AIOPS_RETRY_INITIAL_MS: positiveInt(1_000),
   AIOPS_RETRY_MAX_MS: positiveInt(30_000),
+}).superRefine((e, ctx) => {
+  // Cross-field checks run only once every field parsed; the messages name variables, never values (SEC-3).
+  if (e.AIOPS_RETRY_INITIAL_MS > e.AIOPS_RETRY_MAX_MS) {
+    ctx.addIssue({ code: 'custom', path: ['AIOPS_RETRY_INITIAL_MS'], message: 'must not exceed AIOPS_RETRY_MAX_MS' });
+  }
+  // A heartbeat timeout at or above the start-to-close timeout would never notice a lost worker first.
+  if (e.AIOPS_BATCH_HEARTBEAT_MS >= e.AIOPS_BATCH_TIMEOUT_MS) {
+    ctx.addIssue({ code: 'custom', path: ['AIOPS_BATCH_HEARTBEAT_MS'], message: 'must be less than AIOPS_BATCH_TIMEOUT_MS' });
+  }
 });
 
 function parse<S extends z.ZodType>(schema: S, env: NodeJS.ProcessEnv): z.output<S> {

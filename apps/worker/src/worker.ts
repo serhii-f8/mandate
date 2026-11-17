@@ -2,6 +2,7 @@ import { extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DataConverter, Duration } from '@temporalio/common';
 import { Worker, type NativeConnection, type WorkerOptions } from '@temporalio/worker';
+import type { WorkerActivities } from './activities/index.js';
 
 const sourceExtension = extname(fileURLToPath(import.meta.url));
 
@@ -29,7 +30,8 @@ export interface CreateWorkerOptions {
   readonly connection: NativeConnection;
   readonly namespace: string;
   readonly taskQueue: string;
-  readonly activities: object;
+  /** The runtime registers all of them; tests and the history recorder register the ones their workflows call. */
+  readonly activities: Partial<WorkerActivities>;
   readonly dataConverter?: DataConverter;
   readonly shutdownGraceTime?: Duration;
   readonly shutdownForceTime?: Duration;
