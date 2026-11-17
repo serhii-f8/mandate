@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Worker } from '@temporalio/worker';
 import { describe, expect, it } from 'vitest';
-import { workflowsPath } from '../../src/worker.js';
+import { workflowBundlerOptions, workflowsPath } from '../../src/worker.js';
 
 const historiesDir = fileURLToPath(new URL('../workflow-histories/', import.meta.url));
 
@@ -23,7 +23,7 @@ describe('EXE-10 workflow replay gate', () => {
   it.each(fixtures)('EXE-10 replays $type/$name with the current workflow code', async ({ path, name }) => {
     const history: unknown = JSON.parse(readFileSync(path, 'utf8'));
     await expect(
-      Worker.runReplayHistory({ workflowsPath }, history, name),
+      Worker.runReplayHistory({ workflowsPath, bundlerOptions: workflowBundlerOptions() }, history, name),
     ).resolves.toBeUndefined();
   });
 });

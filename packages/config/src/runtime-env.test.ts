@@ -123,19 +123,82 @@ describe('AUTH-5 page login environment', () => {
   });
 });
 
+/** `WORKER` without one variable. */
+function without(variable: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(WORKER).filter(([k]) => k !== variable));
+}
+
+const WORKER = {
+  DATABASE_URL: DB,
+  AIOPS_CONFIG_DIR: '/etc/aiops/config',
+  AIOPS_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
+  AIOPS_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
+};
+
 describe('worker runtime environment', () => {
   it('applies defaults', () => {
-    expect(parseWorkerEnv({})).toEqual({
+    expect(parseWorkerEnv(WORKER)).toEqual({
       temporalAddress: 'localhost:7233',
       temporalNamespace: 'default',
       taskQueue: 'aiops-operations',
       logLevel: 'info',
+      databaseUrl: DB,
+      configDir: '/etc/aiops/config',
+      presetDirs: [],
+      masterKeys: WORKER.AIOPS_MASTER_KEYS,
+      temporalKeys: WORKER.AIOPS_TEMPORAL_KEYS,
+      activityTuning: { batchHeartbeatMs: 30_000, batchTimeoutMs: 900_000, batchMaxAttempts: 10, retryInitialMs: 1_000, retryMaxMs: 30_000 },
     });
   });
 
   it('reads Temporal settings', () => {
     expect(
-      parseWorkerEnv({ TEMPORAL_ADDRESS: 'temporal:7233', TEMPORAL_NAMESPACE: 'ops', TEMPORAL_TASK_QUEUE: 'q' }),
+      parseWorkerEnv({ ...WORKER, TEMPORAL_ADDRESS: 'temporal:7233', TEMPORAL_NAMESPACE: 'ops', TEMPORAL_TASK_QUEUE: 'q' }),
     ).toMatchObject({ temporalAddress: 'temporal:7233', temporalNamespace: 'ops', taskQueue: 'q' });
+  });
+
+  it('NFR-4 parseWorkerEnv reads database, configuration, keys and activity tuning', () => {
+    const env = parseWorkerEnv({
+      ...WORKER,
+      AIOPS_PRESET_DIRS: '/app/presets: /opt/presets',
+      AIOPS_BATCH_HEARTBEAT_MS: '5000',
+      AIOPS_BATCH_TIMEOUT_MS: '60000',
+      AIOPS_BATCH_MAX_ATTEMPTS: '3',
+      AIOPS_RETRY_INITIAL_MS: '200',
+      AIOPS_RETRY_MAX_MS: '2000',
+    });
+    expect(env).toMatchObject({
+      databaseUrl: DB,
+      configDir: '/etc/aiops/config',
+      presetDirs: ['/app/presets', '/opt/presets'],
+      masterKeys: WORKER.AIOPS_MASTER_KEYS,
+      temporalKeys: WORKER.AIOPS_TEMPORAL_KEYS,
+      activityTuning: { batchHeartbeatMs: 5_000, batchTimeoutMs: 60_000, batchMaxAttempts: 3, retryInitialMs: 200, retryMaxMs: 2_000 },
+    });
+    for (const required of ['DATABASE_URL', 'AIOPS_CONFIG_DIR', 'AIOPS_MASTER_KEYS']) {
+      expect(() => parseWorkerEnv(without(required))).toThrow(new RegExp(`${required}: is required`));
+    }
+  });
+
+  it('SEC-3 a missing AIOPS_TEMPORAL_KEYS is reported by name without values', () => {
+    let error: unknown;
+    try {
+      parseWorkerEnv(without('AIOPS_TEMPORAL_KEYS'));
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    expect((error as EnvError).issues).toEqual([{ variable: 'AIOPS_TEMPORAL_KEYS', reason: 'is required' }]);
+    const message = (error as EnvError).message;
+    expect(message).not.toContain(WORKER.AIOPS_MASTER_KEYS);
+    expect(message).not.toContain('dev-only-secret-value');
+  });
+
+  it('NFR-4 activity tuning must be positive integers', () => {
+    for (const variable of ['AIOPS_BATCH_HEARTBEAT_MS', 'AIOPS_BATCH_TIMEOUT_MS', 'AIOPS_BATCH_MAX_ATTEMPTS', 'AIOPS_RETRY_INITIAL_MS', 'AIOPS_RETRY_MAX_MS']) {
+      for (const bad of ['0', '-5', '1.5', 'many']) {
+        expect(() => parseWorkerEnv({ ...WORKER, [variable]: bad })).toThrow(new RegExp(`${variable}: invalid`));
+      }
+    }
   });
 });

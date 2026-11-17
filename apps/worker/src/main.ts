@@ -1,25 +1,24 @@
-import { NativeConnection } from '@temporalio/worker';
 import { pino } from 'pino';
 import { parseWorkerEnv } from '@aiops/config';
-import { createWorker } from './worker.js';
+import { startWorkerRuntime } from './runtime.js';
 
-/** Process entry: connect to Temporal and poll the task queue until SIGTERM/SIGINT. */
+/** Process entry: start the runtime (NFR-4) and poll the task queue until SIGTERM/SIGINT. */
 async function main(): Promise<void> {
   const env = parseWorkerEnv(process.env);
   const logger = pino({ level: env.logLevel, base: { service: 'worker' } });
-  const connection = await NativeConnection.connect({ address: env.temporalAddress });
+  const runtime = await startWorkerRuntime(env, logger);
   try {
-    const worker = await createWorker({ connection, namespace: env.temporalNamespace, taskQueue: env.taskQueue });
     logger.info({ namespace: env.temporalNamespace, taskQueue: env.taskQueue }, 'worker polling');
     // Worker.run() installs SIGINT/SIGTERM handlers and resolves after a graceful shutdown.
-    await worker.run();
+    await runtime.run();
     logger.info('worker stopped');
   } finally {
-    await connection.close();
+    await runtime.close();
   }
 }
 
 main().catch((error: unknown) => {
+  // EnvError, ConfigurationError and key-parse messages carry names and locations only, never values.
   console.error(JSON.stringify({ level: 'fatal', msg: error instanceof Error ? error.message : String(error) }));
   process.exit(1);
 });

@@ -25,13 +25,19 @@
     "record-history": "tsx scripts/record-history.ts"
   },
   "devDependencies": {
-    "@temporalio/client": "1.25.0",
+    "@aiops/testing": "workspace:*",
     "@temporalio/testing": "1.25.0",
     "tsx": "4.23.15"
   },
   "dependencies": {
+    "@aiops/adapters": "workspace:*",
     "@aiops/config": "workspace:*",
+    "@aiops/core": "workspace:*",
+    "@aiops/db": "workspace:*",
+    "@aiops/temporal": "workspace:*",
+    "@aiops/upstream": "workspace:*",
     "@temporalio/activity": "1.25.0",
+    "@temporalio/client": "1.25.0",
     "@temporalio/common": "1.25.0",
     "@temporalio/worker": "1.25.0",
     "@temporalio/workflow": "1.25.0",
