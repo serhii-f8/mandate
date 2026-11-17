@@ -34,7 +34,12 @@ describe('MCP-4 request building', () => {
       new MappingError('path parameter sku has no value'),
     );
   });
-  it.each(['Authorization', 'cookie', 'HOST', 'Proxy-Authorization'])('rejects header %s', (h) => {
+  it('throws for an empty-string path value', () => {
+    expect(() => buildRequest('http://h', { ...base, path: '/p/{sku}', pathParams: { sku: { arg: 'sku' } } }, { sku: '' })).toThrow(
+      new MappingError('path parameter sku has no value'),
+    );
+  });
+  it.each(['Authorization', 'cookie', 'HOST', 'Proxy-Authorization', 'Content-Length', 'transfer-encoding', 'Connection'])('rejects header %s', (h) => {
     expect(() => buildRequest('http://h', { ...base, headers: { [h]: 'x' } }, {})).toThrow(MappingError);
   });
   it('sends a JSON body from an argument', () => {

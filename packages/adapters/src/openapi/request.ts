@@ -1,4 +1,5 @@
 import type { HttpMethod, TemplateValue, UpstreamMapping } from '@aiops/connector-sdk';
+import { FORBIDDEN_HEADERS } from '../http/headers.js';
 
 /** Raised for mapping/argument problems. Messages never contain argument values (SEC-3). */
 export class MappingError extends Error {
@@ -11,8 +12,6 @@ export interface HttpRequestSpec {
   headers: Record<string, string>;
   body?: string;
 }
-
-const FORBIDDEN_HEADERS = new Set(['authorization', 'cookie', 'host', 'proxy-authorization']);
 
 type Scalar = string | number | boolean;
 const isScalar = (v: unknown): v is Scalar => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean';
@@ -46,8 +45,9 @@ export function buildRequest(
   const path = mapping.path.replace(/\{([^{}]+)\}/g, (_m, name: string) => {
     const tpl = Object.hasOwn(mapping.pathParams, name) ? mapping.pathParams[name] : undefined;
     const vals = tpl ? resolveScalars(name, tpl, args) : undefined;
-    if (vals?.length !== 1) throw new MappingError(`path parameter ${name} has no value`);
-    const raw = String(vals[0]);
+    const raw = vals?.length === 1 ? String(vals[0]) : '';
+    // An empty segment would silently address another resource.
+    if (raw === '') throw new MappingError(`path parameter ${name} has no value`);
     let decoded = raw;
     try {
       decoded = decodeURIComponent(raw);

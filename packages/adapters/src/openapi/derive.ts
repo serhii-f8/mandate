@@ -6,9 +6,9 @@
  * exposed as arguments.
  */
 import type { CatalogEntry, SpecIssue, TemplateValue, UpstreamMapping } from '@aiops/connector-sdk';
+import { FORBIDDEN_HEADERS } from '../http/headers.js';
 import type { NormalisedOperation } from './normalise.js';
 
-const EXCLUDED_HEADERS: ReadonlySet<string> = new Set(['authorization', 'cookie', 'host']);
 const DEFAULT_MAX_ITEMS = 100;
 
 export function operationLabel(op: Pick<NormalisedOperation, 'operationId' | 'method' | 'path'>): string {
@@ -48,7 +48,7 @@ export function deriveCatalog(
     const required: string[] = [];
     const mapping: Record<'path' | 'query' | 'header', Record<string, TemplateValue>> = { path: {}, query: {}, header: {} };
     for (const param of op.parameters) {
-      if (param.in === 'header' && EXCLUDED_HEADERS.has(param.name.toLowerCase())) continue;
+      if (param.in === 'header' && FORBIDDEN_HEADERS.has(param.name.toLowerCase())) continue;
       if (properties.has(param.name) || (param.name === 'body' && op.jsonBody !== undefined)) {
         issues.push({ path: [...opAt, 'parameters', param.name], message: 'parameter name collides with another argument; it is not exposed' });
         continue;

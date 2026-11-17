@@ -107,6 +107,14 @@ describe('CONN-2 OpenAPI import', () => {
     }
   });
 
+  it('CONN-2 never exposes platform-set header parameters (shared forbidden list)', () => {
+    const names = ['Authorization', 'Proxy-Authorization', 'Cookie', 'Host', 'Content-Length', 'Transfer-Encoding', 'Connection', 'X-Store'];
+    const op = { operationId: 'get', method: 'GET' as const, path: '/p', parameters: names.map((name) => ({ name, in: 'header' as const, required: false, schema: { type: 'string' } })) };
+    const entry = only(deriveCatalog('shop', [op]).catalog);
+    expect(Object.keys(entry.inputSchema.properties ?? {})).toEqual(['X-Store']);
+    expect(Object.keys(entry.defaultMapping.headers)).toEqual(['X-Store']);
+  });
+
   it('CONN-2 reports a duplicate operationId and keeps the first operation', () => {
     const doc = {
       openapi: '3.0.3',

@@ -372,6 +372,15 @@ describe('SEC-3 upstream echoes the credential', () => {
     expect(JSON.stringify(r)).not.toContain(Buffer.from('user:pw-secret').toString('base64'));
   });
 
+  it('SEC-3 a basic username is not treated as a secret and stays readable in the body', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: { owner: 'admin', note: 'pw-secret' } }));
+    const c = createConnectionClient(settings({ auth: { scheme: 'basic' } }));
+    const r = await c.send(get(), { credential: cred('basic', { username: 'admin', password: 'pw-secret' }), retryable: false });
+    expect(r.ok).toBe(true);
+    expect(JSON.stringify(r)).toContain('"owner":"admin"');
+    expect(JSON.stringify(r)).not.toContain('pw-secret');
+  });
+
   it('SEC-3 a fetched OAuth token echoed by the upstream is scrubbed', async () => {
     up.route('POST', '/token', () => ({ status: 200, body: { access_token: 'oauth-issued-secret', expires_in: 3600 } }));
     up.route('GET', '/items', (req) => ({ status: 200, body: { echo: req.headers.authorization } }));

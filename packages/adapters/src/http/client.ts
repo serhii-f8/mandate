@@ -214,7 +214,9 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
         return fail('credential_unusable', parsed.message);
       }
       const s = parsed.secret;
-      secrets.push(...Object.values(s));
+      // A Basic user name is an identifier, not a secret: scrubbing it would redact ordinary
+      // response data ("admin"). The password and the encoded pair are scrubbed.
+      secrets.push(...Object.entries(s).filter(([k]) => !(auth.scheme === 'basic' && k === 'username')).map(([, v]) => v));
       const unsendable = (): SendResult => fail('credential_unusable', `credential ${credential.ref} contains characters not allowed in a header`);
       switch (auth.scheme) {
         case 'bearer':
