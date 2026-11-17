@@ -22,7 +22,7 @@
     "test": "vitest run --project unit --passWithNoTests",
     "test:int": "vitest run --project integration",
     "start": "node dist/main.js",
-    "record-history": "tsx scripts/record-history.ts"
+    "record-history": "tsx --conditions=@aiops/source scripts/record-history.ts"
   },
   "devDependencies": {
     "@aiops/testing": "workspace:*",
