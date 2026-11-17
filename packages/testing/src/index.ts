@@ -2,6 +2,8 @@
 export { InMemoryAuditLog } from './in-memory-audit-log.js';
 export { InMemoryChangeSetRepository } from './in-memory-changeset-repository.js';
 export { describeChangeSetRepositoryContract, type ChangeSetRepositoryHarness } from './changeset-repository-contract.js';
+export { InMemoryExecutor, ScriptedWriter, type InMemoryExecutorDeps, type ScriptedWriterOptions } from './in-memory-executor.js';
+export { describeExecutorContract, EXECUTOR_CONTRACT_HASH, type ExecutorHarness } from './executor-contract.js';
 export { POSTGRES_IMAGE, startPostgres, type StartedPostgres } from './postgres.js';
 export {
   startTestIssuer,
