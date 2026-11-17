@@ -1,5 +1,5 @@
 /**
- * A call of an allowed `write` operation with a manifest creates a change-set in `preparing` and
+ * A call of an allowed `write` or `destructive` operation with a manifest creates a change-set in `preparing` and
  * starts its workflow (EXE-1); the workflow prepares it (design §4.1, CS-1), and nothing is
  * written upstream. A request that declared Tasks gets a task once its row is committed (MCP-7);
  * any other request waits a bounded time for preparation and answers with the result, or with
@@ -57,7 +57,7 @@ export class ChangeSetInvoker implements OperationInvoker {
 
   async invoke({ operation, args, caller, asTask, report }: InvocationRequest): Promise<InvocationResult> {
     const { manifest } = operation;
-    if (operation.risk !== 'write' || manifest === undefined) return riskNotSupportedResult(operation);
+    if ((operation.risk !== 'write' && operation.risk !== 'destructive') || manifest === undefined) return riskNotSupportedResult(operation);
     const { configuration, repository, correlationId } = this.deps;
     const base: Details = { operation: operation.id, connection: operation.connection };
 

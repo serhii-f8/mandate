@@ -1,6 +1,6 @@
 /**
  * The worker's writer per operation (design part 2 §4, OPS-6): a `ManifestBatchWriter` for a
- * `write` operation with a manifest whose binding has a `bulk` block, `UnsupportedWriter` for
+ * `write` or `destructive` operation with a manifest whose binding has a `bulk` block, `UnsupportedWriter` for
  * everything else. Reads and bulk calls are bound to the change-set's correlation ID and to the
  * configuration snapshot the activity passes in.
  */
@@ -33,7 +33,7 @@ export function createWriterFor(deps: WriterForDeps): (configuration: LoadedConf
   return (configuration, operationId) => {
     const operation = configuration.policy.operations.find((o) => o.id === operationId);
     const manifest = operation?.manifest;
-    if (operation?.risk !== 'write' || manifest === undefined) return new UnsupportedWriter();
+    if ((operation?.risk !== 'write' && operation?.risk !== 'destructive') || manifest === undefined) return new UnsupportedWriter();
     const bulkFor = (correlationId: string) => createBulkWriter({ configuration, vault, adapter, operationId, correlationId, ...log });
     // Checked once here so a ManifestBatchWriter is only built for a bulk binding.
     if (bulkFor('') === undefined) return new UnsupportedWriter();

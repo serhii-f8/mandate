@@ -156,6 +156,14 @@ describe('EXE-4 OPS-6 worker writerFor', () => {
     expect(up.requests).toEqual([]);
   });
 
+  it('POL-5 a destructive operation with a manifest and bulk binding gets a ManifestBatchWriter', () => {
+    const operations = configuration.policy.operations.map((o) =>
+      o.id === 'catalog.update_content' ? { ...o, risk: 'destructive' as const } : o,
+    );
+    const destructive = { ...configuration, policy: { ...configuration.policy, operations } };
+    expect(writerFor()(destructive, 'catalog.update_content')).toBeInstanceOf(ManifestBatchWriter);
+  });
+
   it('EXE-4 CS-7 writerFor writes a batch against the fake catalog: carry status kept, drift skipped, record before poll', async () => {
     catalog.set('B', { description: 'edited after preparation' });
     const writer = writerFor()(configuration, 'catalog.update_content');
