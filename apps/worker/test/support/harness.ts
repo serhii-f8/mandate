@@ -10,6 +10,8 @@ import { DrizzleAuditLog, PostgresChangeSetRepository, type Database } from '@ai
 import {
   clientDataConverter,
   parseTemporalKeys,
+  TemporalExecutor,
+  TemporalWorkflowStarter,
   workerDataConverter,
   type ActivityTuning,
   type ChangesetActivities,
@@ -110,6 +112,10 @@ export interface TestWorkerOptions {
 export interface TestWorker {
   readonly taskQueue: string;
   readonly worker: Worker;
+  /** The Temporal executor on this worker's task queue, with the infrastructure's client and repository. */
+  readonly executor: TemporalExecutor;
+  /** The workflow starter on this worker's task queue. */
+  readonly starter: TemporalWorkflowStarter;
   /** Shuts the worker down and waits until it has stopped. */
   stop(): Promise<void>;
 }
@@ -163,6 +169,14 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
   return {
     taskQueue,
     worker,
+    executor: new TemporalExecutor({
+      client: infra.client,
+      taskQueue,
+      repository: infra.repository,
+      newId: randomUUID,
+      now: () => new Date(),
+    }),
+    starter: new TemporalWorkflowStarter({ client: infra.client, taskQueue }),
     async stop() {
       if (worker.getState() === 'RUNNING') worker.shutdown();
       await running;
