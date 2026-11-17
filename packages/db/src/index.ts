@@ -2,6 +2,7 @@
 export { DrizzleAuditLog } from './audit-log.js';
 export { PostgresChangeSetRepository, type PostgresChangeSetRepositoryOptions } from './changeset-repository.js';
 export { PostgresCredentialVault } from './credential-vault.js';
+export { PostgresTaskRepository } from './task-repository.js';
 export { PostgresRateCounter } from './rate-counter.js';
 export { PostgresSessionStore, type LoginRow, type SessionRow } from './web-sessions.js';
 export type { SealedCredential } from './envelope.js';
@@ -14,6 +15,7 @@ export {
   changeItem,
   changeSet,
   credential,
+  mcpTask,
   rateBucket,
   webLogin,
   webSession,

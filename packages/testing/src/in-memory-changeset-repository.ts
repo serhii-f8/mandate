@@ -84,6 +84,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       configHash: cs.configHash,
       correlationId: cs.correlationId,
       createdAt: copyDate(cs.createdAt),
+      updatedAt: new Date(),
       expiresAt: copyDate(cs.expiresAt),
     };
     // Apply before awaiting the audit append so concurrent callers see the change; undo if the append fails.
@@ -161,8 +162,9 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
             hash: outcome.hash,
             stats: structuredClone(outcome.stats),
             preparedAt: copyDate(outcome.preparedAt),
+            updatedAt: new Date(),
           }
-        : { ...entry.record, status: 'failed', errorCode: outcome.errorCode };
+        : { ...entry.record, status: 'failed', errorCode: outcome.errorCode, updatedAt: new Date() };
     await this.commit(entry, next, audit);
     return copyRecord(next);
   }
@@ -182,10 +184,19 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     const next: ChangeSetRecord = {
       ...entry.record,
       status: to,
+      updatedAt: new Date(),
       ...(extra?.errorCode === undefined ? {} : { errorCode: extra.errorCode }),
     };
     await this.commit(entry, next, audit);
     return copyRecord(next);
+  }
+
+  errorCounts(changesetId: string): Promise<Readonly<Record<string, number>>> {
+    const counts: Record<string, number> = {};
+    for (const it of this.entries.get(changesetId)?.items.values() ?? []) {
+      if (it.error !== undefined) counts[it.error] = (counts[it.error] ?? 0) + 1;
+    }
+    return Promise.resolve(counts);
   }
 
   recordItemOutcomes(changesetId: string, outcomes: readonly ItemOutcome[]): Promise<void> {
@@ -203,7 +214,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
         ...(o.error === undefined ? {} : { error: o.error }),
       });
     }
-    entry.record = { ...entry.record, stats: computeStats(entry.items) };
+    entry.record = { ...entry.record, stats: computeStats(entry.items), updatedAt: new Date() };
     return Promise.resolve();
   }
 
@@ -214,7 +225,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     if (entry === undefined) return { ok: false, reason: 'not_found' };
     const record = entry.record;
     if (isExpiryDue(record, req.now)) {
-      const expired: ChangeSetRecord = { ...record, status: 'expired' };
+      const expired: ChangeSetRecord = { ...record, status: 'expired', updatedAt: new Date() };
       await this.commit(entry, expired, req.event({ kind: 'expired', from: record.status }, copyRecord(record)));
       return { ok: false, reason: 'expired' };
     }
@@ -232,6 +243,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     const executing: ChangeSetRecord = {
       ...record,
       status: 'executing',
+      updatedAt: new Date(),
       executionRequest: { ...structuredClone(req.request), startedAt: copyDate(req.now) },
     };
     await this.commit(entry, executing, req.event({ kind: 'executing', from: record.status }, copyRecord(record)));
@@ -247,7 +259,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     if (entry.record.status !== 'executing') return Promise.resolve({ ok: false, status: entry.record.status });
     // First request wins.
     if (entry.record.cancelRequest === undefined) {
-      entry.record = { ...entry.record, cancelRequest: structuredClone(cancel) };
+      entry.record = { ...entry.record, cancelRequest: structuredClone(cancel), updatedAt: new Date() };
     }
     return Promise.resolve({ ok: true, changeset: copyRecord(entry.record) });
   }
@@ -326,14 +338,15 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       entry.items.set(o.targetId, { ...current, status: o.status, ...(o.error === undefined ? {} : { error: o.error }) });
       counts[o.status] += 1;
     }
-    entry.record = { ...entry.record, stats: computeStats(entry.items) };
+    const beforeBatch = entry.record;
+    entry.record = { ...entry.record, stats: computeStats(entry.items), updatedAt: new Date() };
     row.state = 'done';
     row.counts = counts;
     try {
       await this.audit.append(audit);
     } catch (error) {
       for (const [targetId, item] of replaced) entry.items.set(targetId, item);
-      entry.record = { ...entry.record, stats: computeStats(entry.items) };
+      entry.record = beforeBatch;
       row.state = 'open';
       row.counts = NO_COUNTS;
       throw error;

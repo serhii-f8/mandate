@@ -54,6 +54,8 @@ export interface ChangeSetRecord {
   readonly configHash: string;
   readonly correlationId: string;
   readonly createdAt: Date;
+  /** Latest transition or outcome time (MCP-7 task `lastUpdatedAt`). */
+  readonly updatedAt?: Date;
   readonly preparedAt?: Date;
   readonly expiresAt: Date;
   readonly executionRequest?: ExecutionRequest;

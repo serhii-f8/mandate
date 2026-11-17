@@ -61,6 +61,8 @@ export interface ChangeSetRepository {
     audit: AuditEventInput,
     extra?: { errorCode?: string; expiredBefore?: Date },
   ): Promise<ChangeSetRecord | undefined>;
+  /** Number of items per non-null error code (CS-7: the drift number of the execution summary). */
+  errorCounts(changesetId: string): Promise<Readonly<Record<string, number>>>;
   /** Only items with status pending; stats recomputed. */
   recordItemOutcomes(changesetId: string, outcomes: readonly ItemOutcome[]): Promise<void>;
   /**

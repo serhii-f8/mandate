@@ -13,7 +13,7 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { ChangeSetStats, ChangeSetStatus, ExclusionReason, ItemStatus, PlanEntry } from '@aiops/core';
+import type { ChangeSetStats, ChangeSetStatus, ExclusionReason, ItemStatus, PlanEntry, TaskKind } from '@aiops/core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => 'bytea',
@@ -190,6 +190,30 @@ export const changeBatch = pgTable(
   (t) => [
     primaryKey({ columns: [t.changesetId, t.batchNo] }),
     check('change_batch_state_check', sql`${t.state} IN ('open', 'done')`),
+  ],
+);
+
+/**
+ * MCP Tasks (MCP-7): binds a task ID to its owner and change-set; the task state is derived from
+ * the change-set. Looked up by `(task_id, owner)` so a foreign ID is indistinguishable from an unknown one.
+ */
+export const mcpTask = pgTable(
+  'mcp_task',
+  {
+    taskId: uuid('task_id').primaryKey(),
+    owner: text('owner').notNull(),
+    clientId: text('client_id'),
+    changesetId: uuid('changeset_id')
+      .notNull()
+      .references(() => changeSet.id),
+    kind: text('kind').$type<TaskKind>().notNull(),
+    tool: text('tool').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    ttlMs: integer('ttl_ms').notNull(),
+  },
+  (t) => [
+    index('mcp_task_task_id_owner_idx').on(t.taskId, t.owner),
+    check('mcp_task_kind_check', sql`${t.kind} IN ('prepare', 'execute')`),
   ],
 );
 

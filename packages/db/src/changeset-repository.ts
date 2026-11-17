@@ -62,6 +62,7 @@ function toRecord(row: ChangeSetRow): ChangeSetRecord {
     configHash: row.configHash,
     correlationId: row.correlationId,
     createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
     ...(row.preparedAt === null ? {} : { preparedAt: row.preparedAt }),
     expiresAt: row.expiresAt,
     ...(row.executionActor === null ||
@@ -272,6 +273,20 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
       updatedAt: sql`now()`,
     };
     return this.compareAndSet(changesetId, from, set, audit, extra?.expiredBefore);
+  }
+
+  async errorCounts(changesetId: string): Promise<Readonly<Record<string, number>>> {
+    if (!UUID.test(changesetId)) return {};
+    const rows = await guarded('item error counts', () =>
+      this.db
+        .select({ error: changeItem.error, n: sql<number>`count(*)::int` })
+        .from(changeItem)
+        .where(and(eq(changeItem.changesetId, changesetId), sql`${changeItem.error} is not null`))
+        .groupBy(changeItem.error),
+    );
+    const counts: Record<string, number> = {};
+    for (const { error, n } of rows) if (error !== null) counts[error] = n;
+    return counts;
   }
 
   async recordItemOutcomes(changesetId: string, outcomes: readonly ItemOutcome[]): Promise<void> {

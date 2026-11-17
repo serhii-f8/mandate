@@ -426,6 +426,31 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         expect((await c.repository.itemsPage(c.id, { limit: 10 }))[0]?.status).toBe('written');
       }));
 
+    it('MCP-7 updatedAt advances on transition', async () =>
+      withRepo(async (c) => {
+        await created(c);
+        const record = await c.repository.get(c.id);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        const next = await c.repository.transition(c.id, ['preparing'], 'cancelled', auditEvent(c.id));
+        expect(next?.updatedAt).toBeInstanceOf(Date);
+        expect(next?.updatedAt?.getTime()).toBeGreaterThan(record?.createdAt.getTime() ?? 0);
+        expect((await c.repository.get(c.id))?.updatedAt?.getTime()).toBe(next?.updatedAt?.getTime());
+      }));
+
+    it('CS-7 errorCounts groups item errors', async () =>
+      withRepo(async (c) => {
+        await executing(c, [item('a'), item('b'), item('c'), item('d')]);
+        expect(await c.repository.errorCounts(c.id)).toEqual({});
+        await c.repository.recordItemOutcomes(c.id, [
+          { targetId: 'a', status: 'skipped', error: 'drift' },
+          { targetId: 'b', status: 'skipped', error: 'drift' },
+          { targetId: 'c', status: 'failed', error: 'upstream_rejected' },
+          { targetId: 'd', status: 'written' },
+        ]);
+        expect(await c.repository.errorCounts(c.id)).toEqual({ drift: 2, upstream_rejected: 1 });
+        expect(await c.repository.errorCounts(randomUUID())).toEqual({});
+      }));
+
     it('recordItemOutcomes updates only pending items and recomputes written/failed/skipped', async () =>
       withRepo(async (c) => {
         await executing(c, [
