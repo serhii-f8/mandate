@@ -200,4 +200,33 @@ describe('MCP-8 built-in change-set tools', () => {
     expect(again.result.isError).toBe(true);
     expect(text(again.result)).toBe(`Change-set ${id} cannot be cancelled in status cancelled.`);
   });
+
+  it('MCP-8 SEC-1 CS-6 a foreign caller cannot expire or cancel an overdue change-set: same answer as an unknown ID, no transition written', async () => {
+    const id = await prepare();
+    await sql('alter table change_set disable trigger user');
+    try {
+      await sql("update change_set set expires_at = now() - interval '1 minute' where id = $1", [id]);
+    } finally {
+      await sql('alter table change_set enable trigger user');
+    }
+    for (const tool of ['get_changeset', 'cancel_changeset']) {
+      const foreign = (await call(bob, tool, { changeset_id: id })).result;
+      const unknown = (await call(bob, tool, { changeset_id: UNKNOWN_ID })).result;
+      expect(foreign.isError).toBe(true);
+      expect(foreign.isError).toBe(unknown.isError);
+      expect(foreign.structuredContent).toEqual(unknown.structuredContent);
+      expect(text(foreign)).toBe(`Change-set ${id} was not found.`);
+      expect(text(unknown)).toBe(`Change-set ${UNKNOWN_ID} was not found.`);
+    }
+    // Only the preparation transitions exist; neither bob nor the system touched it.
+    const transitions = await auditRows(databaseUrl, "action = 'changeset.transition' and changeset_id = $1", [id]);
+    expect(transitions.map((r) => r.details.to)).toEqual(['preparing', 'prepared']);
+    const client = new pg.Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      expect((await client.query<{ status: string }>('select status from change_set where id = $1', [id])).rows[0]?.status).toBe('prepared');
+    } finally {
+      await client.end();
+    }
+  });
 });
