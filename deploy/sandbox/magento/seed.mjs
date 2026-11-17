@@ -5,12 +5,24 @@
 // Creates the text attribute `brand` in the Default attribute set and seven products of the
 // brands acme, globex and initech, each with price, cost and description. ACME-003 carries
 // an instruction-like sentence in its description: upstream content is data (SEC-5).
+// Also creates the 3000 products UMBRELLA-0001 ... UMBRELLA-3000 of the brand umbrella for the
+// large change-set acceptance (EXE-9, NFR-7): only the missing ones are sent, through Magento's
+// asynchronous bulk API in chunks of 500 (ADR 0029), so the async.operations.all consumer must
+// run (up.sh starts it). A second run finds all 3000 and sends nothing.
 // Development only: the admin password is the sandbox's visibly fake default (up.sh).
 // Never prints the token.
 
 const base = (process.argv[2] ?? 'http://127.0.0.1:4390').replace(/\/+$/, '');
 const rest = `${base}/rest/all/V1`;
+const asyncBulk = `${base}/rest/all/async/bulk/V1`;
 const DEFAULT_SET = 4; // Magento's "Default" product attribute set
+const UMBRELLA_COUNT = 3000;
+const UMBRELLA_CHUNK = 500;
+const BULK_POLL_MS = 2000;
+const BULK_TIMEOUT_MS = 10 * 60 * 1000;
+// Magento bulk operation statuses: 1 complete, 2 retriably failed, 3 failed, 4 open, 5 rejected.
+const OPERATION_COMPLETE = 1;
+const OPERATION_FAILED = new Set([2, 3, 5]);
 
 const PRODUCTS = [
   { sku: 'ACME-001', name: 'Acme Anvil', brand: 'acme', price: 49.9, cost: 21.5, description: 'A sturdy steel anvil for every workshop.' },
@@ -29,8 +41,8 @@ const PRODUCTS = [
   { sku: 'INITECH-002', name: 'Initech TPS Cover Sheet Pad', brand: 'initech', price: 7.5, cost: 1.5, description: 'One hundred TPS report cover sheets.' },
 ];
 
-async function call(method, path, token, body) {
-  const res = await fetch(`${rest}${path}`, {
+async function call(method, path, token, body, root = rest) {
+  const res = await fetch(`${root}${path}`, {
     method,
     headers: { accept: 'application/json', 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -115,8 +127,8 @@ async function ensureBrandAttribute(token) {
   console.log('attribute brand in Default set: assigned');
 }
 
-async function upsertProduct(token, p) {
-  const r = await call('POST', '/products', token, {
+function productBody(p) {
+  return {
     product: {
       sku: p.sku,
       name: p.name,
@@ -132,12 +144,76 @@ async function upsertProduct(token, p) {
         { attribute_code: 'cost', value: String(p.cost) },
         { attribute_code: 'description', value: p.description },
         { attribute_code: 'short_description', value: p.name },
-        { attribute_code: 'url_key', value: p.sku.toLowerCase() },
+        { attribute_code: 'url_key', value: p.urlKey ?? p.sku.toLowerCase() },
       ],
     },
-  });
+  };
+}
+
+async function upsertProduct(token, p) {
+  const r = await call('POST', '/products', token, productBody(p));
   if (r.status !== 200) fail(`upsert ${p.sku}`, r);
   console.log(`product ${p.sku}: saved`);
+}
+
+function umbrellaProduct(i) {
+  const n = String(i).padStart(4, '0');
+  return {
+    sku: `UMBRELLA-${n}`,
+    name: `Umbrella Product ${n}`,
+    brand: 'umbrella',
+    price: 10,
+    cost: 4,
+    description: `Umbrella seed description ${n}`,
+    urlKey: `umbrella-${n}`,
+  };
+}
+
+async function existingUmbrellaSkus(token) {
+  const skus = new Set();
+  for (let page = 1; ; page++) {
+    const q = new URLSearchParams({
+      'searchCriteria[filter_groups][0][filters][0][field]': 'brand',
+      'searchCriteria[filter_groups][0][filters][0][value]': 'umbrella',
+      'searchCriteria[filter_groups][0][filters][0][condition_type]': 'eq',
+      'searchCriteria[pageSize]': '1000',
+      'searchCriteria[currentPage]': String(page),
+      fields: 'items[sku],total_count',
+    });
+    const r = await call('GET', `/products?${q}`, token);
+    if (r.status !== 200 || typeof r.json?.total_count !== 'number') fail('list umbrella products', r);
+    const items = Array.isArray(r.json.items) ? r.json.items : [];
+    for (const item of items) skus.add(item.sku);
+    // Magento repeats the last page for a currentPage beyond it, so stop on the total.
+    if (items.length === 0 || page * 1000 >= r.json.total_count) return skus;
+  }
+}
+
+async function waitForBulk(token, uuid, deadline) {
+  for (;;) {
+    const r = await call('GET', `/bulk/${encodeURIComponent(uuid)}/detailed-status`, token);
+    if (r.status !== 200 || !Array.isArray(r.json?.operations_list)) fail('read bulk status', r);
+    const ops = r.json.operations_list;
+    const failed = ops.filter((o) => OPERATION_FAILED.has(o.status)).length;
+    if (failed > 0) throw new Error(`umbrella seed: ${failed} bulk operations failed`);
+    if (ops.length > 0 && ops.every((o) => o.status === OPERATION_COMPLETE)) return;
+    if (Date.now() >= deadline) throw new Error('umbrella seed timed out; is the async.operations.all consumer running?');
+    await new Promise((resolve) => setTimeout(resolve, BULK_POLL_MS));
+  }
+}
+
+async function ensureUmbrella(token) {
+  const existing = await existingUmbrellaSkus(token);
+  const all = Array.from({ length: UMBRELLA_COUNT }, (_, k) => umbrellaProduct(k + 1));
+  const missing = all.filter((p) => !existing.has(p.sku));
+  for (let i = 0; i < missing.length; i += UMBRELLA_CHUNK) {
+    const chunk = missing.slice(i, i + UMBRELLA_CHUNK);
+    const r = await call('POST', '/products', token, chunk.map(productBody), asyncBulk);
+    if (r.status !== 202 && r.status !== 200) fail('submit umbrella bulk', r);
+    if (typeof r.json?.bulk_uuid !== 'string' || r.json.errors === true) fail('submit umbrella bulk', r);
+    await waitForBulk(token, r.json.bulk_uuid, Date.now() + BULK_TIMEOUT_MS);
+  }
+  console.log(`SEEDED umbrella created=${missing.length} existing=${all.length - missing.length}`);
 }
 
 async function main() {
@@ -145,6 +221,7 @@ async function main() {
   await ensureBrandAttribute(token);
   for (const p of PRODUCTS) await upsertProduct(token, p);
   console.log(`SEEDED ${PRODUCTS.length} products`);
+  await ensureUmbrella(token);
 }
 
 main().catch((err) => {
