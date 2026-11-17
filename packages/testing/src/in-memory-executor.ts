@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import {
   CANCELLABLE,
   changesetTransitionEvent,
+  coverBatch,
+  type BatchContext,
+  type StartOutcome,
+  type StartRequest,
   isExpiryDue,
   type AuditEventInput,
   type ChangeItemRecord,
@@ -12,7 +16,6 @@ import {
   type ChangeWriter,
   type ExecutionProgress,
   type ItemOutcome,
-  type StartRefusal,
 } from '@aiops/core';
 
 export interface InMemoryExecutorDeps {
@@ -22,6 +25,13 @@ export interface InMemoryExecutorDeps {
   readonly now?: () => Date;
   readonly newId?: () => string;
 }
+
+/** Batch context of the in-memory executor: nothing is fenced or recorded. */
+const NO_BATCH: BatchContext = {
+  key: 'in-memory',
+  recordSubmission: () => Promise.resolve(),
+  heartbeat: () => undefined,
+};
 
 interface Run {
   cancel?: { actor: string; correlationId: string };
@@ -63,12 +73,7 @@ export class InMemoryExecutor implements ChangeSetExecutor {
     return changesetTransitionEvent({ id: this.newId(), actor, changeset, from, to, correlationId });
   }
 
-  async start(req: {
-    changesetId: string;
-    expectedHash: string;
-    actor: string;
-    correlationId: string;
-  }): Promise<{ ok: true } | { ok: false; reason: StartRefusal }> {
+  async start(req: StartRequest): Promise<StartOutcome> {
     let record = await this.repository.get(req.changesetId);
     if (record === undefined) return { ok: false, reason: 'not_found' };
     const now = this.now();
@@ -121,7 +126,7 @@ export class InMemoryExecutor implements ChangeSetExecutor {
         if (items.length === 0) break;
         let outcomes: readonly ItemOutcome[];
         try {
-          outcomes = await this.writer.writeBatch({ changeset: record, items });
+          outcomes = await this.writer.writeBatch({ changeset: record, items, batch: NO_BATCH });
         } catch {
           writerFailed = true;
           break;
@@ -215,13 +220,6 @@ export class InMemoryExecutor implements ChangeSetExecutor {
   }
 }
 
-/** Outcomes for exactly the batch: first outcome per target wins, strangers are ignored, gaps fail. */
-function coverBatch(items: readonly ChangeItemRecord[], outcomes: readonly ItemOutcome[]): ItemOutcome[] {
-  const byTarget = new Map<string, ItemOutcome>();
-  for (const o of outcomes) if (!byTarget.has(o.targetId)) byTarget.set(o.targetId, o);
-  return items.map((i) => byTarget.get(i.targetId) ?? { targetId: i.targetId, status: 'failed', error: 'no_outcome' });
-}
-
 type ScriptedStatus = 'written' | 'failed' | 'skipped';
 
 export interface ScriptedWriterOptions {
@@ -279,6 +277,7 @@ export class ScriptedWriter implements ChangeWriter {
   async writeBatch(input: {
     changeset: ChangeSetRecord;
     items: readonly ChangeItemRecord[];
+    batch?: BatchContext;
   }): Promise<readonly ItemOutcome[]> {
     const index = this.batches.length;
     this.batches.push(input.items.map((i) => i.targetId));

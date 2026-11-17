@@ -26,6 +26,20 @@ export interface ChangeSetStats {
   readonly skipped: number;
 }
 
+export interface ExecutionRequest {
+  readonly actor: string;
+  readonly groups: readonly string[];
+  readonly clientId?: string;
+  readonly correlationId: string;
+  readonly startedAt: Date;
+}
+
+export interface CancelRequest {
+  readonly actor: string;
+  readonly correlationId: string;
+  readonly requestedAt: Date;
+}
+
 export interface ChangeSetRecord {
   readonly id: string;
   readonly operation: string;
@@ -42,6 +56,8 @@ export interface ChangeSetRecord {
   readonly createdAt: Date;
   readonly preparedAt?: Date;
   readonly expiresAt: Date;
+  readonly executionRequest?: ExecutionRequest;
+  readonly cancelRequest?: CancelRequest;
 }
 
 export interface ChangeItemRecord {

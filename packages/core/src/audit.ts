@@ -9,7 +9,8 @@ export type AuditAction =
   | 'credential.set'
   | 'credential.rotate'
   | 'connection.test'
-  | 'changeset.transition';
+  | 'changeset.transition'
+  | 'changeset.batch';
 
 export type AuditOutcome = 'ok' | 'error' | 'denied';
 

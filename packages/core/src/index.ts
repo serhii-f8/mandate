@@ -31,6 +31,8 @@ export type { CredentialHandle, CredentialStatus, CredentialVault } from './cred
 export { canonicalJson, compareTargetIds, normalizeArgs } from './changeset/canonical.js';
 export { ChangeSetHasher, type HashableItem } from './changeset/hash.js';
 export type {
+  CancelRequest,
+  ExecutionRequest,
   ChangeItemRecord,
   ChangeSetRecord,
   ChangeSetStats,
@@ -41,19 +43,44 @@ export type {
 export { EMPTY_STATS } from './changeset/model.js';
 export { CANCELLABLE, canTransition, isExpiryDue, PRE_EXECUTION, TRANSITIONS } from './changeset/lifecycle.js';
 export type {
+  BatchContext,
+  BatchSubmission,
   ChangeSetExecutor,
   ChangeSetRepository,
   ChangeWriter,
+  ExecutionGuard,
+  ExecutionLimits,
   ExecutionProgress,
+  ExecutionUsage,
+  FinishOutcome,
   ItemOutcome,
   ItemsPageQuery,
+  LimitName,
   NewChangeSet,
+  PlanEntry,
   PreparationRepository,
   PrepareFailure,
+  RateCounter,
   ReadPage,
+  StartEvent,
+  StartOutcome,
   StartRefusal,
+  StartRequest,
   UpstreamReader,
+  WorkflowProgress,
+  WorkflowStarter,
 } from './changeset/ports.js';
+export { BatchFenced, ExecutorUnavailable } from './changeset/ports.js';
+export {
+  changesetBatchEvent,
+  coverBatch,
+  evaluateLimits,
+  executionTerminal,
+  failureThresholdExceeded,
+  startEventFactory,
+  type BatchCounts,
+  type StartEventContext,
+} from './changeset/execution.js';
 export { changesetTransitionEvent, type ChangesetTransitionInput } from './changeset/audit.js';
 export { buildItems, touchedFields } from './changeset/items.js';
 export {

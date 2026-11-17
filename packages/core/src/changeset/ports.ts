@@ -75,12 +75,106 @@ export interface UpstreamReader {
   read(operationId: string, args: Readonly<Record<string, unknown>>): Promise<ReadPage>;
 }
 
+export type PlanEntry =
+  | { readonly targetId: string; readonly action: 'write' }
+  | {
+      readonly targetId: string;
+      readonly action: 'outcome';
+      readonly status: 'written' | 'skipped' | 'failed';
+      readonly error: string;
+    };
+
+export interface BatchSubmission {
+  readonly upstreamBatchId: string;
+  readonly plan: readonly PlanEntry[];
+}
+
+export interface BatchContext {
+  readonly key: string;
+  readonly submission?: BatchSubmission;
+  recordSubmission(s: BatchSubmission): Promise<void>;
+  heartbeat(): void;
+}
+
+/** Thrown when a newer attempt of the batch has taken over (EXE-4). */
+export class BatchFenced extends Error {
+  constructor() {
+    super('batch attempt superseded');
+    this.name = 'BatchFenced';
+  }
+}
+
 export interface ChangeWriter {
   writeBatch(input: {
     changeset: ChangeSetRecord;
     items: readonly ChangeItemRecord[];
+    batch: BatchContext;
   }): Promise<readonly ItemOutcome[]>;
 }
+
+export type LimitName = 'records_per_operation' | 'records_per_day' | 'concurrent_executions';
+
+export interface ExecutionLimits {
+  readonly role: string;
+  readonly recordsPerOperation?: number;
+  readonly recordsPerDay?: number;
+  readonly concurrentExecutions?: number;
+}
+
+export type StartOutcome =
+  | { ok: true }
+  | { ok: false; reason: Exclude<StartRefusal, 'limit_exceeded'> }
+  | { ok: false; reason: 'limit_exceeded'; limit: LimitName };
+
+export interface StartRequest {
+  changesetId: string;
+  expectedHash: string;
+  actor: string;
+  correlationId: string;
+  groups?: readonly string[];
+  limits?: ExecutionLimits;
+  clientId?: string;
+}
+
+export interface WorkflowStarter {
+  start(changesetId: string): Promise<void>;
+}
+
+export interface RateCounter {
+  hit(key: string, windowStart: Date): Promise<number>;
+}
+
+/** Usage of a role's callers, excluding the change-set being started. */
+export interface ExecutionUsage {
+  readonly recordsSince: number;
+  readonly executing: number;
+}
+
+export type FinishOutcome =
+  | 'done'
+  | 'cancelled'
+  | 'failure_threshold'
+  | 'writer_error'
+  | 'hash_mismatch'
+  | 'policy_denied'
+  | 'executor_error';
+
+export interface ExecutionGuard {
+  check(
+    changeset: ChangeSetRecord,
+  ): Promise<{ ok: true } | { ok: false; outcome: 'hash_mismatch' | 'policy_denied' }>;
+}
+
+export class ExecutorUnavailable extends Error {
+  constructor() {
+    super('executor_unavailable');
+    this.name = 'ExecutorUnavailable';
+  }
+}
+
+export type StartEvent =
+  | { kind: 'expired' | 'executing'; from: ChangeSetStatus }
+  | { kind: 'limit_denied'; limit: LimitName; role: string };
 
 export interface ExecutionProgress {
   readonly status: ChangeSetStatus;
@@ -90,16 +184,14 @@ export interface ExecutionProgress {
   readonly skipped: number;
 }
 
-export type StartRefusal = 'not_found' | 'hash_mismatch' | 'expired' | 'not_executable';
+/** Alias of the progress shape for the workflow query result. */
+export type WorkflowProgress = ExecutionProgress;
 
-/** Executor port (EXE-11). */
+export type StartRefusal = 'not_found' | 'hash_mismatch' | 'expired' | 'not_executable' | 'limit_exceeded';
+
+/** Executor port (EXE-11). `cancel` may answer `{ ok: true, status: 'executing' }` while a run winds down. */
 export interface ChangeSetExecutor {
-  start(req: {
-    changesetId: string;
-    expectedHash: string;
-    actor: string;
-    correlationId: string;
-  }): Promise<{ ok: true } | { ok: false; reason: StartRefusal }>;
+  start(req: StartRequest): Promise<StartOutcome>;
   cancel(req: {
     changesetId: string;
     actor: string;

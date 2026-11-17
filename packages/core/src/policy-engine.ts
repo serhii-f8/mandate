@@ -8,7 +8,8 @@ export type DenyReason =
   | 'scope_argument_missing'
   | 'out_of_scope'
   | 'denied_field'
-  | 'field_not_allowed';
+  | 'field_not_allowed'
+  | 'limit_exceeded';
 
 /**
  * The outcome of one evaluation. `rule` names what produced it (POL-8):

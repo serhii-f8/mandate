@@ -102,6 +102,7 @@ const REASON_TEXT: Readonly<Record<DenyReason, (detail: string) => string>> = {
   out_of_scope: (d) => `argument '${d}' is outside your scope`,
   denied_field: (d) => `field '${d}' is denied`,
   field_not_allowed: (d) => `field '${d}' is not allowed`,
+  limit_exceeded: () => 'an execution limit of your role was reached',
 };
 
 function deniedResult(decision: PolicyDecision): CallToolResult {
