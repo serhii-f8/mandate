@@ -7,6 +7,7 @@
 import { ProtocolError, ProtocolErrorCode, type CallToolResult, type Tool } from '@modelcontextprotocol/server';
 import type { LoadedConfiguration } from '@aiops/config';
 import {
+  allowingRole,
   createPolicyEngine,
   resolveRoles,
   toolCallAuditEvent,
@@ -18,7 +19,6 @@ import {
   type PolicyEngine,
   type RateCounter,
 } from '@aiops/core';
-import { allowingRole } from '../changesets/allowing-role.js';
 import { toCallToolResult } from '../changesets/results.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
