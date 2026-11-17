@@ -67,9 +67,13 @@ function activitiesFor(stores: RuntimeStores): WorkerActivities {
  * Worker start-up (NFR-4): refuses an unmigrated schema (migrations are `api`'s job), loads the
  * configuration exactly as `api` does (specs resolved, presets loaded), binds the activities to
  * the database, connects to Temporal with the encrypting data converter (SEC-4) and reloads the
- * configuration on SIGHUP (CFG-2).
+ * configuration on SIGHUP (CFG-2). `signals` is the process (a test passes its own emitter).
  */
-export async function startWorkerRuntime(env: WorkerEnv, logger: Logger): Promise<WorkerRuntime> {
+export async function startWorkerRuntime(
+  env: WorkerEnv,
+  logger: Logger,
+  signals: Pick<NodeJS.EventEmitter, 'on'> = process,
+): Promise<WorkerRuntime> {
   await assertMigrated(env.databaseUrl);
 
   // One adapter: its resolver checks the specs at load and on every reload; it also runs the calls.
@@ -85,6 +89,8 @@ export async function startWorkerRuntime(env: WorkerEnv, logger: Logger): Promis
   }
   assertFullyChecked(configuration.current);
   logger.info({ hash: configuration.current.hash }, 'configuration loaded');
+  // Before the slow connect and workflow bundling: an early SIGHUP must reload, not end the process.
+  installReload(configuration, logger, signals);
 
   // Parsed before any connection so a malformed key set stops the start; messages name no key material.
   const masterKeys = parseMasterKeys(env.masterKeys);
@@ -114,7 +120,6 @@ export async function startWorkerRuntime(env: WorkerEnv, logger: Logger): Promis
       activities,
       dataConverter: workerDataConverter(temporalKeys),
     });
-    installReload(configuration, logger, process);
     const open = connection;
     return {
       run: async () => {

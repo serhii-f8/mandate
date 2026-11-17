@@ -327,6 +327,26 @@ describe('change-set activities', () => {
     expect(await itemStatuses(cs.id)).toEqual({ 't-0001': 'pending', 't-0002': 'pending' });
   });
 
+  it('SEC-3 a throwing writer is logged at warn with the change-set, the batch and the error class, never its message', async () => {
+    const cs = await createPrepared(repository, 2, { execute: {} });
+    const writer: ChangeWriter = { writeBatch: () => Promise.reject(new TypeError('upstream said secret-upstream-text')) };
+    const entries: { level: string; message: string; meta?: Record<string, unknown> }[] = [];
+    const env = new MockActivityEnvironment(
+      { attempt: 1 },
+      { logger: new DefaultLogger('WARN', (entry) => entries.push({ level: entry.level, message: entry.message, ...(entry.meta === undefined ? {} : { meta: entry.meta }) })) },
+    );
+    await expect(env.run(() => activities({ writer }).executeBatch(cs.id, 0))).rejects.toMatchObject({ message: 'writer_failed' });
+    // The SDK logs the failed activity on its own (as `writer_failed`); this is the activity's entry.
+    const warned = entries.filter((e) => e.message === 'change-set batch write failed');
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toMatchObject({
+      level: 'WARN',
+      message: 'change-set batch write failed',
+      meta: { changesetId: cs.id, batchNo: 0, errorClass: 'TypeError' },
+    });
+    expect(JSON.stringify(entries)).not.toContain('secret-upstream-text');
+  });
+
   it('NFR-2 EXE-3 a claim by an older attempt than the batch owner is superseded and not retried', async () => {
     const cs = await createPrepared(repository, 2, { execute: {} });
     const writer = new ScriptedWriter();

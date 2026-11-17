@@ -14,6 +14,7 @@ import {
   executionTerminal,
   failureThresholdExceeded,
   PRE_EXECUTION,
+  RetryableWriteError,
   runPreparation,
   type BatchContext,
   type ChangeSetRecord,
@@ -223,6 +224,13 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
       } catch (error) {
         // A newer attempt owns the batch: this one stops without recording anything (NFR-2).
         if (error instanceof BatchFenced) throw superseded();
+        // The class name and fixed code only, never the message (SEC-3).
+        Context.current().log.warn('change-set batch write failed', {
+          changesetId,
+          batchNo,
+          errorClass: error instanceof Error ? error.constructor.name : typeof error,
+          ...(error instanceof RetryableWriteError ? { code: error.code } : {}),
+        });
         // Retried by the activity's policy; the writer's message stays out of history (SEC-3).
         throw ApplicationFailure.retryable('writer_failed');
       }
