@@ -1,20 +1,28 @@
 /**
  * OpenAPI adapter facade (CONN-2, CONN-7, SEC-7): the spec resolver the configuration loader uses,
- * the read path the api uses, and scope detection for the connection test.
+ * the read path the api uses, scope detection for the connection test, and the bulk write path the
+ * worker uses (OPS-6, EXE-4).
  */
 import {
   parseSecret,
+  type BulkStatusOutcome,
+  type BulkSubmitOutcome,
   type ConnectionSettings,
   type CredentialSource,
+  type HttpMethod,
   type ReadAdapter,
   type ReadOutcome,
   type ScopeReport,
   type SpecIssue,
+  type UpstreamMapping,
   type UpstreamResolver,
+  type WriteAdapter,
+  type WriteFailure,
 } from '@aiops/connector-sdk';
-import { createConnectionClient, createTransport, type ConnectionClient, type Transport } from '../http/client.js';
+import { createConnectionClient, createTransport, type ConnectionClient, type SendResult, type Transport } from '../http/client.js';
 import { createGuardedLookup } from '../http/egress.js';
 import { clientCredentialsToken, lastTokenScopes } from '../http/oauth.js';
+import { buildBulkBody, extractBatchId, isSafeBatchId, mapBulkStatus } from './bulk.js';
 import { deriveCatalog } from './derive.js';
 import { normaliseSpec, validateSpecDocument } from './normalise.js';
 import { buildRequest, MappingError, type HttpRequestSpec } from './request.js';
@@ -29,7 +37,7 @@ export interface OpenApiAdapterDeps {
   transportFor?: (settings: ConnectionSettings) => Transport;
 }
 
-export type OpenApiAdapter = ReadAdapter & { resolver: UpstreamResolver };
+export type OpenApiAdapter = ReadAdapter & WriteAdapter & { resolver: UpstreamResolver };
 
 const NOT_DETECTABLE: ScopeReport = { detectable: false, source: 'none', values: [] };
 /** RFC 6749 §3.3 scope-token characters; anything else is not reported. */
@@ -76,6 +84,23 @@ export function jwtScopes(token: string): string[] | undefined {
   if (!isPlainObject(p)) return undefined;
   const values = scopeValues(p.scope) ?? scopeValues(p.scp);
   return values && values.length > 0 ? values : undefined;
+}
+
+const mappingFailure = (): WriteFailure => ({ ok: false, code: 'mapping', durationMs: 0, retriable: false });
+
+/**
+ * Write outcome of a failed send. Carries no message: nothing from the upstream reaches a write
+ * outcome (SEC-3, SEC-5). Retriable means the caller may try again: timeouts, network errors, a
+ * full semaphore, HTTP 429 and 5xx. A submit answered with any other status was refused by the
+ * upstream (`rejected`); a status poll keeps `http_status`.
+ */
+function classify(r: SendResult & { ok: false }, kind: 'submit' | 'status'): WriteFailure {
+  const base = { ok: false as const, ...(r.status === undefined ? {} : { status: r.status }), durationMs: r.durationMs };
+  if (r.code === 'http_status') {
+    const retriable = r.status !== undefined && (r.status === 429 || r.status >= 500);
+    return { ...base, code: retriable || kind === 'status' ? 'http_status' : 'rejected', retriable };
+  }
+  return { ...base, code: r.code, retriable: r.code === 'timeout' || r.code === 'network' || r.code === 'busy' };
 }
 
 async function openSecret(
@@ -186,6 +211,56 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
     return NOT_DETECTABLE;
   }
 
-  return { resolver, read, detectScopes };
+  async function submitBulk(input: Parameters<WriteAdapter['submitBulk']>[0]): Promise<BulkSubmitOutcome> {
+    const { connection, mapping, records, credential } = input;
+    const { bulk, method, path } = mapping;
+    if (bulk === undefined || method === undefined || path === undefined) return mappingFailure();
+    // The mapping's own `body` template is not used: the body is built from the records below.
+    const withoutBody: UpstreamMapping & { method: HttpMethod; path: string } = { ...mapping, method, path };
+    delete withoutBody.body;
+    let req: HttpRequestSpec;
+    try {
+      req = buildRequest(connection.baseUrl, withoutBody, {});
+    } catch (err) {
+      if (err instanceof MappingError) return mappingFailure();
+      throw err;
+    }
+    req.body = JSON.stringify(buildBulkBody(bulk.body, records));
+    req.headers['content-type'] = 'application/json';
+    // Never retried by the client: a resent submit could apply the batch twice (EXE-4).
+    const r = await clientOf(connection).send(req, { retryable: false, ...(credential ? { credential } : {}) });
+    if (!r.ok) return classify(r, 'submit');
+    const batchId = extractBatchId(r.json, bulk.batchId);
+    if (batchId === undefined || !isSafeBatchId(batchId)) {
+      return { ok: false, code: 'invalid_response', status: r.status, durationMs: r.durationMs, retriable: false };
+    }
+    return { ok: true, batchId, status: r.status, durationMs: r.durationMs };
+  }
+
+  async function bulkStatus(input: Parameters<WriteAdapter['bulkStatus']>[0]): Promise<BulkStatusOutcome> {
+    const { connection, mapping, batchId, credential } = input;
+    const bulk = mapping.bulk;
+    // The batch ID came from the upstream: it goes into the path only when it is a plain token (SEC-5).
+    if (bulk === undefined || !isSafeBatchId(batchId)) return mappingFailure();
+    let req: HttpRequestSpec;
+    try {
+      req = buildRequest(
+        connection.baseUrl,
+        { pathParams: { batch_id: batchId }, query: {}, headers: {}, response: { maxItems: 1 }, method: 'GET', path: bulk.status.path },
+        {},
+      );
+    } catch (err) {
+      if (err instanceof MappingError) return mappingFailure();
+      throw err;
+    }
+    // A status read changes nothing upstream, so the client may retry it.
+    const r = await clientOf(connection).send(req, { retryable: true, ...(credential ? { credential } : {}) });
+    if (!r.ok) return classify(r, 'status');
+    const items = mapBulkStatus(bulk.status, r.json);
+    if (items === undefined) return { ok: false, code: 'invalid_response', status: r.status, durationMs: r.durationMs, retriable: false };
+    return { ok: true, items, durationMs: r.durationMs };
+  }
+
+  return { resolver, read, detectScopes, submitBulk, bulkStatus };
 }
 
