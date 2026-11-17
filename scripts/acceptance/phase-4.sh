@@ -71,8 +71,6 @@ if bash "$REPO/deploy/sandbox/magento/up.sh" >"$WORK/sandbox.log" 2>&1 &&
 else
   fail sandbox-ready "see sandbox output below"; tail -30 "$WORK/sandbox.log"; exit 1
 fi
-TOKEN_B64="$(printf '%s' "$TOKEN" | base64 -w0)"
-BEARER="Bearer $TOKEN"
 
 git clone --quiet --no-local --no-checkout "$REPO" "$WORK/aiops"
 git -C "$WORK/aiops" checkout --quiet --detach "$SHA"
@@ -114,7 +112,8 @@ ALICE="$(login alice 2>&1)" || { fail login-alice "$ALICE"; exit 1; }
 
 STAMP="Phase 4 acceptance $(date -u +%Y%m%dT%H%M%SZ)"
 ARGS="$(node -e 'console.log(JSON.stringify({ brand: "acme", skus: ["ACME-001", "ACME-002", "ACME-404"], changes: { description: process.argv[1] } }))' "$STAMP")"
-BEFORE_P="$(sandbox_products 'ACME-001,ACME-002')"
+# Every seeded acme product: the selector change-set covers all of them, so all must stay unwritten.
+BEFORE_P="$(sandbox_products "$ACME_SKUS")"
 PREP_CIDS=()
 
 # 1. prepared-explicit
@@ -182,8 +181,8 @@ else
   fail other-brand-denied "result=$P4 rows $CS_BEFORE → $CS_AFTER"
 fi
 
-# 6. zero writes: every upstream call of the prepare calls is a GET; updated_at unchanged.
-AFTER_P="$(sandbox_products 'ACME-001,ACME-002')"
+# 6. zero writes: every upstream call of the prepare calls is a GET; description and updated_at of every acme product unchanged.
+AFTER_P="$(sandbox_products "$ACME_SKUS")"
 compose logs --no-color api >"$WORK/api.log" 2>&1 || true
 CIDS_JOINED="$(IFS=,; echo "${PREP_CIDS[*]}")"
 ZW="$(CIDS="$CIDS_JOINED" node -e '
@@ -194,10 +193,11 @@ ZW="$(CIDS="$CIDS_JOINED" node -e '
     if (!cids.has(o.correlationId)) continue; total++; methods[o.method] = (methods[o.method] ?? 0) + 1; }
   console.log(JSON.stringify({ total, methods }));' "$WORK/api.log" 2>&1 || true)"
 ZW_OK="$(node -e 'const z = JSON.parse(process.argv[1]); console.log(z.total > 0 && Object.keys(z.methods).length === 1 && z.methods.GET === z.total ? "ok" : "no")' "$ZW" 2>&1 || true)"
-if [[ "$ZW_OK" == ok && "$BEFORE_P" == "$AFTER_P" && "$BEFORE_P" != "{}" ]]; then
-  pass zero-writes "upstream calls of the prepare calls: $ZW (GET only); updated_at of ACME-001/002 unchanged: $(node -e 'const o = JSON.parse(process.argv[1]); console.log(Object.entries(o).map(([k, v]) => k + "=" + v.updated_at).join(" "))' "$AFTER_P")"
+ZW_COVERED="$(node -e 'console.log(Object.keys(JSON.parse(process.argv[1])).sort().join(","))' "$AFTER_P" 2>&1 || true)"
+if [[ "$ZW_OK" == ok && "$BEFORE_P" == "$AFTER_P" && "$BEFORE_P" != "{}" && -n "$ACME_SKUS" && "$ZW_COVERED" == "$ACME_SKUS" ]]; then
+  pass zero-writes "upstream calls of the prepare calls: $ZW (GET only); description and updated_at unchanged for all acme SKUs: $(node -e 'const o = JSON.parse(process.argv[1]); console.log(Object.entries(o).map(([k, v]) => k + "=" + v.updated_at).join(" "))' "$AFTER_P")"
 else
-  fail zero-writes "calls=$ZW before=$BEFORE_P after=$AFTER_P"
+  fail zero-writes "calls=$ZW covered=$ZW_COVERED seeded=$ACME_SKUS before=$BEFORE_P after=$AFTER_P"
 fi
 
 # 7. get_changeset and cancel_changeset
