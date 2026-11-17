@@ -35,3 +35,4 @@ export {
 } from './keycloak.js';
 export { startFakeUpstream, type FakeUpstream, type FakeHandler, type FakeResponse, type RecordedRequest } from './fake-upstream.js';
 export { FakeResolver, fakeCatalogEntry } from './fake-resolver.js';
+export { installFakeMagentoCatalog, type FakeMagentoCatalog, type FakeMagentoProduct } from './fake-magento-catalog.js';

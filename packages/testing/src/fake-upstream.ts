@@ -28,6 +28,8 @@ export interface FakeUpstream {
   readonly maxInFlight: number;
   /** Registers (or replaces) the handler for `METHOD path`; the query string is not part of the path. */
   route(method: string, path: string, handler: FakeHandler): void;
+  /** Registers a handler for `method` and every path matching `pattern`; tried after exact routes, in registration order. */
+  routeMatch(method: string, pattern: RegExp, handler: FakeHandler): void;
   close(): Promise<void>;
 }
 
@@ -43,6 +45,7 @@ function flattenHeaders(req: IncomingMessage): Record<string, string> {
 /** An HTTP server on 127.0.0.1 with a random port, for adapter tests. Unrouted requests get 404 JSON. */
 export async function startFakeUpstream(): Promise<FakeUpstream> {
   const routes = new Map<string, FakeHandler>();
+  const patterns: { method: string; pattern: RegExp; handler: FakeHandler }[] = [];
   const requests: RecordedRequest[] = [];
   let inFlight = 0;
   let maxInFlight = 0;
@@ -85,7 +88,9 @@ export async function startFakeUpstream(): Promise<FakeUpstream> {
         body: Buffer.concat(chunks).toString('utf8'),
       };
       requests.push(recorded);
-      const handler = routes.get(`${recorded.method.toUpperCase()} ${recorded.path}`);
+      const handler =
+        routes.get(`${recorded.method.toUpperCase()} ${recorded.path}`) ??
+        patterns.find((p) => p.method === recorded.method.toUpperCase() && p.pattern.test(recorded.path))?.handler;
       let r: FakeResponse;
       try {
         r = handler ? handler(recorded) : { status: 404, body: { error: 'not found' } };
@@ -122,6 +127,9 @@ export async function startFakeUpstream(): Promise<FakeUpstream> {
     },
     route(method, path, handler) {
       routes.set(`${method.toUpperCase()} ${path}`, handler);
+    },
+    routeMatch(method, pattern, handler) {
+      patterns.push({ method: method.toUpperCase(), pattern, handler });
     },
     close() {
       return new Promise<void>((resolve) => {
