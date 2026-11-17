@@ -28,5 +28,6 @@ export {
   type LoadResult,
 } from './load.js';
 export { presetDocumentSchema, resolvePreset, type LoadedPreset, type PresetEntryLocation, type PresetResult } from './presets.js';
+export { changesetsSchema, manifestSchema, toManifestDefinition, type ManifestConfig } from './manifest.js';
 export { PLACEHOLDER_SCHEMA } from './registry.js';
 export { toUpstreamMapping, type AuthConfig, type ConnectionTestConfig, type UpstreamConfig } from './upstream-schema.js';

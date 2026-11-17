@@ -33,7 +33,7 @@ operations:
       additionalProperties: false
   - id: catalog.update_product
     connection: shop
-    risk: write
+    risk: write_opaque
     description: Update a product.
     upstream:
       method: PUT

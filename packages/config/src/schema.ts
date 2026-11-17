@@ -15,6 +15,7 @@ import {
   OPERATION_ID,
   upstreamSchema,
 } from './upstream-schema.js';
+import { changesetsSchema, manifestSchema } from './manifest.js';
 
 export { OPERATION_ID };
 const credentialRef = id;
@@ -37,6 +38,8 @@ const operationFields = {
   /** Absent: derived from the connection's spec (CONN-2). */
   input_schema: openObject.optional(),
   fields_arg: z.string().min(1).max(128).optional(),
+  /** OPS-2: how a write operation's targets and after values are prepared. */
+  manifest: manifestSchema.optional(),
 };
 const operation = z.strictObject({ ...operationFields, connection: id });
 /** A preset operation: bound to the connection that applies the preset. */
@@ -102,6 +105,8 @@ export const configDocumentSchema = z.strictObject({
   presets: z.array(preset).optional(),
   notifications: z.array(notification).optional(),
   overrides: z.array(override).optional(),
+  /** CS-6: at most one document may set it. */
+  changesets: changesetsSchema.optional(),
 });
 
 export type ConfigDocument = z.output<typeof configDocumentSchema>;

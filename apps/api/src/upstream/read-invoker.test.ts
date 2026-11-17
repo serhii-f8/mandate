@@ -29,7 +29,7 @@ operations:
     fields_arg: fields
   - id: catalog.update_product
     connection: magento
-    risk: write
+    risk: write_opaque
     description: Update a product.
     upstream: { method: PUT, path: '/V1/products/{sku}', path_params: { sku: { arg: sku } } }
     input_schema: { type: object, properties: { sku: { type: string } }, required: [sku] }
