@@ -135,14 +135,24 @@ export function createTaskHandlers(deps: TaskHandlerDeps): TaskHandlers {
     async cancel(params, ctx) {
       const task = await owned(params.taskId, ctx);
       const { caller, correlationId } = ctx;
+      const record = await deps.repository.get(task.changesetId);
+      if (record === undefined) throw taskNotFound();
       // Cooperative (EXE-7): acknowledged whatever the outcome; a finished task keeps its status.
-      let outcome: Awaited<ReturnType<ChangeSetExecutor['cancel']>> | { ok: false; reason: 'executor_unavailable' };
-      try {
-        outcome = await deps.executor.cancel({ changesetId: task.changesetId, actor: caller.subject, correlationId });
-      } catch (e) {
-        // Nothing was stored; the request is still acknowledged, and the audit row says why it did nothing.
-        if (!(e instanceof ExecutorUnavailable)) throw e;
-        outcome = { ok: false, reason: 'executor_unavailable' };
+      let outcome:
+        | Awaited<ReturnType<ChangeSetExecutor['cancel']>>
+        | { ok: false; reason: 'executor_unavailable' | 'not_cancellable' };
+      if (deriveTaskState(task.kind, record).status !== 'working') {
+        // A terminal task is a no-op (as in the ext-tasks reference receiver): a finished prepare task
+        // must not cancel its prepared change-set, nor an execution that belongs to another task.
+        outcome = { ok: false, reason: 'not_cancellable' };
+      } else {
+        try {
+          outcome = await deps.executor.cancel({ changesetId: task.changesetId, actor: caller.subject, correlationId });
+        } catch (e) {
+          // Nothing was stored; the request is still acknowledged, and the audit row says why it did nothing.
+          if (!(e instanceof ExecutorUnavailable)) throw e;
+          outcome = { ok: false, reason: 'executor_unavailable' };
+        }
       }
       await deps.audit.append({
         id: deps.newId(),

@@ -218,12 +218,36 @@ describe('MCP-7 SEC-1 AUD-1 task handlers', () => {
 
   it('MCP-7 AUD-1 tasks/cancel of a completed task is acknowledged and audited and leaves the status', async () => {
     const { handlers, ctx, executor, audit } = await setup('execute', 'completed');
-    executor.cancelAnswer = { ok: false, reason: 'not_cancellable' };
     const answer = await handlers.cancel({ taskId: TASK }, ctx(alice));
     expect(answer).toEqual({ resultType: 'complete' });
+    expect(executor.cancels).toEqual([]);
     expect(audit.events).toHaveLength(1);
-    expect(audit.events[0]).toMatchObject({ action: 'task.cancel', changesetId: CS, details: { taskId: TASK, reason: 'not_cancellable' } });
+    expect(audit.events[0]).toMatchObject({ action: 'task.cancel', outcome: 'error', changesetId: CS, details: { taskId: TASK, reason: 'not_cancellable' } });
     expect((await handlers.get({ taskId: TASK }, ctx(alice))).status).toBe('completed');
+  });
+
+  for (const stage of ['prepared', 'executing'] as const) {
+    it(`MCP-7 AUD-1 tasks/cancel of a completed prepare task on a ${stage} change-set never reaches the executor`, async () => {
+      const { handlers, ctx, executor, audit, repository } = await setup('prepare', stage);
+      const answer = await handlers.cancel({ taskId: TASK }, ctx(alice));
+      expect(answer).toEqual({ resultType: 'complete' });
+      expect(executor.cancels).toEqual([]);
+      expect(audit.events).toHaveLength(1);
+      expect(audit.events[0]).toMatchObject({
+        action: 'task.cancel',
+        outcome: 'error',
+        changesetId: CS,
+        details: { taskId: TASK, reason: 'not_cancellable' },
+      });
+      expect((await repository.get(CS))?.status).toBe(stage);
+      expect((await handlers.get({ taskId: TASK }, ctx(alice))).status).toBe('completed');
+    });
+  }
+
+  it('MCP-7 tasks/cancel of a working prepare task reaches the executor', async () => {
+    const { handlers, ctx, executor } = await setup('prepare', 'preparing');
+    await handlers.cancel({ taskId: TASK }, ctx(alice));
+    expect(executor.cancels).toEqual([{ changesetId: CS, actor: 'alice', correlationId: 'corr-7' }]);
   });
 
   it('MCP-7 SEC-1 tasks/update acknowledges an owned task and answers -32602 for a foreign one', async () => {
