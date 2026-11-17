@@ -21,7 +21,7 @@ import { Client } from '@temporalio/client';
 import type { Duration } from '@temporalio/common';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { DefaultLogger, Runtime, type NativeConnection, type Worker } from '@temporalio/worker';
-import { createActivities, createExecutionGuard, echo, type ExecutionSettings } from '../../src/activities/index.js';
+import { createActivities, createExecutionGuard, echo, type ActivityDeps, type ExecutionSettings } from '../../src/activities/index.js';
 import { createWorker } from '../../src/worker.js';
 import { testConfiguration } from './configuration.js';
 import { TEST_TEMPORAL_KEYS } from './keys.js';
@@ -100,9 +100,16 @@ export const TEST_SETTINGS: ExecutionSettings = { batchSize: 2, failureThreshold
 
 export interface TestWorkerOptions {
   readonly writer?: ChangeWriter;
+  /** Replaces the writer factory (default: `writer` for every operation), e.g. the production `createWriterFor`. */
+  readonly writerFor?: ActivityDeps['writerFor'];
   readonly reader?: UpstreamReader;
-  /** Replaces the reader factory, e.g. to fail every preparation before any read (an infrastructure failure). */
-  readonly readerFor?: () => UpstreamReader;
+  /**
+   * Replaces the reader factory, e.g. to fail every preparation before any read (an infrastructure
+   * failure), or the production `createUpstreamReader` against a fake upstream.
+   */
+  readonly readerFor?: ActivityDeps['readerFor'];
+  /** The worker's configuration (default: the infrastructure's). */
+  readonly configuration?: LoadedConfiguration;
   /** The activities' clock (default: the real one), e.g. to put the worker behind workflow time. */
   readonly now?: () => Date;
   /** Default: the production guard over the test configuration. */
@@ -160,10 +167,11 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
   const reader = opts.reader ?? noReads;
   const { guard } = opts;
   const guardFor = guard === undefined ? createExecutionGuard({ repository: infra.repository, audit: infra.audit, newId: randomUUID }) : () => guard;
+  const configuration = opts.configuration ?? infra.configuration;
   const activities = createActivities({
     repository: infra.repository,
-    configuration: () => infra.configuration,
-    writerFor: () => writer,
+    configuration: () => configuration,
+    writerFor: opts.writerFor ?? (() => writer),
     readerFor: opts.readerFor ?? (() => reader),
     guardFor,
     settingsFor: () => settings,
