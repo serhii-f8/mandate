@@ -59,7 +59,8 @@ function hasProgress(record: ChangeSetRecord): boolean {
   return PROGRESS_STATUSES.includes(record.status) || ((record.status === 'failed' || record.status === 'cancelled') && record.preparedAt !== undefined);
 }
 
-async function progressOf(deps: ChangesetToolDeps, record: ChangeSetRecord): Promise<ExecutionProgress | undefined> {
+/** Live execution progress when the status has any; `undefined` when the executor is down. */
+export async function progressOf(deps: ChangesetToolDeps, record: ChangeSetRecord): Promise<ExecutionProgress | undefined> {
   if (!hasProgress(record)) return undefined;
   try {
     return await deps.executor.progress(record.id);
