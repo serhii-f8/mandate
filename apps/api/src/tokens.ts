@@ -1,7 +1,10 @@
 /** Dependency-injection tokens shared by the api modules. */
 export const API_ENV = Symbol('ApiEnv');
+export const APPROVAL_SERVICE = Symbol('ApprovalService');
 export const AUDIT_LOG = Symbol('AuditLog');
 export const BEARER_GATE = Symbol('BearerGate');
+export const CHANGESET_EXECUTOR = Symbol('ChangeSetExecutor');
+export const CHANGESET_REPOSITORY = Symbol('ChangeSetRepository');
 export const CONFIGURATION = Symbol('ConfigurationHolder');
 export const CONNECTION_TEST = Symbol('ConnectionTestService');
 export const CREDENTIAL_VAULT = Symbol('CredentialVault');

@@ -314,7 +314,7 @@ describe('AUTH-5 pages log in through the identity provider', () => {
 });
 
 describe('SEC-1 every page route is authorized', () => {
-  it('SEC-1 every route handler is marked @Public or @PageAccess', () => {
+  it('SEC-1 every route handler, including the approval page routes, is marked @Public or @PageAccess', () => {
     const discovery = new DiscoveryService(a.app.get(ModulesContainer));
     const scanner = new MetadataScanner();
     const reflector = new Reflector();
@@ -331,7 +331,12 @@ describe('SEC-1 every page route is authorized', () => {
       }
     }
     expect(routes.map((r) => r.name)).toEqual(
-      expect.arrayContaining(['McpController.handle', 'HealthController.live', 'AuthController.login', 'AuthController.callback', 'SessionController.current', 'CredentialsController.list', 'CredentialsController.put', 'ConnectionsController.test']),
+      expect.arrayContaining(['McpController.handle', 'HealthController.live', 'AuthController.login', 'AuthController.callback', 'SessionController.current', 'CredentialsController.list', 'CredentialsController.put', 'ConnectionsController.test',
+        'ApprovalsController.queue',
+        'ChangeSetPagesController.detail',
+        'ChangeSetPagesController.items',
+        'ChangeSetPagesController.sample',
+      ]),
     );
     expect(routes.filter((r) => !r.marked)).toEqual([]);
   });

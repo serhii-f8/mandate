@@ -31,14 +31,19 @@ import { HealthController } from './health/health.controller.js';
 import { bodyErrorHandler } from './http/body-errors.js';
 import { createLogger, PinoNestLogger } from './logger.js';
 import { ApprovalService } from './approvals/approval-service.js';
+import { ApprovalsController } from './approvals/approvals.controller.js';
+import { ChangeSetPagesController } from './approvals/changeset-pages.controller.js';
 import { createBuiltinTools } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
 import { createServerFactory } from './mcp/mcp-server-factory.js';
 import { snapshotOf, type PipelineDeps } from './mcp/tool-pipeline.js';
 import {
   API_ENV,
+  APPROVAL_SERVICE,
   AUDIT_LOG,
   BEARER_GATE,
+  CHANGESET_EXECUTOR,
+  CHANGESET_REPOSITORY,
   CONFIGURATION,
   CONNECTION_TEST,
   CREDENTIAL_VAULT,
@@ -155,7 +160,7 @@ class AppModule {
     const pageChecks: PageChecks = { publicOrigin: env.publicUrl.origin, freshAuthSeconds: env.freshAuthSeconds };
     return {
       module: AppModule,
-      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, WebAppController],
+      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, ApprovalsController, ChangeSetPagesController, WebAppController],
       providers: [
         { provide: API_ENV, useValue: env },
         { provide: LOGGER, useValue: logger },
@@ -190,16 +195,39 @@ class AppModule {
             overrides.vault ?? new PostgresCredentialVault(d.db, keys ?? parseMasterKeys(env.masterKeys)),
         },
         {
+          // One repository for the write path, the built-in change-set tools and the approval pages.
+          provide: CHANGESET_REPOSITORY,
+          inject: [DATABASE],
+          useFactory: (database: Database): ChangeSetRepository => overrides.changesets ?? new PostgresChangeSetRepository(database.db),
+        },
+        {
+          provide: CHANGESET_EXECUTOR,
+          inject: [CHANGESET_REPOSITORY, TEMPORAL],
+          useFactory: (changesets: ChangeSetRepository, temporal: TemporalHandle | null): ChangeSetExecutor =>
+            overrides.executor ?? new TemporalExecutor({ client: temporalOf(temporal).client, taskQueue: env.taskQueue, repository: changesets, newId: randomUUID, now: () => new Date() }),
+        },
+        {
+          // One approval service for the MCP decision tool and the page routes (ADR 0032).
+          provide: APPROVAL_SERVICE,
+          inject: [CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, AUDIT_LOG],
+          useFactory: (repository: ChangeSetRepository, executor: ChangeSetExecutor, audit: AuditLog) =>
+            new ApprovalService({ repository, executor, audit, newId: randomUUID, now: () => new Date() }),
+        },
+        {
           provide: MCP_HANDLER,
-          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, TEMPORAL],
-          useFactory: (audit: AuditLog, vault: CredentialVault, database: Database, temporal: TemporalHandle | null) => {
-            // One repository for the write path and the built-in change-set tools.
-            const changesets = overrides.changesets ?? new PostgresChangeSetRepository(database.db);
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, TEMPORAL, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE],
+          useFactory: (
+            audit: AuditLog,
+            vault: CredentialVault,
+            database: Database,
+            temporal: TemporalHandle | null,
+            changesets: ChangeSetRepository,
+            executor: ChangeSetExecutor,
+            approvals: ApprovalService,
+          ) => {
             // One task store for the write path that creates tasks and the handlers that read them.
             const tasks = overrides.tasks ?? new PostgresTaskRepository(database.db);
-            const executor = overrides.executor ?? new TemporalExecutor({ client: temporalOf(temporal).client, taskQueue: env.taskQueue, repository: changesets, newId: randomUUID, now: () => new Date() });
             const starter = overrides.starter ?? new TemporalWorkflowStarter({ client: temporalOf(temporal).client, taskQueue: env.taskQueue });
-            const approvals = new ApprovalService({ repository: changesets, executor, audit, newId: randomUUID, now: () => new Date() });
             const io: UpstreamIo = {
               vault,
               adapter,
