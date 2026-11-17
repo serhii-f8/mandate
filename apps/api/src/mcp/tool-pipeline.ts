@@ -19,6 +19,7 @@ import {
   type PolicyDecision,
   type PolicyEngine,
 } from '@aiops/core';
+import { toCallToolResult } from '../changesets/results.js';
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
 import type { BuiltinTool } from './tool-catalog.js';
 
@@ -217,12 +218,7 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
       const result = await deps.invokerFor(configuration, req.correlationId).invoke({ operation, args: validArgs, caller: req.caller });
       // The operation ID stays authoritative over whatever the invoker reports.
       if (result.auditDetails !== undefined) report({ ...result.auditDetails, operation: operation.id });
-      return {
-        // MCP-4: summary first; the data again as JSON for clients that ignore structuredContent.
-        content: [{ type: 'text', text: result.text }, ...(result.dataText === undefined ? [] : [{ type: 'text' as const, text: result.dataText }])],
-        ...(result.structured === undefined ? {} : { structuredContent: { ...result.structured } }),
-        ...(result.isError === true ? { isError: true } : {}),
-      };
+      return toCallToolResult(result);
     },
     runDeps,
   );
