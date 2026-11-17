@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, lte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, DrizzleQueryError, eq, gt, inArray, lte, sql, type SQL } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type {
   AuditEventInput,
@@ -70,6 +70,27 @@ function pgCode(error: unknown): string | undefined {
 }
 
 /**
+ * A database error leaves as a fixed message carrying only its code, without `cause`:
+ * drizzle's error quotes the statement and its parameters (target IDs, outcome texts,
+ * cursors, error codes), and the driver's `detail` quotes key values (SEC-3). Errors of
+ * our own (validation, an injected audit failure) pass unchanged.
+ */
+function databaseError(what: string, error: unknown): unknown {
+  const code = pgCode(error);
+  if (code === undefined && !(error instanceof DrizzleQueryError)) return error;
+  const message = code === '23505' && what === 'change-set create' ? 'change-set already exists' : `${what} failed`;
+  return Object.assign(new Error(code === undefined ? message : `${message} (sqlstate ${code})`), code === undefined ? {} : { code });
+}
+
+async function guarded<T>(what: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    throw databaseError(what, error);
+  }
+}
+
+/**
  * PostgreSQL implementation of the core `ChangeSetRepository` port (CS-2, CS-4, CS-6, NFR-7).
  * Every state change and its audit event commit in one transaction. Immutability after
  * `prepared` is also enforced by the triggers of migration `0004_change_set_immutability`.
@@ -86,8 +107,8 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
   }
 
   async create(cs: NewChangeSet, audit: AuditEventInput): Promise<ChangeSetRecord> {
-    try {
-      return await this.db.transaction(async (tx) => {
+    return guarded('change-set create', () =>
+      this.db.transaction(async (tx) => {
         const [row] = await tx
           .insert(changeSet)
           .values({
@@ -108,21 +129,14 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
         if (row === undefined) throw new Error('change-set insert returned no row');
         await this.auditFor(tx).append(audit);
         return toRecord(row);
-      });
-    } catch (error) {
-      // No `cause`: drizzle's error quotes the statement parameters, the call arguments among them (SEC-3).
-      // eslint-disable-next-line preserve-caught-error -- see above
-      if (pgCode(error) === '23505') throw new Error('change-set already exists');
-      // eslint-disable-next-line preserve-caught-error -- see above
-      if (pgCode(error) !== undefined) throw new Error('change-set could not be created');
-      throw error;
-    }
+      }),
+    );
   }
 
   async appendItems(changesetId: string, items: readonly ChangeItemRecord[]): Promise<number> {
     if (!UUID.test(changesetId)) throw new Error('unknown change-set');
-    try {
-      return await this.db.transaction(async (tx) => {
+    return guarded('change items append', () =>
+      this.db.transaction(async (tx) => {
         // FOR SHARE: a concurrent status change waits until this append commits.
         const [parent] = await tx
           .select({ status: changeSet.status })
@@ -159,24 +173,20 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           ORDER BY ord
           ON CONFLICT (changeset_id, target_id) DO NOTHING`);
         return result.rowCount ?? 0;
-      });
-    } catch (error) {
-      // Trigger rejections and driver errors quote parameters; rethrow without them and
-      // without `cause` (SEC-3).
-      // eslint-disable-next-line preserve-caught-error -- see above
-      if (pgCode(error) !== undefined) throw new Error('change items could not be appended');
-      throw error;
-    }
+      }),
+    );
   }
 
   async stats(changesetId: string): Promise<ChangeSetStats> {
     if (!UUID.test(changesetId)) return structuredClone(EMPTY_STATS);
-    return computeStats(this.db, changesetId);
+    return guarded('change-set stats', () => computeStats(this.db, changesetId));
   }
 
   async get(changesetId: string): Promise<ChangeSetRecord | undefined> {
     if (!UUID.test(changesetId)) return undefined;
-    const [row] = await this.db.select().from(changeSet).where(eq(changeSet.id, changesetId));
+    const [row] = await guarded('change-set read', () =>
+      this.db.select().from(changeSet).where(eq(changeSet.id, changesetId)),
+    );
     return row === undefined ? undefined : toRecord(row);
   }
 
@@ -189,12 +199,14 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     // Keyset on the primary key; the column's "C" collation orders by code point.
     if (query.after !== undefined) conditions.push(gt(changeItem.targetId, query.after));
     if (query.status !== undefined) conditions.push(eq(changeItem.status, query.status));
-    const rows = await this.db
-      .select()
-      .from(changeItem)
-      .where(and(...conditions))
-      .orderBy(asc(changeItem.targetId))
-      .limit(query.limit);
+    const rows = await guarded('change items page', () =>
+      this.db
+        .select()
+        .from(changeItem)
+        .where(and(...conditions))
+        .orderBy(asc(changeItem.targetId))
+        .limit(query.limit),
+    );
     return rows.map(toItem);
   }
 
@@ -245,26 +257,28 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
       seen.add(o.targetId);
       rows.push({ target_id: o.targetId, status: o.status, error: o.error ?? null });
     }
-    await this.db.transaction(async (tx) => {
-      // Serializes outcome batches per change-set so the recomputed stats see every batch.
-      const [parent] = await tx
-        .select({ id: changeSet.id })
-        .from(changeSet)
-        .where(eq(changeSet.id, changesetId))
-        .for('update');
-      if (parent === undefined) return;
-      if (rows.length > 0) {
-        await tx.execute(sql`
-          UPDATE change_item AS ci
-          SET status = o.status, error = COALESCE(o.error, ci.error), updated_at = now()
-          FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS o(target_id text, status text, error text)
-          WHERE ci.changeset_id = ${changesetId}::uuid
-            AND ci.target_id = o.target_id
-            AND ci.status = 'pending'`);
-      }
-      const stats = await computeStats(tx, changesetId);
-      await tx.update(changeSet).set({ stats, updatedAt: sql`now()` }).where(eq(changeSet.id, changesetId));
-    });
+    await guarded('item outcomes record', () =>
+      this.db.transaction(async (tx) => {
+        // Serializes outcome batches per change-set so the recomputed stats see every batch.
+        const [parent] = await tx
+          .select({ id: changeSet.id })
+          .from(changeSet)
+          .where(eq(changeSet.id, changesetId))
+          .for('update');
+        if (parent === undefined) return;
+        if (rows.length > 0) {
+          await tx.execute(sql`
+            UPDATE change_item AS ci
+            SET status = o.status, error = COALESCE(o.error, ci.error), updated_at = now()
+            FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS o(target_id text, status text, error text)
+            WHERE ci.changeset_id = ${changesetId}::uuid
+              AND ci.target_id = o.target_id
+              AND ci.status = 'pending'`);
+        }
+        const stats = await computeStats(tx, changesetId);
+        await tx.update(changeSet).set({ stats, updatedAt: sql`now()` }).where(eq(changeSet.id, changesetId));
+      }),
+    );
   }
 
   /** Compare-and-set on status; no matching row writes no audit event and returns undefined. */
@@ -275,18 +289,20 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     audit: AuditEventInput,
     expiredBefore?: Date,
   ): Promise<ChangeSetRecord | undefined> {
-    return this.db.transaction(async (tx) => {
-      const conditions: SQL[] = [eq(changeSet.id, changesetId), inArray(changeSet.status, [...from])];
-      if (expiredBefore !== undefined) conditions.push(lte(changeSet.expiresAt, expiredBefore));
-      const [row] = await tx
-        .update(changeSet)
-        .set(set)
-        .where(and(...conditions))
-        .returning();
-      if (row === undefined) return undefined;
-      await this.auditFor(tx).append(audit);
-      return toRecord(row);
-    });
+    return guarded('change-set update', () =>
+      this.db.transaction(async (tx) => {
+        const conditions: SQL[] = [eq(changeSet.id, changesetId), inArray(changeSet.status, [...from])];
+        if (expiredBefore !== undefined) conditions.push(lte(changeSet.expiresAt, expiredBefore));
+        const [row] = await tx
+          .update(changeSet)
+          .set(set)
+          .where(and(...conditions))
+          .returning();
+        if (row === undefined) return undefined;
+        await this.auditFor(tx).append(audit);
+        return toRecord(row);
+      }),
+    );
   }
 }
 

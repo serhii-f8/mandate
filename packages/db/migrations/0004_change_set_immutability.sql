@@ -55,6 +55,11 @@ BEGIN
     RAISE EXCEPTION 'change_set update rejected: identity columns are immutable'
       USING ERRCODE = 'integrity_constraint_violation';
   END IF;
+  -- No way back into preparation: items could be appended again after the hash was fixed.
+  IF NEW.status = 'preparing' AND OLD.status <> 'preparing' THEN
+    RAISE EXCEPTION 'change_set update rejected: status cannot return to preparing'
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
   -- `stats` stays updatable in every status: execution outcomes recompute it (Phase 5).
   IF OLD.status <> 'preparing'
      AND (NEW.hash IS DISTINCT FROM OLD.hash OR NEW.prepared_at IS DISTINCT FROM OLD.prepared_at) THEN

@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { asc } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { compareTargetIds, type AuditEventInput, type AuditLog, type ChangeItemRecord } from '@aiops/core';
+import {
+  compareTargetIds,
+  type AuditEventInput,
+  type AuditLog,
+  type ChangeItemRecord,
+  type ItemOutcome,
+} from '@aiops/core';
 import { describeChangeSetRepositoryContract, startPostgres, type StartedPostgres } from '@aiops/testing';
 import { DrizzleAuditLog } from '../../src/audit-log.js';
 import { PostgresChangeSetRepository } from '../../src/changeset-repository.js';
@@ -237,5 +243,51 @@ describe('NFR-7 change-set repository in PostgreSQL', () => {
     expect((await repo.stats('not-a-uuid')).total).toBe(0);
     expect(await repo.transition('not-a-uuid', ['prepared'], 'cancelled', audit(randomUUID()))).toBeUndefined();
     await expect(repo.appendItems('not-a-uuid', [item('a')])).rejects.toThrow();
+  });
+});
+
+describe('CS-4 status never returns to preparing', () => {
+  it('CS-4 the database refuses a status change back to preparing', async () => {
+    const id = await preparedWithItems();
+    await sqlRejects(`UPDATE change_set SET status = 'preparing' WHERE id = $1`, [id]);
+    await database.pool.query(`UPDATE change_set SET status = 'cancelled' WHERE id = $1`, [id]);
+    await sqlRejects(`UPDATE change_set SET status = 'preparing' WHERE id = $1`, [id]);
+  });
+});
+
+describe('SEC-3 database errors never quote statement parameters', () => {
+  async function thrownMessage(run: () => Promise<unknown>): Promise<string> {
+    try {
+      await run();
+    } catch (error) {
+      // No cause either: drizzle's error, the one that quotes parameters, must not travel along.
+      expect(error).not.toHaveProperty('cause');
+      return error instanceof Error ? error.message : String(error);
+    }
+    throw new Error('expected the call to throw');
+  }
+
+  it('SEC-3 transition refused by the database throws a fixed message with the SQLSTATE only', async () => {
+    const id = await preparedWithItems();
+    const repo = new PostgresChangeSetRepository(database.db);
+    const message = await thrownMessage(() =>
+      repo.transition(id, ['prepared'], 'preparing', audit(id), { errorCode: 'secret-error-code-41' }),
+    );
+    expect(message).not.toContain('secret-error-code-41');
+    expect(message).not.toContain(id);
+    expect(message).toMatch(/sqlstate 23000/);
+    expect((await repo.get(id))?.status).toBe('prepared');
+  });
+
+  it('SEC-3 recordItemOutcomes refused by the database throws a fixed message with the SQLSTATE only', async () => {
+    const id = await preparedWithItems();
+    const repo = new PostgresChangeSetRepository(database.db);
+    // Not a valid outcome status: forces the trigger refusal (no item becomes excluded).
+    const outcome = { targetId: 'p1', status: 'excluded', error: 'secret-upstream-text-77' } as unknown as ItemOutcome;
+    const message = await thrownMessage(() => repo.recordItemOutcomes(id, [outcome]));
+    expect(message).not.toContain('secret-upstream-text-77');
+    expect(message).not.toContain('p1');
+    expect(message).not.toContain(id);
+    expect(message).toMatch(/sqlstate 23000/);
   });
 });
