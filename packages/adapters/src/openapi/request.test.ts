@@ -19,6 +19,16 @@ describe('MCP-4 request building', () => {
     expect(r.url.pathname).toBe('/rest/V1/products');
     expect(r.headers.accept).toBe('application/json');
   });
+  it('OPS-4 joins an array argument into one query value when join is set', () => {
+    const q = { 'f[value]': { arg: 'skus', join: ',' } };
+    const r = buildRequest('http://h', { ...base, query: q }, { skus: ['A-1', 'B-2'] });
+    expect(r.url.searchParams.getAll('f[value]')).toEqual(['A-1,B-2']);
+    const s = buildRequest('http://h', { ...base, query: q }, { skus: 'A-1' });
+    expect(s.url.searchParams.getAll('f[value]')).toEqual(['A-1']);
+    const n = buildRequest('http://h', { ...base, query: { 'f[value]': { arg: 'skus' } } }, { skus: ['A-1', 'B-2'] });
+    expect(n.url.searchParams.getAll('f[value]')).toEqual(['A-1', 'B-2']);
+  });
+
   it('omits absent args without default and repeats array keys', () => {
     const r = buildRequest('http://h', { ...base, query: { a: { arg: 'a' }, b: { arg: 'b' }, c: 'lit' } }, { b: ['x', 'y'] });
     expect(r.url.searchParams.has('a')).toBe(false);

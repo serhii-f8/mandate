@@ -8,9 +8,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { READ_RESULT_TEXT } from '@aiops/core';
 import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@aiops/testing';
 import { createLogger } from '../../src/logger.js';
-import { WRITE_NEEDS_CHANGESET } from '../../src/upstream/read-invoker.js';
 import { auditRows, connectClient, modernRequest, rawPost, startApi, startDatabase, tokenFor, vaultOf, type RunningApi } from './helpers.js';
 
+/** Built-in tools every authenticated user sees (MCP-8). */
+const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset'];
 const READ_CONFIG = fileURLToPath(new URL('./fixtures/read-config', import.meta.url));
 /** Obviously fake; the tests prove it never leaves the adapter (SEC-3). */
 const UPSTREAM_TOKEN = 'e2e-only-upstream-token-0123456789';
@@ -120,11 +121,13 @@ describe('MCP-4 read operations return structured results', () => {
     expect(upstream.requests[0]?.query.get('brand')).toBe('acme');
   });
 
-  it('MCP-4 a write operation is refused until change-sets exist, without an upstream call', async () => {
-    const { result } = await call(alice, 'catalog.update_product', { sku: 'acme-1' });
+  it('MCP-4 a write_opaque operation is refused as not supported yet, without an upstream call', async () => {
+    const { result, correlationId } = await call(alice, 'catalog.update_product', { sku: 'acme-1' });
     expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toBe(`catalog.update_product cannot run: ${WRITE_NEEDS_CHANGESET}.`);
+    expect(result.content[0]?.text).toBe('catalog.update_product cannot run: write_opaque operations are not supported yet.');
     expect(upstream.requests).toEqual([]);
+    const [row] = await auditRows(databaseUrl, "correlation_id = $1 and action = 'tool.call'", [correlationId]);
+    expect(row?.details).toMatchObject({ operation: 'catalog.update_product', connection: 'shop', errorCode: 'risk_not_supported' });
   });
 });
 
@@ -132,7 +135,7 @@ describe('MCP-9 overridden tool name', () => {
   it('MCP-9 tools/list shows the override name and a call by it reaches the operation', async () => {
     const client = await connectClient({ era: 'modern', baseUrls: [api.url], token: bob });
     try {
-      expect((await client.listTools()).tools.map((t) => t.name)).toEqual(['ping', 'support.find_order']);
+      expect((await client.listTools()).tools.map((t) => t.name)).toEqual([...BUILTIN_NAMES, 'support.find_order']);
     } finally {
       await client.close();
     }

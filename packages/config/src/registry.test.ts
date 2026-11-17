@@ -458,7 +458,7 @@ connections:
   - { id: other, adapter: openapi, base_url: https://other.example.test }
 operations:
   - { id: other.read, connection: other, risk: read, description: R., upstream: { method: GET, path: /x }, input_schema: { type: object } }
-  - { id: shop.write, connection: shop, risk: write, description: W., upstream: { method: POST, path: /x }, input_schema: { type: object } }
+  - { id: shop.write, connection: shop, risk: write_opaque, description: W., upstream: { method: POST, path: /x }, input_schema: { type: object } }
 ${extraOps}`,
     });
     const okConfig = ok(await sources(withTest('{ operation: shop.search, args: { fields: [sku] } }')));

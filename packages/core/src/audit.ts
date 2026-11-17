@@ -8,7 +8,8 @@ export type AuditAction =
   | 'auth.logout'
   | 'credential.set'
   | 'credential.rotate'
-  | 'connection.test';
+  | 'connection.test'
+  | 'changeset.transition';
 
 export type AuditOutcome = 'ok' | 'error' | 'denied';
 

@@ -10,6 +10,7 @@ import type { ArgumentValidator } from './argument-validators.js';
 import { pathToString } from './issues.js';
 import type { OverrideConfig, PresetOperationConfig } from './schema.js';
 import type { SourceDocument } from './yaml-source.js';
+import { toManifestDefinition } from './manifest.js';
 import { hasTemplates, pathPlaceholders, templateArgs, toResponse, toUpstreamMapping } from './upstream-schema.js';
 
 export interface Located<T> {
@@ -151,10 +152,12 @@ export function buildRegistry(input: RegistryInput): Registry {
 
     // POL-3: field rules and response projection must use the same argument, so a
     // field the policy checks is also the field list the response is cut to.
+    // A manifest operation's field list is its values argument and nothing is projected:
+    // its fields_arg is checked with the manifest (OPS-2, manifest.ts).
     const projectedBy = u.response?.fields_from_arg;
-    if (op.fields_arg !== undefined && projectedBy !== op.fields_arg) {
+    if (op.manifest === undefined && op.fields_arg !== undefined && projectedBy !== op.fields_arg) {
       at(source, [...path, 'fields_arg'], 'must equal upstream.response.fields_from_arg, so the response is projected by the same argument');
-    } else if (op.fields_arg === undefined && projectedBy !== undefined) {
+    } else if (op.manifest === undefined && op.fields_arg === undefined && projectedBy !== undefined) {
       upstreamAt(['response', 'fields_from_arg'], 'requires fields_arg naming the same argument');
     }
 
@@ -165,6 +168,8 @@ export function buildRegistry(input: RegistryInput): Registry {
       at(source, [...path, 'risk'], 'read operations must use GET; writes need change-sets');
     }
     const override = overrideByOp.get(op.id)?.value;
+    // OPS-2: `fields_arg` of a manifest operation defaults to `values_arg`.
+    const fieldsArg = op.fields_arg ?? op.manifest?.values_arg;
     const enabled = override?.enabled ?? true;
     const definition: OperationDefinition = {
       id: op.id,
@@ -175,7 +180,8 @@ export function buildRegistry(input: RegistryInput): Registry {
       ...(override?.title !== undefined ? { title: override.title } : op.title !== undefined ? { title: op.title } : {}),
       description: override?.description ?? op.description,
       inputSchema: schema,
-      ...(op.fields_arg === undefined ? {} : { fieldsArg: op.fields_arg }),
+      ...(fieldsArg === undefined ? {} : { fieldsArg }),
+      ...(op.manifest === undefined ? {} : { manifest: toManifestDefinition(op.manifest) }),
     };
     all.set(op.id, { definition, located, enabled, schemaKnown, ...(validator === undefined ? {} : { validator }) });
 

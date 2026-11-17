@@ -73,7 +73,7 @@ function operationTool(op: OperationDefinition): Tool {
 }
 
 function builtinTool(tool: BuiltinTool): Tool {
-  return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema as Tool['inputSchema'], annotations: { readOnlyHint: true } };
+  return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema as Tool['inputSchema'], annotations: { readOnlyHint: tool.readOnlyHint ?? true } };
 }
 
 export async function listTools(deps: PipelineDeps, req: PipelineRequest): Promise<Tool[]> {
@@ -205,7 +205,11 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
   return auditedRun(
     name,
     async (report) => {
-      if (builtin !== undefined) return builtin.handler(validArgs, req.caller);
+      if (builtin !== undefined) {
+        // A change-set ID is an identifier, not argument content, so it may be audited.
+        if (typeof validArgs.changeset_id === 'string') report({ changesetId: validArgs.changeset_id });
+        return builtin.handler(validArgs, { caller: req.caller, snapshot: req.snapshot, correlationId: req.correlationId });
+      }
       // Step 1 returned unless a built-in or a granted operation was found.
       if (operation === undefined) throw new Error('no operation after lookup');
       report({ operation: operation.id });

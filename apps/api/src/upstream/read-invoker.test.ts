@@ -3,7 +3,7 @@ import { createOpenApiAdapter } from '@aiops/adapters';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
 import type { ReadAdapter, ReadOutcome } from '@aiops/connector-sdk';
 import { READ_RESULT_TEXT, type Caller, type CredentialHandle, type CredentialStatus, type CredentialVault, type OperationDefinition } from '@aiops/core';
-import { DirectReadInvoker, directReadInvokers, WRITE_NEEDS_CHANGESET, type UpstreamCallLog } from './read-invoker.js';
+import { DirectReadInvoker, directReadInvokers, NOT_DIRECT_READ, type UpstreamCallLog } from './read-invoker.js';
 
 const SOURCES = {
   'connections.yaml': `version: 1
@@ -29,7 +29,7 @@ operations:
     fields_arg: fields
   - id: catalog.update_product
     connection: magento
-    risk: write
+    risk: write_opaque
     description: Update a product.
     upstream: { method: PUT, path: '/V1/products/{sku}', path_params: { sku: { arg: sku } } }
     input_schema: { type: object, properties: { sku: { type: string } }, required: [sku] }
@@ -91,9 +91,9 @@ describe('MCP-4 direct read invoker', () => {
     const { invoker, adapter } = setup();
     const result = await invoker.invoke({ operation: op('catalog.update_product'), args: { sku: 'x' }, caller });
     expect(result.isError).toBe(true);
-    expect(result.text).toBe(`catalog.update_product cannot run: ${WRITE_NEEDS_CHANGESET}.`);
-    expect(WRITE_NEEDS_CHANGESET).toBe('write operations need change-sets, which arrive in Phase 4');
-    expect(result.auditDetails).toEqual({ operation: 'catalog.update_product', connection: 'magento', errorCode: 'write_not_supported' });
+    expect(result.text).toBe(`catalog.update_product cannot run: ${NOT_DIRECT_READ}.`);
+    expect(NOT_DIRECT_READ).toBe('only read operations bound to GET run directly');
+    expect(result.auditDetails).toEqual({ operation: 'catalog.update_product', connection: 'magento', errorCode: 'not_readable' });
     expect(adapter.reads).toEqual([]);
   });
 
@@ -106,8 +106,8 @@ describe('MCP-4 direct read invoker', () => {
     const invoker = new DirectReadInvoker({ configuration: { ...CONFIG, bindings }, vault: new MemoryVault(), adapter });
     const result = await invoker.invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
     expect(result.isError).toBe(true);
-    expect(result.text).toBe(`catalog.search_products cannot run: ${WRITE_NEEDS_CHANGESET}.`);
-    expect(result.auditDetails).toEqual({ operation: 'catalog.search_products', connection: 'magento', errorCode: 'write_not_supported' });
+    expect(result.text).toBe(`catalog.search_products cannot run: ${NOT_DIRECT_READ}.`);
+    expect(result.auditDetails).toEqual({ operation: 'catalog.search_products', connection: 'magento', errorCode: 'not_readable' });
     expect(adapter.reads).toEqual([]);
   });
 
@@ -200,6 +200,8 @@ describe('MCP-4 direct read invoker', () => {
     await invokerFor(other.configuration, 'corr-b').invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
     expect(adapter.reads.map((r) => r.connection.baseUrl)).toEqual(['https://shop.example.test/rest', 'https://other.example.test/rest']);
     expect(adapter.reads[0]?.mapping).toBe(CONFIG.bindings.get('catalog.search_products')?.mapping);
+    // Direct reads keep the adapter's string clipping (MCP-4); only preparation asks for exact values.
+    expect(adapter.reads[0]).not.toHaveProperty('exactValues');
   });
 
   it('AUD-1 records the connection of the binding that ran', async () => {
@@ -217,7 +219,7 @@ describe('MCP-4 direct read invoker', () => {
     expect(adapter.reads[0]?.connection.id).toBe('magento-eu');
   });
 
-  it('SEC-3 logs each upstream call with correlation ID, operation, connection, status and duration only', async () => {
+  it('SEC-3 logs each upstream call with correlation ID, operation, connection, method, status and duration only', async () => {
     const lines: UpstreamCallLog[] = [];
     const invokerFor = directReadInvokers({ vault: new MemoryVault(), adapter: new FakeAdapter(OK), log: (l) => lines.push(l) });
     await invokerFor(CONFIG, 'corr-1').invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
@@ -228,8 +230,8 @@ describe('MCP-4 direct read invoker', () => {
     });
     await failing(CONFIG, 'corr-2').invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
     expect(lines).toEqual([
-      { correlationId: 'corr-1', operation: 'catalog.search_products', connection: 'magento', status: 200, durationMs: 12 },
-      { correlationId: 'corr-2', operation: 'catalog.search_products', connection: 'magento', durationMs: 9, errorCode: 'timeout' },
+      { correlationId: 'corr-1', operation: 'catalog.search_products', connection: 'magento', method: 'GET', status: 200, durationMs: 12 },
+      { correlationId: 'corr-2', operation: 'catalog.search_products', connection: 'magento', method: 'GET', durationMs: 9, errorCode: 'timeout' },
     ]);
   });
 });

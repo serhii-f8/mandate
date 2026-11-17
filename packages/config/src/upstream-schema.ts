@@ -76,7 +76,7 @@ export const openApiSchema = z.strictObject({
 });
 
 const literal = z.union([z.string().max(4000), z.number(), z.boolean()]);
-const templateValue = z.union([literal, z.strictObject({ arg: z.string().min(1).max(128), default: literal.optional() })]);
+const templateValue = z.union([literal, z.strictObject({ arg: z.string().min(1).max(128), default: literal.optional(), join: z.string().min(1).max(8).optional() })]);
 const templateMap = z.record(z.string().min(1).max(256), templateValue);
 const dottedPath = z.string().min(1).max(256);
 
@@ -152,7 +152,11 @@ export function pathPlaceholders(path: string): string[] {
 
 function toTemplate(value: TemplateConfig): TemplateValue {
   if (typeof value !== 'object') return value;
-  return value.default === undefined ? { arg: value.arg } : { arg: value.arg, default: value.default };
+  return {
+    arg: value.arg,
+    ...(value.default === undefined ? {} : { default: value.default }),
+    ...(value.join === undefined ? {} : { join: value.join }),
+  };
 }
 
 function toTemplates(map: Readonly<Record<string, TemplateConfig>> | undefined): Record<string, TemplateValue> {

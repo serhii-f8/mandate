@@ -5,6 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CookieJar, loginWithPkce, pageLogin, registerClient, startKeycloak, type LoginResult, type StartedKeycloak, type StartedPostgres } from '@aiops/testing';
 import { connectClient, freePort, modernRequest, rawPost, startApi, startDatabase, type RunningApi } from './helpers.js';
 
+/** Built-in tools every authenticated user sees (MCP-8). */
+const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset'];
 const PASSWORD = 'dev-only-password';
 const LOOPBACK = 'http://localhost:33418/callback';
 
@@ -117,8 +119,8 @@ describe('AUTH-1 AUTH-3 real Keycloak tokens at the api', () => {
   it('AUTH-3 alice (content) and bob (support) see different tool lists', async () => {
     const alice = await connectClient({ era: 'modern', baseUrls: [api.url], token: tokenOf(await login('aiops-mcp', 'alice')) });
     const bob = await connectClient({ era: 'modern', baseUrls: [api.url], token: tokenOf(await login('aiops-mcp', 'bob')) });
-    expect((await alice.listTools()).tools.map((t) => t.name)).toEqual(['ping', 'catalog.search_products']);
-    expect((await bob.listTools()).tools.map((t) => t.name)).toEqual(['ping', 'support.lookup_order']);
+    expect((await alice.listTools()).tools.map((t) => t.name)).toEqual([...BUILTIN_NAMES, 'catalog.search_products']);
+    expect((await bob.listTools()).tools.map((t) => t.name)).toEqual([...BUILTIN_NAMES, 'support.lookup_order']);
     await alice.close();
     await bob.close();
   });

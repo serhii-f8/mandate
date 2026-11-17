@@ -48,6 +48,12 @@ export interface ReadAdapter {
     mapping: UpstreamMapping;
     args: Readonly<Record<string, unknown>>;
     credential?: CredentialSource;
+    /**
+     * Return string values whole instead of clipping long ones (since 0.2.0, additive). Used
+     * where values are stored and compared, such as a change-set's before values; the
+     * client's response body size limit still applies.
+     */
+    exactValues?: boolean;
   }): Promise<ReadOutcome>;
   detectScopes(input: { connection: ConnectionSettings; credential?: CredentialSource }): Promise<ScopeReport>;
 }

@@ -23,6 +23,34 @@ export interface OperationDefinition {
   readonly inputSchema: Readonly<Record<string, unknown>>;
   /** Argument naming the fields a call touches: object keys or string elements (POL-3). */
   readonly fieldsArg?: string;
+  /** Present on write operations that prepare change-sets (CS-1). */
+  readonly manifest?: ManifestDefinition;
+}
+
+export type RollbackStrategy =
+  | { readonly strategy: 'replay_previous_state' | 'none' }
+  | { readonly strategy: 'inverse_operation'; readonly operation: string };
+
+export type ManifestTemplate = string | number | boolean | { readonly arg: string; readonly default?: string | number | boolean };
+
+export interface ManifestRead {
+  readonly operation: string;
+  readonly args: Readonly<Record<string, ManifestTemplate>>;
+}
+
+export interface ManifestDefinition {
+  readonly idField: string;
+  readonly idsArg?: string;
+  readonly valuesArg: string;
+  readonly fields: readonly string[];
+  readonly requiredFields: readonly string[];
+  /** Call argument name to record field. */
+  readonly scopeArgs: Readonly<Record<string, string>>;
+  readonly readBefore: ManifestRead & { readonly idsArg: string };
+  readonly selector?: ManifestRead & { readonly pageArg: string; readonly pageSizeArg: string; readonly pageSize: number };
+  readonly batchSize: number;
+  readonly maxTargets: number;
+  readonly rollback: RollbackStrategy;
 }
 
 /** A catalogue entry the operator has not enabled (visible to admins only). */

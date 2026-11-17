@@ -16,13 +16,16 @@ import {
   type OperationInvoker,
 } from '@aiops/core';
 
-export const WRITE_NEEDS_CHANGESET = 'write operations need change-sets, which arrive in Phase 4';
+/** The direct path runs only `read` operations bound to GET; anything else goes through a change-set (MCP-4, CS-1). */
+export const NOT_DIRECT_READ = 'only read operations bound to GET run directly';
 
 /** One log record per upstream call: identifiers, status and timing only (SEC-3). */
 export interface UpstreamCallLog {
   readonly correlationId: string;
   readonly operation: string;
   readonly connection: string;
+  /** HTTP method of the binding; always GET for reads (CS-1). */
+  readonly method: string;
   readonly status?: number;
   readonly durationMs: number;
   readonly errorCode?: string;
@@ -84,42 +87,77 @@ function fromOutcome(operation: string, base: Details, outcome: ReadOutcome): In
   };
 }
 
+/** What one read through a binding produced: a refusal before any upstream call, or the adapter outcome. */
+export type SingleRead =
+  | { readonly ok: false; readonly code: 'not_bound' }
+  | { readonly ok: false; readonly code: 'not_get' | 'credential_unusable'; readonly connection: string }
+  | { readonly ok: true; readonly outcome: ReadOutcome; readonly connection: string };
+
+export type SingleReadDeps = Pick<DirectReadInvokerDeps, 'configuration' | 'vault' | 'adapter' | 'correlationId' | 'log'>;
+
+/**
+ * One upstream read under the given configuration (design §4.2): binding lookup, the GET
+ * check, the credential (opened only inside the adapter, SEC-2), the adapter call and one
+ * log line with identifiers, method, status and timing only (SEC-3). No policy decision:
+ * callers have made it.
+ */
+export async function performRead(
+  deps: SingleReadDeps,
+  operationId: string,
+  args: Readonly<Record<string, unknown>>,
+  options: { readonly exactValues?: true } = {},
+): Promise<SingleRead> {
+  const { configuration } = deps;
+  const binding = configuration.bindings.get(operationId);
+  const connection = binding === undefined ? undefined : configuration.connectionSettings.get(binding.connection);
+  if (binding === undefined || connection === undefined) return { ok: false, code: 'not_bound' };
+  // Configuration refuses a read that is not GET; checked again so nothing writes without a change-set (CS-1, MCP-4).
+  if (binding.mapping.method !== 'GET') return { ok: false, code: 'not_get', connection: binding.connection };
+  const credential = await connectionCredential(deps.vault, connection.credentialRef);
+  if (credential === 'unusable') return { ok: false, code: 'credential_unusable', connection: binding.connection };
+
+  const outcome = await deps.adapter.read({
+    connection,
+    mapping: binding.mapping,
+    args,
+    ...(credential === undefined ? {} : { credential }),
+    ...(options.exactValues === true ? { exactValues: true } : {}),
+  });
+  deps.log?.({
+    correlationId: deps.correlationId ?? '',
+    operation: operationId,
+    connection: binding.connection,
+    method: binding.mapping.method,
+    ...(outcome.status === undefined ? {} : { status: outcome.status }),
+    durationMs: outcome.durationMs,
+    ...(outcome.ok ? {} : { errorCode: outcome.code }),
+  });
+  return { ok: true, outcome, connection: binding.connection };
+}
+
 export class DirectReadInvoker implements OperationInvoker {
   constructor(private readonly deps: DirectReadInvokerDeps) {}
 
   async invoke({ operation, args }: InvocationRequest): Promise<InvocationResult> {
     const base: Details = { operation: operation.id, connection: operation.connection };
-    if (operation.risk !== 'read') {
-      return { isError: true, text: `${operation.id} cannot run: ${WRITE_NEEDS_CHANGESET}.`, auditDetails: { ...base, errorCode: 'write_not_supported' } };
-    }
-    const { configuration } = this.deps;
-    const binding = configuration.bindings.get(operation.id);
-    const connection = binding === undefined ? undefined : configuration.connectionSettings.get(binding.connection);
-    if (binding === undefined || connection === undefined) {
+    const notDirect = (details: Details): InvocationResult => ({
+      isError: true,
+      text: `${operation.id} cannot run: ${NOT_DIRECT_READ}.`,
+      auditDetails: { ...details, errorCode: 'not_readable' },
+    });
+    if (operation.risk !== 'read') return notDirect(base);
+
+    const read = await performRead(this.deps, operation.id, args);
+    if (!read.ok && read.code === 'not_bound') {
       // Not reachable with a fully checked configuration; answered without detail all the same.
       return { isError: true, text: READ_RESULT_TEXT.unknown(operation.id), auditDetails: { ...base, errorCode: 'not_bound' } };
     }
-
     // From here on the binding decides the connection, for the call and for the audit.
-    const bound: Details = { operation: operation.id, connection: binding.connection };
-    // Configuration refuses a read that is not GET; checked again so no write runs without a change-set (MCP-4).
-    if (binding.mapping.method !== 'GET') {
-      return { isError: true, text: `${operation.id} cannot run: ${WRITE_NEEDS_CHANGESET}.`, auditDetails: { ...bound, errorCode: 'write_not_supported' } };
-    }
-    const credential = await connectionCredential(this.deps.vault, connection.credentialRef);
-    if (credential === 'unusable') {
+    const bound: Details = { operation: operation.id, connection: read.connection };
+    if (!read.ok) {
+      if (read.code === 'not_get') return notDirect(bound);
       return { ...readErrorResult(operation.id, 'credential_unusable'), auditDetails: { ...bound, errorCode: 'credential_unusable' } };
     }
-
-    const outcome = await this.deps.adapter.read({ connection, mapping: binding.mapping, args, ...(credential === undefined ? {} : { credential }) });
-    this.deps.log?.({
-      correlationId: this.deps.correlationId ?? '',
-      operation: operation.id,
-      connection: binding.connection,
-      ...(outcome.status === undefined ? {} : { status: outcome.status }),
-      durationMs: outcome.durationMs,
-      ...(outcome.ok ? {} : { errorCode: outcome.code }),
-    });
-    return fromOutcome(operation.id, bound, outcome);
+    return fromOutcome(operation.id, bound, read.outcome);
   }
 }

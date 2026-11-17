@@ -10,15 +10,15 @@ import type { Logger } from 'pino';
 import { createOpenApiAdapter } from '@aiops/adapters';
 import type { ReadAdapter } from '@aiops/connector-sdk';
 import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
-import { resolveRoles, type AuditLog, type CredentialVault, type OperationInvoker } from '@aiops/core';
-import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresCredentialVault, PostgresSessionStore, type Database } from '@aiops/db';
+import { resolveRoles, type AuditLog, type ChangeSetRepository, type CredentialVault, type OperationInvoker } from '@aiops/core';
+import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, PostgresSessionStore, type Database } from '@aiops/db';
 import { createBearerGate } from './auth/bearer-gate.js';
 import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
 import { HealthController } from './health/health.controller.js';
 import { bodyErrorHandler } from './http/body-errors.js';
 import { createLogger, PinoNestLogger } from './logger.js';
-import { BUILTIN_TOOLS } from './mcp/builtin-tools.js';
+import { createBuiltinTools } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
 import { createServerFactory } from './mcp/mcp-server-factory.js';
 import { snapshotOf, type PipelineDeps } from './mcp/tool-pipeline.js';
@@ -37,7 +37,7 @@ import {
   PAGE_SESSIONS,
 } from './tokens.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
-import { directReadInvokers } from './upstream/read-invoker.js';
+import { operationInvokers } from './upstream/operation-router.js';
 import { assertFullyChecked } from './upstream/upstream-runtime.js';
 import { PageAccessGuard, type PageChecks } from './web/access.js';
 import { AuthController, SessionController } from './web/auth.controller.js';
@@ -49,8 +49,10 @@ import { WebAppController } from './web/static.js';
 
 /** Seams the tests replace. */
 export interface AppOverrides {
-  /** Runs allowed operations; defaults to the direct read path (`DirectReadInvoker`). */
+  /** Runs allowed operations, all risk classes; defaults to routing by risk (`operationInvokers`). */
   readonly invoker?: OperationInvoker;
+  /** Change-set store; defaults to `PostgresChangeSetRepository` on the api database. */
+  readonly changesets?: ChangeSetRepository;
   /** The read adapter; `main.ts` passes the one whose resolver loaded the configuration. Defaults to a new OpenAPI adapter. */
   readonly adapter?: ReadAdapter;
   /** Credential store; defaults to `PostgresCredentialVault` under `AIOPS_MASTER_KEYS`. */
@@ -59,17 +61,21 @@ export interface AppOverrides {
   readonly jwks?: JWTVerifyGetKey;
 }
 
-/** The invoker per call: the override, or the direct read path bound to the request's snapshot. */
+/** The invoker per call: the override, or the risk router bound to the request's snapshot. */
 function invokerFactory(
   override: OperationInvoker | undefined,
   vault: CredentialVault,
   adapter: ReadAdapter,
+  repository: ChangeSetRepository,
   logger: Logger,
 ): PipelineDeps['invokerFor'] {
   if (override !== undefined) return () => override;
-  return directReadInvokers({
+  return operationInvokers({
     vault,
     adapter,
+    repository,
+    newId: randomUUID,
+    now: () => new Date(),
     log: (record) => {
       logger.info(record, 'upstream call completed');
     },
@@ -136,13 +142,15 @@ class AppModule {
         },
         {
           provide: MCP_HANDLER,
-          inject: [AUDIT_LOG, CREDENTIAL_VAULT],
-          useFactory: (audit: AuditLog, vault: CredentialVault) =>
-            createMcpHandler(
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE],
+          useFactory: (audit: AuditLog, vault: CredentialVault, database: Database) => {
+            // One repository for the write path and the built-in change-set tools.
+            const changesets = overrides.changesets ?? new PostgresChangeSetRepository(database.db);
+            return createMcpHandler(
               createServerFactory({
                 snapshot: () => snapshotOf(configuration.current),
-                builtins: BUILTIN_TOOLS,
-                invokerFor: invokerFactory(overrides.invoker, vault, adapter, logger),
+                builtins: createBuiltinTools({ repository: changesets, newId: randomUUID, now: () => new Date() }),
+                invokerFor: invokerFactory(overrides.invoker, vault, adapter, changesets, logger),
                 audit,
                 newId: randomUUID,
                 now: () => performance.now(),
@@ -154,7 +162,8 @@ class AppModule {
                   logger.warn({ err: error.message }, 'mcp request rejected');
                 },
               },
-            ),
+            );
+          },
         },
         {
           provide: CONNECTION_TEST,

@@ -30,7 +30,10 @@ function resolveScalars(name: string, t: TemplateValue, args: Readonly<Record<st
   const v = resolve(t, args);
   if (v === undefined) return undefined;
   if (isScalar(v)) return [v];
-  if (Array.isArray(v) && v.every(isScalar)) return v;
+  if (Array.isArray(v) && v.every(isScalar)) {
+    // `join` folds an array into one parameter value (for example a comma separated `in` filter).
+    return typeof t === 'object' && t.join !== undefined ? [v.map(String).join(t.join)] : v;
+  }
   throw new MappingError(`parameter ${name} must be a scalar or an array of scalars`);
 }
 

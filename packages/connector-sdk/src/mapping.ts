@@ -4,7 +4,7 @@ export type TemplateValue =
   | string
   | number
   | boolean
-  | { readonly arg: string; readonly default?: string | number | boolean };
+  | { readonly arg: string; readonly default?: string | number | boolean; readonly join?: string };
 
 export interface ResponseMapping {
   items?: string;

@@ -1,4 +1,19 @@
-import { bigint, boolean, customType, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import {
+  bigint,
+  boolean,
+  check,
+  customType,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
+import type { ChangeSetStats, ChangeSetStatus, ExclusionReason, ItemStatus } from '@aiops/core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => 'bytea',
@@ -75,4 +90,63 @@ export const webSession = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   },
   (t) => [index('web_session_expires_at_idx').on(t.expiresAt)],
+);
+
+/**
+ * Change-sets (CS-2, CS-4, CS-6). Immutability after `prepared` is enforced by triggers of
+ * migration `0004_change_set_immutability`; status transitions are compare-and-set in the
+ * repository and checked in core.
+ */
+export const changeSet = pgTable(
+  'change_set',
+  {
+    id: uuid('id').primaryKey(),
+    operation: text('operation').notNull(),
+    connection: text('connection').notNull(),
+    requester: text('requester').notNull(),
+    clientId: text('client_id'),
+    args: jsonb('args').$type<Record<string, unknown>>().notNull(),
+    hash: text('hash'),
+    status: text('status').$type<ChangeSetStatus>().notNull(),
+    stats: jsonb('stats').$type<ChangeSetStats>().notNull(),
+    errorCode: text('error_code'),
+    configHash: text('config_hash').notNull(),
+    correlationId: text('correlation_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    preparedAt: timestamp('prepared_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('change_set_requester_created_at_idx').on(t.requester, t.createdAt),
+    check(
+      'change_set_status_check',
+      sql`${t.status} IN ('preparing', 'prepared', 'pending_approval', 'approved', 'executing', 'completed', 'completed_with_errors', 'failed', 'rejected', 'expired', 'cancelled', 'rolling_back', 'rolled_back')`,
+    ),
+  ],
+);
+
+/**
+ * Items of a change-set. `target_id` is `COLLATE "C"` (set by migration
+ * `0004_change_set_immutability`, drizzle-kit cannot express it), so the primary key orders
+ * by code point like `compareTargetIds` and serves the keyset scans (NFR-7).
+ */
+export const changeItem = pgTable(
+  'change_item',
+  {
+    changesetId: uuid('changeset_id')
+      .notNull()
+      .references(() => changeSet.id),
+    targetId: text('target_id').notNull(),
+    status: text('status').$type<ItemStatus>().notNull(),
+    reason: text('reason').$type<ExclusionReason>(),
+    before: jsonb('before').$type<unknown>().notNull(),
+    after: jsonb('after').$type<unknown>().notNull(),
+    error: text('error'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.changesetId, t.targetId] }),
+    check('change_item_status_check', sql`${t.status} IN ('pending', 'excluded', 'written', 'failed', 'skipped')`),
+  ],
 );

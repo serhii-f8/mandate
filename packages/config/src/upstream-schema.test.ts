@@ -12,6 +12,15 @@ function issuesOf(value: unknown) {
   return schemaIssues(upstreamSchema.safeParse(value, { reportInput: true })).map((i) => [i.path.join('.'), i.message]);
 }
 
+describe('OPS-4 template join', () => {
+  const withJoin = (join: string) => ({ method: 'GET', path: '/p', query: { v: { arg: 'skus', join } } });
+  it('rejects an empty and a too long join and carries a valid one', () => {
+    expect(issuesOf(withJoin(''))).not.toEqual([]);
+    expect(issuesOf(withJoin('123456789'))).not.toEqual([]);
+    expect(toUpstreamMapping(parse(withJoin(','))).query).toEqual({ v: { arg: 'skus', join: ',' } });
+  });
+});
+
 describe('CONN-2 upstream mapping templates', () => {
   it('converts literals, argument templates with defaults, and absent maps', () => {
     const u = parse({
