@@ -11,7 +11,7 @@ import {
   type StartOutcome,
   type StartRequest,
 } from '@aiops/core';
-import { WorkflowNotFoundError, type Client } from '@temporalio/client';
+import { WorkflowExecutionAlreadyStartedError, WorkflowNotFoundError, type Client } from '@temporalio/client';
 import {
   CHANGESET_WORKFLOW,
   PROGRESS_QUERY,
@@ -80,26 +80,55 @@ export class TemporalExecutor implements ChangeSetExecutor {
         signalArgs: [],
         workflowIdReusePolicy: 'REJECT_DUPLICATE',
       });
-    } catch {
-      // Nothing will run it: the change-set must not stay `executing` (fixed code, no error text, SEC-3).
-      await this.repository.transition(
-        changeset.id,
-        ['executing'],
-        'failed',
-        changesetTransitionEvent({
-          id: this.newId(),
-          actor: 'system',
-          changeset,
-          from: 'executing',
-          to: 'failed',
-          correlationId: req.correlationId,
-          details: { errorCode: 'executor_unavailable' },
-        }),
-        { errorCode: 'executor_unavailable' },
-      );
-      throw new ExecutorUnavailable();
+    } catch (error) {
+      return this.afterFailedSignal(changeset, req.correlationId, error);
     }
     return { ok: true };
+  }
+
+  /**
+   * A failed signalWithStart is not proof that nothing runs: the server may have accepted it and
+   * only the response was lost, so a live run answers ok. A closed workflow ID can never run again
+   * (REJECT_DUPLICATE): `workflow_closed`; anything else: `executor_unavailable`. Either way the
+   * change-set must not stay `executing`. The compare-and-set loses when a run already moved the
+   * change-set on; then the record answers.
+   */
+  private async afterFailedSignal(changeset: ChangeSetRecord, correlationId: string, error: unknown): Promise<StartOutcome> {
+    const closed = error instanceof WorkflowExecutionAlreadyStartedError;
+    if (!closed && (await this.runIsLive(changeset.id))) return { ok: true };
+    const errorCode = closed ? 'workflow_closed' : 'executor_unavailable';
+    // Fixed codes only, no error text (SEC-3).
+    const failed = await this.repository.transition(
+      changeset.id,
+      ['executing'],
+      'failed',
+      changesetTransitionEvent({
+        id: this.newId(),
+        actor: 'system',
+        changeset,
+        from: 'executing',
+        to: 'failed',
+        correlationId,
+        details: { errorCode },
+      }),
+      { errorCode },
+    );
+    if (failed === undefined) {
+      const current = await this.repository.get(changeset.id);
+      // Only a run's terminal transition moves a change-set out of `executing`: this start ran.
+      if (current !== undefined && current.status !== 'executing') return { ok: true };
+    }
+    throw new ExecutorUnavailable();
+  }
+
+  /** Whether the change-set's workflow is running; false when Temporal cannot tell. */
+  private async runIsLive(changesetId: string): Promise<boolean> {
+    try {
+      const description = await this.client.workflow.getHandle(changesetId).describe();
+      return description.status.name === 'RUNNING';
+    } catch {
+      return false;
+    }
   }
 
   async cancel(req: { changesetId: string; actor: string; correlationId: string }): Promise<CancelAnswer> {

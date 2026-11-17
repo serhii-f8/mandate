@@ -138,4 +138,75 @@ describe('preparation and start on Temporal', () => {
     expect(record?.status).toBe('failed');
     expect(record?.errorCode).toBe('executor_unavailable');
   });
+
+  /** A client whose signalWithStart reaches Temporal, optionally waits, and then reports a failure (a lost response). */
+  function lostResponseClient(after?: (workflowId: string) => Promise<unknown>): Client {
+    const client = new Client({
+      connection: infra.env.connection,
+      namespace: 'default',
+      dataConverter: clientDataConverter(parseTemporalKeys(TEST_TEMPORAL_KEYS)),
+    });
+    const real = client.workflow.signalWithStart.bind(client.workflow);
+    client.workflow.signalWithStart = (async (...args: Parameters<typeof real>) => {
+      const handle = await real(...args);
+      await after?.(handle.workflowId);
+      throw new Error('DEADLINE_EXCEEDED');
+    }) as typeof real;
+    return client;
+  }
+
+  function executorOn(client: Client, worker: TestWorker): TemporalExecutor {
+    return new TemporalExecutor({ client, taskQueue: worker.taskQueue, repository: infra.repository, newId: randomUUID, now: () => new Date() });
+  }
+
+  it('EXE-11 a start whose signalWithStart response is lost while the run is live answers ok and the run completes', async () => {
+    const cs = await createPrepared(infra.repository, 3);
+    if (cs.hash === undefined) throw new Error('prepared change-set has no hash');
+    const writer = new ScriptedWriter();
+    const pause = writer.pauseAt(0);
+    await withWorker({ writer }, async (worker) => {
+      const executor = executorOn(lostResponseClient(), worker);
+      expect(
+        await executor.start({ changesetId: cs.id, expectedHash: cs.hash ?? '', actor: 'alice', groups: [EDITOR_GROUP], correlationId: 'corr-exec' }),
+      ).toEqual({ ok: true });
+      await pause.reached;
+      expect(await statusOf(cs.id)).toBe('executing');
+      pause.release();
+      await executor.settled(cs.id);
+    });
+    const record = await infra.repository.get(cs.id);
+    expect(record?.status).toBe('completed');
+    expect(record?.errorCode).toBeUndefined();
+  });
+
+  it('EXE-11 a start whose run already finished when the lost response is noticed answers ok from the record', async () => {
+    const cs = await createPrepared(infra.repository, 2);
+    await withWorker({}, async (worker) => {
+      const waitForRun = (id: string) => infra.client.workflow.getHandle(id).result();
+      const executor = executorOn(lostResponseClient(waitForRun), worker);
+      expect(
+        await executor.start({ changesetId: cs.id, expectedHash: cs.hash ?? '', actor: 'alice', groups: [EDITOR_GROUP], correlationId: 'corr-exec' }),
+      ).toEqual({ ok: true });
+    });
+    const record = await infra.repository.get(cs.id);
+    expect(record?.status).toBe('completed');
+    expect(record?.errorCode).toBeUndefined();
+  });
+
+  it('EXE-1 EXE-11 a start whose workflow ID is already closed marks the change-set failed/workflow_closed', async () => {
+    const cs = await createPrepared(infra.repository, 2);
+    const writer = new ScriptedWriter();
+    await withWorker({ writer }, async (worker) => {
+      await worker.starter.start(cs.id);
+      const handle = infra.client.workflow.getHandle(cs.id);
+      await handle.terminate('test');
+      await expect(
+        worker.executor.start({ changesetId: cs.id, expectedHash: cs.hash ?? '', actor: 'alice', groups: [EDITOR_GROUP], correlationId: 'corr-exec' }),
+      ).rejects.toBeInstanceOf(ExecutorUnavailable);
+    });
+    const record = await infra.repository.get(cs.id);
+    expect(record?.status).toBe('failed');
+    expect(record?.errorCode).toBe('workflow_closed');
+    expect(writer.calls).toBe(0);
+  });
 });
