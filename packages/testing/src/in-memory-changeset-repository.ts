@@ -47,7 +47,6 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
 
   async create(cs: NewChangeSet, audit: AuditEventInput): Promise<ChangeSetRecord> {
     if (this.entries.has(cs.id)) throw new Error(`change-set ${cs.id} already exists`);
-    await this.audit.append(audit);
     const record: ChangeSetRecord = {
       id: cs.id,
       operation: cs.operation,
@@ -62,7 +61,14 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       createdAt: copyDate(cs.createdAt),
       expiresAt: copyDate(cs.expiresAt),
     };
+    // Apply before awaiting the audit append so concurrent callers see the change; undo if the append fails.
     this.entries.set(cs.id, { record, items: new Map() });
+    try {
+      await this.audit.append(audit);
+    } catch (error) {
+      this.entries.delete(cs.id);
+      throw error;
+    }
     return copyRecord(record);
   }
 
@@ -87,7 +93,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
 
   stats(changesetId: string): Promise<ChangeSetStats> {
     const entry = this.entries.get(changesetId);
-    return Promise.resolve(entry === undefined ? EMPTY_STATS : computeStats(entry.items));
+    return Promise.resolve(entry === undefined ? structuredClone(EMPTY_STATS) : computeStats(entry.items));
   }
 
   get(changesetId: string): Promise<ChangeSetRecord | undefined> {
@@ -120,10 +126,9 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined> {
     const entry = this.entries.get(changesetId);
-    const open = (): boolean => entry?.record.status === 'preparing';
-    if (entry === undefined || !open()) return undefined;
-    await this.audit.append(audit);
-    if (!open()) return undefined;
+    if (entry?.record.status !== 'preparing') return undefined;
+    const previous = entry.record;
+    // Check and apply synchronously (compare-and-set); undo if the audit append fails.
     entry.record =
       outcome.status === 'prepared'
         ? {
@@ -134,7 +139,14 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
             preparedAt: copyDate(outcome.preparedAt),
           }
         : { ...entry.record, status: 'failed', errorCode: outcome.errorCode };
-    return copyRecord(entry.record);
+    const next = entry.record;
+    try {
+      await this.audit.append(audit);
+    } catch (error) {
+      if (entry.record === next) entry.record = previous;
+      throw error;
+    }
+    return copyRecord(next);
   }
 
   async transition(
@@ -146,19 +158,23 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
   ): Promise<ChangeSetRecord | undefined> {
     const entry = this.entries.get(changesetId);
     const expiredBefore = extra?.expiredBefore;
-    const applicable = (): boolean =>
-      entry !== undefined &&
-      from.includes(entry.record.status) &&
-      (expiredBefore === undefined || entry.record.expiresAt.getTime() <= expiredBefore.getTime());
-    if (entry === undefined || !applicable()) return undefined;
-    await this.audit.append(audit);
-    if (!applicable()) return undefined;
+    if (entry === undefined || !from.includes(entry.record.status)) return undefined;
+    if (expiredBefore !== undefined && entry.record.expiresAt.getTime() > expiredBefore.getTime()) return undefined;
+    const previous = entry.record;
+    // Check and apply synchronously (compare-and-set); undo if the audit append fails.
     entry.record = {
       ...entry.record,
       status: to,
       ...(extra?.errorCode === undefined ? {} : { errorCode: extra.errorCode }),
     };
-    return copyRecord(entry.record);
+    const next = entry.record;
+    try {
+      await this.audit.append(audit);
+    } catch (error) {
+      if (entry.record === next) entry.record = previous;
+      throw error;
+    }
+    return copyRecord(next);
   }
 
   recordItemOutcomes(changesetId: string, outcomes: readonly ItemOutcome[]): Promise<void> {
