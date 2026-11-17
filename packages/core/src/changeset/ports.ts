@@ -54,13 +54,17 @@ export interface ChangeSetRepository {
       | { status: 'failed'; errorCode: string; upstreamStatus?: number },
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined>;
-  /** Undefined when status is not in `from` (or the change-set is not expired before `expiredBefore`). */
+  /**
+   * Undefined when status is not in `from` (or the change-set is not expired before `expiredBefore`,
+   * or `unlessBatches` is set and a batch of it exists). `unlessBatches` is checked under the same
+   * lock `claimBatch` takes, so no batch is claimed between the check and the change (EXE-11).
+   */
   transition(
     changesetId: string,
     from: readonly ChangeSetStatus[],
     to: ChangeSetStatus,
     audit: AuditEventInput,
-    extra?: { errorCode?: string; expiredBefore?: Date },
+    extra?: { errorCode?: string; expiredBefore?: Date; unlessBatches?: boolean },
   ): Promise<ChangeSetRecord | undefined>;
   /** Number of items per non-null error code (CS-7: the drift number of the execution summary). */
   errorCounts(changesetId: string): Promise<Readonly<Record<string, number>>>;

@@ -179,6 +179,86 @@ describe('preparation and start on Temporal', () => {
     expect(record?.errorCode).toBeUndefined();
   });
 
+  /**
+   * Wraps every handle the client hands out: describe() fails when `blind` (Temporal cannot be
+   * asked), and the wake signals sent through handles are counted.
+   */
+  function watchHandles(client: Client, blind: boolean): { signals: () => number } {
+    let signals = 0;
+    const real = client.workflow.getHandle.bind(client.workflow);
+    client.workflow.getHandle = ((...args: Parameters<typeof real>) => {
+      const handle = real(...args);
+      const signal = handle.signal.bind(handle);
+      return Object.assign(Object.create(handle) as typeof handle, {
+        describe: blind ? () => Promise.reject(new Error('UNAVAILABLE')) : handle.describe.bind(handle),
+        signal: (...signalArgs: Parameters<typeof signal>) => {
+          signals += 1;
+          return signal(...signalArgs);
+        },
+      });
+    }) as typeof real;
+    return { signals: () => signals };
+  }
+
+  it('AUD-1 EXE-11 a lost start response with Temporal unable to describe the run does not fail a run that already claimed a batch', async () => {
+    const cs = await createPrepared(infra.repository, 3);
+    const writer = new ScriptedWriter();
+    const pause = writer.pauseAt(0);
+    await withWorker({ writer }, async (worker) => {
+      // The response is lost only after the run claimed batch 0 and is writing it.
+      const client = lostResponseClient(() => pause.reached);
+      watchHandles(client, true);
+      const executor = executorOn(client, worker);
+      let started: unknown;
+      try {
+        started = await executor.start({ changesetId: cs.id, expectedHash: cs.hash ?? '', actor: 'alice', groups: [EDITOR_GROUP], correlationId: 'corr-exec' });
+        expect(await statusOf(cs.id)).toBe('executing');
+      } finally {
+        pause.release();
+      }
+      expect(started).toEqual({ ok: true });
+      await infra.client.workflow.getHandle(cs.id).result();
+    });
+    const record = await infra.repository.get(cs.id);
+    expect(record?.status).toBe('completed');
+    expect(record?.errorCode).toBeUndefined();
+    expect(writer.batches).toEqual([['t-0001', 't-0002'], ['t-0003']]);
+  });
+
+  it('EXE-11 a lost start response with Temporal unable to describe the run and no batch claimed fails executor_unavailable', async () => {
+    const cs = await createPrepared(infra.repository, 2);
+    // No worker polls this task queue: the started workflow never runs, so no batch is claimed.
+    const client = lostResponseClient();
+    watchHandles(client, true);
+    const executor = new TemporalExecutor({ client, taskQueue: `idle-${randomUUID()}`, repository: infra.repository, newId: randomUUID, now: () => new Date() });
+    await expect(
+      executor.start({ changesetId: cs.id, expectedHash: cs.hash ?? '', actor: 'alice', groups: [EDITOR_GROUP], correlationId: 'corr-exec' }),
+    ).rejects.toBeInstanceOf(ExecutorUnavailable);
+    await infra.client.workflow.getHandle(cs.id).terminate('cleanup');
+    expect(await infra.repository.get(cs.id)).toMatchObject({ status: 'failed', errorCode: 'executor_unavailable' });
+  });
+
+  it('EXE-11 a start whose signalWithStart response is lost while the run is live sends the wake once more', async () => {
+    const cs = await createPrepared(infra.repository, 2);
+    const writer = new ScriptedWriter();
+    const pause = writer.pauseAt(0);
+    await withWorker({ writer }, async (worker) => {
+      const client = lostResponseClient();
+      const watched = watchHandles(client, false);
+      const executor = executorOn(client, worker);
+      let started: unknown;
+      try {
+        started = await executor.start({ changesetId: cs.id, expectedHash: cs.hash ?? '', actor: 'alice', groups: [EDITOR_GROUP], correlationId: 'corr-exec' });
+      } finally {
+        pause.release();
+      }
+      expect(started).toEqual({ ok: true });
+      expect(watched.signals()).toBe(1);
+      await executor.settled(cs.id);
+    });
+    expect(await statusOf(cs.id)).toBe('completed');
+  });
+
   it('EXE-11 a start whose run already finished when the lost response is noticed answers ok from the record', async () => {
     const cs = await createPrepared(infra.repository, 2);
     await withWorker({}, async (worker) => {

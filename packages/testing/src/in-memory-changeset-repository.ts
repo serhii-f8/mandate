@@ -180,12 +180,13 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     from: readonly ChangeSetStatus[],
     to: ChangeSetStatus,
     audit: AuditEventInput,
-    extra?: { errorCode?: string; expiredBefore?: Date },
+    extra?: { errorCode?: string; expiredBefore?: Date; unlessBatches?: boolean },
   ): Promise<ChangeSetRecord | undefined> {
     const entry = this.entries.get(changesetId);
     const expiredBefore = extra?.expiredBefore;
     if (entry === undefined || !from.includes(entry.record.status)) return undefined;
     if (expiredBefore !== undefined && entry.record.expiresAt.getTime() > expiredBefore.getTime()) return undefined;
+    if (extra?.unlessBatches === true && (this.batches.get(changesetId)?.size ?? 0) > 0) return undefined;
     // Check and apply synchronously (compare-and-set); undo if the audit append fails.
     const next: ChangeSetRecord = {
       ...entry.record,

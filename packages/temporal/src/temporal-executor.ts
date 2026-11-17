@@ -91,11 +91,16 @@ export class TemporalExecutor implements ChangeSetExecutor {
    * only the response was lost, so a live run answers ok. A closed workflow ID can never run again
    * (REJECT_DUPLICATE): `workflow_closed`; anything else: `executor_unavailable`. Either way the
    * change-set must not stay `executing`. The compare-and-set loses when a run already moved the
-   * change-set on; then the record answers.
+   * change-set on, or already claimed a batch (it may be writing upstream: failing the change-set
+   * under it would hide those writes, AUD-1); then the record answers. A live run is woken once
+   * more, in case the lost call never delivered the wake.
    */
   private async afterFailedSignal(changeset: ChangeSetRecord, correlationId: string, error: unknown): Promise<StartOutcome> {
     const closed = error instanceof WorkflowExecutionAlreadyStartedError;
-    if (!closed && (await this.runIsLive(changeset.id))) return { ok: true };
+    if (!closed && (await this.runIsLive(changeset.id))) {
+      await this.wake(changeset.id);
+      return { ok: true };
+    }
     const errorCode = closed ? 'workflow_closed' : 'executor_unavailable';
     // Fixed codes only, no error text (SEC-3).
     const failed = await this.repository.transition(
@@ -111,12 +116,12 @@ export class TemporalExecutor implements ChangeSetExecutor {
         correlationId,
         details: { errorCode },
       }),
-      { errorCode },
+      { errorCode, unlessBatches: true },
     );
     if (failed === undefined) {
-      const current = await this.repository.get(changeset.id);
-      // Only a run's terminal transition moves a change-set out of `executing`: this start ran.
-      if (current !== undefined && current.status !== 'executing') return { ok: true };
+      // From `executing` the compare-and-set loses only to a run: its terminal transition moved the
+      // change-set on, or it claimed a batch. Either way this start ran.
+      if ((await this.repository.get(changeset.id)) !== undefined) return { ok: true };
     }
     throw new ExecutorUnavailable();
   }

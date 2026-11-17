@@ -265,7 +265,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     from: readonly ChangeSetStatus[],
     to: ChangeSetStatus,
     audit: AuditEventInput,
-    extra?: { errorCode?: string; expiredBefore?: Date },
+    extra?: { errorCode?: string; expiredBefore?: Date; unlessBatches?: boolean },
   ): Promise<ChangeSetRecord | undefined> {
     if (!UUID.test(changesetId) || from.length === 0) return undefined;
     const set: PgUpdateSetSource<typeof changeSet> = {
@@ -273,7 +273,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
       ...(extra?.errorCode === undefined ? {} : { errorCode: extra.errorCode }),
       updatedAt: sql`now()`,
     };
-    return this.compareAndSet(changesetId, from, set, audit, extra?.expiredBefore);
+    return this.compareAndSet(changesetId, from, set, audit, extra?.expiredBefore, extra?.unlessBatches === true);
   }
 
   async errorCounts(changesetId: string): Promise<Readonly<Record<string, number>>> {
@@ -582,9 +582,21 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     set: PgUpdateSetSource<typeof changeSet>,
     audit: AuditEventInput,
     expiredBefore?: Date,
+    unlessBatches = false,
   ): Promise<ChangeSetRecord | undefined> {
     return guarded('change-set update', () =>
       this.db.transaction(async (tx) => {
+        if (unlessBatches) {
+          // The parent row lock claimBatch takes: a claim either committed before (its batch is seen
+          // by the next statement, read committed) or waits until this change committed (and fences).
+          await tx.select({ id: changeSet.id }).from(changeSet).where(eq(changeSet.id, changesetId)).for('update');
+          const [batch] = await tx
+            .select({ batchNo: changeBatch.batchNo })
+            .from(changeBatch)
+            .where(eq(changeBatch.changesetId, changesetId))
+            .limit(1);
+          if (batch !== undefined) return undefined;
+        }
         const conditions: SQL[] = [eq(changeSet.id, changesetId), inArray(changeSet.status, [...from])];
         if (expiredBefore !== undefined) conditions.push(lte(changeSet.expiresAt, expiredBefore));
         const [row] = await tx

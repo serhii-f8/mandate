@@ -832,6 +832,33 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         expect(await c.repository.recordSubmission(c.id, 0, 5, { upstreamBatchId: 'late', plan: [] })).toBe(false);
       }));
 
+    it('AUD-1 EXE-11 transition with unlessBatches applies only while no batch of the change-set exists', async () =>
+      withRepo(async (c) => {
+        await preparedSet(c, c.id, 2);
+        expect((await start(c, c.id)).ok).toBe(true);
+        expect((await c.repository.claimBatch(c.id, 0, 1, 1)).kind).toBe('claimed');
+        const before = (await c.events()).length;
+        expect(
+          await c.repository.transition(c.id, ['executing'], 'failed', auditEvent(c.id), {
+            errorCode: 'executor_unavailable',
+            unlessBatches: true,
+          }),
+        ).toBeUndefined();
+        expect(await c.repository.get(c.id)).toMatchObject({ status: 'executing' });
+        expect(await c.events()).toHaveLength(before);
+
+        const other = randomUUID();
+        await preparedSet(c, other, 1);
+        expect((await start(c, other)).ok).toBe(true);
+        const failed = await c.repository.transition(other, ['executing'], 'failed', auditEvent(other), {
+          errorCode: 'executor_unavailable',
+          unlessBatches: true,
+        });
+        expect(failed).toMatchObject({ status: 'failed', errorCode: 'executor_unavailable' });
+        // No batch is claimed once it left executing.
+        expect(await c.repository.claimBatch(other, 0, 1, 1)).toEqual({ kind: 'fenced' });
+      }));
+
     it('EXE-3 claimBatch refuses a new claim or a takeover unless the change-set is executing', async () =>
       withRepo(async (c) => {
         // Prepared, not started: no batch is claimed.
