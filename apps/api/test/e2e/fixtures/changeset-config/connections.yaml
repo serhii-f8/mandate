@@ -1,0 +1,11 @@
+# Change-set e2e (CS-1, CS-2, CS-4). The test replaces __UPSTREAM_URL__ with the fake upstream's URL.
+version: 1
+connections:
+  - id: shop
+    adapter: openapi
+    base_url: __UPSTREAM_URL__/rest
+    credential_ref: shop-token
+    auth: { scheme: bearer }
+    allow_private_network: true
+    timeout_ms: 5000
+    retry: { max_attempts: 1 }

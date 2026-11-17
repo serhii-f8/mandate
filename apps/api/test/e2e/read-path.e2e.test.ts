@@ -8,7 +8,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { READ_RESULT_TEXT } from '@aiops/core';
 import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@aiops/testing';
 import { createLogger } from '../../src/logger.js';
-import { WRITE_NEEDS_CHANGESET } from '../../src/upstream/read-invoker.js';
 import { auditRows, connectClient, modernRequest, rawPost, startApi, startDatabase, tokenFor, vaultOf, type RunningApi } from './helpers.js';
 
 const READ_CONFIG = fileURLToPath(new URL('./fixtures/read-config', import.meta.url));
@@ -120,11 +119,13 @@ describe('MCP-4 read operations return structured results', () => {
     expect(upstream.requests[0]?.query.get('brand')).toBe('acme');
   });
 
-  it('MCP-4 a write operation is refused until change-sets exist, without an upstream call', async () => {
-    const { result } = await call(alice, 'catalog.update_product', { sku: 'acme-1' });
+  it('MCP-4 a write_opaque operation is refused as not supported yet, without an upstream call', async () => {
+    const { result, correlationId } = await call(alice, 'catalog.update_product', { sku: 'acme-1' });
     expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toBe(`catalog.update_product cannot run: ${WRITE_NEEDS_CHANGESET}.`);
+    expect(result.content[0]?.text).toBe('catalog.update_product cannot run: write_opaque operations are not supported yet.');
     expect(upstream.requests).toEqual([]);
+    const [row] = await auditRows(databaseUrl, "correlation_id = $1 and action = 'tool.call'", [correlationId]);
+    expect(row?.details).toMatchObject({ operation: 'catalog.update_product', connection: 'shop', errorCode: 'risk_not_supported' });
   });
 });
 

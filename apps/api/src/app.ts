@@ -10,8 +10,8 @@ import type { Logger } from 'pino';
 import { createOpenApiAdapter } from '@aiops/adapters';
 import type { ReadAdapter } from '@aiops/connector-sdk';
 import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
-import { resolveRoles, type AuditLog, type CredentialVault, type OperationInvoker } from '@aiops/core';
-import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresCredentialVault, PostgresSessionStore, type Database } from '@aiops/db';
+import { resolveRoles, type AuditLog, type ChangeSetRepository, type CredentialVault, type OperationInvoker } from '@aiops/core';
+import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, PostgresSessionStore, type Database } from '@aiops/db';
 import { createBearerGate } from './auth/bearer-gate.js';
 import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
@@ -37,7 +37,7 @@ import {
   PAGE_SESSIONS,
 } from './tokens.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
-import { directReadInvokers } from './upstream/read-invoker.js';
+import { operationInvokers } from './upstream/operation-router.js';
 import { assertFullyChecked } from './upstream/upstream-runtime.js';
 import { PageAccessGuard, type PageChecks } from './web/access.js';
 import { AuthController, SessionController } from './web/auth.controller.js';
@@ -49,8 +49,10 @@ import { WebAppController } from './web/static.js';
 
 /** Seams the tests replace. */
 export interface AppOverrides {
-  /** Runs allowed operations; defaults to the direct read path (`DirectReadInvoker`). */
+  /** Runs allowed operations, all risk classes; defaults to routing by risk (`operationInvokers`). */
   readonly invoker?: OperationInvoker;
+  /** Change-set store; defaults to `PostgresChangeSetRepository` on the api database. */
+  readonly changesets?: ChangeSetRepository;
   /** The read adapter; `main.ts` passes the one whose resolver loaded the configuration. Defaults to a new OpenAPI adapter. */
   readonly adapter?: ReadAdapter;
   /** Credential store; defaults to `PostgresCredentialVault` under `AIOPS_MASTER_KEYS`. */
@@ -59,17 +61,21 @@ export interface AppOverrides {
   readonly jwks?: JWTVerifyGetKey;
 }
 
-/** The invoker per call: the override, or the direct read path bound to the request's snapshot. */
+/** The invoker per call: the override, or the risk router bound to the request's snapshot. */
 function invokerFactory(
   override: OperationInvoker | undefined,
   vault: CredentialVault,
   adapter: ReadAdapter,
+  repository: ChangeSetRepository,
   logger: Logger,
 ): PipelineDeps['invokerFor'] {
   if (override !== undefined) return () => override;
-  return directReadInvokers({
+  return operationInvokers({
     vault,
     adapter,
+    repository,
+    newId: randomUUID,
+    now: () => new Date(),
     log: (record) => {
       logger.info(record, 'upstream call completed');
     },
@@ -136,13 +142,13 @@ class AppModule {
         },
         {
           provide: MCP_HANDLER,
-          inject: [AUDIT_LOG, CREDENTIAL_VAULT],
-          useFactory: (audit: AuditLog, vault: CredentialVault) =>
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE],
+          useFactory: (audit: AuditLog, vault: CredentialVault, database: Database) =>
             createMcpHandler(
               createServerFactory({
                 snapshot: () => snapshotOf(configuration.current),
                 builtins: BUILTIN_TOOLS,
-                invokerFor: invokerFactory(overrides.invoker, vault, adapter, logger),
+                invokerFor: invokerFactory(overrides.invoker, vault, adapter, overrides.changesets ?? new PostgresChangeSetRepository(database.db), logger),
                 audit,
                 newId: randomUUID,
                 now: () => performance.now(),

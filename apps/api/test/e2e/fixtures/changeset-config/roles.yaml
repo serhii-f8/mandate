@@ -1,0 +1,10 @@
+version: 1
+roles:
+  - id: content_manager
+    grants:
+      - operation: shop.update_content
+        id: own-brands
+        scope: { brand: [acme, globex] }
+role_mapping:
+  - group: content
+    roles: [content_manager]
