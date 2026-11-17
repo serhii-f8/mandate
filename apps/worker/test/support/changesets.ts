@@ -23,7 +23,7 @@ export interface PreparedOptions extends ChangeSetOptions {
   /** Stored instead of the hash of the stored items (to provoke a mismatch). */
   readonly hash?: string;
   /** Moves the change-set to `executing` with this execution request. */
-  readonly execute?: { readonly actor?: string; readonly groups?: readonly string[]; readonly correlationId?: string; readonly clientId?: string };
+  readonly execute?: ExecuteOptions;
 }
 
 /** Target IDs `t-0001`, `t-0002`, ... */
@@ -82,13 +82,30 @@ export async function createPrepared(
   if (prepared === undefined) throw new Error('test change-set not prepared');
   if (opts.execute === undefined) return prepared;
 
-  const actor = opts.execute.actor ?? created.requester;
-  const groups = opts.execute.groups ?? [EDITOR_GROUP];
-  const correlationId = opts.execute.correlationId ?? 'corr-execute';
-  const clientId = opts.execute.clientId === undefined ? {} : { clientId: opts.execute.clientId };
+  return startExecutionOf(repository, prepared, opts.execute);
+}
+
+export interface ExecuteOptions {
+  readonly actor?: string;
+  readonly groups?: readonly string[];
+  readonly correlationId?: string;
+  readonly clientId?: string;
+}
+
+/** Moves a prepared change-set to `executing` with an execution request, as the executor's start does. */
+export async function startExecutionOf(
+  repository: ChangeSetRepository,
+  prepared: ChangeSetRecord,
+  execute: ExecuteOptions = {},
+): Promise<ChangeSetRecord> {
+  if (prepared.hash === undefined) throw new Error('test change-set has no hash');
+  const actor = execute.actor ?? prepared.requester;
+  const groups = execute.groups ?? [EDITOR_GROUP];
+  const correlationId = execute.correlationId ?? 'corr-execute';
+  const clientId = execute.clientId === undefined ? {} : { clientId: execute.clientId };
   const started = await repository.startExecution({
-    changesetId: created.id,
-    expectedHash: hash,
+    changesetId: prepared.id,
+    expectedHash: prepared.hash,
     request: { actor, groups, ...clientId, correlationId },
     now: new Date(),
     event: startEventFactory({ newId: randomUUID, actor, groups, ...clientId, correlationId }),
