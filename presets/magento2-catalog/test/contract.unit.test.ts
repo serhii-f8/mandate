@@ -216,10 +216,14 @@ describe('NFR-17 magento2-catalog contract', () => {
   });
 
   it('NFR-17 SEC-3 no recording or the vendored spec contains a token', async () => {
-    const names = await readdir(RECORDINGS);
-    expect(names.length).toBeGreaterThan(0);
+    // The read recordings and the Phase 5 write recordings (recordings/write/).
+    const paths = [
+      ...(await readdir(RECORDINGS)).filter((n) => n.endsWith('.json')).map((n) => join(RECORDINGS, n)),
+      ...(await readdir(join(RECORDINGS, 'write'))).map((n) => join(RECORDINGS, 'write', n)),
+    ];
+    expect(paths.length).toBeGreaterThan(0);
     const files = [
-      ...(await Promise.all(names.map((n) => readFile(join(RECORDINGS, n), 'utf8')))),
+      ...(await Promise.all(paths.map((p) => readFile(p, 'utf8')))),
       await readFile(join(PRESET_DIR, 'spec', 'magento2-catalog.swagger.json'), 'utf8'),
     ];
     for (const text of files) {
