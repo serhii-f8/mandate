@@ -1,12 +1,21 @@
 import { DrizzleQueryError } from 'drizzle-orm';
 
 /** Postgres error code of `error` or of its cause (drizzle wraps driver errors). */
-export function pgCode(error: unknown): string | undefined {
+function pgCode(error: unknown): string | undefined {
   for (let e: unknown = error; typeof e === 'object' && e !== null; e = (e as { cause?: unknown }).cause) {
     const code = (e as { code?: unknown }).code;
     if (typeof code === 'string') return code;
   }
   return undefined;
+}
+
+/** True when `error` (or its cause) is a unique violation (23505) of exactly `constraint`. */
+export function isUniqueViolation(error: unknown, constraint: string): boolean {
+  for (let e: unknown = error; typeof e === 'object' && e !== null; e = (e as { cause?: unknown }).cause) {
+    const { code, constraint: name } = e as { code?: unknown; constraint?: unknown };
+    if (typeof code === 'string') return code === '23505' && name === constraint;
+  }
+  return false;
 }
 
 /**

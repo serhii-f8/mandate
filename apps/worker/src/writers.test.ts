@@ -102,6 +102,7 @@ function changesetFor(operation: string): ChangeSetRecord {
     correlationId: 'corr-cs-1',
     createdAt: new Date(0),
     expiresAt: new Date(86_400_000),
+    approvalRound: 0,
   };
 }
 

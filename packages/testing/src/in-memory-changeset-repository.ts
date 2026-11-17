@@ -511,7 +511,8 @@ function claimed(changesetId: string, batchNo: number, row: Batch, entry: Entry)
 /** SEC-9: every plan step of the current round holds an `approved` row for this hash. */
 function approvalsCover(record: ChangeSetRecord, approvals: readonly ApprovalRecord[], hash: string): boolean {
   const plan = record.approvalPlan;
-  if (plan === undefined) return false;
+  // Fail closed: a plan without steps covers nothing (as in PostgreSQL).
+  if (plan === undefined || plan.steps.length === 0) return false;
   return plan.steps.every((_, i) =>
     approvals.some((a) => a.round === record.approvalRound && a.step === i + 1 && a.decision === 'approved' && a.hash === hash),
   );

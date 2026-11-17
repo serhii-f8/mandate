@@ -23,7 +23,7 @@ import type {
 } from '@aiops/core';
 import { changesetTransitionEvent, EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
 import { DrizzleAuditLog } from './audit-log.js';
-import { guarded, pgCode } from './errors.js';
+import { guarded, isUniqueViolation } from './errors.js';
 import type { Db, DbExecutor } from './client.js';
 import { approval, changeBatch, changeItem, changeSet, type StoredSubmission } from './schema.js';
 
@@ -456,8 +456,9 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           return { ok: true, changeset: toRecord(updated) };
         });
       } catch (error) {
-        // A concurrent decision of the same step stored its row first: the unique key refused ours.
-        if (pgCode(error) === '23505') return { ok: false, reason: 'not_pending' };
+        // A concurrent decision of the same step stored its row first: the step key refused ours.
+        // Any other unique violation (a reused approval or audit id) is a caller error and propagates.
+        if (isUniqueViolation(error, 'approval_changeset_round_step_key')) return { ok: false, reason: 'not_pending' };
         throw error;
       }
     });

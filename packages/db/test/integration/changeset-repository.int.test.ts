@@ -11,7 +11,9 @@ import {
 import {
   describeApprovalRepositoryContract,
   describeChangeSetRepositoryContract,
+  recordApproval,
   startPostgres,
+  submitChangeSet,
   type ChangeSetRepositoryHarness,
   type StartedPostgres,
 } from '@aiops/testing';
@@ -359,5 +361,31 @@ describe('SEC-3 database errors never quote statement parameters', () => {
     expect(message).not.toContain('p1');
     expect(message).not.toContain(id);
     expect(message).toMatch(/sqlstate 23000/);
+  });
+});
+
+describe('APR-3 recordDecision answers not_pending only for the step key', () => {
+  it('APR-3 a duplicate approval id on another change-set is rethrown, not answered not_pending', async () => {
+    const repo = new PostgresChangeSetRepository(database.db);
+    const at = new Date('2026-01-01T00:00:02.000Z');
+    const first = await repo.get(await preparedWithItems());
+    const second = await repo.get(await preparedWithItems());
+    if (first === undefined || second === undefined) throw new Error('missing change-set');
+    await recordApproval(repo, await submitChangeSet(repo, first, { at }), { approver: 'bob' });
+    const [stored] = await repo.approvals(first.id);
+    if (stored === undefined) throw new Error('missing approval row');
+    const pending = await submitChangeSet(repo, second, { at });
+    const attempt = repo.recordDecision({
+      changesetId: pending.id,
+      round: 1,
+      step: 1,
+      record: { ...stored, changesetId: pending.id },
+      next: { kind: 'approved' },
+      audit: [audit(pending.id)],
+      notifications: [],
+    });
+    await expect(attempt).rejects.toThrow(/sqlstate 23505/);
+    expect(await repo.approvals(pending.id)).toEqual([]);
+    expect((await repo.get(pending.id))?.status).toBe('pending_approval');
   });
 });
