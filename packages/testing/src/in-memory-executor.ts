@@ -69,18 +69,21 @@ export class InMemoryExecutor implements ChangeSetExecutor {
     actor: string;
     correlationId: string;
   }): Promise<{ ok: true } | { ok: false; reason: StartRefusal }> {
-    const record = await this.repository.get(req.changesetId);
+    let record = await this.repository.get(req.changesetId);
     if (record === undefined) return { ok: false, reason: 'not_found' };
     const now = this.now();
     if (isExpiryDue(record, now)) {
-      await this.repository.transition(
+      const expired = await this.repository.transition(
         record.id,
         [record.status],
         'expired',
         this.audit(record, record.status, 'expired', 'system', req.correlationId),
         { expiredBefore: now },
       );
-      return { ok: false, reason: 'expired' };
+      if (expired !== undefined) return { ok: false, reason: 'expired' };
+      // Lost a race with another writer: continue with the normal checks on the current state.
+      record = await this.repository.get(req.changesetId);
+      if (record === undefined) return { ok: false, reason: 'not_found' };
     }
     if (record.hash === undefined || record.hash !== req.expectedHash) return { ok: false, reason: 'hash_mismatch' };
     const executing = await this.repository.transition(
@@ -98,9 +101,10 @@ export class InMemoryExecutor implements ChangeSetExecutor {
   }
 
   private async run(record: ChangeSetRecord, run: Run, correlationId: string): Promise<void> {
-    const limit = Math.min(500, Math.max(1, this.batchSizeOf(record.operation)));
     let writerFailed = false;
     try {
+      const size = this.batchSizeOf(record.operation);
+      if (!Number.isInteger(size) || size < 1) throw new Error('invalid batch size');
       for (;;) {
         if (run.cancel !== undefined) {
           await this.repository.transition(
@@ -111,11 +115,7 @@ export class InMemoryExecutor implements ChangeSetExecutor {
           );
           return;
         }
-        // Recorded items leave `pending`, so the next pending page always starts at the beginning.
-        const items: readonly ChangeItemRecord[] = await this.repository.itemsPage(record.id, {
-          status: 'pending',
-          limit,
-        });
+        const items = await this.nextBatch(record.id, size);
         if (items.length === 0) break;
         let outcomes: readonly ItemOutcome[];
         try {
@@ -124,7 +124,7 @@ export class InMemoryExecutor implements ChangeSetExecutor {
           writerFailed = true;
           break;
         }
-        await this.repository.recordItemOutcomes(record.id, outcomes);
+        await this.repository.recordItemOutcomes(record.id, coverBatch(items, outcomes));
       }
       const stats = await this.repository.stats(record.id);
       let to: ChangeSetStatus;
@@ -139,8 +139,37 @@ export class InMemoryExecutor implements ChangeSetExecutor {
         writerFailed ? { errorCode: 'writer_error' } : undefined,
       );
     } catch {
-      // The run has no caller to report to; the stored status is the outcome.
+      // Unexpected error: best effort to leave a terminal state; the run has no caller to report to.
+      try {
+        await this.repository.transition(
+          record.id,
+          ['executing'],
+          'failed',
+          this.audit(record, 'executing', 'failed', 'system', correlationId),
+          { errorCode: 'executor_error' },
+        );
+      } catch {
+        // Nothing more can be done; the change-set stays `executing` for inspection.
+      }
     }
+  }
+
+  /** Next pending items, up to `size`, read in pages of at most 500 (the repository limit). */
+  private async nextBatch(changesetId: string, size: number): Promise<ChangeItemRecord[]> {
+    const items: ChangeItemRecord[] = [];
+    let after: string | undefined;
+    while (items.length < size) {
+      const page = await this.repository.itemsPage(changesetId, {
+        status: 'pending',
+        limit: Math.min(500, size - items.length),
+        ...(after === undefined ? {} : { after }),
+      });
+      items.push(...page);
+      const last = page[page.length - 1];
+      if (last === undefined) break;
+      after = last.targetId;
+    }
+    return items;
   }
 
   async cancel(req: {
@@ -148,16 +177,19 @@ export class InMemoryExecutor implements ChangeSetExecutor {
     actor: string;
     correlationId: string;
   }): Promise<{ ok: true; status: ChangeSetStatus } | { ok: false; reason: 'not_found' | 'not_cancellable' }> {
-    const record = await this.repository.get(req.changesetId);
-    if (record === undefined) return { ok: false, reason: 'not_found' };
-    if (record.status === 'executing') {
-      const run = this.runs.get(record.id);
-      if (run === undefined) return { ok: false, reason: 'not_cancellable' };
+    // The run registry is consulted before any await, so an active run sees the request at once.
+    const run = this.runs.get(req.changesetId);
+    if (run !== undefined) {
       run.cancel ??= { actor: req.actor, correlationId: req.correlationId };
       await run.done;
-      const after = await this.repository.get(record.id);
-      return { ok: true, status: after?.status ?? 'cancelled' };
+      const after = await this.repository.get(req.changesetId);
+      return after?.status === 'cancelled'
+        ? { ok: true, status: 'cancelled' }
+        : { ok: false, reason: 'not_cancellable' };
     }
+    const record = await this.repository.get(req.changesetId);
+    if (record === undefined) return { ok: false, reason: 'not_found' };
+    if (record.status === 'executing') return { ok: false, reason: 'not_cancellable' };
     if (!CANCELLABLE.includes(record.status)) return { ok: false, reason: 'not_cancellable' };
     const cancelled = await this.repository.transition(
       record.id,
@@ -181,12 +213,21 @@ export class InMemoryExecutor implements ChangeSetExecutor {
   }
 }
 
+/** Outcomes for exactly the batch: first outcome per target wins, strangers are ignored, gaps fail. */
+function coverBatch(items: readonly ChangeItemRecord[], outcomes: readonly ItemOutcome[]): ItemOutcome[] {
+  const byTarget = new Map<string, ItemOutcome>();
+  for (const o of outcomes) if (!byTarget.has(o.targetId)) byTarget.set(o.targetId, o);
+  return items.map((i) => byTarget.get(i.targetId) ?? { targetId: i.targetId, status: 'failed', error: 'no_outcome' });
+}
+
 type ScriptedStatus = 'written' | 'failed' | 'skipped';
 
 export interface ScriptedWriterOptions {
   readonly outcomes?: Readonly<Record<string, ScriptedStatus>>;
   /** Zero-based index of the batch whose call throws. */
   readonly throwOnBatch?: number;
+  /** Targets for which the writer returns no outcome. */
+  readonly dropOutcomes?: readonly string[];
 }
 
 /** Writer with per-target outcomes, an optional throwing batch and pausable batches. */
@@ -194,11 +235,20 @@ export class ScriptedWriter implements ChangeWriter {
   readonly batches: string[][] = [];
   private readonly outcomes = new Map<string, ScriptedStatus>();
   private throwOnBatch: number | undefined;
+  private readonly dropped = new Set<string>();
+  /** Appended to every batch's outcomes (to test that strangers and duplicates are ignored). */
+  extraOutcomes: ItemOutcome[] = [];
   private readonly pauses = new Map<number, { reached: () => void; gate: Promise<void> }>();
 
   constructor(options: ScriptedWriterOptions = {}) {
     for (const [target, status] of Object.entries(options.outcomes ?? {})) this.outcomes.set(target, status);
     this.throwOnBatch = options.throwOnBatch;
+    for (const target of options.dropOutcomes ?? []) this.dropped.add(target);
+  }
+
+  /** Makes the writer return no outcome for this target. */
+  dropOutcome(targetId: string): void {
+    this.dropped.add(targetId);
   }
 
   setOutcome(targetId: string, status: ScriptedStatus): void {
@@ -236,6 +286,9 @@ export class ScriptedWriter implements ChangeWriter {
       await pause.gate;
     }
     if (this.throwOnBatch === index) throw new Error('scripted writer failure');
-    return input.items.map((i) => ({ targetId: i.targetId, status: this.outcomes.get(i.targetId) ?? 'written' }));
+    const own = input.items
+      .filter((i) => !this.dropped.has(i.targetId))
+      .map((i): ItemOutcome => ({ targetId: i.targetId, status: this.outcomes.get(i.targetId) ?? 'written' }));
+    return [...own, ...this.extraOutcomes];
   }
 }
