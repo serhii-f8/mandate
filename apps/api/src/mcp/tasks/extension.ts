@@ -17,7 +17,7 @@ export function declaresTasks(envelope: object | undefined): boolean {
 }
 
 export function missingTasksCapability(): ProtocolError {
-  return new ProtocolError(-32021, 'The request does not declare the Tasks extension.');
+  return new ProtocolError(-32021, 'Missing required client capability', { requiredCapabilities: { extensions: { [TASKS_EXTENSION]: {} } } });
 }
 
 export function taskNotFound(): ProtocolError {

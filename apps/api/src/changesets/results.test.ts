@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_STATS, type ChangeSetRecord } from '@aiops/core';
-import { executionAnswer, executionSummaryText, expiredDuringPreparationAnswer, preparationErrorAnswer, preparingAnswer, toCallToolResult } from './results.js';
+import { EMPTY_STATS, encodeCursor, type ChangeSetRecord } from '@aiops/core';
+import { executionAnswer, preparedAnswer, executionSummaryText, expiredDuringPreparationAnswer, preparationErrorAnswer, preparingAnswer, toCallToolResult } from './results.js';
 
 const stats = { ...EMPTY_STATS, total: 3, included: 3, written: 2, failed: 0, skipped: 1 };
 
@@ -22,6 +22,22 @@ function record(status: ChangeSetRecord['status'], extra: Partial<ChangeSetRecor
 }
 
 describe('change-set answers', () => {
+  it('MCP-7 MCP-4 preparedAnswer takes 20 items and sets the next cursor only for more', async () => {
+    const item = (n: number) => ({ targetId: `t${String(n)}`, status: 'pending' as const, before: null, after: null });
+    const calls: unknown[] = [];
+    const repo = {
+      itemsPage: (_id: string, q: unknown) => {
+        calls.push(q);
+        return Promise.resolve(Array.from({ length: 20 }, (_v, i) => item(i)));
+      },
+    };
+    const more = await preparedAnswer(repo, record('prepared', { stats: { ...stats, total: 25 } }));
+    expect(calls).toEqual([{ limit: 20 }]);
+    expect(more.structured).toHaveProperty('nextCursor', encodeCursor('t19'));
+    const exact = await preparedAnswer(repo, record('prepared', { stats: { ...stats, total: 20 } }));
+    expect(exact.structured).not.toHaveProperty('nextCursor');
+  });
+
   it('SEC-5 CS-7 executionSummaryText counts only', () => {
     expect(executionSummaryText('completed_with_errors', stats, 1)).toBe(
       'completed_with_errors: 2 written, 0 failed, 1 skipped (1 changed upstream since preparation).',

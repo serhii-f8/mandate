@@ -23,9 +23,12 @@ describe('MCP-7 MCP-1 Tasks extension detection', () => {
   });
 
   it('errors carry the specified codes', () => {
-    expect(missingTasksCapability().code).toBe(-32021);
+    const missing = missingTasksCapability();
+    expect(missing.code).toBe(-32021);
+    expect(missing.message).toContain('Missing required client capability');
+    expect(missing.data).toEqual({ requiredCapabilities: { extensions: { 'io.modelcontextprotocol/tasks': {} } } });
     const notFound = taskNotFound();
     expect(notFound.code).toBe(-32602);
-    expect(notFound.message).toContain('Failed to retrieve task: Task not found');
+    expect(notFound.message).toBe('Failed to retrieve task: Task not found');
   });
 });

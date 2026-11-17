@@ -34,6 +34,9 @@ const rows: Row[] = [
   ['execute', 'completed_with_errors', true, 'completed', 'execution'],
   ['execute', 'failed', true, 'completed', 'execution'],
   ['execute', 'cancelled', true, 'cancelled', undefined],
+  ['execute', 'approved', true, 'working', undefined],
+  ['prepare', 'expired', true, 'completed', 'prepared'],
+  ['prepare', 'rejected', false, 'completed', 'preparation_error'],
   ['execute', 'rolled_back', true, 'completed', 'execution'],
 ];
 
