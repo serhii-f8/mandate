@@ -36,7 +36,7 @@ function converterFor(type: string): DataConverter | undefined {
 
 /**
  * Required `changesetWorkflow` histories (CLAUDE.md fixture rule): parked at each wait after an
- * activity, completed per code path, failed and cancelled, one per continue-as-new run.
+ * activity (the wake condition, the prepare-retry pause, the expire-retry pause), completed per code path, failed and cancelled, one per continue-as-new run.
  */
 const REQUIRED_CHANGESET_FIXTURES = [
   'parked-prepared',
@@ -54,6 +54,7 @@ const REQUIRED_CHANGESET_FIXTURES = [
   'prepare-retry-sleep',
   'prepare-retry-parked',
   'expire-retry',
+  'expire-retry-parked',
 ];
 
 /** Every payload's `metadata.encoding` in a history JSON (base64 in the proto JSON form), decoded. */

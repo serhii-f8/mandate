@@ -251,6 +251,38 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
     },
   },
 
+  /**
+   * Parked in the expire-retry pause: the worker's clock is a minute behind, so the first expire
+   * changes nothing and the workflow sleeps the 5 s pause (history taken while it sleeps). A cancel
+   * then ends the run after the pause.
+   */
+  'expire-retry-parked': {
+    files: ['expire-retry-parked'],
+    async run(infra) {
+      const cs = await createPrepared(infra.repository, 1, { expiresAt: new Date(Date.now() + 1_000) });
+      const now = (): Date => new Date(Date.now() - 60_000);
+      return withWorker(infra, { now }, async (worker) => {
+        const handle = await signalWithStart(infra, worker, cs.id);
+        const timers = (events: History['events']): { started: number; fired: number } => ({
+          started: events?.filter((e) => e.timerStartedEventAttributes != null).length ?? 0,
+          fired: events?.filter((e) => e.timerFiredEventAttributes != null).length ?? 0,
+        });
+        // The wake timeout fired, the expire pause started and has not fired yet.
+        await waitFor('the expire-retry pause', async () => {
+          const t = timers((await handle.fetchHistory()).events);
+          return t.started === 2 && t.fired === 1;
+        });
+        const parked = await handle.fetchHistory();
+        const t = timers(parked.events);
+        if (t.started !== 2 || t.fired !== 1) throw new Error(`not parked in the pause: ${JSON.stringify(t)}`);
+        const cancelled = await worker.executor.cancel({ changesetId: cs.id, actor: 'alice', correlationId: 'corr-cancel' });
+        if (!cancelled.ok) throw new Error('cancel refused');
+        await expectResult(handle, 'cancelled');
+        return { 'expire-retry-parked': parked };
+      });
+    },
+  },
+
   /** The upstream read answers a domain failure: preparation ends failed (no retry). */
   'prepare-failed': {
     files: ['prepare-failed'],
