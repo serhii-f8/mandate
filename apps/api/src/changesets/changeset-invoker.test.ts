@@ -154,8 +154,15 @@ describe('CS-1 CS-2 change-set invoker', () => {
     const result = await invoker.invoke({ operation: op('catalog.update_content'), args: { brand: 'acme', skus: ['a'], changes: { name: 'New' } }, caller });
     const id = '00000000-0000-4000-8000-000000000001';
     expect(result.isError).toBe(true);
-    expect(result.text).toBe(`catalog.update_content failed: the upstream system answered HTTP error (change-set ${id}).`);
-    expect(result.auditDetails).toEqual({ operation: 'catalog.update_content', connection: 'magento', changesetId: id, errorCode: 'http_status' });
+    expect(result.text).toBe(`catalog.update_content failed: the upstream system answered HTTP 500 (change-set ${id}).`);
+    expect(result.structured).toEqual({ changeset: { id, status: 'failed', errorCode: 'http_status' } });
+    expect(result.auditDetails).toEqual({
+      operation: 'catalog.update_content',
+      connection: 'magento',
+      changesetId: id,
+      errorCode: 'http_status',
+      upstreamStatus: 500,
+    });
     expect((await repository.get(id))?.status).toBe('failed');
   });
 

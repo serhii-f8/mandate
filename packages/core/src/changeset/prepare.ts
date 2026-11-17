@@ -30,7 +30,13 @@ export interface PrepareRequest {
 
 export type PrepareOutcome =
   | { readonly ok: true; readonly changeset: ChangeSetRecord; readonly firstItems: readonly ChangeItemRecord[] }
-  | { readonly ok: false; readonly changesetId?: string; readonly code: PrepareFailure };
+  | {
+      readonly ok: false;
+      readonly changesetId?: string;
+      readonly code: PrepareFailure;
+      /** The upstream HTTP status of a failed read, when there was one (never upstream text, SEC-3). */
+      readonly status?: number;
+    };
 
 const HASH_PAGE = 500;
 const FIRST_ITEMS = 20;
@@ -38,7 +44,10 @@ const HOUR_MS = 3_600_000;
 
 /** A fixed-code preparation failure that marks the change-set `failed`. */
 class Failure extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly status?: number,
+  ) {
     super(`preparation failed: ${code}`);
   }
 }
@@ -69,7 +78,7 @@ function chunks<T>(list: readonly T[], size: number): T[][] {
 }
 
 function okPage(page: ReadPage): Extract<ReadPage, { ok: true }> {
-  if (!page.ok) throw new Failure(page.code);
+  if (!page.ok) throw new Failure(page.code, page.status);
   if (page.truncated) throw new Failure('incomplete_read');
   return page;
 }
@@ -234,7 +243,9 @@ export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): 
       // Marking is best effort; the original error is the one worth reporting.
       throw err;
     }
-    return { ok: false, changesetId: id, code: failed === undefined ? 'cancelled' : code };
+    if (failed === undefined) return { ok: false, changesetId: id, code: 'cancelled' };
+    const status = err instanceof Failure ? err.status : undefined;
+    return { ok: false, changesetId: id, code, ...(status === undefined ? {} : { status }) };
   }
   if (changeset === undefined) return { ok: false, changesetId: id, code: 'cancelled' };
   // Outside the try: once prepared, the change-set must not be marked failed by a later read error.

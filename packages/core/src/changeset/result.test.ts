@@ -79,12 +79,12 @@ describe('SEC-3 preparation error results', () => {
       `${CHANGESET_TEXT.errors.too_many_targets(op).slice(0, -1)} (change-set cs-1).`,
     );
     for (const code of ['incomplete_read', 'cancelled'] as const) {
-      expect(preparationErrorResult(op, code, 'cs-1')).toEqual({
+      expect(preparationErrorResult(op, code, 'cs-1')).toMatchObject({
         text: `${CHANGESET_TEXT.errors[code](op).slice(0, -1)} (change-set cs-1).`,
         isError: true,
       });
     }
-    expect(preparationErrorResult(op, 'internal', 'cs-1')).toEqual({
+    expect(preparationErrorResult(op, 'internal', 'cs-1')).toMatchObject({
       text: `${op} could not be prepared because of an internal error (change-set cs-1).`,
       isError: true,
     });
@@ -92,6 +92,21 @@ describe('SEC-3 preparation error results', () => {
       `${READ_RESULT_TEXT.errors.timeout(op).slice(0, -1)} (change-set cs-1).`,
     );
     expect(preparationErrorResult(op, 'something_else').text).toBe(READ_RESULT_TEXT.unknown(op));
+  });
+
+  it('MCP-4 SEC-3 a failure with a change-set carries its id, status and code as structured data, nothing else', () => {
+    const op = 'catalog.update_content';
+    const failed = preparationErrorResult(op, 'http_status', 'cs-1', 404);
+    expect(failed.text).toBe(`${op} failed: the upstream system answered HTTP 404 (change-set cs-1).`);
+    expect(failed.structured).toEqual({ changeset: { id: 'cs-1', status: 'failed', errorCode: 'http_status' } });
+    expect(failed.dataText).toBe(JSON.stringify(failed.structured));
+    expect(failed.isError).toBe(true);
+    expect(preparationErrorResult(op, 'cancelled', 'cs-2').structured).toEqual({
+      changeset: { id: 'cs-2', status: 'cancelled', errorCode: 'cancelled' },
+    });
+    const none = preparationErrorResult(op, 'targets_missing');
+    expect(none).not.toHaveProperty('structured');
+    expect(none).not.toHaveProperty('dataText');
   });
 });
 

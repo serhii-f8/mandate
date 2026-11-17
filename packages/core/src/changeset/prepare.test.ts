@@ -311,6 +311,14 @@ describe('CS-1 CS-2 CS-4 preparation', () => {
     expect(repository.sets.get('id-1')).toMatchObject({ status: 'failed', errorCode: 'timeout' });
   });
 
+  it('CS-1 an upstream HTTP status travels with the failure code', async () => {
+    const reader = new ScriptedReader({}, { readOverride: () => ({ ok: false, code: 'http_status', status: 404 }) });
+    const { deps, repository } = setup(reader);
+    const out = await prepareChangeSet(deps, request(explicitArgs));
+    expect(out).toEqual({ ok: false, changesetId: 'id-1', code: 'http_status', status: 404 });
+    expect(repository.sets.get('id-1')).toMatchObject({ status: 'failed', errorCode: 'http_status' });
+  });
+
   it('CS-1 a truncated read fails incomplete_read', async () => {
     const reader = new ScriptedReader({}, { readOverride: () => ({ ok: true, items: [], truncated: true }) });
     const { deps, repository } = setup(reader);

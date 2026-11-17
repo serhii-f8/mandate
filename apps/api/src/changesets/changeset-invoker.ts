@@ -54,8 +54,13 @@ export class ChangeSetInvoker implements OperationInvoker {
 
     if (!outcome.ok) {
       return {
-        ...preparationErrorResult(operation.id, outcome.code, outcome.changesetId),
-        auditDetails: { ...base, ...(outcome.changesetId === undefined ? {} : { changesetId: outcome.changesetId }), errorCode: outcome.code },
+        ...preparationErrorResult(operation.id, outcome.code, outcome.changesetId, outcome.status),
+        auditDetails: {
+          ...base,
+          ...(outcome.changesetId === undefined ? {} : { changesetId: outcome.changesetId }),
+          errorCode: outcome.code,
+          ...(outcome.status === undefined ? {} : { upstreamStatus: outcome.status }),
+        },
       };
     }
     const { changeset, firstItems } = outcome;

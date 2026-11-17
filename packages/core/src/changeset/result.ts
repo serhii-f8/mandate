@@ -52,13 +52,26 @@ export function preparedResult(
   return { text, structured, dataText: JSON.stringify(structured) };
 }
 
-/** A fixed, value-free error result per preparation failure code (SEC-3), with the change-set id when one exists. */
-export function preparationErrorResult(operation: string, code: string, changesetId?: string): InvocationResult {
+/**
+ * A fixed, value-free error result per preparation failure code (SEC-3). When a change-set
+ * exists, the text names it and the structured data carries its id, status and code only;
+ * an upstream HTTP status (a number, never upstream text) is part of the text.
+ */
+export function preparationErrorResult(
+  operation: string,
+  code: string,
+  changesetId?: string,
+  upstreamStatus?: number,
+): InvocationResult {
   const base = Object.hasOwn(CHANGESET_TEXT.errors, code)
     ? CHANGESET_TEXT.errors[code as keyof typeof CHANGESET_TEXT.errors](operation)
-    : readErrorResult(operation, code).text;
-  const text = changesetId === undefined ? base : `${base.replace(/\.$/, '')} (change-set ${changesetId}).`;
-  return { text, isError: true };
+    : readErrorResult(operation, code, upstreamStatus).text;
+  if (changesetId === undefined) return { text: base, isError: true };
+  const text = `${base.replace(/\.$/, '')} (change-set ${changesetId}).`;
+  // `cancelled` is the code for a change-set that left preparing under us; every other code marked it failed.
+  const status = code === 'cancelled' ? 'cancelled' : 'failed';
+  const structured = { changeset: { id: changesetId, status, errorCode: code } };
+  return { text, structured, dataText: JSON.stringify(structured), isError: true };
 }
 
 /** Opaque item cursor: base64url of the last target id. */

@@ -254,19 +254,21 @@ describe('CS-1 CS-2 CS-4 write calls prepare change-sets', () => {
     expect(upstream.requests.every((r) => r.method === 'GET')).toBe(true);
   });
 
-  it('CS-1 SEC-3 an upstream 500 answers with a fixed error and the change-set ID, and marks it failed', async () => {
-    upstream.route('GET', '/rest/V1/products', () => ({ status: 500, body: { error: 'database exploded at row Anvil' } }));
+  it('CS-1 SEC-3 an upstream 404 answers with a fixed error naming the status and the change-set ID, and marks it failed', async () => {
+    upstream.route('GET', '/rest/V1/products', () => ({ status: 404, body: { error: 'database exploded at row Anvil' } }));
     const { result, correlationId } = await call('shop.update_content', { brand: 'acme', skus: ['acme-1'], changes: { name: 'New name' } });
     expect(result.isError).toBe(true);
     const text = result.content[0]?.text ?? '';
     const id = UUID.exec(text)?.[0] ?? '';
-    expect(text).toBe(`shop.update_content failed: the upstream system answered HTTP error (change-set ${id}).`);
+    expect(text).toBe(`shop.update_content failed: the upstream system answered HTTP 404 (change-set ${id}).`);
+    expect(result.structuredContent).toEqual({ changeset: { id, status: 'failed', errorCode: 'http_status' } });
+    expect(JSON.stringify(result)).not.toContain('exploded');
     const row = await changeSet(id);
     expect(row?.status).toBe('failed');
     expect(row?.error_code).toBe('http_status');
     const [audit] = await auditRows(databaseUrl, "correlation_id = $1 and action = 'tool.call'", [correlationId]);
     expect(audit?.outcome).toBe('error');
-    expect(audit?.details).toMatchObject({ operation: 'shop.update_content', connection: 'shop', changesetId: id, errorCode: 'http_status' });
+    expect(audit?.details).toMatchObject({ operation: 'shop.update_content', connection: 'shop', changesetId: id, errorCode: 'http_status', upstreamStatus: 404 });
     expect(JSON.stringify(audit)).not.toContain('exploded');
   });
 
