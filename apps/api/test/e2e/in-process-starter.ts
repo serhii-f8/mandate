@@ -16,6 +16,8 @@ export interface InProcessStarterDeps {
   readonly now: () => Date;
   /** Delay before preparation begins, e.g. to let a bounded wait run out (MCP-7). Default 0. */
   readonly delayMs?: number;
+  /** Called with every preparation that threw, when it throws (it is also kept for `settled`). */
+  readonly onError?: (error: Error) => void;
 }
 
 /**
@@ -34,7 +36,9 @@ export class InProcessStarter implements WorkflowStarter {
     const run = new Promise<void>((resolve) => setTimeout(resolve, this.deps.delayMs ?? 0))
       .then(() => this.prepare(changesetId))
       .then(undefined, (error: unknown) => {
-        this.failures.push(error instanceof Error ? error : new Error('preparation failed'));
+        const failure = error instanceof Error ? error : new Error('preparation failed');
+        this.failures.push(failure);
+        this.deps.onError?.(failure);
       })
       .finally(() => {
         this.runs.delete(run);

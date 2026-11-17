@@ -103,7 +103,15 @@ describe('MCP-7 api Temporal settings and prepare wait', () => {
     }
     expect(error).toBeInstanceOf(EnvError);
     expect((error as EnvError).issues).toEqual([{ variable: 'AIOPS_TEMPORAL_KEYS', reason: 'is required' }]);
-    expect((error as EnvError).message).not.toContain(API.AIOPS_MASTER_KEYS);
+    // Present but blank: still named by variable, the reason carries no value.
+    let blank: unknown;
+    try {
+      parseApiEnv({ ...API, AIOPS_TEMPORAL_KEYS: ' \t ' });
+    } catch (e) {
+      blank = e;
+    }
+    expect(blank).toBeInstanceOf(EnvError);
+    expect((blank as EnvError).issues).toEqual([{ variable: 'AIOPS_TEMPORAL_KEYS', reason: 'invalid (too_small)' }]);
   });
 
   it('AIOPS_PREPARE_WAIT_MS outside 0..300000 is rejected by name', () => {

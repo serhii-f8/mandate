@@ -78,10 +78,14 @@ export interface StartApiOptions {
 /** Obviously fake Temporal payload key, same format as the master keys (never reaches Temporal here). */
 const TEST_TEMPORAL_KEYS = '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=';
 
-export async function startApi(databaseUrl: string, options: StartApiOptions): Promise<RunningApi> {
-  const port = options.port ?? (await freePort());
+/** The api environment the e2e tests run with, listening on `port` (Temporal settings as in Compose, fake keys). */
+export function testApiEnv(
+  databaseUrl: string,
+  port: number,
+  options: Pick<StartApiOptions, 'issuer' | 'configDir' | 'resource' | 'webDir' | 'prepareWaitMs'>,
+): ApiEnv {
   const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
-  const env: ApiEnv = {
+  return {
     databaseUrl,
     port,
     allowedHosts: ['localhost', '127.0.0.1'],
@@ -106,6 +110,13 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
     temporalKeys: TEST_TEMPORAL_KEYS,
     prepareWaitMs: options.prepareWaitMs ?? 20_000,
   };
+}
+
+export async function startApi(databaseUrl: string, options: StartApiOptions): Promise<RunningApi> {
+  const port = options.port ?? (await freePort());
+  const env = testApiEnv(databaseUrl, port, options);
+  // As given: the token audience must match it character for character.
+  const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
   const adapter = options.adapter ?? createOpenApiAdapter();
   // Loaded as `main.ts` loads it: with the adapter's spec resolver and the preset directories.
   const configuration = await ConfigurationHolder.load(env.configDir, configurationLoadOptions(adapter, env));
@@ -115,7 +126,10 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
   const repository = new PostgresChangeSetRepository(database.db);
   const vault = new PostgresCredentialVault(database.db, parseMasterKeys(env.masterKeys));
   const { logger } = options;
-  const upstreamLog = logger === undefined ? {} : {
+  const upstreamLog =
+    logger === undefined
+      ? {}
+      : {
           log: (record: object) => {
             logger.info(record, 'upstream call completed');
           },
@@ -130,6 +144,10 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
           newId: randomUUID,
           now: () => new Date(),
           ...(options.prepareDelayMs === undefined ? {} : { delayMs: options.prepareDelayMs }),
+          // A broken preparation shows up at once in the test output, not as a wait that ran out.
+          onError: (error) => {
+            console.error('in-process preparation failed', error);
+          },
         })
       : options.starter;
   const executor = options.executor ?? new InMemoryExecutor({ repository, writer: new ScriptedWriter(), batchSizeOf: () => 100 });
@@ -148,7 +166,7 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
     starter,
     async close() {
       await app.close();
-      // Preparations still running would otherwise hit a closed pool; their failures do not matter here.
+      // Preparations still running would otherwise hit a closed pool; their failures were reported by `onError`.
       if (starter instanceof InProcessStarter) await starter.settled().catch(() => undefined);
       await database.close();
     },
