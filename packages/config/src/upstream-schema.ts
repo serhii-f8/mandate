@@ -88,7 +88,11 @@ const responseSchema = z.strictObject({
   max_items: z.number().int().min(1).max(500).default(100),
 });
 
-/** Headers the platform sets itself. `authorization` and `cookie` are caught by the CFG-5 key scan. */
+/**
+ * Headers the platform sets itself. `authorization`, `proxy-authorization` and `cookie` are
+ * caught by the CFG-5 key scan. Keep in step with `FORBIDDEN_HEADERS` in
+ * `@aiops/adapters` (src/http/headers.ts); this package cannot import the adapters.
+ */
 const PLATFORM_HEADERS: ReadonlySet<string> = new Set(['host', 'content-length', 'transfer-encoding', 'connection']);
 
 export const upstreamSchema = z

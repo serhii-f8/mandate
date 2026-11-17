@@ -12,7 +12,7 @@ import type { DisabledOperation, GrantDefinition, PolicyConfiguration, RoleDefin
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { readSpecFile, resolvePreset, type LoadedPreset } from './presets.js';
-import { buildRegistry, propertiesOf, type CatalogState, type Located, type OperationBinding, type OperationSource } from './registry.js';
+import { buildRegistry, propertiesOf, sentArguments, type CatalogState, type Located, type OperationBinding, type OperationSource } from './registry.js';
 import {
   configDocumentSchema,
   PARSE_PARAMS,
@@ -353,8 +353,11 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       const { definition } = op;
       if (op.schemaKnown) {
         const properties = propertiesOf(definition.inputSchema);
+        const sent = sentArguments(op.located.value);
         for (const arg of Object.keys(grant.scope)) {
           if (!properties.has(arg)) at(source, [...gPath, 'scope', arg], `is not an argument of operation ${definition.id}`);
+          // A constraint on an argument the upstream never sees restricts nothing (POL-2).
+          else if (sent !== undefined && !sent.has(arg)) at(source, [...gPath, 'scope', arg], `scope argument ${arg} is not sent upstream by operation ${definition.id}`);
         }
       }
       if (definition.fieldsArg === undefined) {

@@ -334,7 +334,9 @@ describe('CFG-2 upstream and preset issues are located', () => {
 
   it('reports a fields_from_arg that is not an argument', async () => {
     const found = issues(await sources({ 'search.yaml': SEARCH.replace('fields_from_arg: fields', 'fields_from_arg: columns') }));
-    expect(found).toEqual([expect.objectContaining({ path: 'operations[0].upstream.response.fields_from_arg' })]);
+    expect(found).toContainEqual(
+      expect.objectContaining({ path: 'operations[0].upstream.response.fields_from_arg', message: 'names an argument that is not in input_schema' }),
+    );
   });
 
   it('requires input_schema for method and path, and for explicit templates', async () => {
@@ -504,6 +506,95 @@ ${extraOps}`,
     const config = ok(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: PRESET_DIRS }));
     expect(config.credentialRefs.get('shop-token')).toEqual({ scheme: 'bearer', connections: ['shop'] });
     expect(config.connectionSettings.get('shop')?.auth).toEqual({ scheme: 'bearer' });
+  });
+});
+
+describe('POL-3 field rules and projection use the same argument', () => {
+  it('POL-3 reports fields_arg when response.fields_from_arg names another argument', async () => {
+    const text = SEARCH.replace('fields_from_arg: fields', 'fields_from_arg: q');
+    const found = issues(await sources({ 'search.yaml': text }));
+    expect(found).toContainEqual(
+      expect.objectContaining({ path: 'operations[0].fields_arg', message: 'must equal upstream.response.fields_from_arg, so the response is projected by the same argument' }),
+    );
+  });
+
+  it('POL-3 reports fields_arg when the mapping projects nothing', async () => {
+    const found = issues(await sources({ 'search.yaml': SEARCH.replace(', fields_from_arg: fields', '') }));
+    expect(found).toEqual([
+      expect.objectContaining({ path: 'operations[0].fields_arg', message: 'must equal upstream.response.fields_from_arg, so the response is projected by the same argument' }),
+    ]);
+  });
+
+  it('POL-3 reports fields_from_arg without fields_arg', async () => {
+    const found = issues(await sources({ 'search.yaml': SEARCH.replace('    fields_arg: fields\n', '') }));
+    expect(found).toEqual([
+      expect.objectContaining({ path: 'operations[0].upstream.response.fields_from_arg', message: 'requires fields_arg naming the same argument' }),
+    ]);
+  });
+
+  it('POL-3 reports fields_arg on a derived operation with the default mapping', async () => {
+    const dir = await fixture('derived', {
+      'config.yaml': (await readFile(join(FIXTURES, 'derived', 'config.yaml'), 'utf8')).replace(
+        '    upstream: { operation: getItem }',
+        '    upstream: { operation: getItem }\n    fields_arg: sku',
+      ),
+    });
+    const found = issues(await loadConfigurationDirectory(dir, { resolver: resolver() }));
+    expect(found).toEqual([
+      expect.objectContaining({ path: 'operations[1].fields_arg', message: 'must equal upstream.response.fields_from_arg, so the response is projected by the same argument' }),
+    ]);
+  });
+});
+
+describe('POL-5 read operations use GET; writes need change-sets', () => {
+  const MESSAGE = 'read operations must use GET; writes need change-sets';
+
+  it('POL-5 reports a configured read operation with another method', async () => {
+    const found = issues(await sources({ 'search.yaml': SEARCH.replace('method: GET', 'method: POST') }));
+    expect(found).toEqual([expect.objectContaining({ path: 'operations[0].risk', message: MESSAGE })]);
+  });
+
+  it('POL-5 reports a derived read operation whose spec method is not GET', async () => {
+    const dir = await fixture('derived', {
+      'config.yaml': (await readFile(join(FIXTURES, 'derived', 'config.yaml'), 'utf8')).replace('operation: getItem', 'operation: deleteItem'),
+    });
+    const found = issues(await loadConfigurationDirectory(dir, { resolver: resolver() }));
+    expect(found).toEqual([expect.objectContaining({ path: 'operations[1].risk', message: MESSAGE })]);
+  });
+
+  it('POL-5 reports a preset read operation whose spec method is not GET', async () => {
+    const text = (await readFile(join(FIXTURES, 'preset-dir', 'fake-preset', 'preset.yaml'), 'utf8')).replace('operation: getItem', 'operation: deleteItem');
+    const presets = await presetDir({ 'preset.yaml': text });
+    const found = issues(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: [presets] }));
+    expect(found).toEqual([expect.objectContaining({ file: '@aiops/fake-preset/preset.yaml', path: 'operations[1].risk', message: MESSAGE })]);
+  });
+});
+
+describe('POL-2 scope arguments are sent upstream', () => {
+  const ROLE = `version: 1
+roles:
+  - id: viewer
+    grants:
+      - { operation: shop.search, scope: { page_size: [10] } }
+`;
+
+  it('POL-2 accepts a scope on an argument a template sends', async () => {
+    ok(await sources({ 'roles.yaml': ROLE }));
+  });
+
+  it('POL-2 reports a scope argument no template of the mapping references', async () => {
+    const text = SEARCH.replace('page_size: { type: integer }', 'page_size: { type: integer }, region: { type: string }');
+    const found = issues(await sources({ 'search.yaml': text, 'roles.yaml': ROLE.replace('page_size: [10]', 'region: [eu]') }));
+    expect(found).toEqual([
+      expect.objectContaining({ file: 'roles.yaml', path: 'roles[0].grants[0].scope.region', message: 'scope argument region is not sent upstream by operation shop.search' }),
+    ]);
+  });
+
+  it('POL-2 accepts any scope argument of a derived operation (the default mapping sends every parameter)', async () => {
+    const dir = await fixture('derived', {
+      'config.yaml': (await readFile(join(FIXTURES, 'derived', 'config.yaml'), 'utf8')) + 'roles:\n  - { id: viewer, grants: [{ operation: shop.get_item, scope: { sku: [A-1] } }] }\n',
+    });
+    ok(await loadConfigurationDirectory(dir, { resolver: resolver() }));
   });
 });
 

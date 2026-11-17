@@ -97,6 +97,20 @@ describe('MCP-4 direct read invoker', () => {
     expect(adapter.reads).toEqual([]);
   });
 
+  it('POL-5 refuses a read operation bound to a non-GET call without calling the upstream (defence in depth)', async () => {
+    const binding = CONFIG.bindings.get('catalog.search_products');
+    if (binding === undefined) throw new Error('fixture has no binding');
+    const bindings = new Map(CONFIG.bindings);
+    bindings.set('catalog.search_products', { ...binding, mapping: { ...binding.mapping, method: 'POST' } });
+    const adapter = new FakeAdapter(OK);
+    const invoker = new DirectReadInvoker({ configuration: { ...CONFIG, bindings }, vault: new MemoryVault(), adapter });
+    const result = await invoker.invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe(`catalog.search_products cannot run: ${WRITE_NEEDS_CHANGESET}.`);
+    expect(result.auditDetails).toEqual({ operation: 'catalog.search_products', connection: 'magento', errorCode: 'write_not_supported' });
+    expect(adapter.reads).toEqual([]);
+  });
+
   it('MCP-4 passes the binding, the connection settings and the validated arguments to the adapter', async () => {
     const { invoker, adapter } = setup();
     await invoker.invoke({ operation: op('catalog.search_products'), args: ARGS, caller });

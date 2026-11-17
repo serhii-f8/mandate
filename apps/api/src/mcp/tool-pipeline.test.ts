@@ -18,7 +18,7 @@ operations:
     connection: magento
     risk: read
     description: Search the catalog by brand.
-    upstream: { method: GET, path: /V1/products }
+    upstream: { method: GET, path: /V1/products, query: { brand: { arg: brand } }, response: { items: items, fields_from_arg: fields } }
     input_schema:
       type: object
       properties: { brand: { type: string }, fields: { type: array, items: { type: string } } }

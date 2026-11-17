@@ -149,7 +149,21 @@ export function buildRegistry(input: RegistryInput): Registry {
       }
     }
 
+    // POL-3: field rules and response projection must use the same argument, so a
+    // field the policy checks is also the field list the response is cut to.
+    const projectedBy = u.response?.fields_from_arg;
+    if (op.fields_arg !== undefined && projectedBy !== op.fields_arg) {
+      at(source, [...path, 'fields_arg'], 'must equal upstream.response.fields_from_arg, so the response is projected by the same argument');
+    } else if (op.fields_arg === undefined && projectedBy !== undefined) {
+      upstreamAt(['response', 'fields_from_arg'], 'requires fields_arg naming the same argument');
+    }
+
     const binding = bindingOf(connection, op, entry);
+    // A non-GET call labelled read would skip the change-set path (POL-5, CS-1).
+    const method = binding?.mapping.method ?? u.method;
+    if (op.risk === 'read' && method !== undefined && method !== 'GET') {
+      at(source, [...path, 'risk'], 'read operations must use GET; writes need change-sets');
+    }
     const override = overrideByOp.get(op.id)?.value;
     const enabled = override?.enabled ?? true;
     const definition: OperationDefinition = {
@@ -205,6 +219,17 @@ export function buildRegistry(input: RegistryInput): Registry {
 
   const enabled = [...all.values()].filter((r) => r.enabled).map((r) => r.definition);
   return { all, enabled, validators, bindings, disabled };
+}
+
+/**
+ * The arguments the operation's mapping sends upstream (POL-2), or `undefined` when it
+ * sends every argument: a derived operation without `input_schema` uses the default
+ * mapping, which takes each parameter from the argument of the same name. The field
+ * list argument counts too: the response is projected by it.
+ */
+export function sentArguments(op: PresetOperationConfig): ReadonlySet<string> | undefined {
+  if (op.input_schema === undefined && op.upstream.operation !== undefined) return undefined;
+  return new Set(templateArgs(op.upstream).map((ref) => ref.arg));
 }
 
 function bindingOf(connection: string, op: PresetOperationConfig, entry: CatalogEntry | undefined): OperationBinding | undefined {

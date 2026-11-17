@@ -18,7 +18,7 @@ operations:
     connection: magento
     risk: read
     description: Search.
-    upstream: { method: GET, path: /V1/products }
+    upstream: { method: GET, path: /V1/products, query: { brand: { arg: brand } }, response: { fields_from_arg: fields } }
     input_schema:
       type: object
       properties: { brand: { type: string }, fields: { type: array, items: { type: string } } }
@@ -191,7 +191,7 @@ describe('CFG-5 secrets never appear in configuration', () => {
   });
 
   it.each([['cookie'], ['bearer'], ['credential']])('rejects the key %s', async (key) => {
-    const found = issues(await load({ 'operations.yaml': OPERATIONS.replace('upstream: { method: GET, path: /V1/products }', `upstream: { method: GET, path: /V1/products, ${key}: x-value }`) }));
+    const found = issues(await load({ 'operations.yaml': OPERATIONS.replace('path: /V1/products,', `path: /V1/products, ${key}: x-value,`) }));
     expect(found).toContainEqual(expect.objectContaining({ path: `operations[0].upstream.${key}`, message }));
   });
 
@@ -202,7 +202,7 @@ describe('CFG-5 secrets never appear in configuration', () => {
   });
 
   it('rejects a secret header inside upstream', async () => {
-    const found = issues(await load({ 'operations.yaml': OPERATIONS.replace('upstream: { method: GET, path: /V1/products }', 'upstream: { method: GET, path: /V1/products, headers: { Authorization: Bearer abc.def } }') }));
+    const found = issues(await load({ 'operations.yaml': OPERATIONS.replace('path: /V1/products,', 'path: /V1/products, headers: { Authorization: Bearer abc.def },') }));
     expect(found).toEqual([expect.objectContaining({ path: 'operations[0].upstream.headers.Authorization', message })]);
     expect(JSON.stringify(found)).not.toContain('abc.def');
   });
