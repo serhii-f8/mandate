@@ -20,7 +20,7 @@ import {
   type PolicyEngine,
 } from '@aiops/core';
 import { toCallToolResult } from '../changesets/results.js';
-import { createTaskResult, type ToolAnswer } from './tasks/task-result.js';
+import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
 import type { BuiltinTool } from './tool-catalog.js';
 
@@ -213,7 +213,10 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
       if (builtin !== undefined) {
         // A change-set ID is an identifier, not argument content, so it may be audited.
         if (typeof validArgs.changeset_id === 'string') report({ changesetId: validArgs.changeset_id });
-        return builtin.handler(validArgs, { caller: req.caller, snapshot: req.snapshot, correlationId: req.correlationId, tasks: req.tasks, report });
+        const answer = await builtin.handler(validArgs, { caller: req.caller, snapshot: req.snapshot, correlationId: req.correlationId, tasks: req.tasks, report });
+        // Never a task for a request that did not declare the extension, whoever built it (MCP-1).
+        if (isTaskAnswer(answer) && !req.tasks) throw new Error('task answer for a request without the Tasks declaration');
+        return answer;
       }
       // Step 1 returned unless a built-in or a granted operation was found.
       if (operation === undefined) throw new Error('no operation after lookup');

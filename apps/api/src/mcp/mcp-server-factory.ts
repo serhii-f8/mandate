@@ -71,11 +71,10 @@ export function createServerFactory(deps: PipelineDeps, tasks: TaskHandlerDeps):
     server.setRequestHandler('tools/list', async (_req, ctx) => ({ tools: await listTools(deps, request(ctx.mcpReq.envelope)) }));
     server.setRequestHandler('tools/call', async (req, ctx) => {
       const answer = await callTool(deps, request(ctx.mcpReq.envelope), req.params.name, req.params.arguments);
-      // A task answer skips projectCallToolResult, which would wrap structuredContent and add text fallbacks to it
-      // (ADR 0003, ADR 0029). Verified in SDK 2.4.0: stampResultType lets resultType 'task' pass on tools/call; the
-      // tools/call wrapper still adds an empty `content` (normalizeContentlessToolResult), which task clients ignore.
-      // The handler's declared result type predates the Tasks extension and has no task variant, so the
-      // task answer is cast to it; it passes the wrapper's validation as spike 1 and the factory test show.
+      // `projectCallToolResult` takes a CallToolResult, and a task answer is not one, so it is returned as it is
+      // (ADR 0003, ADR 0029). SDK 2.4.0: `stampResultType` lets resultType 'task' pass on tools/call; the wrapper
+      // still adds an empty `content` (normalizeContentlessToolResult). The handler's declared result type has no
+      // task variant, hence the cast.
       return isTaskAnswer(answer) ? (answer as unknown as CallToolResult) : server.projectCallToolResult(answer, undefined);
     });
     // The 3-argument (custom-schema) form: on 2026-07-28, `tasks/get` and `tasks/cancel` are

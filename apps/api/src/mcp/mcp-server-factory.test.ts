@@ -120,12 +120,14 @@ describe('MCP-7 server factory', () => {
     },
   });
 
-  it('MCP-7 a task answer reaches the wire unprojected', async () => {
+  it('MCP-7 a declaring request reaches the built-in with tasks true; resultType and taskId survive the SDK wrapper', async () => {
     const seen: boolean[] = [];
     const { status, json } = await handler([probe(seen)])(modernRequest('tools/call', { name: 'probe', arguments: {} }, { extensions: { [TASKS]: {} } }));
     expect(status).toBe(200);
     expect(json.result).toMatchObject({ resultType: 'task', status: 'working', ttlMs: 604800000 });
     expect((json.result as { taskId?: string }).taskId).toBe('44444444-4444-4444-8444-444444444444');
+    // Tripwire: today the SDK's tools/call wrapper adds an empty `content` to a task answer (ADR 0029).
+    expect(json.result).toHaveProperty('content', []);
     expect(seen).toEqual([true]);
   });
 

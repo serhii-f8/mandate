@@ -7,7 +7,7 @@ import { callerFromAuthInfo } from '../auth/caller-from-auth.js';
 import { pingTool } from './builtin-tools.js';
 import type { BuiltinTool } from './tool-catalog.js';
 import { callTool, listTools, snapshotOf, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
-import { isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
+import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 
 /** Narrows an answer to a plain tool result; these tests never ask for a task. */
 function plain(answer: ToolAnswer): CallToolResult {
@@ -366,11 +366,27 @@ describe('MCP-7 AUD-1 task answers', () => {
     expect(row?.details).toMatchObject({ changesetId: 'cs-1', taskId: task.taskId });
   });
 
+  it('a built-in task answer for a non-declaring request is a tool failure', async () => {
+    const rogue: BuiltinTool = {
+      name: 'rogue',
+      description: 'rogue',
+      inputSchema: { type: 'object' },
+      validate: () => ({ ok: true }),
+      handler: () => Promise.resolve(createTaskResult(task)),
+    };
+    const { deps, req, audit } = setupWith(LOADED, new FakeInvoker());
+    const answer = await callTool({ ...deps, builtins: [rogue] }, req(alice), 'rogue', {});
+    expect(answer).toMatchObject({ isError: true, content: [{ type: 'text', text: 'Tool failed.' }] });
+    expect(audit.events.find((e) => e.action === 'tool.call')?.details).toMatchObject({ errorCode: 'handler_failed' });
+  });
+
   it('a task for a non-declaring request is a tool failure', async () => {
-    const { deps, req, audit } = setupWith(LOADED, taskInvoker());
+    const invoker = taskInvoker();
+    const { deps, req, audit } = setupWith(LOADED, invoker);
     const answer = await callTool(deps, req(alice), 'catalog.search_products', call);
     expect(answer).toMatchObject({ isError: true, content: [{ type: 'text', text: 'Tool failed.' }] });
     expect(audit.events.find((e) => e.action === 'tool.call')?.details).toMatchObject({ errorCode: 'handler_failed' });
+    expect(invoker.seen[0]?.asTask).toBe(false);
   });
 
   it('built-ins receive tasks and report', async () => {
