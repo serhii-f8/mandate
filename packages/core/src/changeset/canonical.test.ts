@@ -11,6 +11,24 @@ describe('CS-4 canonical JSON', () => {
   it('CS-4 orders keys by UTF-16 code units', () => {
     expect(canonicalJson({ é: 2, z: 1 })).toBe('{"z":1,"é":2}');
   });
+  it('CS-4 key order is UTF-16, not code point (RFC 8785)', () => {
+    expect(canonicalJson({ '￿': 2, '\u{1F600}': 1 })).toBe('{"\u{1F600}":1,"￿":2}');
+  });
+  it('CS-4 writes negative zero as 0', () => {
+    expect(canonicalJson(-0)).toBe('0');
+  });
+  it('CS-4 rejects non-plain objects and sparse arrays', () => {
+    class C {
+      readonly x = 1;
+    }
+    expect(() => canonicalJson(new Date(0))).toThrow(TypeError);
+    expect(() => canonicalJson(new Map())).toThrow(TypeError);
+    expect(() => canonicalJson(new Set())).toThrow(TypeError);
+    expect(() => canonicalJson(new C())).toThrow(TypeError);
+    // eslint-disable-next-line no-sparse-arrays -- the hole is the case under test
+    expect(() => canonicalJson([1, , 2])).toThrow(TypeError);
+    expect(canonicalJson(Object.create(null) as object)).toBe('{}');
+  });
   it('CS-4 rejects values without a JSON form', () => {
     expect(() => canonicalJson({ a: undefined })).toThrow(TypeError);
     expect(() => canonicalJson(Number.NaN)).toThrow(TypeError);
@@ -33,6 +51,11 @@ describe('CS-4 target id order and argument normalization', () => {
       skus: ['1', 'A', 'B'],
       changes: { x: 'y' },
     });
+  });
+  it('CS-4 rejects id elements that are neither string nor number', () => {
+    for (const bad of [null, true, {}, ['a'], undefined]) {
+      expect(() => normalizeArgs({ skus: ['A', bad] }, 'skus')).toThrow(TypeError);
+    }
   });
   it('CS-4 returns a copy and leaves args untouched without an ids argument', () => {
     const args = { skus: ['b', 'a'] };

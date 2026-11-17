@@ -10,7 +10,16 @@ export function canonicalJson(value: unknown): string {
       if (!Number.isFinite(value)) throw new TypeError('canonicalJson: non-finite number');
       return JSON.stringify(value);
     case 'object': {
-      if (Array.isArray(value)) return `[${value.map((v) => canonicalJson(v)).join(',')}]`;
+      if (Array.isArray(value)) {
+        const parts: string[] = [];
+        for (let i = 0; i < value.length; i++) {
+          if (!(i in value)) throw new TypeError('canonicalJson: sparse array');
+          parts.push(canonicalJson(value[i]));
+        }
+        return `[${parts.join(',')}]`;
+      }
+      const proto: unknown = Object.getPrototypeOf(value);
+      if (proto !== Object.prototype && proto !== null) throw new TypeError('canonicalJson: non-plain object');
       const record = value as Record<string, unknown>;
       const keys = Object.keys(record).sort();
       return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(record[k])}`).join(',')}}`;
@@ -45,7 +54,11 @@ export function normalizeArgs(
   if (idsArg === undefined) return copy;
   const ids = copy[idsArg];
   if (Array.isArray(ids)) {
-    copy[idsArg] = [...new Set(ids.map((v) => String(v)))].sort(compareTargetIds);
+    const strings = (ids as unknown[]).map((v) => {
+      if (typeof v !== 'string' && typeof v !== 'number') throw new TypeError('normalizeArgs: id must be string or number');
+      return String(v);
+    });
+    copy[idsArg] = [...new Set(strings)].sort(compareTargetIds);
   }
   return copy;
 }
