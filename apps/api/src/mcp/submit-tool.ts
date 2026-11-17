@@ -10,7 +10,7 @@ import { ExecutorUnavailable, TASK_TTL_MS, type StartOutcome } from '@aiops/core
 import { allowingRole } from '../changesets/allowing-role.js';
 import { AUDIT_UNAVAILABLE } from './audited-tool.js';
 import type { BuiltinToolDeps } from './builtin-tools.js';
-import { load } from './changeset-tools.js';
+import { load, notFound } from './changeset-tools.js';
 import { deniedResult, recordDecision } from './policy-answers.js';
 import { createTaskResult } from './tasks/task-result.js';
 import type { BuiltinTool } from './tool-catalog.js';
@@ -59,7 +59,7 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
 
       // 1. Requester only; unknown and foreign IDs look the same (expires lazily, CS-6).
       const record = await load(deps, caller, correlationId, id);
-      if (record === undefined) return error(`Change-set ${id} was not found.`);
+      if (record === undefined) return notFound(id);
 
       // 2. Only a prepared change-set can be submitted; a second submit finds it executing.
       if (record.status !== 'prepared') return error(`Change-set ${id} cannot be submitted in status ${record.status}.`);

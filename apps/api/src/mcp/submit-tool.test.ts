@@ -11,7 +11,7 @@ import {
   type TaskRecord,
 } from '@aiops/core';
 import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryTaskRepository } from '@aiops/testing';
-import type { AuditDetails } from './audited-tool.js';
+import { AUDIT_UNAVAILABLE, type AuditDetails } from './audited-tool.js';
 import { submitForApprovalTool } from './submit-tool.js';
 import { isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { snapshotOf, type Snapshot } from './tool-pipeline.js';
@@ -130,7 +130,7 @@ class RecordingTasks extends InMemoryTaskRepository {
   }
 }
 
-async function setup(options: { requester?: string; stage?: 'preparing' | 'prepared' | 'executing' } = {}) {
+async function setup(options: { requester?: string; stage?: 'preparing' | 'prepared' | 'executing'; expiresAt?: Date } = {}) {
   const repository = new InMemoryChangeSetRepository();
   const tasks = new RecordingTasks();
   const audit = new InMemoryAuditLog();
@@ -146,7 +146,7 @@ async function setup(options: { requester?: string; stage?: 'preparing' | 'prepa
       configHash: 'h',
       correlationId: 'c0',
       createdAt: NOW,
-      expiresAt: new Date('2026-11-18T10:00:00.000Z'),
+      expiresAt: options.expiresAt ?? new Date('2026-11-18T10:00:00.000Z'),
     },
     event,
   );
@@ -219,6 +219,23 @@ describe('MCP-8 POL-6 POL-5 POL-4 submit_for_approval', () => {
     expect(result.isError).toBe(true);
     expect(text(result)).toBe(`Change-set ${ID} was not found.`);
     expect(executor.starts).toEqual([]);
+  });
+
+  it('MCP-8 POL-8 an audit log that rejects answers the fixed text and never starts', async () => {
+    const { tool, ctx, executor, audit } = await setup();
+    audit.append = () => Promise.reject(new Error('audit down'));
+    const result = plain(await tool.handler(args(), ctx(alice)));
+    expect(result).toEqual(AUDIT_UNAVAILABLE);
+    expect(executor.starts).toEqual([]);
+  });
+
+  it('MCP-8 CS-6 an expired change-set answers the status text and never starts', async () => {
+    const { tool, ctx, executor, tasks } = await setup({ expiresAt: new Date('2026-11-17T09:00:00.000Z') });
+    const result = plain(await tool.handler(args(), ctx(alice, { tasks: true })));
+    expect(result.isError).toBe(true);
+    expect(text(result)).toBe(`Change-set ${ID} cannot be submitted in status expired.`);
+    expect(executor.starts).toEqual([]);
+    expect(tasks.created).toEqual([]);
   });
 
   it('MCP-8 wrong status names it', async () => {

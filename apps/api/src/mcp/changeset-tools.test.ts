@@ -1,6 +1,6 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import { encodeCursor, type Caller } from '@aiops/core';
+import { CANCELLABLE, encodeCursor, ExecutorUnavailable, type Caller, type ChangeSetExecutor, type ChangeSetStatus, type ExecutionProgress } from '@aiops/core';
 import { InMemoryChangeSetRepository } from '@aiops/testing';
 import { createChangesetTools } from './changeset-tools.js';
 import { isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
@@ -16,6 +16,40 @@ const bob: Caller = { subject: 'bob', groups: [] };
 const ID = '11111111-1111-4111-8111-111111111111';
 const NOW = new Date('2026-01-01T12:00:00Z');
 
+type CancelAnswer = Awaited<ReturnType<ChangeSetExecutor['cancel']>>;
+
+class StubExecutor implements ChangeSetExecutor {
+  progressAnswer: ExecutionProgress | undefined | 'unavailable';
+  cancelAnswer: CancelAnswer | 'unavailable' | 'repository' = 'repository';
+  readonly cancels: { changesetId: string; actor: string; correlationId: string }[] = [];
+  readonly progressCalls: string[] = [];
+
+  constructor(private readonly repository: InMemoryChangeSetRepository) {}
+
+  start(): ReturnType<ChangeSetExecutor['start']> {
+    return Promise.reject(new Error('not used'));
+  }
+
+  async cancel(req: { changesetId: string; actor: string; correlationId: string }): Promise<CancelAnswer> {
+    this.cancels.push(req);
+    if (this.cancelAnswer === 'unavailable') throw new ExecutorUnavailable();
+    if (this.cancelAnswer !== 'repository') return this.cancelAnswer;
+    // Stands in for the real executor: pre-execution states cancel through the repository.
+    const record = await this.repository.get(req.changesetId);
+    if (record === undefined) return { ok: false, reason: 'not_found' };
+    if (!CANCELLABLE.includes(record.status)) return { ok: false, reason: 'not_cancellable' };
+    await this.repository.transition(req.changesetId, CANCELLABLE, 'cancelled', {
+      id: 'ex-1', actor: req.actor, action: 'changeset.transition', outcome: 'ok', correlationId: req.correlationId, changesetId: req.changesetId, details: { from: record.status, to: 'cancelled' },
+    });
+    return { ok: true, status: 'cancelled' };
+  }
+
+  progress(id: string): Promise<ExecutionProgress | undefined> {
+    this.progressCalls.push(id);
+    return this.progressAnswer === 'unavailable' ? Promise.reject(new ExecutorUnavailable()) : Promise.resolve(this.progressAnswer);
+  }
+}
+
 async function setup(expiresAt = new Date('2026-01-02T12:00:00Z')) {
   const repository = new InMemoryChangeSetRepository();
   const base = { operation: 'shop.update_content', connection: 'shop', requester: 'alice', args: {}, configHash: 'h', correlationId: 'c0', createdAt: NOW, expiresAt };
@@ -28,11 +62,19 @@ async function setup(expiresAt = new Date('2026-01-02T12:00:00Z')) {
     { ...audit, id: 'a1' },
   );
   let n = 0;
-  const [get, cancel] = createChangesetTools({ repository, newId: () => `id-${String(n++)}`, now: () => NOW });
+  const executor = new StubExecutor(repository);
+  const [get, cancel] = createChangesetTools({ repository, executor, newId: () => `id-${String(n++)}`, now: () => NOW });
   if (get === undefined || cancel === undefined) throw new Error('tools missing');
   // The handlers under test use only the caller and the correlation ID from the context.
   const ctx = (caller: Caller) => ({ caller, snapshot: undefined as never, correlationId: 'c1', tasks: false, report: () => undefined });
-  return { repository, get, cancel, ctx };
+  const audit0 = { ...audit, id: 'ax' };
+  /** Moves the change-set on: executing, then optionally finished with item outcomes. */
+  const advance = async (to: ChangeSetStatus, outcomes: { targetId: string; status: 'written' | 'skipped' | 'failed'; error?: string }[] = []) => {
+    await repository.transition(ID, ['prepared'], 'executing', { ...audit0, id: 'ax1' });
+    if (outcomes.length > 0) await repository.recordItemOutcomes(ID, outcomes);
+    if (to !== 'executing') await repository.transition(ID, ['executing'], to, { ...audit0, id: 'ax2' });
+  };
+  return { repository, executor, get, cancel, ctx, advance };
 }
 
 describe('MCP-8 CS-6 built-in change-set tools', () => {
@@ -74,6 +116,79 @@ describe('MCP-8 CS-6 built-in change-set tools', () => {
     const result = plain(await get.handler({ changeset_id: ID }, ctx(alice)));
     expect((result.structuredContent as { changeset: { status: string } }).changeset.status).toBe('expired');
     expect(repository.audit.events.at(-1)).toMatchObject({ actor: 'system', action: 'changeset.transition', details: { from: 'prepared', to: 'expired' } });
+  });
+
+  it('EXE-6 MCP-8 get_changeset shows progress while executing', async () => {
+    const { get, ctx, executor, advance } = await setup();
+    await advance('executing');
+    executor.progressAnswer = { status: 'executing', total: 10, done: 4, failed: 1, skipped: 0 };
+    const result = plain(await get.handler({ changeset_id: ID }, ctx(alice)));
+    expect((result.structuredContent as { progress?: unknown }).progress).toEqual({ total: 10, done: 4, failed: 1, skipped: 0 });
+  });
+
+  it('EXE-6 MCP-8 get_changeset still answers when the executor is unavailable', async () => {
+    const { get, ctx, executor, advance } = await setup();
+    await advance('executing');
+    executor.progressAnswer = 'unavailable';
+    const result = plain(await get.handler({ changeset_id: ID }, ctx(alice)));
+    expect(result.isError).toBeUndefined();
+    expect((result.structuredContent as { progress?: unknown }).progress).toBeUndefined();
+  });
+
+  it('CS-7 MCP-8 get_changeset summarises a finished execution', async () => {
+    const { get, ctx, executor, advance } = await setup();
+    executor.progressAnswer = { status: 'completed_with_errors', total: 3, done: 2, failed: 0, skipped: 1 };
+    await advance('completed_with_errors', [
+      { targetId: 'a', status: 'written' },
+      { targetId: 'b', status: 'written' },
+      { targetId: 'c', status: 'skipped', error: 'drift' },
+    ]);
+    const result = plain(await get.handler({ changeset_id: ID }, ctx(alice)));
+    const first = result.content[0]?.type === 'text' ? result.content[0].text : '';
+    expect(first).toContain('completed_with_errors: 2 written, 0 failed, 1 skipped (1 changed upstream since preparation).');
+    expect((result.structuredContent as { progress?: unknown }).progress).toEqual({ total: 3, done: 2, failed: 0, skipped: 1 });
+  });
+
+  it('MCP-8 get_changeset shows no progress for a prepared change-set', async () => {
+    const { get, ctx, executor } = await setup();
+    executor.progressAnswer = { status: 'prepared', total: 3, done: 0, failed: 0, skipped: 0 };
+    const result = plain(await get.handler({ changeset_id: ID }, ctx(alice)));
+    expect((result.structuredContent as { progress?: unknown }).progress).toBeUndefined();
+    expect(executor.progressCalls).toEqual([]);
+  });
+
+  it('EXE-7 cancel_changeset during execution requests cancellation', async () => {
+    const { cancel, ctx, executor, advance } = await setup();
+    await advance('executing');
+    executor.cancelAnswer = { ok: true, status: 'executing' };
+    const result = plain(await cancel.handler({ changeset_id: ID }, ctx(alice)));
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toEqual([{ type: 'text', text: 'Cancellation requested; the current batch finishes first.' }]);
+    expect(result.structuredContent).toEqual({ changeset: { id: ID, status: 'executing', cancelRequested: true } });
+    expect(executor.cancels).toEqual([{ changesetId: ID, actor: 'alice', correlationId: 'c1' }]);
+  });
+
+  it('MCP-8 cancel_changeset of a prepared change-set cancels through the executor', async () => {
+    const { cancel, ctx, executor } = await setup();
+    executor.cancelAnswer = { ok: true, status: 'cancelled' };
+    const result = plain(await cancel.handler({ changeset_id: ID }, ctx(alice)));
+    expect(result.content).toEqual([{ type: 'text', text: `Change-set ${ID} was cancelled.` }]);
+    expect(result.structuredContent).toEqual({ changeset: { id: ID, status: 'cancelled' } });
+  });
+
+  it('MCP-8 cancel_changeset answers unavailable when the executor is', async () => {
+    const { cancel, ctx, executor } = await setup();
+    executor.cancelAnswer = 'unavailable';
+    const result = plain(await cancel.handler({ changeset_id: ID }, ctx(alice)));
+    expect(result).toEqual({ isError: true, content: [{ type: 'text', text: `Change-set ${ID} could not be cancelled: the execution service is unavailable.` }] });
+  });
+
+  it('SEC-1 cancel_changeset of a foreign change-set never reaches the executor', async () => {
+    const { cancel, ctx, executor, repository } = await setup();
+    const result = plain(await cancel.handler({ changeset_id: ID }, ctx(bob)));
+    expect(result.content).toEqual([{ type: 'text', text: `Change-set ${ID} was not found.` }]);
+    expect(executor.cancels).toEqual([]);
+    expect((await repository.get(ID))?.status).toBe('prepared');
   });
 
   it('MCP-8 cancel works once, then reports the status', async () => {
