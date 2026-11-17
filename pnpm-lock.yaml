@@ -182,6 +182,9 @@ importers:
         specifier: 10.4.0
         version: 10.4.0
     devDependencies:
+      '@aiops/magento2-catalog':
+        specifier: workspace:*
+        version: link:../../presets/magento2-catalog
       '@aiops/testing':
         specifier: workspace:*
         version: link:../../packages/testing

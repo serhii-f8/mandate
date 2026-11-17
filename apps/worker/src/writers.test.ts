@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createOpenApiAdapter } from '@aiops/adapters';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
+import type { LoadedConfiguration } from '@aiops/config';
 import {
   EMPTY_STATS,
   ManifestBatchWriter,
@@ -10,129 +10,43 @@ import {
   type ChangeItemRecord,
   type ChangeSetRecord,
   type Clock,
-  type CredentialHandle,
-  type CredentialStatus,
-  type CredentialVault,
 } from '@aiops/core';
 import { installFakeMagentoCatalog, startFakeUpstream, type FakeMagentoCatalog, type FakeUpstream } from '@aiops/testing';
 import type { UpstreamCallLog } from '@aiops/upstream';
+import { loadMagentoPreset, MAGENTO_BASE_PATH, vaultWithToken, type MemoryVault } from '../test/support/magento.js';
 import { createWriterFor } from './writers.js';
 
-const BASE_PATH = '/rest/all';
 const FAKE_TOKEN = 'writers-test-only-token';
 
-/** The preset's 0.3.0 bulk block (design part 2 §6), inline until the preset bump (Task 10). */
-function configText(baseUrl: string): string {
-  return `version: 1
-connections:
-  - id: magento
-    adapter: openapi
-    base_url: ${baseUrl}
-    credential_ref: magento-token
-    auth: { scheme: bearer }
-    allow_private_network: true
+/** An operation without a bulk binding on the preset's connection, next to the preset's own. */
+const PLAIN_OPERATION = `version: 1
 operations:
-  - id: catalog.get_products_by_sku
+  - id: catalog.update_content_plain
     connection: magento
-    risk: read
-    description: Products by SKU.
+    risk: write
+    description: Update product content without a bulk binding.
     input_schema:
       type: object
       properties:
         brand: { type: string }
         skus: { type: array, items: { type: string } }
-        fields: { type: array, items: { type: string } }
-      required: [brand, skus, fields]
-      additionalProperties: false
-    fields_arg: fields
-    upstream:
-      method: GET
-      path: /V1/products
-      query:
-        searchCriteria[filter_groups][0][filters][0][field]: brand
-        searchCriteria[filter_groups][0][filters][0][value]: { arg: brand }
-        searchCriteria[filter_groups][0][filters][0][condition_type]: eq
-        searchCriteria[filter_groups][1][filters][0][field]: sku
-        searchCriteria[filter_groups][1][filters][0][value]: { arg: skus, join: ',' }
-        searchCriteria[filter_groups][1][filters][0][condition_type]: in
-        searchCriteria[pageSize]: 100
-      response:
-        items: items
-        total: total_count
-        flatten: { path: custom_attributes, key: attribute_code, value: value }
-        fields_from_arg: fields
-        max_items: 100
-  - id: catalog.update_content
-    connection: magento
-    risk: write
-    description: Update product content.
-    input_schema: &write_schema
-      type: object
-      properties:
-        brand: { type: string }
-        skus: { type: array, items: { type: string } }
-        changes: { type: object, properties: { name: { type: string }, description: { type: string } }, additionalProperties: false }
+        changes: { type: object, properties: { description: { type: string } }, additionalProperties: false }
       required: [brand, changes]
       additionalProperties: false
-    upstream:
-      method: POST
-      path: /async/bulk/V1/products
-      bulk:
-        body:
-          wrap: product
-          nest: { path: custom_attributes, key: attribute_code, value: value, keep: [sku, name, status] }
-        batch_id: bulk_uuid
-        status:
-          method: GET
-          path: /V1/bulk/{batch_id}/detailed-status
-          items: operations_list
-          index: id
-          state: status
-          states: { ok: [1], retriable: [2], failed: [3, 5], open: [4] }
-    manifest: &manifest
+    upstream: { method: POST, path: /V1/products }
+    manifest:
       id_field: sku
       ids_arg: skus
       values_arg: changes
-      fields: [name, description]
+      fields: [description]
       scope_args: { brand: brand }
       read_before:
         operation: catalog.get_products_by_sku
         ids_arg: skus
         args: { brand: { arg: brand } }
-      write: { carry_fields: [status] }
       batch_size: 100
       rollback: { strategy: replay_previous_state }
-  - id: catalog.update_content_plain
-    connection: magento
-    risk: write
-    description: Update product content without a bulk binding.
-    input_schema: *write_schema
-    upstream: { method: POST, path: /V1/products }
-    manifest: *manifest
 `;
-}
-
-async function loadConfig(baseUrl: string): Promise<LoadedConfiguration> {
-  const result = await loadConfigurationSources([{ file: 'config.yaml', text: configText(baseUrl) }]);
-  if (!result.ok) throw new Error(`configuration did not load: ${JSON.stringify(result.issues)}`);
-  return result.configuration;
-}
-
-class MemoryVault implements CredentialVault {
-  readonly rows = new Map<string, { scheme: string; secret: Readonly<Record<string, string>> }>();
-  put(input: { ref: string; scheme: string; secret: Readonly<Record<string, string>>; actor: string }): Promise<{ keyVersion: number }> {
-    this.rows.set(input.ref, { scheme: input.scheme, secret: input.secret });
-    return Promise.resolve({ keyVersion: 1 });
-  }
-  describe(refs: readonly string[]): Promise<CredentialStatus[]> {
-    return Promise.resolve(refs.map((ref) => ({ ref, set: this.rows.has(ref) })));
-  }
-  handle(ref: string): Promise<CredentialHandle | undefined> {
-    const row = this.rows.get(ref);
-    if (row === undefined) return Promise.resolve(undefined);
-    return Promise.resolve({ ref, scheme: row.scheme, open: () => Promise.resolve(row.secret) });
-  }
-}
 
 /** Advances virtual time instead of sleeping. */
 class FakeClock implements Clock {
@@ -206,15 +120,14 @@ describe('EXE-4 OPS-6 worker writerFor', () => {
   beforeEach(async () => {
     up = await startFakeUpstream();
     catalog = installFakeMagentoCatalog(up, {
-      basePath: BASE_PATH,
+      basePath: MAGENTO_BASE_PATH,
       products: [
         { sku: 'A', name: 'Alpha', status: 2, brand: 'acme', description: 'old A' },
         { sku: 'B', name: 'Beta', status: 1, brand: 'acme', description: 'old B' },
       ],
     });
-    configuration = await loadConfig(`${up.url}${BASE_PATH}`);
-    vault = new MemoryVault();
-    await vault.put({ ref: 'magento-token', scheme: 'bearer', secret: { token: FAKE_TOKEN }, actor: 'test' });
+    configuration = await loadMagentoPreset(`${up.url}${MAGENTO_BASE_PATH}`, [{ file: 'operations.yaml', text: PLAIN_OPERATION }]);
+    vault = await vaultWithToken(FAKE_TOKEN);
     lines = [];
   });
   afterEach(async () => {

@@ -25,6 +25,7 @@
     "record-history": "tsx --conditions=@aiops/source scripts/record-history.ts"
   },
   "devDependencies": {
+    "@aiops/magento2-catalog": "workspace:*",
     "@aiops/testing": "workspace:*",
     "@temporalio/testing": "1.25.0",
     "tsx": "4.23.15"
