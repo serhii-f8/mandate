@@ -57,6 +57,13 @@
       "when": 1794931670934,
       "tag": "0007_mcp_task",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794933936082,
+      "tag": "0008_changeset_error_status",
+      "breakpoints": true
     }
   ]
 }

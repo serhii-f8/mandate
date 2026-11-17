@@ -50,7 +50,8 @@ export interface ChangeSetRepository {
     changesetId: string,
     outcome:
       | { status: 'prepared'; hash: string; stats: ChangeSetStats; preparedAt: Date }
-      | { status: 'failed'; errorCode: string },
+      /** `upstreamStatus`: the HTTP status of the failed read, when there was one (a number, never upstream text). */
+      | { status: 'failed'; errorCode: string; upstreamStatus?: number },
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined>;
   /** Undefined when status is not in `from` (or the change-set is not expired before `expiredBefore`). */

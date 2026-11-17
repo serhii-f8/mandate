@@ -110,6 +110,8 @@ export const changeSet = pgTable(
     status: text('status').$type<ChangeSetStatus>().notNull(),
     stats: jsonb('stats').$type<ChangeSetStats>().notNull(),
     errorCode: text('error_code'),
+    // Upstream HTTP status of a failed preparation read (a number only, SEC-3).
+    errorStatus: integer('error_status'),
     configHash: text('config_hash').notNull(),
     correlationId: text('correlation_id').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),

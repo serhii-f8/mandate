@@ -59,6 +59,7 @@ function toRecord(row: ChangeSetRow): ChangeSetRecord {
     status: row.status,
     stats: row.stats,
     ...(row.errorCode === null ? {} : { errorCode: row.errorCode }),
+    ...(row.errorStatus === null ? {} : { errorStatus: row.errorStatus }),
     configHash: row.configHash,
     correlationId: row.correlationId,
     createdAt: row.createdAt,
@@ -242,7 +243,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     changesetId: string,
     outcome:
       | { status: 'prepared'; hash: string; stats: ChangeSetStats; preparedAt: Date }
-      | { status: 'failed'; errorCode: string },
+      | { status: 'failed'; errorCode: string; upstreamStatus?: number },
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined> {
     if (!UUID.test(changesetId)) return undefined;
@@ -255,7 +256,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
             preparedAt: outcome.preparedAt,
             updatedAt: sql`now()`,
           }
-        : { status: 'failed' as const, errorCode: outcome.errorCode, updatedAt: sql`now()` };
+        : { status: 'failed' as const, errorCode: outcome.errorCode, errorStatus: outcome.upstreamStatus ?? null, updatedAt: sql`now()` };
     return this.compareAndSet(changesetId, ['preparing'], set, audit);
   }
 

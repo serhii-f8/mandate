@@ -27,7 +27,7 @@ export async function preparedAnswer(repository: Pick<ChangeSetRepository, 'item
 /** A change-set that failed, or was cancelled, while preparing. */
 export function preparationErrorAnswer(record: ChangeSetRecord): InvocationResult {
   const code = record.status === 'cancelled' ? 'cancelled' : (record.errorCode ?? 'internal');
-  return preparationErrorResult(record.operation, code, record.id);
+  return preparationErrorResult(record.operation, code, record.id, record.errorStatus);
 }
 
 export function expiredDuringPreparationAnswer(record: ChangeSetRecord): InvocationResult {

@@ -173,4 +173,19 @@ describe('MCP-1 MCP-7 operationInvokers wiring', () => {
     expect(sleeps).toEqual([250, 250, 250, 250]);
     expect(result.structured).toEqual({ changesetId: id, status: 'preparing' });
   });
+
+  it('MCP-1 a negative prepare wait stops the wiring instead of every write call', () => {
+    expect(() =>
+      operationInvokers({
+        vault: UNREACHABLE_VAULT,
+        adapter: UNREACHABLE_ADAPTER,
+        repository: new InMemoryChangeSetRepository(),
+        tasks: new InMemoryTaskRepository(),
+        starter: { start: () => Promise.resolve() },
+        prepareWaitMs: -1,
+        newId: () => 'x',
+        now: () => new Date(),
+      }),
+    ).toThrow(/timeoutMs must not be negative/);
+  });
 });

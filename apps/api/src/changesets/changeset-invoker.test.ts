@@ -8,6 +8,7 @@ import {
   type Caller,
   type OperationDefinition,
   type ReadPage,
+  type TaskRecord,
   type UpstreamReader,
   type WorkflowStarter,
 } from '@aiops/core';
@@ -105,25 +106,33 @@ class FakeStarter implements WorkflowStarter {
   onStart: ((id: string) => Promise<void>) | undefined;
 
   async start(changesetId: string): Promise<void> {
-    if (this.fail) throw new Error('temporal unreachable');
     this.started.push(changesetId);
     await this.onStart?.(changesetId);
+    if (this.fail) throw new Error('temporal unreachable');
   }
 }
 
-const NO_WAIT: PrepareWait = { timeoutMs: 0, pollMs: 250, sleep: () => Promise.resolve() };
+/** Keeps every created task so a test can prove none was. */
+class RecordingTasks extends InMemoryTaskRepository {
+  readonly created: TaskRecord[] = [];
+  override async create(task: TaskRecord): Promise<void> {
+    await super.create(task);
+    this.created.push(task);
+  }
+}
+
+const NO_WAIT: PrepareWait = { timeoutMs: 250, pollMs: 250, sleep: () => Promise.resolve() };
 
 function setup(opts: { reader?: ScriptedReader; wait?: PrepareWait } = {}) {
   const reader = opts.reader ?? acmeReader();
   const repository = new InMemoryChangeSetRepository();
-  const tasks = new InMemoryTaskRepository();
+  const tasks = new RecordingTasks();
   const starter = new FakeStarter();
   let n = 0;
   const newId = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
   const invoker = new ChangeSetInvoker({
     configuration: CONFIG,
     repository,
-    reader,
     tasks,
     starter,
     newId,
@@ -161,7 +170,15 @@ function setup(opts: { reader?: ScriptedReader; wait?: PrepareWait } = {}) {
       }),
     );
   };
-  return { repository, tasks, starter, invoker, reader, prepareInline, failPreparation };
+  const moveTo = async (id: string, to: 'expired' | 'cancelled'): Promise<void> => {
+    await repository.transition(
+      id,
+      ['preparing'],
+      to,
+      changesetTransitionEvent({ id: newId(), actor: 'system', changeset: { id, operation: 'catalog.update_content' }, from: 'preparing', to, correlationId: 'corr-w' }),
+    );
+  };
+  return { repository, tasks, starter, invoker, reader, prepareInline, failPreparation, moveTo };
 }
 
 const ID = '00000000-0000-4000-8000-000000000001';
@@ -197,8 +214,9 @@ describe('MCP-7 MCP-1 EXE-1 asynchronous write call', () => {
   });
 
   it('MCP-7 CS-1 targets_missing answers as in Phase 4 and creates neither task nor workflow', async () => {
-    const { invoker, starter } = setup();
+    const { invoker, starter, tasks } = setup();
     const result = await invoker.invoke({ operation: op('catalog.update_content'), args: { brand: 'acme', changes: { name: 'New' } }, caller, asTask: true });
+    expect(tasks.created).toEqual([]);
     expect(result).toEqual({
       isError: true,
       text: CHANGESET_TEXT.errors.targets_missing('catalog.update_content'),
@@ -220,8 +238,24 @@ describe('MCP-7 MCP-1 EXE-1 asynchronous write call', () => {
     expect(result.structured).toEqual({ changeset: { id: ID, status: 'failed', errorCode: 'executor_unavailable' } });
     expect(result.task).toBeUndefined();
     expect(result.auditDetails).toEqual({ ...BASE_AUDIT, changesetId: ID, errorCode: 'executor_unavailable' });
-    // IDs 2 and 3 went to the two transition events; no task row was created with the next one.
-    expect(await tasks.findOwned('00000000-0000-4000-8000-000000000004', caller.subject)).toBeUndefined();
+    expect(tasks.created).toEqual([]);
+  });
+
+  it.each([true, false])('EXE-1 a start that fails after the workflow moved the change-set on continues as a started one (asTask %s)', async (asTask) => {
+    const { invoker, starter, repository, tasks, prepareInline } = setup();
+    starter.onStart = prepareInline;
+    starter.fail = true;
+    const result = await invoker.invoke({ operation: op('catalog.update_content'), args: WRITE_ARGS, caller, asTask });
+    // The executor_unavailable mark lost its compare-and-set: the workflow is running after all.
+    expect((await repository.get(ID))?.status).toBe('prepared');
+    expect(result.isError).toBeUndefined();
+    if (asTask) {
+      expect(tasks.created).toHaveLength(1);
+      expect(result.task).toEqual(tasks.created[0]);
+    } else {
+      expect(tasks.created).toEqual([]);
+      expect(changesetStatus(result.structured)).toBe('prepared');
+    }
   });
 
   it('MCP-1 CS-1 MCP-4 a plain call answers the Phase 4 prepared result when preparation finishes within the wait', async () => {
@@ -314,10 +348,51 @@ describe('MCP-7 MCP-1 EXE-1 asynchronous write call', () => {
     starter.onStart = prepareInline;
     const result = await invoker.invoke({ operation: op('catalog.update_content'), args: { brand: 'acme', skus: ['a'], changes: { name: 'New' } }, caller });
     expect(result.isError).toBe(true);
-    // The workflow stores the code only, so the HTTP status is no longer part of the answer.
-    expect(result.text).toBe(`catalog.update_content failed: the upstream system answered HTTP error (change-set ${ID}).`);
+    expect(result.text).toBe(`catalog.update_content failed: the upstream system answered HTTP 500 (change-set ${ID}).`);
     expect(result.structured).toEqual({ changeset: { id: ID, status: 'failed', errorCode: 'http_status' } });
+    expect(result.auditDetails).toEqual({ ...BASE_AUDIT, changesetId: ID, errorCode: 'http_status', upstreamStatus: 500 });
     expect((await repository.get(ID))?.status).toBe('failed');
+  });
+
+  it('MCP-1 a change-set that expired during the wait answers expired', async () => {
+    const { invoker, starter, moveTo } = setup();
+    starter.onStart = (id) => moveTo(id, 'expired');
+    const result = await invoker.invoke({ operation: op('catalog.update_content'), args: WRITE_ARGS, caller });
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe(`catalog.update_content could not prepare a change-set: it expired before preparation finished (change-set ${ID}).`);
+    expect(result.auditDetails).toEqual({ ...BASE_AUDIT, changesetId: ID, errorCode: 'expired' });
+  });
+
+  it('MCP-1 a change-set cancelled during the wait answers cancelled', async () => {
+    const { invoker, starter, moveTo } = setup();
+    starter.onStart = (id) => moveTo(id, 'cancelled');
+    const result = await invoker.invoke({ operation: op('catalog.update_content'), args: WRITE_ARGS, caller });
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe(`${CHANGESET_TEXT.errors.cancelled('catalog.update_content').replace(/\.$/, '')} (change-set ${ID}).`);
+    expect(result.structured).toEqual({ changeset: { id: ID, status: 'cancelled', errorCode: 'cancelled' } });
+    expect(result.auditDetails).toEqual({ ...BASE_AUDIT, changesetId: ID, errorCode: 'cancelled' });
+  });
+
+  it.each([
+    [{ timeoutMs: 1000, pollMs: 0 }, /pollMs must be positive/],
+    [{ timeoutMs: 1000, pollMs: -1 }, /pollMs must be positive/],
+    [{ timeoutMs: 1000, pollMs: Number.NaN }, /pollMs must be positive/],
+    [{ timeoutMs: -1, pollMs: 250 }, /timeoutMs must not be negative/],
+    [{ timeoutMs: Number.POSITIVE_INFINITY, pollMs: 250 }, /timeoutMs must not be negative/],
+  ])('MCP-1 an invalid wait setting is refused at construction (%o)', (settings, message) => {
+    expect(() => setup({ wait: { ...settings, sleep: () => Promise.resolve() } })).toThrow(message);
+  });
+
+  it('MCP-1 a zero wait (AIOPS_PREPARE_WAIT_MS=0) answers preparing without sleeping', async () => {
+    const sleeps: number[] = [];
+    const sleep = (ms: number): Promise<void> => {
+      sleeps.push(ms);
+      return Promise.resolve();
+    };
+    const { invoker } = setup({ wait: { timeoutMs: 0, pollMs: 250, sleep } });
+    const result = await invoker.invoke({ operation: op('catalog.update_content'), args: WRITE_ARGS, caller });
+    expect(sleeps).toEqual([]);
+    expect(result.structured).toEqual({ changesetId: ID, status: 'preparing' });
   });
 
   it('CS-1 operations without a manifest are still refused by risk, without reading or starting anything', async () => {

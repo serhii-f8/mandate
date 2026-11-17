@@ -51,6 +51,8 @@ export interface ChangeSetRecord {
   readonly status: ChangeSetStatus;
   readonly stats: ChangeSetStats;
   readonly errorCode?: string;
+  /** Upstream HTTP status of a failed preparation read, stored with `errorCode` (never upstream text, SEC-3). */
+  readonly errorStatus?: number;
   readonly configHash: string;
   readonly correlationId: string;
   readonly createdAt: Date;

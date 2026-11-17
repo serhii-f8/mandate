@@ -72,7 +72,7 @@ class FakeRepository implements PreparationRepository {
     id: string,
     outcome:
       | { status: 'prepared'; hash: string; stats: ChangeSetStats; preparedAt: Date }
-      | { status: 'failed'; errorCode: string },
+      | { status: 'failed'; errorCode: string; upstreamStatus?: number },
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined> {
     const cs = this.sets.get(id);
@@ -80,7 +80,12 @@ class FakeRepository implements PreparationRepository {
     const next: ChangeSetRecord =
       outcome.status === 'prepared'
         ? { ...cs, status: 'prepared', hash: outcome.hash, stats: outcome.stats, preparedAt: outcome.preparedAt }
-        : { ...cs, status: 'failed', errorCode: outcome.errorCode };
+        : {
+            ...cs,
+            status: 'failed',
+            errorCode: outcome.errorCode,
+            ...(outcome.upstreamStatus === undefined ? {} : { errorStatus: outcome.upstreamStatus }),
+          };
     this.sets.set(id, next);
     this.audit.push(audit);
     return Promise.resolve(next);
@@ -322,7 +327,8 @@ describe('CS-1 CS-2 CS-4 preparation', () => {
     const { deps, repository } = setup(reader);
     const out = await prepareChangeSet(deps, request(explicitArgs));
     expect(out).toEqual({ ok: false, changesetId: 'id-1', code: 'http_status', status: 404 });
-    expect(repository.sets.get('id-1')).toMatchObject({ status: 'failed', errorCode: 'http_status' });
+    // Stored with the code, so an answer rebuilt from the change-set names it too (design §5 step 4).
+    expect(repository.sets.get('id-1')).toMatchObject({ status: 'failed', errorCode: 'http_status', errorStatus: 404 });
   });
 
   it('CS-1 a truncated read fails incomplete_read', async () => {

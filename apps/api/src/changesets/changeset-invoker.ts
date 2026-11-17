@@ -17,7 +17,6 @@ import {
   type InvocationResult,
   type OperationInvoker,
   type TaskRepository,
-  type UpstreamReader,
   type WorkflowStarter,
 } from '@aiops/core';
 import { deriveTaskState } from '../mcp/tasks/task-state.js';
@@ -35,8 +34,6 @@ export interface ChangeSetInvokerDeps {
   /** The request's configuration snapshot, the one its policy decision used (SEC-1). */
   readonly configuration: LoadedConfiguration;
   readonly repository: ChangeSetRepository;
-  /** Bound to the same snapshot and correlation ID. Preparation runs in the workflow; kept for the router's wiring. */
-  readonly reader: UpstreamReader;
   readonly tasks: TaskRepository;
   readonly starter: WorkflowStarter;
   readonly newId: () => string;
@@ -47,8 +44,16 @@ export interface ChangeSetInvokerDeps {
 
 type Details = Record<string, string | number | boolean>;
 
+/** Throws on settings that would spin or never end; a zero timeout answers without waiting. */
+export function checkPrepareWait(wait: Pick<PrepareWait, 'timeoutMs' | 'pollMs'>): void {
+  if (!(Number.isFinite(wait.pollMs) && wait.pollMs > 0)) throw new Error('prepare wait: pollMs must be positive');
+  if (!(Number.isFinite(wait.timeoutMs) && wait.timeoutMs >= 0)) throw new Error('prepare wait: timeoutMs must not be negative');
+}
+
 export class ChangeSetInvoker implements OperationInvoker {
-  constructor(private readonly deps: ChangeSetInvokerDeps) {}
+  constructor(private readonly deps: ChangeSetInvokerDeps) {
+    checkPrepareWait(deps.wait);
+  }
 
   async invoke({ operation, args, caller, asTask }: InvocationRequest): Promise<InvocationResult> {
     const { manifest } = operation;
@@ -77,7 +82,7 @@ export class ChangeSetInvoker implements OperationInvoker {
       await this.deps.starter.start(changeset.id);
     } catch {
       // The start's error stays out of results and audit (SEC-3): only the fixed code.
-      await repository.completePreparation(
+      const marked = await repository.completePreparation(
         changeset.id,
         { status: 'failed', errorCode: 'executor_unavailable' },
         changesetTransitionEvent({
@@ -90,10 +95,14 @@ export class ChangeSetInvoker implements OperationInvoker {
           details: { errorCode: 'executor_unavailable' },
         }),
       );
-      return {
-        ...preparationErrorResult(operation.id, 'executor_unavailable', changeset.id),
-        auditDetails: { ...withId, errorCode: 'executor_unavailable' },
-      };
+      // A lost compare-and-set means the workflow did start and moved the change-set on (for
+      // example, the start timed out after the server accepted it): carry on as a started call.
+      if (marked !== undefined) {
+        return {
+          ...preparationErrorResult(operation.id, 'executor_unavailable', changeset.id),
+          auditDetails: { ...withId, errorCode: 'executor_unavailable' },
+        };
+      }
     }
 
     if (asTask === true) {
@@ -144,6 +153,8 @@ export class ChangeSetInvoker implements OperationInvoker {
     }
     const answer = preparationErrorAnswer(record);
     const code = record.status === 'cancelled' ? 'cancelled' : (record.errorCode ?? 'internal');
-    return { ...answer, auditDetails: { ...withId, errorCode: code } };
+    // As in Phase 4: the upstream HTTP status of a failed read, a number only (SEC-3).
+    const status = record.status === 'failed' ? record.errorStatus : undefined;
+    return { ...answer, auditDetails: { ...withId, errorCode: code, ...(status === undefined ? {} : { upstreamStatus: status }) } };
   }
 }

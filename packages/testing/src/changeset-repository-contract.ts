@@ -282,6 +282,27 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         expect(rec?.hash).toBeUndefined();
       }));
 
+    it('CS-1 completePreparation failed stores the upstream HTTP status when given', async () =>
+      withRepo(async (c) => {
+        await created(c);
+        const rec = await c.repository.completePreparation(
+          c.id,
+          { status: 'failed', errorCode: 'http_status', upstreamStatus: 404 },
+          auditEvent(c.id),
+        );
+        expect(rec?.errorStatus).toBe(404);
+        expect((await c.repository.get(c.id))?.errorStatus).toBe(404);
+      }));
+
+    it('CS-1 completePreparation failed without an upstream status stores none', async () =>
+      withRepo(async (c) => {
+        await created(c);
+        await c.repository.completePreparation(c.id, { status: 'failed', errorCode: 'timeout' }, auditEvent(c.id));
+        const rec = await c.repository.get(c.id);
+        expect(rec?.errorCode).toBe('timeout');
+        expect(rec).not.toHaveProperty('errorStatus');
+      }));
+
     it('parallel completePreparation: exactly one wins and exactly one audit event is written', async () =>
       withRepo(async (c) => {
         await created(c);

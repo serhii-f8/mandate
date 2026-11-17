@@ -297,11 +297,12 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
     if (err instanceof LostRace) return { ok: false, changesetId: id, code: 'cancelled' };
     // Design §4.1: any failure after creation marks the change-set failed with a fixed code.
     const code = err instanceof Failure ? err.code : 'internal';
+    const status = err instanceof Failure ? err.status : undefined;
     let failed: ChangeSetRecord | undefined;
     try {
       failed = await repository.completePreparation(
         id,
-        { status: 'failed', errorCode: code },
+        { status: 'failed', errorCode: code, ...(status === undefined ? {} : { upstreamStatus: status }) },
         event('preparing', 'failed', { errorCode: code }),
       );
     } catch {
@@ -309,7 +310,6 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
       throw err;
     }
     if (failed === undefined) return { ok: false, changesetId: id, code: 'cancelled' };
-    const status = err instanceof Failure ? err.status : undefined;
     return { ok: false, changesetId: id, code, ...(status === undefined ? {} : { status }) };
   }
   if (changeset === undefined) return { ok: false, changesetId: id, code: 'cancelled' };

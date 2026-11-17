@@ -148,7 +148,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     changesetId: string,
     outcome:
       | { status: 'prepared'; hash: string; stats: ChangeSetStats; preparedAt: Date }
-      | { status: 'failed'; errorCode: string },
+      | { status: 'failed'; errorCode: string; upstreamStatus?: number },
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined> {
     const entry = this.entries.get(changesetId);
@@ -164,7 +164,13 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
             preparedAt: copyDate(outcome.preparedAt),
             updatedAt: new Date(),
           }
-        : { ...entry.record, status: 'failed', errorCode: outcome.errorCode, updatedAt: new Date() };
+        : {
+            ...entry.record,
+            status: 'failed',
+            errorCode: outcome.errorCode,
+            ...(outcome.upstreamStatus === undefined ? {} : { errorStatus: outcome.upstreamStatus }),
+            updatedAt: new Date(),
+          };
     await this.commit(entry, next, audit);
     return copyRecord(next);
   }

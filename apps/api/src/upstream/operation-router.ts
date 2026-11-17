@@ -6,11 +6,10 @@
 import type { LoadedConfiguration } from '@aiops/config';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ChangeSetRepository, InvocationRequest, InvocationResult, OperationInvoker, TaskRepository, WorkflowStarter } from '@aiops/core';
-import { ChangeSetInvoker } from '../changesets/changeset-invoker.js';
+import { ChangeSetInvoker, checkPrepareWait } from '../changesets/changeset-invoker.js';
 import type { PipelineDeps } from '../mcp/tool-pipeline.js';
 import { DirectReadInvoker, type DirectReadInvokerDeps } from './read-invoker.js';
 import { riskNotSupportedResult } from './risk-not-supported.js';
-import { createUpstreamReader } from '@aiops/upstream';
 
 export { riskNotSupportedResult };
 
@@ -45,6 +44,8 @@ const POLL_MS = 250;
 /** The per-call invoker the pipeline asks for, every path bound to the request's snapshot (SEC-1). */
 export function operationInvokers(base: OperationInvokersBase): PipelineDeps['invokerFor'] {
   const wait = { timeoutMs: base.prepareWaitMs, pollMs: base.pollMs ?? POLL_MS, sleep: base.sleep ?? ((ms: number) => delay(ms)) };
+  // Checked once here too, so a bad setting stops the start instead of failing every write call.
+  checkPrepareWait(wait);
   return (configuration: LoadedConfiguration, correlationId: string) => {
     const io = { configuration, vault: base.vault, adapter: base.adapter, correlationId, ...(base.log === undefined ? {} : { log: base.log }) };
     return new OperationRouter({
@@ -52,7 +53,6 @@ export function operationInvokers(base: OperationInvokersBase): PipelineDeps['in
       changeset: new ChangeSetInvoker({
         configuration,
         repository: base.repository,
-        reader: createUpstreamReader(io),
         tasks: base.tasks,
         starter: base.starter,
         newId: base.newId,
