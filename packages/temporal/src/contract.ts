@@ -78,7 +78,7 @@ export type BeginResult =
       readonly itemsPerRun: number;
       readonly cancelRequested: boolean;
     } & ExecutionCounts)
-  | { readonly ok: false; readonly outcome: 'hash_mismatch' | 'policy_denied' };
+  | { readonly ok: false; readonly outcome: 'hash_mismatch' | 'policy_denied' | 'approval_missing' };
 
 export interface BatchResult {
   readonly written: number;

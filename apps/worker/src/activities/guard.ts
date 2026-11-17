@@ -1,16 +1,20 @@
 import type { LoadedConfiguration } from '@aiops/config';
 import {
+  allowingRole,
+  approvalRequirement,
   createPolicyEngine,
   hashStoredItems,
   policyDecisionAuditEvent,
   type AuditLog,
   type Caller,
+  type ChangeSetRecord,
   type ChangeSetRepository,
   type ExecutionGuard,
+  type PolicyDecision,
 } from '@aiops/core';
 
 export interface ExecutionGuardDeps {
-  readonly repository: Pick<ChangeSetRepository, 'itemsPage'>;
+  readonly repository: Pick<ChangeSetRepository, 'itemsPage' | 'approvals'>;
   readonly audit: AuditLog;
   readonly newId: () => string;
   /** Called once per stored-items page while hashing, so a long hash keeps its activity alive. */
@@ -22,7 +26,12 @@ export interface ExecutionGuardDeps {
  * 1. the hash recomputed from the stored items, page by page, must equal the stored hash (CS-4);
  * 2. the execution request's caller (stored actor, groups and client) must still be allowed the
  *    operation with the change-set's arguments under the worker's current configuration (POL-6).
- *    A denial is audited as a `policy.decision` with the change-set ID (POL-8, AUD-1).
+ *    A denial is audited as a `policy.decision` with the change-set ID (POL-8, AUD-1);
+ * 3. the approval requirement is recomputed from the current configuration, the allowing role of
+ *    that re-evaluation and `stats.included` (POL-5). When required, every step role needs an
+ *    `approved` row of the current round whose hash equals the recomputed hash (SEC-9, APR-4);
+ *    otherwise, or when no step is configured, `approval_missing`. A change-set started from
+ *    `prepared` that now needs approval fails closed (design §7).
  */
 export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: LoadedConfiguration) => ExecutionGuard {
   const { heartbeat } = deps;
@@ -35,9 +44,34 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
             return deps.repository.itemsPage(changesetId, query);
           },
         };
+
+  /** Whether the change-set carries the approvals the current configuration requires for it. */
+  async function approvalsSuffice(
+    configuration: LoadedConfiguration,
+    changeset: ChangeSetRecord,
+    decision: PolicyDecision,
+    hash: string,
+  ): Promise<boolean> {
+    const role = allowingRole(decision.rule);
+    const rule = role === undefined ? undefined : configuration.approval.get(role);
+    // The engine allowed the operation, so it is configured; the strictest risk stands in otherwise.
+    const risk = configuration.policy.operations.find((o) => o.id === changeset.operation)?.risk ?? 'destructive';
+    const requirement = approvalRequirement({
+      risk,
+      ...(rule === undefined ? {} : { rule }),
+      included: changeset.stats.included,
+    });
+    if (!requirement.required) return true;
+    if (requirement.unroutable === true) return false;
+    const approved = (await deps.repository.approvals(changeset.id, changeset.approvalRound)).filter(
+      (a) => a.decision === 'approved' && a.hash === hash,
+    );
+    return requirement.steps.every((step) => approved.some((a) => a.role === step));
+  }
   return (configuration) => ({
     async check(changeset) {
-      if (changeset.hash === undefined || (await hashStoredItems(repository, changeset)) !== changeset.hash) {
+      const hash = changeset.hash === undefined ? undefined : await hashStoredItems(repository, changeset);
+      if (hash === undefined || hash !== changeset.hash) {
         return { ok: false, outcome: 'hash_mismatch' };
       }
       const request = changeset.executionRequest;
@@ -52,7 +86,11 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
         operationId: changeset.operation,
         args: changeset.args,
       });
-      if (decision.effect === 'allow') return { ok: true };
+      if (decision.effect === 'allow') {
+        return (await approvalsSuffice(configuration, changeset, decision, hash))
+          ? { ok: true }
+          : { ok: false, outcome: 'approval_missing' };
+      }
       const tool = configuration.policy.operations.find((o) => o.id === changeset.operation)?.toolName ?? changeset.operation;
       await deps.audit.append({
         ...policyDecisionAuditEvent({

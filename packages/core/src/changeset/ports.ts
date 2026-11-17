@@ -293,7 +293,7 @@ export type FinishOutcome =
 export interface ExecutionGuard {
   check(
     changeset: ChangeSetRecord,
-  ): Promise<{ ok: true } | { ok: false; outcome: 'hash_mismatch' | 'policy_denied' }>;
+  ): Promise<{ ok: true } | { ok: false; outcome: 'hash_mismatch' | 'policy_denied' | 'approval_missing' }>;
 }
 
 export class ExecutorUnavailable extends Error {
