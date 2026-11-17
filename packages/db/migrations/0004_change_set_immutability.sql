@@ -5,6 +5,15 @@
 -- sort like code points). The table is empty when this runs.
 ALTER TABLE "change_item" ALTER COLUMN "target_id" TYPE text COLLATE "C";
 --> statement-breakpoint
+-- A change-set that reached `prepared` always carries its hash; only rows that never got
+-- there (preparing, or failed, cancelled, expired) may lack one.
+ALTER TABLE "change_set" ADD CONSTRAINT "change_set_hash_when_prepared" CHECK (
+  "hash" IS NOT NULL OR "status" NOT IN (
+    'prepared', 'pending_approval', 'approved', 'executing', 'completed',
+    'completed_with_errors', 'rolling_back', 'rolled_back'
+  )
+);
+--> statement-breakpoint
 CREATE FUNCTION change_item_guard_insert() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE

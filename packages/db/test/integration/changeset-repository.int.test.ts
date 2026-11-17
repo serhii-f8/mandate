@@ -260,6 +260,53 @@ describe('NFR-7 change-set repository in PostgreSQL', () => {
   });
 });
 
+describe('CS-4 a change-set that reached prepared always has a hash', () => {
+  async function preparing(): Promise<string> {
+    const id = randomUUID();
+    await new PostgresChangeSetRepository(database.db).create(
+      {
+        id,
+        operation: 'catalog.update',
+        connection: 'shop',
+        requester: 'alice',
+        args: {},
+        configHash: 'cfg',
+        correlationId: 'corr-imm',
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+      audit(id),
+    );
+    return id;
+  }
+
+  it('CS-4 statuses at or after prepared are refused without a hash', async () => {
+    for (const status of [
+      'prepared',
+      'pending_approval',
+      'approved',
+      'executing',
+      'completed',
+      'completed_with_errors',
+      'rolling_back',
+      'rolled_back',
+    ]) {
+      const id = await preparing();
+      await expect(
+        database.pool.query('UPDATE change_set SET status = $2 WHERE id = $1', [id, status]),
+      ).rejects.toThrow(/change_set_hash_when_prepared/);
+    }
+  });
+
+  it('CS-4 failed, cancelled and expired may lack a hash', async () => {
+    for (const status of ['failed', 'cancelled', 'expired']) {
+      const id = await preparing();
+      const res = await database.pool.query('UPDATE change_set SET status = $2 WHERE id = $1', [id, status]);
+      expect(res.rowCount).toBe(1);
+    }
+  });
+});
+
 describe('CS-4 status never returns to preparing', () => {
   it('CS-4 the database refuses a status change back to preparing', async () => {
     const id = await preparedWithItems();
