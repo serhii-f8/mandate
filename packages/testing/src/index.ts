@@ -2,6 +2,8 @@
 export { InMemoryAuditLog } from './in-memory-audit-log.js';
 export { InMemoryChangeSetRepository } from './in-memory-changeset-repository.js';
 export { describeChangeSetRepositoryContract, type ChangeSetRepositoryHarness } from './changeset-repository-contract.js';
+export { InMemoryTaskRepository } from './in-memory-task-repository.js';
+export { describeTaskRepositoryContract, type TaskRepositoryHarness } from './task-repository-contract.js';
 export { InMemoryRateCounter } from './in-memory-rate-counter.js';
 export { describeRateCounterContract, type RateCounterHarness } from './rate-counter-contract.js';
 export { InMemoryExecutor, ScriptedWriter, type InMemoryExecutorDeps, type ScriptedWriterOptions } from './in-memory-executor.js';

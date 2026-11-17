@@ -25,6 +25,7 @@ export {
   type PolicyEngine,
 } from './policy-engine.js';
 export { MAX_AUDITED_TOOL_NAME, policyDecisionAuditEvent, type PolicyDecisionRecord } from './policy-audit.js';
+export { isTaskId, TASK_TTL_MS, type TaskKind, type TaskRecord, type TaskRepository } from './task.js';
 export type { InvocationRequest, InvocationResult, OperationInvoker } from './operation-invoker.js';
 export { readErrorResult, readToolResult, READ_RESULT_TEXT, type ReadToolResultInput } from './read-result.js';
 export type { CredentialHandle, CredentialStatus, CredentialVault } from './credential-vault.js';

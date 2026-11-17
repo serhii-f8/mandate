@@ -10,7 +10,8 @@ export type AuditAction =
   | 'credential.rotate'
   | 'connection.test'
   | 'changeset.transition'
-  | 'changeset.batch';
+  | 'changeset.batch'
+  | 'task.cancel';
 
 export type AuditOutcome = 'ok' | 'error' | 'denied';
 

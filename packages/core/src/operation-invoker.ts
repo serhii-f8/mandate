@@ -1,4 +1,5 @@
 import type { Caller } from './caller.js';
+import type { TaskRecord } from './task.js';
 import type { OperationDefinition } from './policy-model.js';
 
 /** What running an operation produced, independent of the MCP wire format. */
@@ -10,6 +11,8 @@ export interface InvocationResult {
   readonly dataText?: string;
   /** Merged into the `tool.call` audit row. Non-sensitive only (SEC-3). */
   readonly auditDetails?: Readonly<Record<string, string | number | boolean>>;
+  /** A task created for this call; set only when the request declared tasks (MCP-7). */
+  readonly task?: TaskRecord;
 }
 
 export interface InvocationRequest {
@@ -18,6 +21,8 @@ export interface InvocationRequest {
   readonly args: Readonly<Record<string, unknown>>;
   /** The verified caller. Never carries the access token (AUTH-7). */
   readonly caller: Caller;
+  /** The request declared Tasks; an invoker that supports tasks may answer with `task` (MCP-7). */
+  readonly asTask?: boolean;
 }
 
 /**
