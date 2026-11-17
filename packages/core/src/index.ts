@@ -5,6 +5,10 @@ export { toolCallAuditEvent, type ToolCallRecord } from './tool-call-audit.js';
 export type {
   DisabledOperation,
   GrantDefinition,
+  ManifestDefinition,
+  ManifestRead,
+  ManifestTemplate,
+  RollbackStrategy,
   OperationDefinition,
   PolicyConfiguration,
   RiskClass,
@@ -26,3 +30,27 @@ export { readErrorResult, readToolResult, READ_RESULT_TEXT, type ReadToolResultI
 export type { CredentialHandle, CredentialStatus, CredentialVault } from './credential-vault.js';
 export { canonicalJson, compareTargetIds, normalizeArgs } from './changeset/canonical.js';
 export { ChangeSetHasher, type HashableItem } from './changeset/hash.js';
+export type {
+  ChangeItemRecord,
+  ChangeSetRecord,
+  ChangeSetStats,
+  ChangeSetStatus,
+  ExclusionReason,
+  ItemStatus,
+} from './changeset/model.js';
+export { EMPTY_STATS } from './changeset/model.js';
+export { CANCELLABLE, canTransition, isExpiryDue, PRE_EXECUTION, TRANSITIONS } from './changeset/lifecycle.js';
+export type {
+  ChangeSetExecutor,
+  ChangeSetRepository,
+  ChangeWriter,
+  ExecutionProgress,
+  ItemOutcome,
+  ItemsPageQuery,
+  NewChangeSet,
+  PrepareFailure,
+  ReadPage,
+  StartRefusal,
+  UpstreamReader,
+} from './changeset/ports.js';
+export { changesetTransitionEvent, type ChangesetTransitionInput } from './changeset/audit.js';
