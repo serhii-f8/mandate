@@ -8,12 +8,10 @@ import { ProtocolError, ProtocolErrorCode, type CallToolResult, type Tool } from
 import type { LoadedConfiguration } from '@aiops/config';
 import {
   createPolicyEngine,
-  policyDecisionAuditEvent,
   resolveRoles,
   toolCallAuditEvent,
   type AuditLog,
   type Caller,
-  type DenyReason,
   type OperationDefinition,
   type OperationInvoker,
   type PolicyDecision,
@@ -24,6 +22,7 @@ import { allowingRole } from '../changesets/allowing-role.js';
 import { toCallToolResult } from '../changesets/results.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
+import { deniedResult, recordDecision } from './policy-answers.js';
 import type { BuiltinTool } from './tool-catalog.js';
 
 /** One configuration and its engine, taken once per HTTP request. */
@@ -115,45 +114,6 @@ export async function listTools(deps: PipelineDeps, req: PipelineRequest): Promi
   return tools;
 }
 
-const REASON_TEXT: Readonly<Record<DenyReason, (detail: string) => string>> = {
-  no_grant: () => 'the operation is not granted to you',
-  unknown_tool: () => 'the operation is not granted to you',
-  scope_argument_missing: (d) => `argument '${d}' is required by your scope`,
-  out_of_scope: (d) => `argument '${d}' is outside your scope`,
-  denied_field: (d) => `field '${d}' is denied`,
-  field_not_allowed: (d) => `field '${d}' is not allowed`,
-  limit_exceeded: (d) => `limit ${d} reached`,
-};
-
-function deniedResult(decision: PolicyDecision): CallToolResult {
-  const reason = REASON_TEXT[decision.reason ?? 'no_grant'](decision.detail ?? '');
-  return { isError: true, content: [{ type: 'text', text: `Denied by policy: ${reason} (rule ${decision.rule})` }] };
-}
-
-async function recordDecision(
-  deps: PipelineDeps,
-  req: PipelineRequest,
-  tool: string,
-  decision: PolicyDecision,
-  operation?: OperationDefinition,
-): Promise<boolean> {
-  try {
-    await deps.audit.append(
-      policyDecisionAuditEvent({
-        id: deps.newId(),
-        caller: req.caller,
-        tool,
-        ...(operation === undefined ? {} : { operation: operation.id }),
-        decision,
-        correlationId: req.correlationId,
-      }),
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: string, rawArgs: unknown): Promise<ToolAnswer> {
   const { configuration, engine } = req.snapshot;
   const builtin = deps.builtins.find((t) => t.name === name);
@@ -237,13 +197,13 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
           req,
           name,
           { effect: 'deny', rule: `role:${role}/limit:calls_per_minute`, reason: 'limit_exceeded', detail: 'calls_per_minute_unavailable', roles: decision.roles },
-          operation,
+          operation === undefined ? {} : { operation: operation.id },
         );
         return RATE_LIMIT_UNAVAILABLE;
       }
     }
   }
-  const recorded = await recordDecision(deps, req, name, decision, operation);
+  const recorded = await recordDecision(deps, req, name, decision, operation === undefined ? {} : { operation: operation.id });
   if (decision.effect === 'deny') return deniedResult(decision);
   if (!recorded) return AUDIT_UNAVAILABLE;
 

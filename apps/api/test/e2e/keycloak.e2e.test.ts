@@ -6,7 +6,7 @@ import { CookieJar, loginWithPkce, pageLogin, registerClient, startKeycloak, typ
 import { connectClient, freePort, modernRequest, rawPost, startApi, startDatabase, type RunningApi } from './helpers.js';
 
 /** Built-in tools every authenticated user sees (MCP-8). */
-const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset'];
+const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset', 'submit_for_approval'];
 const PASSWORD = 'dev-only-password';
 const LOOPBACK = 'http://localhost:33418/callback';
 

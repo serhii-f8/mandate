@@ -47,7 +47,7 @@ const error = (text: string): CallToolResult => ({ isError: true, content: [{ ty
 const notFound = (id: string): CallToolResult => error(`Change-set ${id} was not found.`);
 
 /** The change-set when the caller requested it; unknown and foreign IDs look the same. Expires it lazily (CS-6). */
-async function load(deps: ChangesetToolDeps, caller: Caller, correlationId: string, id: string): Promise<ChangeSetRecord | undefined> {
+export async function load(deps: ChangesetToolDeps, caller: Caller, correlationId: string, id: string): Promise<ChangeSetRecord | undefined> {
   let record = await deps.repository.get(id);
   if (record?.requester !== caller.subject) return undefined;
   const now = deps.now();

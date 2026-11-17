@@ -23,7 +23,7 @@ let issuer: TestIssuer;
 let api: RunningApi;
 let configDir: string;
 /** Built-in tools every authenticated user sees (MCP-8). */
-const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset'];
+const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset', 'submit_for_approval'];
 const invoker = new FakeInvoker();
 let alice: string;
 let bob: string;

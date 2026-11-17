@@ -221,7 +221,7 @@ class AppModule {
               createServerFactory(
                 {
                   snapshot: () => snapshotOf(configuration.current),
-                  builtins: createBuiltinTools({ repository: changesets, newId: randomUUID, now: () => new Date() }),
+                  builtins: createBuiltinTools({ repository: changesets, newId: randomUUID, now: () => new Date(), executor: UNWIRED_EXECUTOR, tasks, audit }),
                   invokerFor: invokerFactory(overrides.invoker, io, tasks),
                   audit,
                   newId: randomUUID,
