@@ -38,3 +38,5 @@ export {
 export { startFakeUpstream, type FakeUpstream, type FakeHandler, type FakeResponse, type RecordedRequest } from './fake-upstream.js';
 export { FakeResolver, fakeCatalogEntry } from './fake-resolver.js';
 export { installFakeMagentoCatalog, type FakeMagentoCatalog, type FakeMagentoProduct } from './fake-magento-catalog.js';
+export { recordApproval, submitChangeSet } from './approval-fixtures.js';
+export { describeApprovalRepositoryContract } from './approval-repository-contract.js';

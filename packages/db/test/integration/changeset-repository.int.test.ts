@@ -8,7 +8,13 @@ import {
   type ChangeItemRecord,
   type ItemOutcome,
 } from '@aiops/core';
-import { describeChangeSetRepositoryContract, startPostgres, type StartedPostgres } from '@aiops/testing';
+import {
+  describeApprovalRepositoryContract,
+  describeChangeSetRepositoryContract,
+  startPostgres,
+  type ChangeSetRepositoryHarness,
+  type StartedPostgres,
+} from '@aiops/testing';
 import { DrizzleAuditLog } from '../../src/audit-log.js';
 import { PostgresChangeSetRepository } from '../../src/changeset-repository.js';
 import { createDb, type Database } from '../../src/client.js';
@@ -47,7 +53,7 @@ async function allAuditEvents(): Promise<AuditEventInput[]> {
 }
 
 // One database for the whole suite (the audit table is append-only); every case uses fresh UUIDs.
-describeChangeSetRepositoryContract('postgres', () => {
+function harness(): Promise<ChangeSetRepositoryHarness> {
   let failNext = false;
   const repository = new PostgresChangeSetRepository(database.db, {
     auditFor: (tx): AuditLog => {
@@ -70,7 +76,10 @@ describeChangeSetRepositoryContract('postgres', () => {
       failNext = true;
     },
   });
-});
+}
+
+describeChangeSetRepositoryContract('postgres', harness);
+describeApprovalRepositoryContract('postgres', harness);
 
 function audit(changesetId: string): AuditEventInput {
   return {

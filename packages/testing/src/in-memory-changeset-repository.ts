@@ -1,4 +1,6 @@
 import type {
+  ApprovalPlan,
+  ApprovalRecord,
   AuditEventInput,
   BatchCounts,
   BatchRecord,
@@ -14,8 +16,11 @@ import type {
   ItemOutcome,
   ItemsPageQuery,
   NewChangeSet,
+  NewNotification,
+  Submission,
 } from '@aiops/core';
-import { compareTargetIds, EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
+import { changesetTransitionEvent, compareTargetIds, EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
+import { randomUUID } from 'node:crypto';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
 
 const MAX_PAGE = 500;
@@ -26,6 +31,7 @@ const NO_COUNTS: BatchCounts = Object.freeze({ written: 0, failed: 0, skipped: 0
 interface Entry {
   record: ChangeSetRecord;
   readonly items: Map<string, ChangeItemRecord>;
+  approvals: ApprovalRecord[];
 }
 
 /** A write batch row (EXE-3): fenced by `attempt`, frozen once `done`. */
@@ -89,7 +95,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       approvalRound: 0,
     };
     // Apply before awaiting the audit append so concurrent callers see the change; undo if the append fails.
-    this.entries.set(cs.id, { record, items: new Map() });
+    this.entries.set(cs.id, { record, items: new Map(), approvals: [] });
     try {
       await this.audit.append(audit);
     } catch (error) {
@@ -181,7 +187,12 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     from: readonly ChangeSetStatus[],
     to: ChangeSetStatus,
     audit: AuditEventInput,
-    extra?: { errorCode?: string; expiredBefore?: Date; unlessBatches?: boolean },
+    extra?: {
+      errorCode?: string;
+      expiredBefore?: Date;
+      unlessBatches?: boolean;
+      notifications?: readonly NewNotification[];
+    },
   ): Promise<ChangeSetRecord | undefined> {
     const entry = this.entries.get(changesetId);
     const expiredBefore = extra?.expiredBefore;
@@ -197,6 +208,97 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     };
     await this.commit(entry, next, audit);
     return copyRecord(next);
+  }
+
+  async submitForApproval(req: {
+    changesetId: string;
+    expectedHash: string;
+    submission: Submission;
+    plan: ApprovalPlan;
+    audit: { transition: AuditEventInput; requested: AuditEventInput };
+    notifications: readonly NewNotification[];
+  }): ReturnType<ChangeSetRepository['submitForApproval']> {
+    const entry = this.entries.get(req.changesetId);
+    if (entry === undefined) return { ok: false, reason: 'not_found' };
+    const record = entry.record;
+    if (record.status === 'prepared' && isExpiryDue(record, req.submission.at)) {
+      const expired: ChangeSetRecord = { ...record, status: 'expired', updatedAt: new Date() };
+      await this.commit(
+        entry,
+        expired,
+        changesetTransitionEvent({
+          id: randomUUID(),
+          actor: 'system',
+          changeset: record,
+          from: record.status,
+          to: 'expired',
+          correlationId: req.submission.correlationId,
+        }),
+      );
+      return { ok: false, reason: 'expired' };
+    }
+    if (record.hash === undefined || record.hash !== req.expectedHash) return { ok: false, reason: 'hash_mismatch' };
+    if (record.status !== 'prepared') return { ok: false, reason: 'not_prepared' };
+    const first = req.plan.steps[0];
+    if (first === undefined) throw new Error('approval plan has no steps');
+    const next: ChangeSetRecord = {
+      ...record,
+      status: 'pending_approval',
+      approvalRound: record.approvalRound + 1,
+      submission: structuredClone(req.submission),
+      approvalPlan: structuredClone(req.plan),
+      awaitingRole: first,
+      updatedAt: new Date(),
+    };
+    await this.commit(entry, next, req.audit.transition, req.audit.requested);
+    return { ok: true, changeset: copyRecord(next) };
+  }
+
+  approvals(changesetId: string, round?: number): Promise<readonly ApprovalRecord[]> {
+    const rows = (this.entries.get(changesetId)?.approvals ?? [])
+      .filter((a) => round === undefined || a.round === round)
+      .sort((a, b) => a.round - b.round || a.step - b.step)
+      .map((a) => structuredClone(a));
+    return Promise.resolve(rows);
+  }
+
+  async recordDecision(req: {
+    changesetId: string;
+    round: number;
+    step: number;
+    record: ApprovalRecord;
+    next: { kind: 'rejected' | 'returned' | 'approved' } | { kind: 'next_step'; awaitingRole: string };
+    audit: readonly AuditEventInput[];
+    notifications: readonly NewNotification[];
+  }): ReturnType<ChangeSetRepository['recordDecision']> {
+    // Synchronous up to the audit append: the in-memory form of one transaction.
+    const entry = this.entries.get(req.changesetId);
+    if (entry === undefined) return { ok: false, reason: 'not_pending' };
+    const record = entry.record;
+    const decidedSteps = entry.approvals.filter((a) => a.round === record.approvalRound && a.decision === 'approved');
+    if (
+      record.status !== 'pending_approval' ||
+      record.approvalRound !== req.round ||
+      decidedSteps.length + 1 !== req.step ||
+      entry.approvals.some((a) => a.round === req.round && a.step === req.step && a.decision === 'approved')
+    ) {
+      return { ok: false, reason: 'not_pending' };
+    }
+    const { awaitingRole: _previous, ...rest } = record; // eslint-disable-line @typescript-eslint/no-unused-vars -- dropped on purpose
+    const base = { ...rest, updatedAt: new Date() };
+    const next: ChangeSetRecord =
+      req.next.kind === 'next_step'
+        ? { ...base, awaitingRole: req.next.awaitingRole }
+        : { ...base, status: req.next.kind === 'returned' ? 'prepared' : req.next.kind };
+    const previousApprovals = entry.approvals;
+    entry.approvals = [...entry.approvals, structuredClone(req.record)];
+    try {
+      await this.commit(entry, next, ...req.audit);
+    } catch (error) {
+      entry.approvals = previousApprovals;
+      throw error;
+    }
+    return { ok: true, changeset: copyRecord(next) };
   }
 
   errorCounts(changesetId: string): Promise<Readonly<Record<string, number>>> {
@@ -240,6 +342,9 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     if (record.hash === undefined) return { ok: false, reason: 'not_executable' };
     if (record.hash !== req.expectedHash) return { ok: false, reason: 'hash_mismatch' };
     if (record.status !== 'prepared' && record.status !== 'approved') return { ok: false, reason: 'not_executable' };
+    if (record.status === 'approved' && !approvalsCover(record, entry.approvals, req.expectedHash)) {
+      return { ok: false, reason: 'not_approved' };
+    }
     if (req.limits !== undefined) {
       const since = new Date(req.now.getTime() - DAY_MS);
       const limit = evaluateLimits(req.limits, record.stats.included, this.usageOf(record.requester, since));
@@ -252,6 +357,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       ...record,
       status: 'executing',
       updatedAt: new Date(),
+      ...(req.submission !== undefined && record.status === 'prepared' ? { submission: structuredClone(req.submission) } : {}),
       executionRequest: { ...structuredClone(req.request), startedAt: copyDate(req.now) },
     };
     await this.commit(entry, executing, req.event({ kind: 'executing', from: record.status }, copyRecord(record)));
@@ -363,11 +469,11 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
   }
 
   /** Applies `next` synchronously, then appends `audit`; undoes the change if the append fails. */
-  private async commit(entry: Entry, next: ChangeSetRecord, audit: AuditEventInput): Promise<void> {
+  private async commit(entry: Entry, next: ChangeSetRecord, ...audit: AuditEventInput[]): Promise<void> {
     const previous = entry.record;
     entry.record = next;
     try {
-      await this.audit.append(audit);
+      for (const event of audit) await this.audit.append(event);
     } catch (error) {
       if (entry.record === next) entry.record = previous;
       throw error;
@@ -400,6 +506,15 @@ function claimed(changesetId: string, batchNo: number, row: Batch, entry: Entry)
     return it === undefined ? [] : [copyItem(it)];
   });
   return { kind: 'claimed', batch, items };
+}
+
+/** SEC-9: every plan step of the current round holds an `approved` row for this hash. */
+function approvalsCover(record: ChangeSetRecord, approvals: readonly ApprovalRecord[], hash: string): boolean {
+  const plan = record.approvalPlan;
+  if (plan === undefined) return false;
+  return plan.steps.every((_, i) =>
+    approvals.some((a) => a.round === record.approvalRound && a.step === i + 1 && a.decision === 'approved' && a.hash === hash),
+  );
 }
 
 const OUTCOME_STATUSES: ReadonlySet<ChangeSetStatus> = new Set<ChangeSetStatus>(['executing', 'rolling_back']);

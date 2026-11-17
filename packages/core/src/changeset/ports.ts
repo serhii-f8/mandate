@@ -1,3 +1,4 @@
+import type { ApprovalPlan, ApprovalRecord, NewNotification, Submission } from '../approval/model.js';
 import type { AuditEventInput } from '../audit.js';
 import type { BatchCounts } from './execution.js';
 import type {
@@ -64,15 +65,52 @@ export interface ChangeSetRepository {
     from: readonly ChangeSetStatus[],
     to: ChangeSetStatus,
     audit: AuditEventInput,
-    extra?: { errorCode?: string; expiredBefore?: Date; unlessBatches?: boolean },
+    extra?: {
+      errorCode?: string;
+      expiredBefore?: Date;
+      unlessBatches?: boolean;
+      notifications?: readonly NewNotification[];
+    },
   ): Promise<ChangeSetRecord | undefined>;
+  /**
+   * One transaction (APR-1): `prepared` to `pending_approval` with round + 1, the submission, the plan
+   * and `awaitingRole = plan.steps[0]`, the two audit events and the outbox rows. Refuses `not_found`,
+   * `expired` (CAS to `expired`, judged at `submission.at`), `hash_mismatch` and `not_prepared`.
+   */
+  submitForApproval(req: {
+    changesetId: string;
+    expectedHash: string;
+    submission: Submission;
+    plan: ApprovalPlan;
+    audit: { transition: AuditEventInput; requested: AuditEventInput };
+    notifications: readonly NewNotification[];
+  }): Promise<
+    { ok: true; changeset: ChangeSetRecord } | { ok: false; reason: 'not_found' | 'hash_mismatch' | 'not_prepared' | 'expired' }
+  >;
+  /** Approval rows ordered by round, then step; all rounds unless `round` is given. */
+  approvals(changesetId: string, round?: number): Promise<readonly ApprovalRecord[]>;
+  /**
+   * One transaction (APR-3, APR-4): only while `pending_approval` in `round` with `step` the next
+   * undecided step (`not_pending` otherwise, nothing stored). Stores the record, applies `next`
+   * (a return goes to `prepared` and keeps the round), appends `audit` and the outbox rows.
+   */
+  recordDecision(req: {
+    changesetId: string;
+    round: number;
+    step: number;
+    record: ApprovalRecord;
+    next: { kind: 'rejected' | 'returned' | 'approved' } | { kind: 'next_step'; awaitingRole: string };
+    audit: readonly AuditEventInput[];
+    notifications: readonly NewNotification[];
+  }): Promise<{ ok: true; changeset: ChangeSetRecord } | { ok: false; reason: 'not_pending' }>;
   /** Number of items per non-null error code (CS-7: the drift number of the execution summary). */
   errorCounts(changesetId: string): Promise<Readonly<Record<string, number>>>;
   /** Only items with status pending; stats recomputed. */
   recordItemOutcomes(changesetId: string, outcomes: readonly ItemOutcome[]): Promise<void>;
   /**
    * One transaction (EXE-11, POL-4, POL-6): not found, expiry (CAS to `expired`, event `expired`),
-   * no hash, hash mismatch, status not `prepared|approved`; then the limits under a per-requester
+   * no hash, hash mismatch, status not `prepared|approved`; from `approved` the current round's
+   * approvals must cover every plan step for `expectedHash` (SEC-9, `not_approved`); then the limits under a per-requester
    * lock (refusal appends `limit_denied` and leaves the status); then CAS to `executing` with the
    * event `executing`, the execution request and `startedAt = now`.
    */
@@ -81,6 +119,9 @@ export interface ChangeSetRepository {
     expectedHash: string;
     request: Omit<ExecutionRequest, 'startedAt'>;
     limits?: ExecutionLimits;
+    /** Stored when starting from `prepared` without approval (POL-6). */
+    submission?: Submission;
+    notifications?: readonly NewNotification[];
     now: Date;
     event: (e: StartEvent, changeset: ChangeSetRecord) => AuditEventInput;
   }): Promise<{ ok: true; changeset: ChangeSetRecord } | Exclude<StartOutcome, { ok: true }>>;

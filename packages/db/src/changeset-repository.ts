@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, lt, lte, sql, type SQL } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type {
+  ApprovalRecord,
   AuditEventInput,
   AuditLog,
   BatchCounts,
@@ -17,12 +19,13 @@ import type {
   ItemOutcome,
   ItemsPageQuery,
   NewChangeSet,
+  Submission,
 } from '@aiops/core';
-import { EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
+import { changesetTransitionEvent, EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
 import { DrizzleAuditLog } from './audit-log.js';
-import { guarded } from './errors.js';
+import { guarded, pgCode } from './errors.js';
 import type { Db, DbExecutor } from './client.js';
-import { changeBatch, changeItem, changeSet } from './schema.js';
+import { approval, changeBatch, changeItem, changeSet, type StoredSubmission } from './schema.js';
 
 const MAX_PAGE = 500;
 const MAX_BATCH = 1000;
@@ -41,6 +44,11 @@ export interface PostgresChangeSetRepositoryOptions {
 type ChangeSetRow = typeof changeSet.$inferSelect;
 type ChangeItemRow = typeof changeItem.$inferSelect;
 type ChangeBatchRow = typeof changeBatch.$inferSelect;
+type ApprovalRow = typeof approval.$inferSelect;
+type SubmitRequest = Parameters<ChangeSetRepository['submitForApproval']>[0];
+type SubmitResult = Awaited<ReturnType<ChangeSetRepository['submitForApproval']>>;
+type DecisionRequestOf = Parameters<ChangeSetRepository['recordDecision']>[0];
+type DecisionResult = Awaited<ReturnType<ChangeSetRepository['recordDecision']>>;
 type StartRequestOf = Parameters<ChangeSetRepository['startExecution']>[0];
 type StartResult = Awaited<ReturnType<ChangeSetRepository['startExecution']>>;
 type ClaimResult = Awaited<ReturnType<ChangeSetRepository['claimBatch']>>;
@@ -66,7 +74,10 @@ function toRecord(row: ChangeSetRow): ChangeSetRecord {
     updatedAt: row.updatedAt,
     ...(row.preparedAt === null ? {} : { preparedAt: row.preparedAt }),
     expiresAt: row.expiresAt,
-    approvalRound: 0,
+    approvalRound: row.approvalRound,
+    ...(row.submission === null ? {} : { submission: fromStoredSubmission(row.submission) }),
+    ...(row.approvalPlan === null ? {} : { approvalPlan: row.approvalPlan }),
+    ...(row.awaitingRole === null ? {} : { awaitingRole: row.awaitingRole }),
     ...(row.executionActor === null ||
     row.executionGroups === null ||
     row.executionCorrelationId === null ||
@@ -90,6 +101,52 @@ function toRecord(row: ChangeSetRow): ChangeSetRecord {
             requestedAt: row.cancelRequestedAt,
           },
         }),
+  };
+}
+
+function toStoredSubmission(s: Submission): StoredSubmission {
+  return {
+    actor: s.actor,
+    groups: [...s.groups],
+    ...(s.clientId === undefined ? {} : { clientId: s.clientId }),
+    correlationId: s.correlationId,
+    at: s.at.toISOString(),
+    role: s.role,
+    rule: s.rule,
+  };
+}
+
+/** JSON keeps `at` as a string; consumers sort and compare on it as a `Date`. */
+function fromStoredSubmission(s: StoredSubmission): Submission {
+  return {
+    actor: s.actor,
+    groups: [...s.groups],
+    ...(s.clientId === undefined ? {} : { clientId: s.clientId }),
+    correlationId: s.correlationId,
+    at: new Date(s.at),
+    role: s.role,
+    rule: s.rule,
+  };
+}
+
+function toApproval(row: ApprovalRow): ApprovalRecord {
+  return {
+    id: row.id,
+    changesetId: row.changesetId,
+    round: row.round,
+    step: row.step,
+    role: row.role,
+    approver: row.approver,
+    ...(row.approverName === null ? {} : { approverName: row.approverName }),
+    decision: row.decision,
+    ...(row.comment === null ? {} : { comment: row.comment }),
+    hash: row.hash,
+    itemCount: row.itemCount,
+    channel: row.channel,
+    ...(row.authTime === null ? {} : { authTime: row.authTime }),
+    ...(row.clientId === null ? {} : { clientId: row.clientId }),
+    correlationId: row.correlationId,
+    ts: row.ts,
   };
 }
 
@@ -277,6 +334,135 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     return this.compareAndSet(changesetId, from, set, audit, extra?.expiredBefore, extra?.unlessBatches === true);
   }
 
+  async submitForApproval(req: SubmitRequest): Promise<SubmitResult> {
+    if (!UUID.test(req.changesetId)) return { ok: false, reason: 'not_found' };
+    return guarded('change-set submit', () =>
+      this.db.transaction(async (tx): Promise<SubmitResult> => {
+        const [row] = await tx.select().from(changeSet).where(eq(changeSet.id, req.changesetId)).for('update');
+        if (row === undefined) return { ok: false, reason: 'not_found' };
+        const record = toRecord(row);
+        // Judged at the submission time: the request carries no other clock (CS-6).
+        if (record.status === 'prepared' && isExpiryDue(record, req.submission.at)) {
+          await tx
+            .update(changeSet)
+            .set({ status: 'expired', updatedAt: sql`now()` })
+            .where(eq(changeSet.id, req.changesetId));
+          await this.auditFor(tx).append(
+            changesetTransitionEvent({
+              id: randomUUID(),
+              actor: 'system',
+              changeset: record,
+              from: record.status,
+              to: 'expired',
+              correlationId: req.submission.correlationId,
+            }),
+          );
+          return { ok: false, reason: 'expired' };
+        }
+        if (record.hash === undefined || record.hash !== req.expectedHash) return { ok: false, reason: 'hash_mismatch' };
+        if (record.status !== 'prepared') return { ok: false, reason: 'not_prepared' };
+        const first = req.plan.steps[0];
+        if (first === undefined) throw new Error('approval plan has no steps');
+        const [updated] = await tx
+          .update(changeSet)
+          .set({
+            status: 'pending_approval',
+            approvalRound: sql`${changeSet.approvalRound} + 1`,
+            submission: toStoredSubmission(req.submission),
+            approvalPlan: structuredClone(req.plan),
+            awaitingRole: first,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(changeSet.id, req.changesetId))
+          .returning();
+        if (updated === undefined) throw new Error('change-set submit update returned no row');
+        const audit = this.auditFor(tx);
+        await audit.append(req.audit.transition);
+        await audit.append(req.audit.requested);
+        // `req.notifications` go to the outbox once it exists (Phase 6 notifications plan); passed as [] until then.
+        return { ok: true, changeset: toRecord(updated) };
+      }),
+    );
+  }
+
+  async approvals(changesetId: string, round?: number): Promise<readonly ApprovalRecord[]> {
+    if (!UUID.test(changesetId)) return [];
+    const conditions: SQL[] = [eq(approval.changesetId, changesetId)];
+    if (round !== undefined) conditions.push(eq(approval.round, round));
+    const rows = await guarded('approvals read', () =>
+      this.db
+        .select()
+        .from(approval)
+        .where(and(...conditions))
+        .orderBy(asc(approval.round), asc(approval.step)),
+    );
+    return rows.map(toApproval);
+  }
+
+  async recordDecision(req: DecisionRequestOf): Promise<DecisionResult> {
+    if (!UUID.test(req.changesetId)) return { ok: false, reason: 'not_pending' };
+    return guarded('approval decision', async () => {
+      try {
+        return await this.db.transaction(async (tx): Promise<DecisionResult> => {
+          // The row lock serializes decisions of one change-set: the loser of a race reads the
+          // winner's status and row below and answers not_pending.
+          const [row] = await tx.select().from(changeSet).where(eq(changeSet.id, req.changesetId)).for('update');
+          if (row?.status !== 'pending_approval' || row.approvalRound !== req.round) {
+            return { ok: false, reason: 'not_pending' };
+          }
+          const [decided] = await tx
+            .select({ n: sql<number>`count(*)::int` })
+            .from(approval)
+            .where(
+              and(
+                eq(approval.changesetId, req.changesetId),
+                eq(approval.round, req.round),
+                eq(approval.decision, 'approved'),
+              ),
+            );
+          if ((decided?.n ?? 0) + 1 !== req.step) return { ok: false, reason: 'not_pending' };
+          const r = req.record;
+          await tx.insert(approval).values({
+            id: r.id,
+            changesetId: req.changesetId,
+            round: req.round,
+            step: req.step,
+            role: r.role,
+            approver: r.approver,
+            approverName: r.approverName ?? null,
+            decision: r.decision,
+            comment: r.comment ?? null,
+            hash: r.hash,
+            itemCount: r.itemCount,
+            channel: r.channel,
+            authTime: r.authTime ?? null,
+            clientId: r.clientId ?? null,
+            correlationId: r.correlationId,
+            ts: r.ts,
+          });
+          const set: PgUpdateSetSource<typeof changeSet> =
+            req.next.kind === 'next_step'
+              ? { awaitingRole: req.next.awaitingRole, updatedAt: sql`now()` }
+              : {
+                  status: req.next.kind === 'returned' ? 'prepared' : req.next.kind,
+                  awaitingRole: null,
+                  updatedAt: sql`now()`,
+                };
+          const [updated] = await tx.update(changeSet).set(set).where(eq(changeSet.id, req.changesetId)).returning();
+          if (updated === undefined) throw new Error('approval decision update returned no row');
+          const audit = this.auditFor(tx);
+          for (const event of req.audit) await audit.append(event);
+          // `req.notifications` go to the outbox once it exists (Phase 6 notifications plan); passed as [] until then.
+          return { ok: true, changeset: toRecord(updated) };
+        });
+      } catch (error) {
+        // A concurrent decision of the same step stored its row first: the unique key refused ours.
+        if (pgCode(error) === '23505') return { ok: false, reason: 'not_pending' };
+        throw error;
+      }
+    });
+  }
+
   async errorCounts(changesetId: string): Promise<Readonly<Record<string, number>>> {
     if (!UUID.test(changesetId)) return {};
     const rows = await guarded('item error counts', () =>
@@ -348,6 +534,9 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           if (record.hash === undefined) return { ok: false, reason: 'not_executable' };
           if (record.hash !== req.expectedHash) return { ok: false, reason: 'hash_mismatch' };
           if (record.status !== 'prepared' && record.status !== 'approved') return { ok: false, reason: 'not_executable' };
+          if (record.status === 'approved' && !(await approvalsCover(tx, record, req.expectedHash))) {
+            return { ok: false, reason: 'not_approved' };
+          }
           // Starts of one requester serialize here, before the usage is read (POL-4). At READ
           // COMMITTED each later statement sees the starts that committed while this one waited.
           await tx.execute(
@@ -370,6 +559,10 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
               executionClientId: req.request.clientId ?? null,
               executionCorrelationId: req.request.correlationId,
               executionStartedAt: req.now,
+              // POL-6: the submission of a start without approval; an approved one keeps its own.
+              ...(req.submission !== undefined && record.status === 'prepared'
+                ? { submission: toStoredSubmission(req.submission) }
+                : {}),
               updatedAt: sql`now()`,
             })
             .where(and(eq(changeSet.id, req.changesetId), inArray(changeSet.status, ['prepared', 'approved'])))
@@ -611,6 +804,25 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
       }),
     );
   }
+}
+
+/** SEC-9: every plan step of the current round holds an `approved` row for this hash. */
+async function approvalsCover(db: DbExecutor, record: ChangeSetRecord, hash: string): Promise<boolean> {
+  const plan = record.approvalPlan;
+  if (plan === undefined || plan.steps.length === 0) return false;
+  const rows = await db
+    .select({ step: approval.step })
+    .from(approval)
+    .where(
+      and(
+        eq(approval.changesetId, record.id),
+        eq(approval.round, record.approvalRound),
+        eq(approval.decision, 'approved'),
+        eq(approval.hash, hash),
+      ),
+    );
+  const steps = new Set(rows.map((r) => r.step));
+  return plan.steps.every((_, i) => steps.has(i + 1));
 }
 
 async function readBatch(db: DbExecutor, changesetId: string, batchNo: number): Promise<ChangeBatchRow | undefined> {

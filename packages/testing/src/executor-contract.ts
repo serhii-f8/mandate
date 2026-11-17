@@ -7,6 +7,7 @@ import type {
   ChangeSetRepository,
   ExecutionLimits,
 } from '@aiops/core';
+import { recordApproval, submitChangeSet } from './approval-fixtures.js';
 import type { ScriptedWriter } from './in-memory-executor.js';
 
 /**
@@ -232,17 +233,9 @@ export function describeExecutorContract(label: string, setup: () => Promise<Exe
     });
 
     const approve = async (h: ExecutorHarness, id: string) => {
-      const ev = (to: string) => ({
-        id: randomUUID(),
-        actor: 'carol',
-        action: 'changeset.transition' as const,
-        outcome: 'ok' as const,
-        correlationId: 'corr-approve',
-        changesetId: id,
-        details: { to },
-      });
-      await h.repository.transition(id, ['prepared'], 'pending_approval', ev('pending_approval'));
-      await h.repository.transition(id, ['pending_approval'], 'approved', ev('approved'));
+      const cs = await h.repository.get(id);
+      if (cs === undefined) throw new Error('missing change-set');
+      await recordApproval(h.repository, await submitChangeSet(h.repository, cs), { approver: 'carol' });
     };
     const transitionActors = async (h: ExecutorHarness, id: string, to: string) =>
       (await h.auditEvents()).filter((e) => e.changesetId === id && e.details.to === to).map((e) => e.actor);

@@ -1,8 +1,9 @@
-import { describeChangeSetRepositoryContract } from './changeset-repository-contract.js';
+import { describeApprovalRepositoryContract } from './approval-repository-contract.js';
+import { describeChangeSetRepositoryContract, type ChangeSetRepositoryHarness } from './changeset-repository-contract.js';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
 import { InMemoryChangeSetRepository } from './in-memory-changeset-repository.js';
 
-describeChangeSetRepositoryContract('in-memory', () => {
+function setup(): Promise<ChangeSetRepositoryHarness> {
   const audit = new InMemoryAuditLog();
   const repository = new InMemoryChangeSetRepository(audit);
   return Promise.resolve({
@@ -12,4 +13,7 @@ describeChangeSetRepositoryContract('in-memory', () => {
       audit.failNext = new Error('audit down');
     },
   });
-});
+}
+
+describeChangeSetRepositoryContract('in-memory', setup);
+describeApprovalRepositoryContract('in-memory', setup);

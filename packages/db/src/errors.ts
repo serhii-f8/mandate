@@ -1,7 +1,7 @@
 import { DrizzleQueryError } from 'drizzle-orm';
 
 /** Postgres error code of `error` or of its cause (drizzle wraps driver errors). */
-function pgCode(error: unknown): string | undefined {
+export function pgCode(error: unknown): string | undefined {
   for (let e: unknown = error; typeof e === 'object' && e !== null; e = (e as { cause?: unknown }).cause) {
     const code = (e as { code?: unknown }).code;
     if (typeof code === 'string') return code;
