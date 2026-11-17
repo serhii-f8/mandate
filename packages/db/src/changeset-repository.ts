@@ -19,6 +19,7 @@ import type { Db, DbExecutor } from './client.js';
 import { changeItem, changeSet } from './schema.js';
 
 const MAX_PAGE = 500;
+const NOT_YET = 'not implemented (Task 6)';
 const OUTCOMES_REFUSED = 'item outcomes rejected: change-set is not executing';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -283,6 +284,31 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
         await tx.update(changeSet).set({ stats, updatedAt: sql`now()` }).where(eq(changeSet.id, changesetId));
       }),
     );
+  }
+
+  // Execution, cancel and batch methods: placeholders until Task 6 of the Phase 5 workflow plan.
+  startExecution(): ReturnType<ChangeSetRepository['startExecution']> {
+    return Promise.reject(new Error(NOT_YET));
+  }
+
+  requestCancel(): ReturnType<ChangeSetRepository['requestCancel']> {
+    return Promise.reject(new Error(NOT_YET));
+  }
+
+  usage(): ReturnType<ChangeSetRepository['usage']> {
+    return Promise.reject(new Error(NOT_YET));
+  }
+
+  claimBatch(): ReturnType<ChangeSetRepository['claimBatch']> {
+    return Promise.reject(new Error(NOT_YET));
+  }
+
+  recordSubmission(): ReturnType<ChangeSetRepository['recordSubmission']> {
+    return Promise.reject(new Error(NOT_YET));
+  }
+
+  completeBatch(): ReturnType<ChangeSetRepository['completeBatch']> {
+    return Promise.reject(new Error(NOT_YET));
   }
 
   /** Compare-and-set on status; no matching row writes no audit event and returns undefined. */

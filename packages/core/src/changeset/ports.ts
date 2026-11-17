@@ -1,5 +1,14 @@
 import type { AuditEventInput } from '../audit.js';
-import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats, ChangeSetStatus, ItemStatus } from './model.js';
+import type { BatchCounts } from './execution.js';
+import type {
+  CancelRequest,
+  ChangeItemRecord,
+  ChangeSetRecord,
+  ChangeSetStats,
+  ChangeSetStatus,
+  ExecutionRequest,
+  ItemStatus,
+} from './model.js';
 
 export type PrepareFailure = 'targets_missing' | 'too_many_targets' | 'incomplete_read' | 'cancelled' | (string & {});
 
@@ -54,6 +63,70 @@ export interface ChangeSetRepository {
   ): Promise<ChangeSetRecord | undefined>;
   /** Only items with status pending; stats recomputed. */
   recordItemOutcomes(changesetId: string, outcomes: readonly ItemOutcome[]): Promise<void>;
+  /**
+   * One transaction (EXE-11, POL-4, POL-6): not found, expiry (CAS to `expired`, event `expired`),
+   * no hash, hash mismatch, status not `prepared|approved`; then the limits under a per-requester
+   * lock (refusal appends `limit_denied` and leaves the status); then CAS to `executing` with the
+   * event `executing`, the execution request and `startedAt = now`.
+   */
+  startExecution(req: {
+    changesetId: string;
+    expectedHash: string;
+    request: Omit<ExecutionRequest, 'startedAt'>;
+    limits?: ExecutionLimits;
+    now: Date;
+    event: (e: StartEvent, changeset: ChangeSetRecord) => AuditEventInput;
+  }): Promise<{ ok: true; changeset: ChangeSetRecord } | Exclude<StartOutcome, { ok: true }>>;
+  /**
+   * Stores the cancel request only while executing and only the first one (EXE-7). `ok: true`
+   * with the record (an earlier request kept) while executing; otherwise the current status
+   * (undefined when not found).
+   */
+  requestCancel(
+    changesetId: string,
+    cancel: CancelRequest,
+  ): Promise<{ ok: true; changeset: ChangeSetRecord } | { ok: false; status?: ChangeSetStatus }>;
+  /** Included records of the requester's executions started at or after `since`, and its executing count (POL-4). */
+  usage(requester: string, since: Date): Promise<ExecutionUsage>;
+  /**
+   * Claims batch `batchNo` for `attempt` (EXE-3, size 1..1000). A new batch takes the next `size`
+   * pending items after the highest existing batch's last target; `empty` when none. A done batch
+   * answers its stored counts; an equal or higher stored attempt answers `fenced`.
+   */
+  claimBatch(
+    changesetId: string,
+    batchNo: number,
+    attempt: number,
+    size: number,
+  ): Promise<
+    | { kind: 'claimed'; batch: BatchRecord; items: readonly ChangeItemRecord[] }
+    | { kind: 'done'; counts: BatchCounts }
+    | { kind: 'fenced' }
+    | { kind: 'empty' }
+  >;
+  /** Stores the upstream batch ID and plan for the owning attempt of an open batch; false when fenced (NFR-2). */
+  recordSubmission(changesetId: string, batchNo: number, attempt: number, submission: BatchSubmission): Promise<boolean>;
+  /**
+   * One transaction for the owning attempt of an open batch (EXE-3, AUD-1): item outcomes (pending
+   * items only; rejected unless executing), batch `done` with counts from `outcomes` (first per
+   * target), and `audit`. Fenced answers `{ ok: false }` and writes nothing.
+   */
+  completeBatch(
+    changesetId: string,
+    batchNo: number,
+    attempt: number,
+    outcomes: readonly ItemOutcome[],
+    audit: AuditEventInput,
+  ): Promise<{ ok: true; counts: BatchCounts } | { ok: false }>;
+}
+
+/** A claimed write batch (EXE-3). */
+export interface BatchRecord {
+  readonly changesetId: string;
+  readonly batchNo: number;
+  readonly attempt: number;
+  readonly targetIds: readonly string[];
+  readonly submission?: BatchSubmission;
 }
 
 /** The repository operations preparation uses; later port growth does not touch its fakes. */

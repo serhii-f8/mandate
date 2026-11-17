@@ -5,7 +5,7 @@ import type { ManifestDefinition, OperationDefinition } from '../policy-model.js
 import { compareTargetIds, normalizeArgs } from './canonical.js';
 import { ChangeSetHasher } from './hash.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats, ExclusionReason } from './model.js';
-import type { ChangeSetRepository, ItemsPageQuery, NewChangeSet, ReadPage, UpstreamReader } from './ports.js';
+import type { ItemsPageQuery, NewChangeSet, PreparationRepository, ReadPage, UpstreamReader } from './ports.js';
 import {
   createChangeSet,
   prepareChangeSet,
@@ -15,7 +15,7 @@ import {
 } from './prepare.js';
 
 /** Minimal Map-based repository with the contract's compare-and-set semantics. */
-class FakeRepository implements ChangeSetRepository {
+class FakeRepository implements PreparationRepository {
   readonly sets = new Map<string, ChangeSetRecord>();
   readonly items = new Map<string, Map<string, ChangeItemRecord>>();
   readonly audit: AuditEventInput[] = [];

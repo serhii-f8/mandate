@@ -44,6 +44,7 @@ export { EMPTY_STATS } from './changeset/model.js';
 export { CANCELLABLE, canTransition, isExpiryDue, PRE_EXECUTION, TRANSITIONS } from './changeset/lifecycle.js';
 export type {
   BatchContext,
+  BatchRecord,
   BatchSubmission,
   ChangeSetExecutor,
   ChangeSetRepository,
