@@ -73,7 +73,8 @@ const limits = z.strictObject({
 const approval = z.strictObject({
   required: z.enum(['always', 'never', 'above_threshold']).optional(),
   record_threshold: positiveInt.optional(),
-  approver_role: id.optional(),
+  steps: z.array(z.strictObject({ role: id })).min(1).max(5).optional(),
+  step_up_max_age_seconds: z.number().int().min(30).max(3600).optional(),
   allow_widget: z.boolean().default(false),
 });
 

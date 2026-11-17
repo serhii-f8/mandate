@@ -97,6 +97,7 @@ roles:
   - id: content_manager
     grants:
       - { operation: catalog.update_content, scope: { brand: [acme] } }
+    approval: { required: never }
 `;
 
 function load(overrides: Record<string, string> = {}): Promise<LoadResult> {
@@ -183,7 +184,7 @@ describe('OPS-2 manifest configuration', () => {
 
   it('OPS-2 check 1: read and write_opaque operations must not have a manifest; destructive may', async () => {
     await expectIssue((t) => t.replace('risk: write', 'risk: write_opaque'), M, 'catalog');
-    ok(await load({ 'write.yaml': WRITE.replace('risk: write', 'risk: destructive') }));
+    ok(await load({ 'write.yaml': WRITE.replace('risk: write', 'risk: destructive'), 'roles.yaml': ROLES.replace('{ required: never }', '{ required: never, steps: [{ role: content_manager }] }') }));
     const readWithManifest = READS.replace(
       '    fields_arg: fields\n  - id: catalog.search_products',
       `    fields_arg: fields\n    manifest: { id_field: sku, ids_arg: skus, values_arg: fields, fields: [name], read_before: { operation: catalog.search_products, ids_arg: skus }, rollback: { strategy: none } }\n  - id: catalog.search_products`,
@@ -296,6 +297,14 @@ describe('CS-6 change-set expiry setting', () => {
     expect(ok(await load()).changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.5, itemsPerWorkflowRun: 2000 });
   });
 
+  it('CS-6 expire_after_hours accepts one minute and refuses less', async () => {
+    const withHours = (h: string) => load({ 'changesets.yaml': `version: 1\nchangesets: { expire_after_hours: ${h} }\n` });
+    expect(ok(await withHours(String(1 / 60))).changesets.expireAfterHours).toBe(1 / 60);
+    for (const bad of ['0.01', '0']) {
+      expect(issues(await withHours(bad)), bad).toEqual([expect.objectContaining({ path: 'changesets.expire_after_hours' })]);
+    }
+  });
+
   it('CS-6 reads changesets.expire_after_hours and checks its range', async () => {
     expect(ok(await load({ 'changesets.yaml': 'version: 1\nchangesets: { expire_after_hours: 24 }\n' })).changesets).toEqual({ expireAfterHours: 24, failureThreshold: 0.5, itemsPerWorkflowRun: 2000 });
     const found = issues(await load({ 'changesets.yaml': 'version: 1\nchangesets: { expire_after_hours: 5000 }\n' }));
@@ -388,7 +397,7 @@ describe('OPS-6 bulk binding configuration', () => {
     const found = issues(await load({ 'reads.yaml': reads }));
     const hit = found.filter((i) => i.path === 'operations[3].upstream.bulk');
     expect(hit).toHaveLength(1);
-    expect(hit[0]?.message).toBe('is allowed on write operations only');
+    expect(hit[0]?.message).toBe('is allowed on write and destructive operations only');
   });
   it('OPS-6 CFG-2 body together with bulk is refused at upstream.body', () =>
     expectIssue((t) => withBulk(t).replace('      path: /async/bulk/V1/products\n', '      path: /async/bulk/V1/products\n      body: { arg: changes }\n'), `${U}.body`, 'changes'));
@@ -414,5 +423,23 @@ describe('OPS-6 manifest write.carry_fields', () => {
   it('OPS-6 an empty carry_fields list is refused by the schema', async () => {
     const found = issues(await load({ 'write.yaml': withCarry(WRITE, '') }));
     expect(found.some((i) => i.path === `${M}.write.carry_fields`)).toBe(true);
+  });
+});
+
+describe('CFG-2 POL-5 approval steps for write grants', () => {
+  const roles = (approval?: string): string => ROLES.replace('    approval: { required: never }\n', approval === undefined ? '' : `    approval: ${approval}\n`);
+  const needs = expect.stringMatching(/^needs at least one step/) as string;
+
+  it('POL-5 a write grant whose approval is required by default needs steps', async () => {
+    const none = issues(await load({ 'roles.yaml': roles() }));
+    expect(none).toContainEqual(expect.objectContaining({ path: 'roles[0].approval', message: needs }));
+    const always = issues(await load({ 'roles.yaml': roles('{ required: always }') }));
+    expect(always).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.steps', message: needs }));
+    ok(await load({ 'roles.yaml': roles('{ required: never }') }));
+  });
+
+  it('POL-5 a destructive grant needs steps even with required: never', async () => {
+    const found = issues(await load({ 'write.yaml': WRITE.replace('risk: write', 'risk: destructive'), 'roles.yaml': roles('{ required: never }') }));
+    expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.steps', message: needs }));
   });
 });

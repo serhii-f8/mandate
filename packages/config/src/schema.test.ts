@@ -55,7 +55,7 @@ roles:
         deny_fields: [cost]
         allow_fields: [name, description, cost]
     limits: { records_per_operation: 500, records_per_day: 5000, calls_per_minute: 60, concurrent_executions: 2 }
-    approval: { required: above_threshold, record_threshold: 50, approver_role: content_lead, allow_widget: false }
+    approval: { required: above_threshold, record_threshold: 50, steps: [{ role: content_lead }], allow_widget: false }
   - id: content_lead
     grants: []
     manage_credentials: [magento-integration]
@@ -143,5 +143,23 @@ describe('EXE-5 EXE-9 changesets execution settings', () => {
     expect(changesetsSchema.parse({ items_per_workflow_run: 150 }).items_per_workflow_run).toBe(150);
     expect(changesetsSchema.safeParse({ items_per_workflow_run: 99 }).success).toBe(false);
     expect(changesetsSchema.safeParse({ items_per_workflow_run: 150.5 }).success).toBe(false);
+  });
+});
+
+describe('APR-3 AUTH-6 approval schema', () => {
+  const role = (approval: string) => `version: 1\nroles:\n  - { id: r, grants: [], approval: ${approval} }\n`;
+  it('APR-3 steps take 1..5 entries', () => {
+    expect(issuesOf(role('{ steps: [] }'))).not.toEqual([]);
+    const six = Array.from({ length: 6 }, () => '{ role: a }').join(', ');
+    expect(issuesOf(role(`{ steps: [${six}] }`))).not.toEqual([]);
+    expect(issuesOf(role('{ steps: [{ role: a }] }'))).toEqual([]);
+    const five = Array.from({ length: 5 }, () => '{ role: a }').join(', ');
+    expect(issuesOf(role(`{ steps: [${five}] }`))).toEqual([]);
+  });
+
+  it('AUTH-6 step_up_max_age_seconds 30..3600 integer', () => {
+    for (const bad of ['29', '3601', '30.5']) expect(issuesOf(role(`{ step_up_max_age_seconds: ${bad} }`)), bad).not.toEqual([]);
+    expect(issuesOf(role('{ step_up_max_age_seconds: 30 }'))).toEqual([]);
+    expect(issuesOf(role('{ step_up_max_age_seconds: 3600 }'))).toEqual([]);
   });
 });

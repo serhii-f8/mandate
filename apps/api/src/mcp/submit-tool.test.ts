@@ -77,14 +77,15 @@ roles:
   - id: other_role
     grants:
       - { operation: catalog.update_content, id: all }
+    approval: { steps: [{ role: content_manager }] }
   - id: always_role
     grants:
       - { operation: catalog.update_content, id: all }
-    approval: { required: always, approver_role: content_manager }
+    approval: { required: always, steps: [{ role: content_manager }] }
   - id: threshold_role
     grants:
       - { operation: catalog.update_content, id: all }
-    approval: { required: above_threshold, record_threshold: 1, approver_role: content_manager }
+    approval: { required: above_threshold, record_threshold: 1, steps: [{ role: content_manager }] }
 role_mapping:
   - { group: content, roles: [content_manager] }
   - { group: other, roles: [other_role] }
