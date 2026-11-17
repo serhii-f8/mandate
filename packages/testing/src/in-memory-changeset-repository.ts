@@ -20,7 +20,7 @@ import type {
   Submission,
 } from '@aiops/core';
 import { changesetTransitionEvent, compareTargetIds, EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
 
 const MAX_PAGE = 500;
@@ -149,6 +149,55 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       .slice(0, query.limit)
       .map(copyItem);
     return Promise.resolve(page);
+  }
+
+  pendingApprovals(q: {
+    roles: readonly string[];
+    excludeRequester: string;
+    after?: { submittedAt: Date; id: string };
+    limit: number;
+  }): Promise<readonly ChangeSetRecord[]> {
+    if (!Number.isInteger(q.limit) || q.limit < 1 || q.limit > MAX_PAGE) {
+      return Promise.reject(new Error(`limit must be between 1 and ${MAX_PAGE}`));
+    }
+    if (q.roles.length === 0) return Promise.resolve([]);
+    const after = q.after;
+    const rows = [...this.entries.values()]
+      .map((e) => e.record)
+      .filter(
+        (r) =>
+          r.status === 'pending_approval' &&
+          r.awaitingRole !== undefined &&
+          q.roles.includes(r.awaitingRole) &&
+          r.requester !== q.excludeRequester &&
+          r.submission !== undefined,
+      )
+      .sort((a, b) => {
+        const byTime = (b.submission?.at.getTime() ?? 0) - (a.submission?.at.getTime() ?? 0);
+        return byTime !== 0 ? byTime : a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+      })
+      .filter((r) => {
+        if (after === undefined) return true;
+        const t = r.submission?.at.getTime() ?? 0;
+        return t < after.submittedAt.getTime() || (t === after.submittedAt.getTime() && r.id < after.id);
+      });
+    return Promise.resolve(rows.slice(0, q.limit).map(copyRecord));
+  }
+
+  sampleItems(changesetId: string, seed: string, size: number): Promise<readonly ChangeItemRecord[]> {
+    if (!Number.isInteger(size) || size < 1 || size > MAX_PAGE) {
+      return Promise.reject(new Error(`size must be between 1 and ${MAX_PAGE}`));
+    }
+    const entry = this.entries.get(changesetId);
+    if (entry === undefined) return Promise.resolve([]);
+    const key = (targetId: string): string => createHash('md5').update(seed + targetId).digest('hex');
+    const sample = [...entry.items.values()]
+      .filter((i) => i.status !== 'excluded')
+      .map((i) => ({ i, k: key(i.targetId) }))
+      .sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : a.i.targetId < b.i.targetId ? -1 : a.i.targetId > b.i.targetId ? 1 : 0))
+      .slice(0, size)
+      .map((x) => copyItem(x.i));
+    return Promise.resolve(sample);
   }
 
   async completePreparation(

@@ -297,6 +297,53 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     return rows.map(toItem);
   }
 
+  async pendingApprovals(q: {
+    roles: readonly string[];
+    excludeRequester: string;
+    after?: { submittedAt: Date; id: string };
+    limit: number;
+  }): Promise<readonly ChangeSetRecord[]> {
+    if (!Number.isInteger(q.limit) || q.limit < 1 || q.limit > MAX_PAGE) {
+      throw new Error(`limit must be between 1 and ${MAX_PAGE}`);
+    }
+    if (q.roles.length === 0) return [];
+    const submittedAt = sql`(${changeSet.submission}->>'at')::timestamptz`;
+    const conditions: SQL[] = [
+      eq(changeSet.status, 'pending_approval'),
+      inArray(changeSet.awaitingRole, [...q.roles]),
+      sql`${changeSet.requester} <> ${q.excludeRequester}`,
+    ];
+    if (q.after !== undefined) {
+      if (!UUID.test(q.after.id)) return [];
+      conditions.push(sql`(${submittedAt}, ${changeSet.id}) < (${q.after.submittedAt.toISOString()}::timestamptz, ${q.after.id}::uuid)`);
+    }
+    const rows = await guarded('pending approvals', () =>
+      this.db
+        .select()
+        .from(changeSet)
+        .where(and(...conditions))
+        .orderBy(sql`${submittedAt} desc`, desc(changeSet.id))
+        .limit(q.limit),
+    );
+    return rows.map(toRecord);
+  }
+
+  async sampleItems(changesetId: string, seed: string, size: number): Promise<readonly ChangeItemRecord[]> {
+    if (!Number.isInteger(size) || size < 1 || size > MAX_PAGE) {
+      throw new Error(`size must be between 1 and ${MAX_PAGE}`);
+    }
+    if (!UUID.test(changesetId)) return [];
+    const rows = await guarded('change items sample', () =>
+      this.db
+        .select()
+        .from(changeItem)
+        .where(and(eq(changeItem.changesetId, changesetId), sql`${changeItem.status} <> 'excluded'`))
+        .orderBy(sql`md5(${seed} || ${changeItem.targetId})`, asc(changeItem.targetId))
+        .limit(size),
+    );
+    return rows.map(toItem);
+  }
+
   async completePreparation(
     changesetId: string,
     outcome:

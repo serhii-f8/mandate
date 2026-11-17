@@ -46,6 +46,22 @@ export interface ChangeSetRepository {
   get(changesetId: string): Promise<ChangeSetRecord | undefined>;
   /** Ordered by compareTargetIds, limit 1..500. */
   itemsPage(changesetId: string, query: ItemsPageQuery): Promise<readonly ChangeItemRecord[]>;
+  /**
+   * Change-sets awaiting approval (UI-7): status `pending_approval`, `awaitingRole` in `roles`, requester
+   * not `excludeRequester`; newest `submission.at` first, then `id` descending. `after` is exclusive;
+   * limit 1..500; an empty `roles` list gives `[]`.
+   */
+  pendingApprovals(q: {
+    roles: readonly string[];
+    excludeRequester: string;
+    after?: { submittedAt: Date; id: string };
+    limit: number;
+  }): Promise<readonly ChangeSetRecord[]>;
+  /**
+   * At most `size` included items (status not `excluded`) ordered by `md5(seed || targetId)` then
+   * `targetId` (APR-5); size 1..500; unknown and non-UUID IDs give `[]`.
+   */
+  sampleItems(changesetId: string, seed: string, size: number): Promise<readonly ChangeItemRecord[]>;
   /** Compare-and-set from preparing. */
   completePreparation(
     changesetId: string,

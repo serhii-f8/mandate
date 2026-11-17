@@ -1,10 +1,12 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { changesetBatchEvent, EMPTY_STATS, startEventFactory } from '@aiops/core';
+import { recordApproval, submitChangeSet } from './approval-fixtures.js';
 import type {
   AuditEventInput,
   BatchSubmission,
   ChangeItemRecord,
+  ChangeSetRecord,
   ChangeSetRepository,
   ChangeSetStats,
   ExecutionLimits,
@@ -1033,6 +1035,123 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         // A finished execution still counts towards records, no longer as executing.
         expect(await c.repository.usage(alice, at(0))).toEqual({ recordsSince: 5, executing: 1 });
         expect(await c.repository.usage(requester('bob'), at(0))).toEqual({ recordsSince: 0, executing: 0 });
+      }));
+
+    /** A change-set submitted for approval awaiting `awaiting`, submitted at `submittedAt`. */
+    async function submittedFor(
+      c: Ctx,
+      opts: { awaiting: string; requester?: string; at: Date; id?: string },
+    ): Promise<ChangeSetRecord> {
+      const id = opts.id ?? randomUUID();
+      await preparedSet(c, id, 2, { requester: opts.requester ?? requester('alice'), expiresAt: FAR });
+      const prepared = await c.repository.get(id);
+      if (prepared === undefined) throw new Error('prepared change-set missing');
+      return submitChangeSet(c.repository, prepared, { steps: [opts.awaiting], at: opts.at });
+    }
+
+    it('UI-7 pendingApprovals lists change-sets awaiting one of the roles, newest submission first', async () =>
+      withRepo(async (c) => {
+        const role = `lead-${randomUUID()}`;
+        const a = await submittedFor(c, { awaiting: role, at: at(1) });
+        const b = await submittedFor(c, { awaiting: role, at: at(3) });
+        const d = await submittedFor(c, { awaiting: role, at: at(2) });
+        await submittedFor(c, { awaiting: `lead-${randomUUID()}`, at: at(4) });
+        const rows = await c.repository.pendingApprovals({ roles: [role], excludeRequester: 'nobody', limit: 10 });
+        expect(rows.map((r) => r.id)).toEqual([b.id, d.id, a.id]);
+      }));
+
+    it('APR-2 pendingApprovals leaves out change-sets the viewer requested', async () =>
+      withRepo(async (c) => {
+        const role = `lead-${randomUUID()}`;
+        const mine = requester('mine');
+        const own = await submittedFor(c, { awaiting: role, requester: mine, at: at(1) });
+        const other = await submittedFor(c, { awaiting: role, at: at(2) });
+        const rows = await c.repository.pendingApprovals({ roles: [role], excludeRequester: mine, limit: 10 });
+        expect(rows.map((r) => r.id)).toEqual([other.id]);
+        expect(rows.map((r) => r.id)).not.toContain(own.id);
+      }));
+
+    it('NFR-8 pendingApprovals pages by (submittedAt, id) without gaps or repeats', async () =>
+      withRepo(async (c) => {
+        const role = `lead-${randomUUID()}`;
+        for (const h of [1, 2, 2, 3, 4]) await submittedFor(c, { awaiting: role, at: at(h) });
+        const all = await c.repository.pendingApprovals({ roles: [role], excludeRequester: 'nobody', limit: 10 });
+        expect(all).toHaveLength(5);
+        const paged: string[] = [];
+        let after: { submittedAt: Date; id: string } | undefined;
+        for (;;) {
+          const page = await c.repository.pendingApprovals({
+            roles: [role],
+            excludeRequester: 'nobody',
+            limit: 2,
+            ...(after === undefined ? {} : { after }),
+          });
+          paged.push(...page.map((r) => r.id));
+          const last = page.at(-1);
+          if (page.length < 2 || last?.submission === undefined) break;
+          after = { submittedAt: last.submission.at, id: last.id };
+        }
+        expect(paged).toEqual(all.map((r) => r.id));
+      }));
+
+    it('UI-7 pendingApprovals ignores other statuses and an empty role list', async () =>
+      withRepo(async (c) => {
+        const role = `lead-${randomUUID()}`;
+        const preparedOnly = randomUUID();
+        await preparedSet(c, preparedOnly, 1, { expiresAt: FAR });
+        const rejected = await submittedFor(c, { awaiting: role, at: at(1) });
+        await recordApproval(c.repository, rejected, { approver: 'dave', decision: 'rejected' });
+        const live = await submittedFor(c, { awaiting: role, at: at(2) });
+        const rows = await c.repository.pendingApprovals({ roles: [role], excludeRequester: 'nobody', limit: 10 });
+        expect(rows.map((r) => r.id)).toEqual([live.id]);
+        expect(await c.repository.pendingApprovals({ roles: [], excludeRequester: 'nobody', limit: 10 })).toEqual([]);
+        await expect(c.repository.pendingApprovals({ roles: [role], excludeRequester: 'x', limit: 0 })).rejects.toThrow();
+        await expect(c.repository.pendingApprovals({ roles: [role], excludeRequester: 'x', limit: 501 })).rejects.toThrow();
+      }));
+
+    const SEED = '0123456789abcdef0123456789abcdef';
+    const md5Order = (seed: string, ids: readonly string[]): string[] =>
+      [...ids].sort((a, b) => {
+        const ka = createHash('md5').update(seed + a).digest('hex');
+        const kb = createHash('md5').update(seed + b).digest('hex');
+        return ka < kb ? -1 : ka > kb ? 1 : a < b ? -1 : a > b ? 1 : 0;
+      });
+
+    it('APR-5 sampleItems is deterministic per seed and ordered by md5(seed || targetId)', async () =>
+      withRepo(async (c) => {
+        const ids = targets(20);
+        await created(c);
+        await c.repository.appendItems(
+          c.id,
+          ids.map((t) => (['t-0003', 't-0010', 't-0017'].includes(t) ? item(t, { status: 'excluded', reason: 'not_found' }) : item(t))),
+        );
+        const included = ids.filter((t) => !['t-0003', 't-0010', 't-0017'].includes(t));
+        const first = await c.repository.sampleItems(c.id, SEED, 5);
+        const second = await c.repository.sampleItems(c.id, SEED, 5);
+        expect(first).toEqual(second);
+        expect(first.map((i) => i.targetId)).toEqual(md5Order(SEED, included).slice(0, 5));
+        const other = await c.repository.sampleItems(c.id, 'fedcba9876543210fedcba9876543210', 5);
+        expect(other.map((i) => i.targetId)).not.toEqual(first.map((i) => i.targetId));
+      }));
+
+    it('APR-5 sampleItems returns included items only, at most size', async () =>
+      withRepo(async (c) => {
+        await created(c);
+        await c.repository.appendItems(
+          c.id,
+          targets(20).map((t) => (['t-0003', 't-0010', 't-0017'].includes(t) ? item(t, { status: 'excluded', reason: 'not_found' }) : item(t))),
+        );
+        const all = await c.repository.sampleItems(c.id, SEED, 50);
+        expect(all).toHaveLength(17);
+        expect(all.every((i) => i.status !== 'excluded')).toBe(true);
+        await expect(c.repository.sampleItems(c.id, SEED, 0)).rejects.toThrow();
+        await expect(c.repository.sampleItems(c.id, SEED, 501)).rejects.toThrow();
+      }));
+
+    it('APR-5 sampleItems of an unknown or non-UUID id is empty', async () =>
+      withRepo(async (c) => {
+        expect(await c.repository.sampleItems(randomUUID(), SEED, 5)).toEqual([]);
+        expect(await c.repository.sampleItems('x', SEED, 5)).toEqual([]);
       }));
   });
 }
