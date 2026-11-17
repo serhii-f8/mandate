@@ -97,7 +97,7 @@ describe('MCP-4 direct read invoker', () => {
     expect(adapter.reads).toEqual([]);
   });
 
-  it('POL-5 refuses a read operation bound to a non-GET call without calling the upstream (defence in depth)', async () => {
+  it('MCP-4 refuses a read operation bound to a non-GET call without calling the upstream (defence in depth)', async () => {
     const binding = CONFIG.bindings.get('catalog.search_products');
     if (binding === undefined) throw new Error('fixture has no binding');
     const bindings = new Map(CONFIG.bindings);

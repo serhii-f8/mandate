@@ -546,15 +546,15 @@ describe('POL-3 field rules and projection use the same argument', () => {
   });
 });
 
-describe('POL-5 read operations use GET; writes need change-sets', () => {
+describe('MCP-4 read operations use GET; writes need change-sets', () => {
   const MESSAGE = 'read operations must use GET; writes need change-sets';
 
-  it('POL-5 reports a configured read operation with another method', async () => {
+  it('MCP-4 reports a configured read operation with another method', async () => {
     const found = issues(await sources({ 'search.yaml': SEARCH.replace('method: GET', 'method: POST') }));
     expect(found).toEqual([expect.objectContaining({ path: 'operations[0].risk', message: MESSAGE })]);
   });
 
-  it('POL-5 reports a derived read operation whose spec method is not GET', async () => {
+  it('MCP-4 reports a derived read operation whose spec method is not GET', async () => {
     const dir = await fixture('derived', {
       'config.yaml': (await readFile(join(FIXTURES, 'derived', 'config.yaml'), 'utf8')).replace('operation: getItem', 'operation: deleteItem'),
     });
@@ -562,7 +562,7 @@ describe('POL-5 read operations use GET; writes need change-sets', () => {
     expect(found).toEqual([expect.objectContaining({ path: 'operations[1].risk', message: MESSAGE })]);
   });
 
-  it('POL-5 reports a preset read operation whose spec method is not GET', async () => {
+  it('MCP-4 reports a preset read operation whose spec method is not GET', async () => {
     const text = (await readFile(join(FIXTURES, 'preset-dir', 'fake-preset', 'preset.yaml'), 'utf8')).replace('operation: getItem', 'operation: deleteItem');
     const presets = await presetDir({ 'preset.yaml': text });
     const found = issues(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: [presets] }));

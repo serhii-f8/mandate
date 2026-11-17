@@ -102,7 +102,7 @@ export class DirectReadInvoker implements OperationInvoker {
 
     // From here on the binding decides the connection, for the call and for the audit.
     const bound: Details = { operation: operation.id, connection: binding.connection };
-    // Configuration refuses a read that is not GET; checked again so no write runs without a change-set (POL-5).
+    // Configuration refuses a read that is not GET; checked again so no write runs without a change-set (MCP-4).
     if (binding.mapping.method !== 'GET') {
       return { isError: true, text: `${operation.id} cannot run: ${WRITE_NEEDS_CHANGESET}.`, auditDetails: { ...bound, errorCode: 'write_not_supported' } };
     }

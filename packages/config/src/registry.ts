@@ -159,7 +159,7 @@ export function buildRegistry(input: RegistryInput): Registry {
     }
 
     const binding = bindingOf(connection, op, entry);
-    // A non-GET call labelled read would skip the change-set path (POL-5, CS-1).
+    // A non-GET call labelled read would skip the change-set path (MCP-4).
     const method = binding?.mapping.method ?? u.method;
     if (op.risk === 'read' && method !== undefined && method !== 'GET') {
       at(source, [...path, 'risk'], 'read operations must use GET; writes need change-sets');
