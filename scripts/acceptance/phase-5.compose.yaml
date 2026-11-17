@@ -1,0 +1,22 @@
+# Compose override of the Phase 5 acceptance (scripts/acceptance/phase-5.sh).
+# The api and the worker join the Magento sandbox's external network (deploy/sandbox/magento, alias
+# `magento-sandbox`) and read the generated acceptance configuration instead of deploy/config.
+# Two worker replicas, so the run shows that every worker can be killed mid-execution (NFR-4).
+#   AIOPS_ACCEPT_CONFIG_DIR   absolute path of the generated configuration directory
+services:
+  api:
+    networks: [default, sandbox]
+    volumes:
+      - ${AIOPS_ACCEPT_CONFIG_DIR:?set AIOPS_ACCEPT_CONFIG_DIR}:/etc/aiops/config:ro
+  # Preparation and execution run in the worker (ADR 0027): it reads and writes the sandbox.
+  worker:
+    networks: [default, sandbox]
+    volumes:
+      - ${AIOPS_ACCEPT_CONFIG_DIR:?set AIOPS_ACCEPT_CONFIG_DIR}:/etc/aiops/config:ro
+    deploy:
+      replicas: 2
+
+networks:
+  sandbox:
+    external: true
+    name: aiops-sandbox
