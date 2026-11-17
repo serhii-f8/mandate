@@ -28,6 +28,7 @@ import {
 import { PREPARE_MAX_ATTEMPTS, type ActivityTuning, type BatchResult, type ChangesetActivities } from '@aiops/temporal';
 import { Context } from '@temporalio/activity';
 import { ApplicationFailure } from '@temporalio/common';
+import { whileHeartbeating } from './heartbeat.js';
 import { executionSettings, type ExecutionSettings } from './settings.js';
 
 export interface ActivityDeps {
@@ -135,16 +136,19 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
           return reader.read(operationId, args);
         },
       };
-      await runPreparation(
-        { repository, reader: heartbeatingReader, newId: deps.newId, now: deps.now },
-        {
-          changesetId,
-          operation: { ...operation, manifest },
-          readFieldsArg: (id) => configuration.policy.operations.find((o) => o.id === id)?.fieldsArg,
-          actor: changeset.requester,
-          ...(changeset.clientId === undefined ? {} : { clientId: changeset.clientId }),
-          correlationId: changeset.correlationId,
-        },
+      // A slow read chunk is kept alive by the timer heartbeat (EXE-4).
+      await whileHeartbeating(() =>
+        runPreparation(
+          { repository, reader: heartbeatingReader, newId: deps.newId, now: deps.now },
+          {
+            changesetId,
+            operation: { ...operation, manifest },
+            readFieldsArg: (id) => configuration.policy.operations.find((o) => o.id === id)?.fieldsArg,
+            actor: changeset.requester,
+            ...(changeset.clientId === undefined ? {} : { clientId: changeset.clientId }),
+            correlationId: changeset.correlationId,
+          },
+        ),
       );
       return { status: (await load(changesetId)).status };
     },
@@ -211,9 +215,11 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
           Context.current().heartbeat();
         },
       };
+      const writer = deps.writerFor(configuration, changeset.operation);
       let outcomes: readonly ItemOutcome[];
       try {
-        outcomes = await deps.writerFor(configuration, changeset.operation).writeBatch({ changeset, items: claim.items, batch });
+        // The whole write (read, submit, poll, verify) is kept alive by the timer heartbeat (EXE-4).
+        outcomes = await whileHeartbeating(() => writer.writeBatch({ changeset, items: claim.items, batch }));
       } catch (error) {
         // A newer attempt owns the batch: this one stops without recording anything (NFR-2).
         if (error instanceof BatchFenced) throw superseded();

@@ -222,7 +222,7 @@ describe('worker runtime environment', () => {
     const env = parseWorkerEnv({
       ...WORKER,
       AIOPS_PRESET_DIRS: '/app/presets: /opt/presets',
-      AIOPS_BATCH_HEARTBEAT_MS: '5000',
+      AIOPS_BATCH_HEARTBEAT_MS: '15000',
       AIOPS_BATCH_TIMEOUT_MS: '60000',
       AIOPS_BATCH_MAX_ATTEMPTS: '3',
       AIOPS_RETRY_INITIAL_MS: '200',
@@ -234,7 +234,7 @@ describe('worker runtime environment', () => {
       presetDirs: ['/app/presets', '/opt/presets'],
       masterKeys: WORKER.AIOPS_MASTER_KEYS,
       temporalKeys: WORKER.AIOPS_TEMPORAL_KEYS,
-      activityTuning: { batchHeartbeatMs: 5_000, batchTimeoutMs: 60_000, batchMaxAttempts: 3, retryInitialMs: 200, retryMaxMs: 2_000 },
+      activityTuning: { batchHeartbeatMs: 15_000, batchTimeoutMs: 60_000, batchMaxAttempts: 3, retryInitialMs: 200, retryMaxMs: 2_000 },
     });
     for (const required of ['DATABASE_URL', 'AIOPS_CONFIG_DIR', 'AIOPS_MASTER_KEYS']) {
       expect(() => parseWorkerEnv(without(required))).toThrow(new RegExp(`${required}: is required`));
@@ -283,6 +283,22 @@ describe('worker runtime environment', () => {
     expect(() => parseWorkerEnv({ ...WORKER, AIOPS_RETRY_INITIAL_MS: '30001' })).toThrow(
       /AIOPS_RETRY_INITIAL_MS: must not exceed AIOPS_RETRY_MAX_MS/,
     );
+  });
+
+  it('EXE-4 the batch heartbeat timeout must exceed the longest poll pause plus a margin (10000 ms), reported without values', () => {
+    let error: unknown;
+    try {
+      parseWorkerEnv({ ...WORKER, AIOPS_BATCH_HEARTBEAT_MS: '9999' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    expect((error as EnvError).issues).toEqual([
+      { variable: 'AIOPS_BATCH_HEARTBEAT_MS', reason: 'must be greater than 10000 (the longest status poll pause plus a margin)' },
+    ]);
+    expect((error as EnvError).message).not.toContain('9999');
+    expect(() => parseWorkerEnv({ ...WORKER, AIOPS_BATCH_HEARTBEAT_MS: '10000' })).toThrow(/AIOPS_BATCH_HEARTBEAT_MS: must be greater than 10000/);
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_BATCH_HEARTBEAT_MS: '10001' }).activityTuning.batchHeartbeatMs).toBe(10_001);
   });
 
   it('NFR-4 the batch heartbeat must be shorter than the batch timeout, reported without values', () => {

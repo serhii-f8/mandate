@@ -65,6 +65,26 @@ describe('changesetWorkflow', () => {
     expect(await record(cs.id)).toEqual({ status: 'completed' });
   });
 
+  it('EXE-4 NFR-2 a batch whose upstream read takes longer than the heartbeat timeout completes on attempt 1, submitted once', async () => {
+    // Like the manifest writer, the slow part (the pre-write read) never heartbeats on its own.
+    let submissions = 0;
+    const writer: ChangeWriter = {
+      async writeBatch({ items }) {
+        await new Promise((resolve) => setTimeout(resolve, 5_000)); // > FAST_TUNING heartbeat 2 s
+        submissions += 1;
+        return items.map((i): ItemOutcome => ({ targetId: i.targetId, status: 'written' }));
+      },
+    };
+    const cs = await createPrepared(infra.repository, 2, { execute: {} });
+    const activities: string[] = [];
+    await withWorker({ writer, spy: (a) => activities.push(a) }, async (worker) => {
+      const handle = await signalWithStart(worker, cs.id);
+      await expect(handle.result()).resolves.toEqual({ status: 'completed' });
+    });
+    expect(activities.filter((a) => a === 'executeBatch')).toHaveLength(1);
+    expect(submissions).toBe(1);
+  }, 60_000);
+
   it('EXE-6 the progress query reports counts while executing', async () => {
     const writer = new ScriptedWriter();
     const paused = writer.pauseAt(1);

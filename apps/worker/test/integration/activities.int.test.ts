@@ -237,12 +237,12 @@ describe('change-set activities', () => {
       heartbeats += 1;
     });
     await expect(first.run(() => a.prepare(cs.id))).resolves.toEqual({ status: 'prepared' });
-    // Batch size 2: two read chunks, each after a heartbeat.
+    // Batch size 2: two read chunks, each after a heartbeat, plus the one at the start.
     expect(reader.calls.map((c) => [c.operationId, c.args.skus])).toEqual([
       [READ_OPERATION, ['t-0001', 't-0002']],
       [READ_OPERATION, ['t-0003']],
     ]);
-    expect(heartbeats).toBe(2);
+    expect(heartbeats).toBe(3);
     const prepared = await repository.get(cs.id);
     expect(prepared).toMatchObject({ status: 'prepared', stats: { included: 3 } });
     expect(prepared?.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
@@ -250,6 +250,50 @@ describe('change-set activities', () => {
     await expect(attempt(2, () => a.prepare(cs.id))).resolves.toEqual({ status: 'prepared' });
     expect(reader.calls).toHaveLength(2);
   });
+
+  it('EXE-4 NFR-2 prepare and executeBatch heartbeat at the start and on a timer while a slow read or write runs', async () => {
+    const slowRead: UpstreamReader = {
+      async read(operationId, args) {
+        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        return new CatalogReader().read(operationId, args);
+      },
+    };
+    const slowWrite: ChangeWriter = {
+      async writeBatch({ items }) {
+        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        return items.map((i): ItemOutcome => ({ targetId: i.targetId, status: 'written' }));
+      },
+    };
+    const a = activities({ reader: slowRead, writer: slowWrite });
+    // Heartbeat timeout 3 s: the timer beats every second (a third of it).
+    const timed = (): { env: MockActivityEnvironment; beats: () => number } => {
+      const env = new MockActivityEnvironment({ attempt: 1, heartbeatTimeoutMs: 3_000 }, { logger: new DefaultLogger('ERROR') });
+      let beats = 0;
+      env.on('heartbeat', () => {
+        beats += 1;
+      });
+      return { env, beats: () => beats };
+    };
+
+    const preparing = await createPreparing(repository, {
+      configHash: configuration.hash,
+      args: { brand: 'acme', skus: ['t-0001'], changes: { name: 'new' } },
+    });
+    const p = timed();
+    await expect(p.env.run(() => a.prepare(preparing.id))).resolves.toEqual({ status: 'prepared' });
+    // One at the start, one before the read chunk, at least two from the timer during the 2.5 s read.
+    expect(p.beats()).toBeGreaterThanOrEqual(4);
+
+    const executing = await createPrepared(repository, 2, { execute: {} });
+    const w = timed();
+    await expect(w.env.run(() => a.executeBatch(executing.id, 0))).resolves.toMatchObject({ written: 2 });
+    // One at the start, at least two from the timer during the 2.5 s write.
+    expect(w.beats()).toBeGreaterThanOrEqual(3);
+    // The timers are cleared: nothing beats after the activity returned.
+    const after = [p.beats(), w.beats()];
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect([p.beats(), w.beats()]).toEqual(after);
+  }, 20_000);
 
   it('EXE-6 finishExecution done computes the terminal status and is idempotent', async () => {
     const cs = await createPrepared(repository, 2, { execute: { correlationId: 'corr-exec-finish' } });

@@ -3,6 +3,7 @@
  * external input is parsed with a schema). Errors name the variable and the
  * reason, never the value, because values can be secrets (SEC-3).
  */
+import { POLL_MAX_MS } from '@aiops/core';
 import { z } from 'zod';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -139,6 +140,13 @@ const apiSchema = z.object({
   AIOPS_PREPARE_WAIT_MS: z.coerce.number().int().min(0).max(300_000).default(20_000),
 });
 
+/**
+ * The batch heartbeat timeout must exceed the longest pause between two status polls (one
+ * heartbeat per round) plus this margin for the status call itself (EXE-4).
+ */
+const HEARTBEAT_MARGIN_MS = 5_000;
+const MIN_BATCH_HEARTBEAT_MS = POLL_MAX_MS + HEARTBEAT_MARGIN_MS;
+
 const workerSchema = z.object({
   TEMPORAL_ADDRESS: nonEmpty('localhost:7233'),
   TEMPORAL_NAMESPACE: nonEmpty('default'),
@@ -158,6 +166,14 @@ const workerSchema = z.object({
   // Cross-field checks run only once every field parsed; the messages name variables, never values (SEC-3).
   if (e.AIOPS_RETRY_INITIAL_MS > e.AIOPS_RETRY_MAX_MS) {
     ctx.addIssue({ code: 'custom', path: ['AIOPS_RETRY_INITIAL_MS'], message: 'must not exceed AIOPS_RETRY_MAX_MS' });
+  }
+  // A shorter one could time a healthy batch out between two status polls, and its retry would resubmit.
+  if (e.AIOPS_BATCH_HEARTBEAT_MS <= MIN_BATCH_HEARTBEAT_MS) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['AIOPS_BATCH_HEARTBEAT_MS'],
+      message: `must be greater than ${String(MIN_BATCH_HEARTBEAT_MS)} (the longest status poll pause plus a margin)`,
+    });
   }
   // A heartbeat timeout at or above the start-to-close timeout would never notice a lost worker first.
   if (e.AIOPS_BATCH_HEARTBEAT_MS >= e.AIOPS_BATCH_TIMEOUT_MS) {
