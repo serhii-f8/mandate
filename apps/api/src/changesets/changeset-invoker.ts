@@ -55,7 +55,7 @@ export class ChangeSetInvoker implements OperationInvoker {
     checkPrepareWait(deps.wait);
   }
 
-  async invoke({ operation, args, caller, asTask }: InvocationRequest): Promise<InvocationResult> {
+  async invoke({ operation, args, caller, asTask, report }: InvocationRequest): Promise<InvocationResult> {
     const { manifest } = operation;
     if (operation.risk !== 'write' || manifest === undefined) return riskNotSupportedResult(operation);
     const { configuration, repository, correlationId } = this.deps;
@@ -77,6 +77,8 @@ export class ChangeSetInvoker implements OperationInvoker {
     }
     const { changeset } = created;
     const withId: Details = { ...base, changesetId: changeset.id };
+    // On the tool.call row from here on, even if the start or the task write throws (AUD-1).
+    report?.(withId);
 
     try {
       await this.deps.starter.start(changeset.id);

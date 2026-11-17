@@ -213,6 +213,16 @@ describe('MCP-7 MCP-1 EXE-1 asynchronous write call', () => {
     expect(reader.calls).toEqual([]);
   });
 
+  it('MCP-7 AUD-1 a failed task write still reports the change-set ID for the tool.call row', async () => {
+    const { invoker, tasks } = setup();
+    tasks.create = () => Promise.reject(new Error('task store down'));
+    const reported: Record<string, unknown>[] = [];
+    await expect(
+      invoker.invoke({ operation: op('catalog.update_content'), args: WRITE_ARGS, caller, asTask: true, report: (d) => reported.push(d) }),
+    ).rejects.toThrow('task store down');
+    expect(Object.assign({}, ...reported)).toMatchObject({ ...BASE_AUDIT, changesetId: ID });
+  });
+
   it('MCP-7 CS-1 targets_missing answers as in Phase 4 and creates neither task nor workflow', async () => {
     const { invoker, starter, tasks } = setup();
     const result = await invoker.invoke({ operation: op('catalog.update_content'), args: { brand: 'acme', changes: { name: 'New' } }, caller, asTask: true });

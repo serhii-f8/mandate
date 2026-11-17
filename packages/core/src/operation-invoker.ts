@@ -23,6 +23,12 @@ export interface InvocationRequest {
   readonly caller: Caller;
   /** The request declared Tasks; an invoker that supports tasks may answer with `task` (MCP-7). */
   readonly asTask?: boolean;
+  /**
+   * Adds non-sensitive details to the call's `tool.call` audit row as soon as they are known, so
+   * they survive a later throw (a failed task write keeps the change-set ID). Merged with, and
+   * overridden by, `auditDetails` of the result. Non-sensitive only (SEC-3).
+   */
+  readonly report?: (details: Readonly<Record<string, string | number | boolean>>) => void;
 }
 
 /**

@@ -371,6 +371,21 @@ describe('MCP-7 AUD-1 task answers', () => {
     expect(row?.details).toMatchObject({ changesetId: 'cs-1', taskId: task.taskId });
   });
 
+  it('AUD-1 an invoker that reports and then throws keeps the reported change-set ID on the tool.call row', async () => {
+    const failing: OperationInvoker = {
+      invoke(request: InvocationRequest): Promise<InvocationResult> {
+        request.report?.({ changesetId: 'cs-1' });
+        return Promise.reject(new Error('task store down'));
+      },
+    };
+    const { deps, req, audit } = setupWith(LOADED, failing);
+    const answer = await callTool(deps, { ...req(alice), tasks: true }, 'catalog.search_products', call);
+    expect(answer).toMatchObject({ isError: true, content: [{ type: 'text', text: 'Tool failed.' }] });
+    const row = audit.events.find((e) => e.action === 'tool.call');
+    expect(row?.outcome).toBe('error');
+    expect(row?.details).toMatchObject({ changesetId: 'cs-1', operation: 'catalog.search_products', errorCode: 'handler_failed' });
+  });
+
   it('a built-in task answer for a non-declaring request is a tool failure', async () => {
     const rogue: BuiltinTool = {
       name: 'rogue',

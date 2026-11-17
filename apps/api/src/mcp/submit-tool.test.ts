@@ -309,6 +309,13 @@ describe('MCP-8 POL-6 POL-5 POL-4 submit_for_approval', () => {
     expect(tasks.created).toEqual([]);
   });
 
+  it('MCP-7 AUD-1 a failed task write still reports the change-set ID for the tool.call row', async () => {
+    const { tool, ctx, tasks, reportedAll } = await setup();
+    tasks.create = () => Promise.reject(new Error('task store down'));
+    await expect(tool.handler(args(), ctx(alice, { tasks: true }))).rejects.toThrow('task store down');
+    expect(reportedAll().changesetId).toBe(ID);
+  });
+
   it('POL-4 start receives groups, clientId and the allowing role\'s limits', async () => {
     const { tool, ctx, executor } = await setup();
     await tool.handler(args(), ctx(alice));

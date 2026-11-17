@@ -222,7 +222,7 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
       // Step 1 returned unless a built-in or a granted operation was found.
       if (operation === undefined) throw new Error('no operation after lookup');
       report({ operation: operation.id });
-      const result = await deps.invokerFor(configuration, req.correlationId).invoke({ operation, args: validArgs, caller: req.caller, asTask: req.tasks });
+      const result = await deps.invokerFor(configuration, req.correlationId).invoke({ operation, args: validArgs, caller: req.caller, asTask: req.tasks, report });
       // The operation ID stays authoritative over whatever the invoker reports.
       if (result.auditDetails !== undefined) report({ ...result.auditDetails, operation: operation.id });
       if (result.task !== undefined) {

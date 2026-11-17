@@ -115,6 +115,8 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
           createdAt: deps.now(),
           ttlMs: TASK_TTL_MS,
         };
+        // The change-set ID is on the tool.call row even if the task write throws (AUD-1).
+        report({ changesetId: id });
         // Committed before the handle is returned, so the first tasks/get finds it.
         await deps.tasks.create(task);
         report({ taskId: task.taskId });
