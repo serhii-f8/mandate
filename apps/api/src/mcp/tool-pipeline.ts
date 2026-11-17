@@ -20,6 +20,7 @@ import {
   type PolicyEngine,
 } from '@aiops/core';
 import { toCallToolResult } from '../changesets/results.js';
+import { createTaskResult, type ToolAnswer } from './tasks/task-result.js';
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
 import type { BuiltinTool } from './tool-catalog.js';
 
@@ -48,6 +49,8 @@ export interface PipelineRequest {
   readonly correlationId: string;
   readonly declaredClientName?: string;
   readonly snapshot: Snapshot;
+  /** The request declared the Tasks extension (MCP-7, MCP-1). */
+  readonly tasks: boolean;
 }
 
 const engines = new WeakMap<LoadedConfiguration, PolicyEngine>();
@@ -135,7 +138,7 @@ async function recordDecision(
   }
 }
 
-export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: string, rawArgs: unknown): Promise<CallToolResult> {
+export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: string, rawArgs: unknown): Promise<ToolAnswer> {
   const { configuration, engine } = req.snapshot;
   const builtin = deps.builtins.find((t) => t.name === name);
   const operation = builtin === undefined ? engine.grantedOperations(req.caller).find((op) => op.toolName === name) : undefined;
@@ -210,14 +213,20 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
       if (builtin !== undefined) {
         // A change-set ID is an identifier, not argument content, so it may be audited.
         if (typeof validArgs.changeset_id === 'string') report({ changesetId: validArgs.changeset_id });
-        return builtin.handler(validArgs, { caller: req.caller, snapshot: req.snapshot, correlationId: req.correlationId });
+        return builtin.handler(validArgs, { caller: req.caller, snapshot: req.snapshot, correlationId: req.correlationId, tasks: req.tasks, report });
       }
       // Step 1 returned unless a built-in or a granted operation was found.
       if (operation === undefined) throw new Error('no operation after lookup');
       report({ operation: operation.id });
-      const result = await deps.invokerFor(configuration, req.correlationId).invoke({ operation, args: validArgs, caller: req.caller });
+      const result = await deps.invokerFor(configuration, req.correlationId).invoke({ operation, args: validArgs, caller: req.caller, asTask: req.tasks });
       // The operation ID stays authoritative over whatever the invoker reports.
       if (result.auditDetails !== undefined) report({ ...result.auditDetails, operation: operation.id });
+      if (result.task !== undefined) {
+        // A task for a request that did not declare the extension is a server bug; it must not reach the client (MCP-1).
+        if (!req.tasks) throw new Error('task created for a request without the Tasks declaration');
+        report({ taskId: result.task.taskId });
+        return createTaskResult(result.task);
+      }
       return toCallToolResult(result);
     },
     runDeps,

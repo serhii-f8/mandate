@@ -1,4 +1,5 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
+import { isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { toolCallAuditEvent, type AuditLog, type AuditOutcome, type Caller } from '@aiops/core';
 
 export interface AuditedRunDeps {
@@ -33,19 +34,20 @@ export type AuditDetails = Readonly<Record<string, string | number | boolean>>;
  */
 export async function auditedRun(
   tool: string,
-  run: (report: (details: AuditDetails) => void) => Promise<CallToolResult>,
+  run: (report: (details: AuditDetails) => void) => Promise<ToolAnswer>,
   deps: AuditedRunDeps,
-): Promise<CallToolResult> {
+): Promise<ToolAnswer> {
   const started = deps.now();
   let details: AuditDetails = {};
   const report = (more: AuditDetails): void => {
     details = { ...details, ...more };
   };
-  let result: CallToolResult;
+  let result: ToolAnswer;
   let outcome: AuditOutcome;
   try {
     result = await run(report);
-    outcome = result.isError === true ? 'error' : 'ok';
+    // A task handle is a successful answer: the work it stands for continues elsewhere (MCP-7).
+    outcome = !isTaskAnswer(result) && result.isError === true ? 'error' : 'ok';
   } catch {
     result = TOOL_FAILED;
     outcome = 'error';

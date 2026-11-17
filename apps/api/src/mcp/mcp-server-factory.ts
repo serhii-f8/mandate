@@ -1,8 +1,9 @@
-import { CLIENT_INFO_META_KEY, Server, type AuthInfo, type McpServerFactory } from '@modelcontextprotocol/server';
+import { CLIENT_INFO_META_KEY, Server, type AuthInfo, type CallToolResult, type McpServerFactory } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { Caller } from '@aiops/core';
 import { declaresTasks, TASKS_EXTENSION } from './tasks/extension.js';
 import { createTaskHandlers, type TaskHandlerDeps, type TaskRequestContext } from './tasks/task-handlers.js';
+import { isTaskAnswer } from './tasks/task-result.js';
 import { callTool, listTools, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
 
 export const SERVER_INFO = { name: 'aiops', version: '0.0.0' } as const;
@@ -65,12 +66,18 @@ export function createServerFactory(deps: PipelineDeps, tasks: TaskHandlerDeps):
     const server = new Server(SERVER_INFO, { capabilities: { tools: { listChanged: false }, extensions: { [TASKS_EXTENSION]: {} } } });
     const request = (envelope: object | undefined): PipelineRequest => {
       const name = declaredClientName(envelope);
-      return { caller, correlationId, snapshot, ...(name === undefined ? {} : { declaredClientName: name }) };
+      return { caller, correlationId, snapshot, tasks: declaresTasks(envelope), ...(name === undefined ? {} : { declaredClientName: name }) };
     };
     server.setRequestHandler('tools/list', async (_req, ctx) => ({ tools: await listTools(deps, request(ctx.mcpReq.envelope)) }));
-    server.setRequestHandler('tools/call', async (req, ctx) =>
-      server.projectCallToolResult(await callTool(deps, request(ctx.mcpReq.envelope), req.params.name, req.params.arguments), undefined),
-    );
+    server.setRequestHandler('tools/call', async (req, ctx) => {
+      const answer = await callTool(deps, request(ctx.mcpReq.envelope), req.params.name, req.params.arguments);
+      // A task answer skips projectCallToolResult, which would wrap structuredContent and add text fallbacks to it
+      // (ADR 0003, ADR 0029). Verified in SDK 2.4.0: stampResultType lets resultType 'task' pass on tools/call; the
+      // tools/call wrapper still adds an empty `content` (normalizeContentlessToolResult), which task clients ignore.
+      // The handler's declared result type predates the Tasks extension and has no task variant, so the
+      // task answer is cast to it; it passes the wrapper's validation as spike 1 and the factory test show.
+      return isTaskAnswer(answer) ? (answer as unknown as CallToolResult) : server.projectCallToolResult(answer, undefined);
+    });
     // The 3-argument (custom-schema) form: on 2026-07-28, `tasks/get` and `tasks/cancel` are
     // extension methods, which the SDK dispatches only when registered this way (ADR 0029).
     const taskContext = (envelope: object | undefined): TaskRequestContext => ({ caller, correlationId, declared: declaresTasks(envelope) });

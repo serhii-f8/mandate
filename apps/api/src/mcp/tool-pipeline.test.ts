@@ -1,11 +1,19 @@
-import { ProtocolError } from '@modelcontextprotocol/server';
+import { ProtocolError, type CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
 import type { AuditEventInput, Caller, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
 import { FakeInvoker, InMemoryAuditLog } from '@aiops/testing';
 import { callerFromAuthInfo } from '../auth/caller-from-auth.js';
 import { pingTool } from './builtin-tools.js';
+import type { BuiltinTool } from './tool-catalog.js';
 import { callTool, listTools, snapshotOf, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
+import { isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
+
+/** Narrows an answer to a plain tool result; these tests never ask for a task. */
+function plain(answer: ToolAnswer): CallToolResult {
+  if (isTaskAnswer(answer)) throw new Error('unexpected task answer');
+  return answer;
+}
 
 const SOURCES = {
   'connections.yaml': `version: 1
@@ -71,7 +79,7 @@ function setup() {
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
     now: () => 0,
   };
-  const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot() });
+  const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot(), tasks: false });
   return { audit, invoker, deps, req };
 }
 
@@ -119,7 +127,7 @@ describe('MCP-2 a non-granted tool is an unknown tool', () => {
 describe('MCP-3 arguments are validated before policy', () => {
   it('returns an input validation error and never evaluates policy or calls the invoker', async () => {
     const { deps, req, audit, invoker } = setup();
-    const result = await callTool(deps, req(alice), 'catalog.search_products', { brand: 5, fields: [] });
+    const result = plain(await callTool(deps, req(alice), 'catalog.search_products', { brand: 5, fields: [] }));
     expect(result.isError).toBe(true);
     expect(text(result)).toMatch(/^Input validation error: Invalid arguments for tool catalog\.search_products: /);
     expect(actions(audit.events)).toEqual(['tool.call:error']);
@@ -129,14 +137,14 @@ describe('MCP-3 arguments are validated before policy', () => {
 
   it('treats missing arguments as an empty object', async () => {
     const { deps, req } = setup();
-    expect(text(await callTool(deps, req(alice), 'catalog.search_products', undefined))).toMatch(/brand/);
+    expect(text(plain(await callTool(deps, req(alice), 'catalog.search_products', undefined)))).toMatch(/brand/);
   });
 });
 
 describe('POL-8 every decision is audited with its rule', () => {
   it('records the allow, runs the operation, then records the call', async () => {
     const { deps, req, audit, invoker } = setup();
-    const result = await callTool(deps, req(alice), 'catalog.search_products', { brand: 'acme', fields: ['name'] });
+    const result = plain(await callTool(deps, req(alice), 'catalog.search_products', { brand: 'acme', fields: ['name'] }));
     expect(result.isError).not.toBe(true);
     expect(text(result)).toBe('ran catalog.search_products');
     expect(actions(audit.events)).toEqual(['policy.decision:allow', 'tool.call:ok']);
@@ -147,7 +155,7 @@ describe('POL-8 every decision is audited with its rule', () => {
 
   it('denies an out-of-scope call with the matching rule', async () => {
     const { deps, req, audit, invoker } = setup();
-    const result = await callTool(deps, req(alice), 'catalog.search_products', { brand: 'initech', fields: [] });
+    const result = plain(await callTool(deps, req(alice), 'catalog.search_products', { brand: 'initech', fields: [] }));
     expect(result.isError).toBe(true);
     expect(text(result)).toBe("Denied by policy: argument 'brand' is outside your scope (rule role:content_manager/grant:own-brands/scope:brand)");
     expect(audit.events).toEqual([
@@ -159,14 +167,14 @@ describe('POL-8 every decision is audited with its rule', () => {
 
   it('denies a denied field', async () => {
     const { deps, req } = setup();
-    expect(text(await callTool(deps, req(alice), 'catalog.search_products', { brand: 'acme', fields: ['cost'] }))).toBe(
+    expect(text(plain(await callTool(deps, req(alice), 'catalog.search_products', { brand: 'acme', fields: ['cost'] })))).toBe(
       "Denied by policy: field 'cost' is denied (rule role:content_manager/grant:own-brands/deny_fields)",
     );
   });
 
   it('records built-in tools under the builtin rule', async () => {
     const { deps, req, audit } = setup();
-    expect(text(await callTool(deps, req(bob), 'ping', { message: 'hi' }))).toBe('pong: hi');
+    expect(text(plain(await callTool(deps, req(bob), 'ping', { message: 'hi' })))).toBe('pong: hi');
     expect(actions(audit.events)).toEqual(['policy.decision:allow', 'tool.call:ok']);
     expect(audit.events[0]?.details).toMatchObject({ rule: 'builtin' });
   });
@@ -176,7 +184,7 @@ describe('SEC-1 nothing runs without an allow decision on record', () => {
   it('does not run when the decision cannot be audited', async () => {
     const { deps, req, audit, invoker } = setup();
     audit.failNext = new Error('database down');
-    const result = await callTool(deps, req(alice), 'catalog.search_products', { brand: 'acme', fields: [] });
+    const result = plain(await callTool(deps, req(alice), 'catalog.search_products', { brand: 'acme', fields: [] }));
     expect(text(result)).toBe('Audit unavailable; the call was not completed.');
     expect(invoker.calls).toEqual([]);
   });
@@ -184,7 +192,7 @@ describe('SEC-1 nothing runs without an allow decision on record', () => {
   it('reports an invoker failure without its message', async () => {
     const { deps, req, invoker, audit } = setup();
     invoker.failWith = new Error('upstream said: secret detail');
-    const result = await callTool(deps, req(alice), 'catalog.search_products', { brand: 'acme', fields: [] });
+    const result = plain(await callTool(deps, req(alice), 'catalog.search_products', { brand: 'acme', fields: [] }));
     expect(text(result)).toBe('Tool failed.');
     expect(audit.events[1]).toMatchObject({ action: 'tool.call', outcome: 'error', details: { errorCode: 'handler_failed' } });
   });
@@ -234,7 +242,7 @@ function setupWith(config: LoadedConfiguration, invoker: OperationInvoker) {
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
     now: () => 0,
   };
-  const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot() });
+  const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot(), tasks: false });
   return { audit, deps, req };
 }
 
@@ -249,7 +257,7 @@ describe('MCP-9 tools are published and called by their tool name', () => {
   it('MCP-9 calls the operation by its tool name; audit subject is the tool name, details.operation the operation ID', async () => {
     const invoker = new FakeInvoker();
     const { deps, req, audit } = setupWith(OVERRIDDEN, invoker);
-    const result = await callTool(deps, req(bob), 'support.find_order', { order_number: '100' });
+    const result = plain(await callTool(deps, req(bob), 'support.find_order', { order_number: '100' }));
     expect(text(result)).toBe('ran support.lookup_order');
     expect(invoker.calls[0]?.operation.id).toBe('support.lookup_order');
     expect(audit.events).toEqual([
@@ -283,7 +291,7 @@ describe('MCP-9 tools are published and called by their tool name', () => {
 describe('MCP-4 read results reach the client as summary, data block and structured content', () => {
   it('MCP-4 puts the summary first and the data JSON in a second text block', async () => {
     const { deps, req } = setupWith(LOADED, new ReadLikeInvoker());
-    const result = await callTool(deps, req(alice), 'catalog.search_products', { brand: 'acme', fields: ['sku'] });
+    const result = plain(await callTool(deps, req(alice), 'catalog.search_products', { brand: 'acme', fields: ['sku'] }));
     expect(result.content).toEqual([
       { type: 'text', text: 'catalog.search_products returned 1 item(s).' },
       { type: 'text', text: '{"operation":"x","items":[{"sku":"a"}]}' },
@@ -319,11 +327,68 @@ describe('SEC-1 POL-2 the operation runs under the snapshot the decision used', 
       newId: () => '00000000-0000-4000-8000-000000000001',
       now: () => 0,
     };
-    const req: PipelineRequest = { caller: alice, correlationId: 'corr-9', snapshot: deps.snapshot() };
+    const req: PipelineRequest = { caller: alice, correlationId: 'corr-9', snapshot: deps.snapshot(), tasks: false };
     current = OVERRIDDEN; // a reload lands while the request is in flight
     await callTool(deps, req, 'catalog.search_products', { brand: 'acme', fields: ['sku'] });
     expect(seen).toHaveLength(1);
     expect(seen[0]?.[0]).toBe(LOADED);
     expect(seen[0]?.[1]).toBe('corr-9');
+  });
+});
+
+describe('MCP-7 AUD-1 task answers', () => {
+  const task = { taskId: '11111111-1111-4111-8111-111111111111', owner: 'alice-id', changesetId: 'cs-1', kind: 'prepare' as const, tool: 'catalog.search_products', createdAt: new Date('2026-01-01T00:00:00Z'), ttlMs: 604800000 };
+  const taskInvoker = (): OperationInvoker & { seen: InvocationRequest[] } => {
+    const seen: InvocationRequest[] = [];
+    return {
+      seen,
+      invoke(request: InvocationRequest): Promise<InvocationResult> {
+        seen.push(request);
+        return Promise.resolve({ text: '', task, auditDetails: { changesetId: 'cs-1' } });
+      },
+    };
+  };
+  const call = { brand: 'acme', fields: ['sku'] };
+
+  it('a declaring request passes asTask and gets a CreateTaskResult', async () => {
+    const invoker = taskInvoker();
+    const { deps, req } = setupWith(LOADED, invoker);
+    const answer = await callTool(deps, { ...req(alice), tasks: true }, 'catalog.search_products', call);
+    expect(answer).toMatchObject({ resultType: 'task', taskId: task.taskId, status: 'working', ttlMs: 604800000, pollIntervalMs: 2000 });
+    expect(invoker.seen[0]?.asTask).toBe(true);
+  });
+
+  it('the tool.call event of a task carries changesetId and taskId', async () => {
+    const { deps, req, audit } = setupWith(LOADED, taskInvoker());
+    await callTool(deps, { ...req(alice), tasks: true }, 'catalog.search_products', call);
+    const row = audit.events.find((e) => e.action === 'tool.call');
+    expect(row?.outcome).toBe('ok');
+    expect(row?.details).toMatchObject({ changesetId: 'cs-1', taskId: task.taskId });
+  });
+
+  it('a task for a non-declaring request is a tool failure', async () => {
+    const { deps, req, audit } = setupWith(LOADED, taskInvoker());
+    const answer = await callTool(deps, req(alice), 'catalog.search_products', call);
+    expect(answer).toMatchObject({ isError: true, content: [{ type: 'text', text: 'Tool failed.' }] });
+    expect(audit.events.find((e) => e.action === 'tool.call')?.details).toMatchObject({ errorCode: 'handler_failed' });
+  });
+
+  it('built-ins receive tasks and report', async () => {
+    const seen: boolean[] = [];
+    const probe: BuiltinTool = {
+      name: 'probe',
+      description: 'probe',
+      inputSchema: { type: 'object' },
+      validate: () => ({ ok: true }),
+      handler(_args, ctx) {
+        seen.push(ctx.tasks);
+        ctx.report({ taskId: 't' });
+        return Promise.resolve({ content: [{ type: 'text', text: 'ok' }] });
+      },
+    };
+    const { deps, req, audit } = setupWith(LOADED, new FakeInvoker());
+    await callTool({ ...deps, builtins: [probe] }, { ...req(alice), tasks: true }, 'probe', {});
+    expect(seen).toEqual([true]);
+    expect(audit.events.find((e) => e.action === 'tool.call')?.details).toMatchObject({ taskId: 't' });
   });
 });

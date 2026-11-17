@@ -1,6 +1,7 @@
-import type { CallToolResult } from '@modelcontextprotocol/server';
 import type { ArgumentCheck } from '@aiops/config';
 import type { Caller } from '@aiops/core';
+import type { AuditDetails } from './audited-tool.js';
+import type { ToolAnswer } from './tasks/task-result.js';
 import type { Snapshot } from './tool-pipeline.js';
 
 /** What a built-in handler receives besides its arguments (design 6.2). */
@@ -8,6 +9,10 @@ export interface BuiltinContext {
   readonly caller: Caller;
   readonly snapshot: Snapshot;
   readonly correlationId: string;
+  /** The request declared the Tasks extension; only then may the handler answer with a task (MCP-7). */
+  readonly tasks: boolean;
+  /** Adds non-sensitive details to the `tool.call` audit row (AUD-1, SEC-3). */
+  readonly report: (details: AuditDetails) => void;
 }
 
 /**
@@ -24,5 +29,5 @@ export interface BuiltinTool {
   readonly readOnlyHint?: boolean;
   validate(args: unknown): ArgumentCheck;
   /** Receives arguments that passed `validate`. */
-  handler(args: Readonly<Record<string, unknown>>, ctx: BuiltinContext): Promise<CallToolResult>;
+  handler(args: Readonly<Record<string, unknown>>, ctx: BuiltinContext): Promise<ToolAnswer>;
 }
