@@ -1,4 +1,4 @@
-import { and, asc, desc, DrizzleQueryError, eq, gt, inArray, lt, lte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, lte, sql, type SQL } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type {
   AuditEventInput,
@@ -20,6 +20,7 @@ import type {
 } from '@aiops/core';
 import { EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
 import { DrizzleAuditLog } from './audit-log.js';
+import { guarded } from './errors.js';
 import type { Db, DbExecutor } from './client.js';
 import { changeBatch, changeItem, changeSet } from './schema.js';
 
@@ -114,36 +115,6 @@ function toItem(row: ChangeItemRow): ChangeItemRecord {
     after: row.after,
     ...(row.error === null ? {} : { error: row.error }),
   };
-}
-
-/** Postgres error code of `error` or of its cause (drizzle wraps driver errors). */
-function pgCode(error: unknown): string | undefined {
-  for (let e: unknown = error; typeof e === 'object' && e !== null; e = (e as { cause?: unknown }).cause) {
-    const code = (e as { code?: unknown }).code;
-    if (typeof code === 'string') return code;
-  }
-  return undefined;
-}
-
-/**
- * A database error leaves as a fixed message carrying only its code, without `cause`:
- * drizzle's error quotes the statement and its parameters (target IDs, outcome texts,
- * cursors, error codes), and the driver's `detail` quotes key values (SEC-3). Errors of
- * our own (validation, an injected audit failure) pass unchanged.
- */
-function databaseError(what: string, error: unknown): unknown {
-  const code = pgCode(error);
-  if (code === undefined && !(error instanceof DrizzleQueryError)) return error;
-  const message = code === '23505' && what === 'change-set create' ? 'change-set already exists' : `${what} failed`;
-  return Object.assign(new Error(code === undefined ? message : `${message} (sqlstate ${code})`), code === undefined ? {} : { code });
-}
-
-export async function guarded<T>(what: string, run: () => Promise<T>): Promise<T> {
-  try {
-    return await run();
-  } catch (error) {
-    throw databaseError(what, error);
-  }
 }
 
 /**

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { LoadedConfiguration } from '@aiops/config';
-import type { ChangeWriter, ExecutionGuard, ReadPage, UpstreamReader } from '@aiops/core';
+import type { BatchContext, ChangeItemRecord, ChangeWriter, ExecutionGuard, ItemOutcome, ReadPage, UpstreamReader } from '@aiops/core';
 import { PostgresChangeSetRepository } from '@aiops/db';
 import { DEFAULT_TUNING, PREPARE_MAX_ATTEMPTS, type ChangesetActivities } from '@aiops/temporal';
 import { allowAllGuard, ScriptedWriter } from '@aiops/testing';
@@ -33,6 +33,36 @@ class CatalogReader implements UpstreamReader {
     this.calls.push({ operationId, args });
     const skus = Array.isArray(args.skus) ? (args.skus as string[]) : [];
     return Promise.resolve({ ok: true, items: skus.map((sku) => ({ sku, brand: 'acme', name: `old ${sku}` })), truncated: false });
+  }
+}
+
+/** Writes every item; its first call waits at a gate before recording the submission. */
+class GatedWriter implements ChangeWriter {
+  calls = 0;
+  private open: () => void = () => undefined; // replaced synchronously by the Promise executor
+  private reach: () => void = () => undefined; // replaced synchronously by the Promise executor
+  private readonly gate = new Promise<void>((resolve) => {
+    this.open = resolve;
+  });
+  readonly reached = new Promise<void>((resolve) => {
+    this.reach = resolve;
+  });
+
+  release(): void {
+    this.open();
+  }
+
+  async writeBatch(input: { items: readonly ChangeItemRecord[]; batch: BatchContext }): Promise<readonly ItemOutcome[]> {
+    this.calls += 1;
+    if (this.calls === 1) {
+      this.reach();
+      await this.gate;
+    }
+    await input.batch.recordSubmission({
+      upstreamBatchId: input.batch.key,
+      plan: input.items.map((i) => ({ targetId: i.targetId, action: 'write' as const })),
+    });
+    return input.items.map((i): ItemOutcome => ({ targetId: i.targetId, status: 'written' }));
   }
 }
 
@@ -236,6 +266,62 @@ describe('change-set activities', () => {
     const cs = await createPrepared(repository, 2, { execute: {} });
     await expect(attempt(1, () => activities().finishExecution(cs.id, 'writer_error'))).resolves.toEqual({ status: 'failed' });
     expect(await repository.get(cs.id)).toMatchObject({ status: 'failed', errorCode: 'writer_error' });
+  });
+
+  it('NFR-2 SEC-3 a throwing writer fails the attempt as retryable writer_failed without its message', async () => {
+    const cs = await createPrepared(repository, 2, { execute: {} });
+    const writer: ChangeWriter = { writeBatch: () => Promise.reject(new Error('upstream said secret-upstream-text')) };
+    let error: unknown;
+    try {
+      await attempt(1, () => activities({ writer }).executeBatch(cs.id, 0));
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toMatchObject({ message: 'writer_failed', nonRetryable: false });
+    expect((error as Error).cause).toBeUndefined();
+    expect(`${String((error as Error).stack)} ${JSON.stringify(error)}`).not.toContain('secret-upstream-text');
+    expect(await itemStatuses(cs.id)).toEqual({ 't-0001': 'pending', 't-0002': 'pending' });
+  });
+
+  it('NFR-2 EXE-3 a claim by an older attempt than the batch owner is superseded and not retried', async () => {
+    const cs = await createPrepared(repository, 2, { execute: {} });
+    const writer = new ScriptedWriter();
+    const a = activities({ writer });
+    const paused = writer.pauseAt(0);
+    const owner = attempt(2, () => a.executeBatch(cs.id, 0));
+    await paused.reached;
+    await expect(attempt(1, () => a.executeBatch(cs.id, 0))).rejects.toMatchObject({ message: 'batch_superseded', nonRetryable: true });
+    expect(writer.calls).toBe(1);
+    paused.release();
+    await expect(owner).resolves.toMatchObject({ written: 2, remaining: 0 });
+  });
+
+  it('NFR-2 EXE-3 a writer whose submission is fenced off is superseded and records nothing', async () => {
+    const cs = await createPrepared(repository, 2, { execute: {} });
+    const writer = new GatedWriter();
+    const a = activities({ writer });
+    const first = attempt(1, () => a.executeBatch(cs.id, 0));
+    await writer.reached;
+    await expect(attempt(2, () => a.executeBatch(cs.id, 0))).resolves.toMatchObject({ written: 2, remaining: 0 });
+    writer.release();
+    await expect(first).rejects.toMatchObject({ message: 'batch_superseded', nonRetryable: true });
+    expect((await repository.stats(cs.id)).written).toBe(2);
+  });
+
+  it('EXE-1 prepare fails operation_unavailable when the operation has no manifest in the configuration', async () => {
+    const cs = await createPreparing(repository, { operation: READ_OPERATION, configHash: configuration.hash });
+    const reader = new CatalogReader();
+    await expect(attempt(1, () => activities({ reader }).prepare(cs.id))).resolves.toEqual({ status: 'failed' });
+    expect(await repository.get(cs.id)).toMatchObject({ status: 'failed', errorCode: 'operation_unavailable' });
+    expect(reader.calls).toEqual([]);
+  });
+
+  it('EXE-7 finishExecution cancelled without a stored cancel request fails closed with executor_error', async () => {
+    const cs = await createPrepared(repository, 2, { execute: {} });
+    await expect(attempt(1, () => activities().finishExecution(cs.id, 'cancelled'))).resolves.toEqual({ status: 'failed' });
+    expect(await repository.get(cs.id)).toMatchObject({ status: 'failed', errorCode: 'executor_error' });
+    const last = (await auditEventsOf(postgres.database, cs.id)).at(-1);
+    expect(last).toMatchObject({ actor: 'system', details: { from: 'executing', to: 'failed' } });
   });
 
   it('EXE-7 finishExecution cancelled uses the stored cancel actor', async () => {

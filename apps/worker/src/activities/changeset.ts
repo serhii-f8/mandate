@@ -1,7 +1,9 @@
 /**
  * The change-set activities of `changesetWorkflow` (design §4, §5). Each one reads the truth from
- * PostgreSQL, is safe to retry (NFR-2) and throws only fixed codes (SEC-3). Activity names and
- * argument shapes are part of workflow history (EXE-10).
+ * PostgreSQL and is safe to retry (NFR-2). The failures they raise themselves carry fixed codes,
+ * a writer's error is replaced by `writer_failed`, and the PostgreSQL stores report value-free
+ * messages (SEC-3); an unexpected programming error is not rewritten. Activity names and argument
+ * shapes are part of workflow history (EXE-10).
  */
 import type { LoadedConfiguration } from '@aiops/config';
 import {
@@ -250,25 +252,29 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
 
     async finishExecution(changesetId, outcome) {
       const changeset = await load(changesetId);
+      const cancel = changeset.cancelRequest;
       let finished: ChangeSetRecord | undefined;
-      if (outcome === 'cancelled') {
+      if (outcome === 'cancelled' && cancel !== undefined) {
         // The stored request's actor and correlation ID end the run (EXE-7).
-        const cancel = changeset.cancelRequest;
         finished = await repository.transition(
           changesetId,
           ['executing'],
           'cancelled',
           changesetTransitionEvent({
             id: deps.newId(),
-            actor: cancel?.actor ?? 'system',
+            actor: cancel.actor,
             changeset,
             from: 'executing',
             to: 'cancelled',
-            correlationId: cancel?.correlationId ?? changeset.correlationId,
+            correlationId: cancel.correlationId,
           }),
         );
       } else {
-        const terminal = executionTerminal(await repository.stats(changesetId), outcome);
+        // `cancelled` without a stored request cannot come from the workflow; fail closed as the in-memory executor does.
+        const terminal = executionTerminal(
+          await repository.stats(changesetId),
+          outcome === 'cancelled' ? 'executor_error' : outcome,
+        );
         finished = await repository.transition(
           changesetId,
           ['executing'],

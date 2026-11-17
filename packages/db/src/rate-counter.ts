@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import type { RateCounter } from '@aiops/core';
-import { guarded } from './changeset-repository.js';
+import { guarded } from './errors.js';
 import type { Db } from './client.js';
 import { rateBucket } from './schema.js';
 
