@@ -35,6 +35,8 @@ export interface CreateWorkerOptions {
   readonly dataConverter?: DataConverter;
   readonly shutdownGraceTime?: Duration;
   readonly shutdownForceTime?: Duration;
+  /** Default: the SDK's. 0 keeps no workflow sticky to this worker (tests spread workflow tasks over workers). */
+  readonly maxCachedWorkflows?: number;
 }
 
 export function createWorker(options: CreateWorkerOptions): Promise<Worker> {
@@ -48,5 +50,6 @@ export function createWorker(options: CreateWorkerOptions): Promise<Worker> {
     ...(options.dataConverter === undefined ? {} : { dataConverter: options.dataConverter }),
     ...(options.shutdownGraceTime === undefined ? {} : { shutdownGraceTime: options.shutdownGraceTime }),
     ...(options.shutdownForceTime === undefined ? {} : { shutdownForceTime: options.shutdownForceTime }),
+    ...(options.maxCachedWorkflows === undefined ? {} : { maxCachedWorkflows: options.maxCachedWorkflows }),
   });
 }

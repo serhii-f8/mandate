@@ -20,7 +20,7 @@ import { ScriptedWriter } from '@aiops/testing';
 import { Client } from '@temporalio/client';
 import type { Duration } from '@temporalio/common';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
-import { DefaultLogger, Runtime, type Worker } from '@temporalio/worker';
+import { DefaultLogger, Runtime, type NativeConnection, type Worker } from '@temporalio/worker';
 import { createActivities, createExecutionGuard, echo, type ExecutionSettings } from '../../src/activities/index.js';
 import { createWorker } from '../../src/worker.js';
 import { testConfiguration } from './configuration.js';
@@ -105,6 +105,14 @@ export interface TestWorkerOptions {
   readonly tuning?: Partial<ActivityTuning>;
   readonly taskQueue?: string;
   readonly shutdownForceTime?: Duration;
+  /**
+   * Default: the environment's connection. Core allows one worker per namespace and task queue
+   * on a connection, so a second worker on the same queue (another worker process in production)
+   * needs a connection of its own.
+   */
+  readonly connection?: NativeConnection;
+  /** Default: the SDK's. 0 sends every workflow task through the shared queue instead of a sticky one. */
+  readonly maxCachedWorkflows?: number;
   /** Called with the activity name before every activity invocation. */
   readonly spy?: (activity: string) => void;
 }
@@ -156,12 +164,13 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
     now: opts.now ?? (() => new Date()),
   });
   const worker = await createWorker({
-    connection: infra.env.nativeConnection,
+    connection: opts.connection ?? infra.env.nativeConnection,
     namespace: 'default',
     taskQueue,
     activities: { echo, ...spied(activities, opts.spy) },
     dataConverter: workerDataConverter(parseTemporalKeys(TEST_TEMPORAL_KEYS)),
     ...(opts.shutdownForceTime === undefined ? {} : { shutdownForceTime: opts.shutdownForceTime }),
+    ...(opts.maxCachedWorkflows === undefined ? {} : { maxCachedWorkflows: opts.maxCachedWorkflows }),
   });
   const running = worker.run();
   // A failed run is reported by stop(); until then it must not count as an unhandled rejection.
