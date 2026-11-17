@@ -1,0 +1,12 @@
+version: 1
+roles:
+  - id: content_manager
+    grants:
+      - { operation: shop.update_content, id: own-brands, scope: { brand: [acme, globex] } }
+      - { operation: shop.retire_content, id: retire, scope: { brand: [acme, globex] } }
+    approval: { required: above_threshold, record_threshold: 1, steps: [{ role: content_lead }], allow_widget: true }
+  - id: content_lead
+    grants: []
+role_mapping:
+  - { group: content, roles: [content_manager] }
+  - { group: content-leads, roles: [content_lead] }
