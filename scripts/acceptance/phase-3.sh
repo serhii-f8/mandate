@@ -6,7 +6,8 @@
 #   3. connection-test         the page's connection test reports ok and the scope report (CONN-7)
 #   4. search-allowed-brand    alice (content) searches brand acme through MCP: only acme
 #                              items, the seeded count, no cost (MCP-4, POL-2, POL-3)
-#   5. search-other-brand-denied  brand initech is denied and audited with the rule (POL-2, AUD-1)
+#   5. search-other-brand-denied  brand initech is denied and audited with the rule (POL-2, AUD-1);
+#      denied-field-refused: asking for `cost`, which the upstream holds, is denied (POL-3)
 #   6. credential-absent-from-logs   token, its Base64 and `Bearer <token>` in no service log (SEC-3)
 #   7. credential-absent-from-audit  ... in no audit_event row, nor in plaintext in `credential` (SEC-2)
 #   8. page-denied-without-permission (SEC-1), injection-kept-as-data (SEC-5);
@@ -151,6 +152,23 @@ else
   fail search-other-brand-denied "result=$DENY row=$ROW"
 fi
 
+# 5b. A denied field is refused before any upstream call, although the upstream holds it
+# (POL-3): the raw sandbox product carries `cost`, the same search asking for it is denied.
+RAW_COST="$(TOKEN="$TOKEN" node -e '
+  fetch(process.argv[1] + "/rest/all/V1/products?searchCriteria[filter_groups][0][filters][0][field]=brand&searchCriteria[filter_groups][0][filters][0][value]=acme&searchCriteria[pageSize]=1",
+    { headers: { authorization: "Bearer " + process.env.TOKEN, accept: "application/json" } })
+    .then((r) => r.json()).then((b) => console.log((b.items?.[0]?.custom_attributes ?? []).some((a) => a.attribute_code === "cost") ? "has-cost" : "no-cost"), () => console.log("error"));' "$SANDBOX" 2>&1 || true)"
+COST="$(mcp --token "$ALICE" --tool catalog.search_products --args '{"brand":"acme","fields":["sku","cost"]}' 2>&1 || true)"
+COST_CID="$(json "$COST" '.correlationId')"
+COST_ROW="$(psql_q "select decision || ' ' || (details->>'rule') from audit_event where correlation_id = '${COST_CID}' and action = 'policy.decision'" 2>&1 || true)"
+COST_CALLS="$(psql_q "select count(*) from audit_event where correlation_id = '${COST_CID}' and action = 'tool.call'" 2>&1 || true)"
+if [[ "$RAW_COST" == has-cost && "$(json "$COST" '.isError')" == true && "$(json "$COST" '.text')" == "Denied by policy:"* &&
+  "$COST_ROW" == "deny role:content_manager/grant:own-brands/deny_fields" && "$COST_CALLS" == 0 ]]; then
+  pass denied-field-refused "upstream product has cost: yes; $(json "$COST" '.text') | audited: $COST_ROW; tool.call rows: 0"
+else
+  fail denied-field-refused "raw=$RAW_COST result=$COST row=$COST_ROW calls=$COST_CALLS"
+fi
+
 # 8a. Upstream content stays data: the instruction-like description of ACME-003 appears only
 # in the JSON part and structuredContent, never in the summary (SEC-5).
 INJ="$(mcp --token "$ALICE" --tool catalog.search_products --args '{"brand":"acme","fields":["sku","description"]}' 2>&1 || true)"
@@ -184,10 +202,13 @@ L_B64="$(count_in "$WORK/all.log" <<<"$TOKEN_B64")"
 L_BEARER="$(count_in "$WORK/all.log" <<<"$BEARER")"
 # Control: the same search finds a value that is in the logs.
 L_CONTROL="$(count_in "$WORK/all.log" <<<"keycloak bootstrap done")"
-if [[ "$LOG_LINES" -gt 0 && "$L_CONTROL" -gt 0 && "$L_TOKEN" == 0 && "$L_B64" == 0 && "$L_BEARER" == 0 ]]; then
-  pass credential-absent-from-logs "$LOG_LINES log lines of all services: token 0, Base64 0, 'Bearer <token>' 0 (control 'keycloak bootstrap done': $L_CONTROL)"
+# The api's own stream is captured too: its start line and its per-call upstream lines.
+L_API="$(count_in "$WORK/all.log" <<<"api listening")"
+L_UPSTREAM="$(count_in "$WORK/all.log" <<<"upstream call completed")"
+if [[ "$LOG_LINES" -gt 0 && "$L_CONTROL" -gt 0 && "$L_API" -gt 0 && "$L_UPSTREAM" -gt 0 && "$L_TOKEN" == 0 && "$L_B64" == 0 && "$L_BEARER" == 0 ]]; then
+  pass credential-absent-from-logs "$LOG_LINES log lines of all services: token 0, Base64 0, 'Bearer <token>' 0 (controls 'keycloak bootstrap done': $L_CONTROL, 'api listening': $L_API, 'upstream call completed': $L_UPSTREAM)"
 else
-  fail credential-absent-from-logs "lines=$LOG_LINES control=$L_CONTROL token=$L_TOKEN base64=$L_B64 bearer=$L_BEARER"
+  fail credential-absent-from-logs "lines=$LOG_LINES control=$L_CONTROL api=$L_API upstream=$L_UPSTREAM token=$L_TOKEN base64=$L_B64 bearer=$L_BEARER"
 fi
 
 # 7. ... nor in any audit row, nor in plaintext in the credential table (SEC-2, SEC-3).
