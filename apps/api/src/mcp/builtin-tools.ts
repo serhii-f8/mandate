@@ -2,6 +2,7 @@ import { createSchemaCompiler } from '@aiops/config';
 import type { AuditLog, ChangeSetExecutor, ChangeSetRepository, TaskRepository } from '@aiops/core';
 import type { ApprovalService } from '../approvals/approval-service.js';
 import { createChangesetTools } from './changeset-tools.js';
+import { decideChangesetTool } from './decide-tool.js';
 import { listMyOperationsTool } from './operations-tool.js';
 import { submitForApprovalTool } from './submit-tool.js';
 import type { BuiltinTool } from './tool-catalog.js';
@@ -39,7 +40,7 @@ export interface BuiltinToolDeps {
   readonly tasks: TaskRepository;
   /** For the policy re-check's decision row (POL-6, POL-8). */
   readonly audit: AuditLog;
-  /** Starts approved change-sets with the requester's submitted identity (POL-6, SEC-9). */
+  /** Records decisions (`decide_changeset`) and starts approved change-sets with the requester's submitted identity (POL-6, SEC-9). */
   readonly approvals: ApprovalService;
   /** `AIOPS_PUBLIC_URL`: base of the approval page link in the submit answer (APR-7). */
   readonly publicUrl: URL;
@@ -47,5 +48,5 @@ export interface BuiltinToolDeps {
 
 /** Every built-in tool (MCP-8); their names are reserved. */
 export function createBuiltinTools(deps: BuiltinToolDeps): readonly BuiltinTool[] {
-  return [pingTool, listMyOperationsTool, ...createChangesetTools(deps), submitForApprovalTool(deps)];
+  return [pingTool, listMyOperationsTool, ...createChangesetTools(deps), submitForApprovalTool(deps), decideChangesetTool(deps)];
 }

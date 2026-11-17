@@ -2,9 +2,19 @@ import { ProtocolError, type CallToolResult } from '@modelcontextprotocol/server
 import { describe, expect, it } from 'vitest';
 import type { AuditEventInput, Caller, RateCounter, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import { FakeInvoker, InMemoryAuditLog, InMemoryRateCounter } from '@aiops/testing';
+import {
+  FakeInvoker,
+  InMemoryAuditLog,
+  InMemoryChangeSetRepository,
+  InMemoryExecutor,
+  InMemoryRateCounter,
+  InMemoryTaskRepository,
+  ScriptedWriter,
+} from '@aiops/testing';
+import { ApprovalService } from '../approvals/approval-service.js';
 import { callerFromAuthInfo } from '../auth/caller-from-auth.js';
-import { pingTool } from './builtin-tools.js';
+import { pingTool, type BuiltinToolDeps } from './builtin-tools.js';
+import { DECIDE_TOOL, decideChangesetTool } from './decide-tool.js';
 import type { BuiltinTool } from './tool-catalog.js';
 import { callTool, listTools, minuteWindow, snapshotOf, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
@@ -520,5 +530,93 @@ describe('POL-4 calls_per_minute', () => {
       decision: 'deny',
       details: { rule: 'role:content_manager/limit:calls_per_minute', reason: 'limit_exceeded', detail: 'calls_per_minute_unavailable' },
     });
+  });
+});
+
+/** `content_manager` lets `lead` decide in the widget; `support_agent` names `auditor`, without the widget (APR-8). */
+const WIDGET_SOURCES = {
+  ...SOURCES,
+  'roles.yaml': `version: 1
+roles:
+  - id: content_manager
+    grants:
+      - { operation: catalog.search_products, id: own-brands, scope: { brand: [acme, globex] }, deny_fields: [cost] }
+    approval: { required: never, steps: [{ role: lead }], allow_widget: true }
+  - id: support_agent
+    grants:
+      - { operation: support.lookup_order }
+    approval: { required: never, steps: [{ role: auditor }] }
+  - id: lead
+    grants: []
+  - id: auditor
+    grants: []
+role_mapping:
+  - { group: content, roles: [content_manager] }
+  - { group: support, roles: [support_agent] }
+  - { group: leads, roles: [lead] }
+  - { group: auditors, roles: [auditor] }
+`,
+};
+const widgetLoaded = await loadConfigurationSources(Object.entries(WIDGET_SOURCES).map(([file, text]) => ({ file, text })));
+if (!widgetLoaded.ok) throw new Error(JSON.stringify(widgetLoaded.issues));
+const WIDGET: LoadedConfiguration = widgetLoaded.configuration;
+
+function widgetSetup() {
+  const { audit, deps, req } = setupWith(WIDGET, new FakeInvoker());
+  const repository = new InMemoryChangeSetRepository(audit);
+  const executor = new InMemoryExecutor({ repository, writer: new ScriptedWriter(), batchSizeOf: () => 100 });
+  const approvals = new ApprovalService({ repository, executor, audit, newId: deps.newId, now: () => new Date(0) });
+  const toolDeps: BuiltinToolDeps = {
+    repository,
+    newId: deps.newId,
+    now: () => new Date(0),
+    executor,
+    tasks: new InMemoryTaskRepository(),
+    audit,
+    approvals,
+    publicUrl: new URL('https://aiops.example.test'),
+  };
+  return { audit, repository, deps: { ...deps, builtins: [pingTool, decideChangesetTool(toolDeps)] }, req };
+}
+
+const dave: Caller = { subject: 'dave-id', clientId: 'aiops-mcp', groups: ['leads'] };
+const erin: Caller = { subject: 'erin-id', clientId: 'aiops-mcp', groups: ['auditors'] };
+const DECIDE_ARGS = {
+  changeset_id: '11111111-1111-4111-8111-111111111111',
+  decision: 'approve',
+  hash: `sha256:${'a'.repeat(64)}`,
+  count: 2,
+};
+
+describe('APR-8 MCP-2 decide_changeset visibility', () => {
+  it('APR-8 MCP-2 decide_changeset is listed only to holders of a widget step role, with _meta.ui.visibility app', async () => {
+    const { deps, req, audit } = widgetSetup();
+    const forDave = await listTools(deps, req(dave));
+    expect(forDave.map((t) => t.name)).toEqual(['ping', DECIDE_TOOL]);
+    expect(forDave[1]).toMatchObject({ _meta: { ui: { visibility: ['app'] } }, annotations: { readOnlyHint: false } });
+    expect(forDave[0]).not.toHaveProperty('_meta');
+    // A step role of a rule without allow_widget, and the requester role itself, do not see it.
+    expect((await listTools(deps, req(erin))).map((t) => t.name)).toEqual(['ping']);
+    expect((await listTools(deps, req(alice))).map((t) => t.name)).toEqual(['ping', 'catalog.search_products']);
+    expect(audit.events.map((e) => e.details)).toEqual([{ count: 2 }, { count: 1 }, { count: 2 }]);
+  });
+
+  it('MCP-2 SEC-11 a call from a caller it is not listed to answers Tool decide_changeset not found and writes the unknown-tool denial', async () => {
+    const { deps, req, audit, repository } = widgetSetup();
+    const hidden = await callTool(deps, req(alice), DECIDE_TOOL, DECIDE_ARGS).catch((e: unknown) => e);
+    const unknown = await callTool(deps, req(alice), 'no_such_tool', DECIDE_ARGS).catch((e: unknown) => e);
+    expect(hidden).toBeInstanceOf(ProtocolError);
+    expect((hidden as ProtocolError).code).toBe((unknown as ProtocolError).code);
+    expect((hidden as ProtocolError).message).toBe('Tool decide_changeset not found');
+    expect(audit.events).toEqual([
+      expect.objectContaining({
+        action: 'policy.decision',
+        decision: 'deny',
+        subject: DECIDE_TOOL,
+        details: { rule: 'default-deny', reason: 'unknown_tool', roles: ['content_manager'] },
+      }),
+      expect.objectContaining({ action: 'policy.decision', subject: 'no_such_tool', details: expect.objectContaining({ reason: 'unknown_tool' }) as unknown }),
+    ]);
+    expect(await repository.approvals(DECIDE_ARGS.changeset_id)).toEqual([]);
   });
 });

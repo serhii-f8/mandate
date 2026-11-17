@@ -6,7 +6,7 @@ const MAX_GROUP_LENGTH = 255;
 
 /**
  * The caller of a verified request: `sub`, the OAuth client (`azp`) and the flat
- * `groups` claim (AUTH-3, ADR 0004). Claims are untrusted in shape even when the
+ * `groups` claim (AUTH-3, ADR 0004), plus `auth_time` for step-up checks (AUTH-6). Claims are untrusted in shape even when the
  * signature is valid, so they are parsed here. The token is never copied (AUTH-7).
  */
 export function callerFromAuthInfo(info: AuthInfo): Caller {
@@ -17,5 +17,12 @@ export function callerFromAuthInfo(info: AuthInfo): Caller {
   const groups = Array.isArray(raw)
     ? raw.filter((g): g is string => typeof g === 'string' && g.length > 0 && g.length <= MAX_GROUP_LENGTH).slice(0, MAX_GROUPS)
     : [];
-  return { subject: sub, ...(info.clientId === '' ? {} : { clientId: info.clientId }), groups };
+  // OIDC `auth_time` is seconds since the epoch; anything else is ignored rather than guessed.
+  const authTime = extra.auth_time;
+  return {
+    subject: sub,
+    ...(info.clientId === '' ? {} : { clientId: info.clientId }),
+    groups,
+    ...(typeof authTime === 'number' && Number.isFinite(authTime) ? { authTime: new Date(authTime * 1000) } : {}),
+  };
 }

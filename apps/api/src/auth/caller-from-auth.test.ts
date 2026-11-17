@@ -39,6 +39,15 @@ describe('AUTH-3 groups claim', () => {
   });
 });
 
+describe('AUTH-6 authentication time', () => {
+  it('AUTH-6 auth_time becomes authTime; a non-number is ignored', () => {
+    expect(callerFromAuthInfo(info({ sub: 'a', auth_time: 1_794_909_570 })).authTime).toEqual(new Date(1_794_909_570_000));
+    for (const auth_time of ['1794909570', null, Number.NaN, Number.POSITIVE_INFINITY, { t: 1 }]) {
+      expect(Object.keys(callerFromAuthInfo(info({ sub: 'a', auth_time }))), JSON.stringify(auth_time)).not.toContain('authTime');
+    }
+  });
+});
+
 describe('AUTH-7 the access token never leaves authentication', () => {
   it('builds the caller without the token, even if AuthInfo still carried one', () => {
     const caller = callerFromAuthInfo({ ...info({ sub: 'a', groups: ['content'] }), token: TOKEN });

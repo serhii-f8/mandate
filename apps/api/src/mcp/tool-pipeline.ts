@@ -92,12 +92,24 @@ function operationTool(op: OperationDefinition): Tool {
 }
 
 function builtinTool(tool: BuiltinTool): Tool {
-  return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema as Tool['inputSchema'], annotations: { readOnlyHint: tool.readOnlyHint ?? true } };
+  return {
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema as Tool['inputSchema'],
+    annotations: { readOnlyHint: tool.readOnlyHint ?? true },
+    ...(tool.meta === undefined ? {} : { _meta: { ...tool.meta } }),
+  };
+}
+
+/** The built-ins this caller sees under this configuration (MCP-2). */
+function visibleBuiltins(builtins: readonly BuiltinTool[], caller: Caller, configuration: LoadedConfiguration): BuiltinTool[] {
+  return builtins.filter((t) => t.visibleTo?.(caller, configuration) ?? true);
 }
 
 export async function listTools(deps: PipelineDeps, req: PipelineRequest): Promise<Tool[]> {
   const granted = req.snapshot.engine.grantedOperations(req.caller);
-  const tools = [...deps.builtins.map(builtinTool), ...granted.map(operationTool)];
+  const builtins = visibleBuiltins(deps.builtins, req.caller, req.snapshot.configuration);
+  const tools = [...builtins.map(builtinTool), ...granted.map(operationTool)];
   try {
     await deps.audit.append({
       id: deps.newId(),
@@ -116,10 +128,11 @@ export async function listTools(deps: PipelineDeps, req: PipelineRequest): Promi
 
 export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: string, rawArgs: unknown): Promise<ToolAnswer> {
   const { configuration, engine } = req.snapshot;
-  const builtin = deps.builtins.find((t) => t.name === name);
+  // A built-in the caller does not see is looked up like any unknown name.
+  const builtin = visibleBuiltins(deps.builtins, req.caller, configuration).find((t) => t.name === name);
   const operation = builtin === undefined ? engine.grantedOperations(req.caller).find((op) => op.toolName === name) : undefined;
 
-  // 1. Lookup (MCP-2): unknown and not granted get the same answer, so the list does not leak.
+  // 1. Lookup (MCP-2): unknown, not granted and not visible get the same answer, so the list does not leak.
   if (builtin === undefined && operation === undefined) {
     const exists = configuration.policy.operations.some((op) => op.toolName === name);
     await recordDecision(deps, req, name, {
