@@ -170,13 +170,13 @@ operations:
           minItems: 1
           maxItems: 1000
           uniqueItems: true
-          description: Product SKUs to change (no commas). Omit to select by name_like.
+          description: Product SKUs to change (no commas). Give either skus or name_like, not both.
           items: *sku
         name_like:
           type: string
           minLength: 1
           maxLength: 255
-          description: Select products by name pattern (% wildcard) when skus is omitted.
+          description: Select products by name pattern (% wildcard) instead of skus; "%" selects the whole brand.
         changes:
           type: object
           minProperties: 1
@@ -192,6 +192,12 @@ operations:
             url_key: { type: string, maxLength: 65535 }
       required: [brand, changes]
       additionalProperties: false
+      # Exactly one of skus or name_like: with brand and changes required and no other
+      # property allowed, three properties means one of the two (a whole brand takes
+      # name_like "%" explicitly). Not anyOf/not at the root: Claude clients refuse a tool
+      # whose input_schema has a top-level combinator (ADR 0026).
+      minProperties: 3
+      maxProperties: 3
     upstream: { method: POST, path: /async/bulk/V1/products }
     manifest:
       id_field: sku

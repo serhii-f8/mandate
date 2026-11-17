@@ -25,7 +25,7 @@ checks it from the repository.
 | `catalog.search_products` | `brand`, `fields`, `page_size` (1-100, default 20), `current_page` (default 1), `name_like` | group 0 `brand eq`, group 1 `name like` |
 | `catalog.get_product` | `brand`, `sku`, `fields` | group 0 `brand eq`, group 1 `sku eq` |
 | `catalog.get_products_by_sku` | `brand`, `skus` (1-100), `fields` | group 0 `brand eq`, group 1 `sku in` (comma-joined) |
-| `catalog.update_content` (write) | `brand`, `skus` (1-1000) or `name_like`, `changes` | none: prepared from the two reads above |
+| `catalog.update_content` (write) | `brand`, `skus` (1-1000) or `name_like` (exactly one), `changes` | none: prepared from the two reads above |
 
 `catalog.search_products` sorts by `sku` ascending so pages are stable.
 
@@ -33,7 +33,8 @@ checks it from the repository.
 
 Changes `name`, `description`, `short_description`, `meta_title`, `meta_keyword`,
 `meta_description` and `url_key` (string values, at least one) for products of one brand, named by
-`skus` or selected by `name_like`. Its manifest reads current state with
+`skus` or selected by `name_like` (exactly one of the two; a whole-brand update needs
+`name_like: "%"` explicitly, ADR 0026). Its manifest reads current state with
 `catalog.get_products_by_sku` (batches of 100), selects with `catalog.search_products`, caps a
 change-set at 10000 targets and uses rollback `replay_previous_state`.
 

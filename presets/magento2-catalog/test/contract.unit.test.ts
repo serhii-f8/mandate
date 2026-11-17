@@ -153,6 +153,18 @@ describe('NFR-17 magento2-catalog contract', () => {
     expect(v?.({ skus: ['A'], changes: { name: 'x' } }).ok).toBe(false);
   });
 
+  it('NFR-17 OPS-4 catalog.update_content names its targets by exactly one of skus or name_like', () => {
+    const v = config.validators.get('catalog.update_content');
+    // Neither: an accidental whole-brand update; a whole brand takes name_like "%" explicitly.
+    expect(v?.({ brand: 'acme', changes: { name: 'x' } }).ok).toBe(false);
+    expect(v?.({ brand: 'acme', skus: ['A'], name_like: '%', changes: { name: 'x' } }).ok).toBe(false);
+    expect(v?.({ brand: 'acme', name_like: '%', changes: { name: 'x' } }).ok).toBe(true);
+    expect(v?.({ brand: 'acme', skus: ['A'], changes: { name: 'x' } }).ok).toBe(true);
+    // No combinator at the root: Claude clients refuse a tool whose input_schema has a top-level anyOf, oneOf or allOf.
+    const schema = config.policy.operations.find((o) => o.id === 'catalog.update_content')?.inputSchema ?? {};
+    for (const k of ['anyOf', 'oneOf', 'allOf', 'not']) expect(schema).not.toHaveProperty(k);
+  });
+
   it('NFR-17 every case is recorded, and its arguments are valid input', () => {
     expect(cases.map((c) => c.name).sort()).toEqual([...recordings.keys()].sort());
     for (const c of cases) {
