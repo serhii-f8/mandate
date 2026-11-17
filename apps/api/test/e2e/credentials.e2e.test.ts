@@ -15,7 +15,8 @@ const CREDENTIALS_CONFIG = fileURLToPath(new URL('./fixtures/credentials-config'
 const SHOP_SECRET = 'e2e-only-page-entered-shop-token-0123456789';
 const REJECTED_SECRET = 'e2e-only-rejected-secret-value-abcdefghij';
 const DENIED_SECRET = 'e2e-only-denied-secret-value-klmnopqrstu';
-const SECRETS = [SHOP_SECRET, REJECTED_SECRET, DENIED_SECRET];
+const MALFORMED_SECRET = 'SUPERSECRET123e2eOnlyMalformedBody';
+const SECRETS = [SHOP_SECRET, REJECTED_SECRET, DENIED_SECRET, MALFORMED_SECRET];
 
 const CAROL: TestLoginUser = { sub: 'carol-id', username: 'carol', groups: ['admins'] };
 const DAVE: TestLoginUser = { sub: 'dave-id', username: 'dave', groups: ['platform'] };
@@ -294,6 +295,30 @@ describe('SEC-1 a user without manage_credentials', () => {
 });
 
 describe('SEC-3 credential values never echo', () => {
+  it('SEC-3 a malformed or oversized JSON body gets a fixed error body that echoes none of it, on every route', async () => {
+    const page = await login(CAROL);
+    const malformed = `{"token":${MALFORMED_SECRET}}`;
+    const routes: [string, string, Record<string, string>][] = [
+      ['PUT', '/api/v1/credentials/shop-token', mutating(page)],
+      ['POST', '/mcp', { accept: 'application/json, text/event-stream' }],
+      ['POST', '/api/v1/connections/shop/test', mutating(page)],
+    ];
+    for (const [method, path, headers] of routes) {
+      const response = await fetch(`${api.url}${path}`, { method, headers: { ...headers, 'content-type': 'application/json' }, body: malformed });
+      const text = await response.text();
+      bodies.push(text);
+      expect(response.status, `${method} ${path}`).toBe(400);
+      expect(JSON.parse(text), `${method} ${path}`).toEqual({ error: 'invalid_json' });
+    }
+    const oversized = `{"token":"${MALFORMED_SECRET}","pad":"${'x'.repeat(5 * 1024 * 1024)}"`;
+    const response = await fetch(`${api.url}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: oversized });
+    const text = await response.text();
+    bodies.push(text);
+    expect(response.status).toBe(413);
+    expect(JSON.parse(text)).toEqual({ error: 'payload_too_large' });
+    expect(logLines.join('\n')).not.toContain(MALFORMED_SECRET);
+  });
+
   it('SEC-3 no secret value or its Base64 appears in any audit row, log line or response body', async () => {
     const client = new pg.Client({ connectionString: databaseUrl });
     await client.connect();

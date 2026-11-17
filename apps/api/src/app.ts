@@ -16,6 +16,7 @@ import { createBearerGate } from './auth/bearer-gate.js';
 import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
 import { HealthController } from './health/health.controller.js';
+import { bodyErrorHandler } from './http/body-errors.js';
 import { createLogger, PinoNestLogger } from './logger.js';
 import { BUILTIN_TOOLS } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
@@ -202,5 +203,7 @@ export async function createApp(options: CreateAppOptions): Promise<INestApplica
   );
   // MCP request bodies up to 4 MiB, the SDK's default bound (ADR 0013).
   app.useBodyParser('json', { limit: '4mb' });
+  // Directly after the parser: its errors quote the body, so they get fixed bodies (SEC-3).
+  app.use(bodyErrorHandler);
   return app;
 }
