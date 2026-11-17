@@ -101,7 +101,12 @@ export type SingleReadDeps = Pick<DirectReadInvokerDeps, 'configuration' | 'vaul
  * log line with identifiers, method, status and timing only (SEC-3). No policy decision:
  * callers have made it.
  */
-export async function performRead(deps: SingleReadDeps, operationId: string, args: Readonly<Record<string, unknown>>): Promise<SingleRead> {
+export async function performRead(
+  deps: SingleReadDeps,
+  operationId: string,
+  args: Readonly<Record<string, unknown>>,
+  options: { readonly exactValues?: true } = {},
+): Promise<SingleRead> {
   const { configuration } = deps;
   const binding = configuration.bindings.get(operationId);
   const connection = binding === undefined ? undefined : configuration.connectionSettings.get(binding.connection);
@@ -111,7 +116,13 @@ export async function performRead(deps: SingleReadDeps, operationId: string, arg
   const credential = await connectionCredential(deps.vault, connection.credentialRef);
   if (credential === 'unusable') return { ok: false, code: 'credential_unusable', connection: binding.connection };
 
-  const outcome = await deps.adapter.read({ connection, mapping: binding.mapping, args, ...(credential === undefined ? {} : { credential }) });
+  const outcome = await deps.adapter.read({
+    connection,
+    mapping: binding.mapping,
+    args,
+    ...(credential === undefined ? {} : { credential }),
+    ...(options.exactValues === true ? { exactValues: true } : {}),
+  });
   deps.log?.({
     correlationId: deps.correlationId ?? '',
     operation: operationId,

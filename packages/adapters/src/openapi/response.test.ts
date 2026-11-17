@@ -26,6 +26,14 @@ describe('MCP-4 response mapping', () => {
     const r = mapResponse({ maxItems: 100 }, { a: { b: 'x'.repeat(5000) } }, {});
     expect((r.value as { a: { b: string } }).a.b).toBe('x'.repeat(4000) + '…[truncated]');
   });
+  it('CS-2 exactValues keeps long strings whole, in items and value', () => {
+    const long = 'x'.repeat(5000);
+    const items = mapResponse({ items: 'items', maxItems: 100 }, { items: [{ d: long, n: [{ e: long }] }] }, {}, { exactValues: true });
+    expect(items.items?.[0]).toEqual({ d: long, n: [{ e: long }] });
+    expect(items.truncated).toBe(false);
+    const value = mapResponse({ maxItems: 100 }, { a: { b: long } }, {}, { exactValues: true });
+    expect((value.value as { a: { b: string } }).a.b).toBe(long);
+  });
   it('flattened keys never overwrite existing keys', () => {
     const r = mapResponse(
       { items: 'items', flatten, maxItems: 10 },

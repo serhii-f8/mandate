@@ -45,6 +45,7 @@ const PRODUCTS: readonly Product[] = [
   { sku: 'acme-2', brand: 'acme', name: 'Rocket', description: 'Fast rocket' },
   { sku: 'acme-3', brand: 'acme', name: 'New name', description: 'Already renamed' },
   { sku: 'globex-1', brand: 'globex', name: 'Globe', description: 'Round globe' },
+  { sku: 'globex-long', brand: 'globex', name: 'Long', description: `${'L'.repeat(4999)}!` },
 ];
 
 /** Whether the fake upstream applies the brand filter; some tests make it ignore it. */
@@ -183,6 +184,14 @@ describe('CS-1 CS-2 CS-4 write calls prepare change-sets', () => {
     expect(upstream.requests.every((r) => r.method === 'GET')).toBe(true);
     expect(upstream.requests[0]?.query.get('skus')).toBe('acme-1,acme-2,acme-9');
     expect(upstream.requests[0]?.query.get('brand')).toBe('acme');
+  });
+
+  it('CS-2 a before value longer than the read path clips is stored exactly', async () => {
+    const { result } = await call('shop.update_content', { brand: 'globex', skus: ['globex-long'], changes: { description: 'Short' } });
+    const id = changesetId(result);
+    expect((await changeSet(id))?.status).toBe('prepared');
+    const [item] = await items(id);
+    expect(item?.before).toEqual({ description: `${'L'.repeat(4999)}!` });
   });
 
   it('MCP-4 tools/list announces the write tool as not read-only', async () => {

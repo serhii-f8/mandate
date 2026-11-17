@@ -219,6 +219,19 @@ describe('CONN-7 read call end to end', () => {
     expect(r).toMatchObject({ ok: true, items: [{ name: 'leak [REDACTED] here' }] });
   });
 
+  it('CS-2 a read with exactValues returns long strings unclipped; without it they are clipped', async () => {
+    const long = 'd'.repeat(5000);
+    up.route('GET', '/rest/default/V1/products', () => ({
+      status: 200,
+      body: { items: [{ sku: 'X', description: long, custom_attributes: [] }], total_count: 1 },
+    }));
+    const adapter = createOpenApiAdapter();
+    const input = { connection: settings(), mapping: searchMapping, args: {} };
+    expect(await adapter.read({ ...input, exactValues: true })).toMatchObject({ ok: true, items: [{ description: long }] });
+    const clipped = await adapter.read(input);
+    expect(clipped).toMatchObject({ ok: true, items: [{ description: `${'d'.repeat(4000)}…[truncated]` }] });
+  });
+
   it('CONN-7 a mapping without method and path is a mapping error and sends nothing', async () => {
     const unresolved: UpstreamMapping = { operation: 'x', pathParams: {}, query: {}, headers: {}, response: searchMapping.response };
     const r = await createOpenApiAdapter().read({ connection: settings(), mapping: unresolved, args: {} });

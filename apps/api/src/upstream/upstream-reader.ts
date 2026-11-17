@@ -30,7 +30,8 @@ export function createUpstreamReader(deps: UpstreamReaderDeps): UpstreamReader {
       // A manifest cannot produce a request the read operation itself would refuse.
       const check = configuration.validators.get(operationId)?.(args);
       if (check?.ok !== true) return { ok: false, code: 'invalid_read_arguments' };
-      const read = await performRead(deps, operationId, args);
+      // Before values are stored and hashed: they must be the upstream's exact values, never clipped (CS-2).
+      const read = await performRead(deps, operationId, args, { exactValues: true });
       if (!read.ok) return { ok: false, code: read.code === 'not_get' ? 'not_readable' : read.code };
       return toPage(read.outcome);
     },

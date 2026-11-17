@@ -92,6 +92,12 @@ describe('CS-1 upstream reader for preparation', () => {
     expect(adapter.reads[0]?.args).toEqual(ARGS);
   });
 
+  it('CS-2 asks the adapter for exact values so before values are never clipped', async () => {
+    const { reader, adapter } = setup();
+    await reader.read('catalog.get_products', ARGS);
+    expect(adapter.reads[0]?.exactValues).toBe(true);
+  });
+
   it('CS-1 refuses an operation that is not a read, without calling the upstream', async () => {
     const { reader, adapter } = setup();
     expect(await reader.read('catalog.update_product', { sku: 'a' })).toEqual({ ok: false, code: 'not_readable' });

@@ -137,7 +137,7 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
   };
 
   async function read(input: Parameters<ReadAdapter['read']>[0]): Promise<ReadOutcome> {
-    const { connection, mapping, args, credential } = input;
+    const { connection, mapping, args, credential, exactValues } = input;
     const { method, path } = mapping;
     if (method === undefined || path === undefined) {
       return { ok: false, code: 'mapping', durationMs: 0, message: 'upstream mapping has no resolved method and path' };
@@ -151,9 +151,9 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
     }
     const r = await clientOf(connection).send(req, { retryable: method === 'GET', ...(credential ? { credential } : {}) });
     if (!r.ok) return r;
-    // `r.json` is already scrubbed deep by the client (SEC-3); mapping only restructures and clips it.
+    // `r.json` is already scrubbed deep by the client (SEC-3); mapping only restructures and clips it (unless exact values are asked for).
     try {
-      const mapped = mapResponse(mapping.response, r.json, args);
+      const mapped = mapResponse(mapping.response, r.json, args, exactValues === true ? { exactValues } : {});
       return { ok: true, status: r.status, durationMs: r.durationMs, ...mapped };
     } catch (err) {
       if (err instanceof MappingError) return { ok: false, code: 'mapping', status: r.status, durationMs: r.durationMs, message: err.message };

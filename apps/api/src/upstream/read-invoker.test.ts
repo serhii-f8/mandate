@@ -200,6 +200,8 @@ describe('MCP-4 direct read invoker', () => {
     await invokerFor(other.configuration, 'corr-b').invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
     expect(adapter.reads.map((r) => r.connection.baseUrl)).toEqual(['https://shop.example.test/rest', 'https://other.example.test/rest']);
     expect(adapter.reads[0]?.mapping).toBe(CONFIG.bindings.get('catalog.search_products')?.mapping);
+    // Direct reads keep the adapter's string clipping (MCP-4); only preparation asks for exact values.
+    expect(adapter.reads[0]).not.toHaveProperty('exactValues');
   });
 
   it('AUD-1 records the connection of the binding that ran', async () => {

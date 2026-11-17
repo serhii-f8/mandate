@@ -21,12 +21,12 @@ function set(o: Obj, k: string, v: unknown): void {
   Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
 }
 
-function clip(v: unknown): unknown {
+function clipStrings(v: unknown): unknown {
   if (typeof v === 'string') return v.length > MAX_STRING ? v.slice(0, MAX_STRING) + MARKER : v;
-  if (Array.isArray(v)) return v.map(clip);
+  if (Array.isArray(v)) return v.map(clipStrings);
   if (isObj(v)) {
     const out: Obj = {};
-    for (const [k, x] of Object.entries(v)) set(out, k, clip(x));
+    for (const [k, x] of Object.entries(v)) set(out, k, clipStrings(x));
     return out;
   }
   return v;
@@ -52,6 +52,7 @@ export function mapResponse(
   mapping: ResponseMapping,
   body: unknown,
   args: Readonly<Record<string, unknown>>,
+  options: { readonly exactValues?: boolean } = {},
 ): { items?: Record<string, unknown>[]; total?: number; value?: unknown; truncated: boolean } {
   const result: { items?: Record<string, unknown>[]; total?: number; value?: unknown; truncated: boolean } = { truncated: false };
 
@@ -67,6 +68,9 @@ export function mapResponse(
     if (!Array.isArray(arg) || !arg.every((x): x is string => typeof x === 'string')) throw new MappingError('fields argument is missing');
     fields = arg;
   }
+
+  // Exact values (change-set before values) are never clipped: a clipped value would be stored as the truth.
+  const clip = options.exactValues === true ? (v: unknown): unknown => v : clipStrings;
 
   /** Flatten, then project; undefined means the entry cannot be projected and is dropped. */
   const shape = (entry: unknown): unknown => {
