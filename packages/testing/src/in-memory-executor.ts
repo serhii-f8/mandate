@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import {
+  BatchFenced,
   CANCELLABLE,
+  changesetBatchEvent,
   changesetTransitionEvent,
   coverBatch,
+  executionTerminal,
+  failureThresholdExceeded,
+  startEventFactory,
   type BatchContext,
-  type StartOutcome,
-  type StartRequest,
-  isExpiryDue,
-  type AuditEventInput,
   type ChangeItemRecord,
   type ChangeSetExecutor,
   type ChangeSetRecord,
@@ -15,38 +16,37 @@ import {
   type ChangeSetStatus,
   type ChangeWriter,
   type ExecutionProgress,
+  type FinishOutcome,
   type ItemOutcome,
+  type StartOutcome,
+  type StartRequest,
 } from '@aiops/core';
 
 export interface InMemoryExecutorDeps {
   readonly repository: ChangeSetRepository;
   readonly writer: ChangeWriter;
   readonly batchSizeOf: (operation: string) => number;
+  /** Stop remaining batches when failed / processed exceeds this (EXE-5). Default 0.5. */
+  readonly failureThreshold?: number;
   readonly now?: () => Date;
   readonly newId?: () => string;
 }
 
-/** Batch context of the in-memory executor: nothing is fenced or recorded. */
-const NO_BATCH: BatchContext = {
-  key: 'in-memory',
-  recordSubmission: () => Promise.resolve(),
-  heartbeat: () => undefined,
-};
-
-interface Run {
-  cancel?: { actor: string; correlationId: string };
-  done: Promise<void>;
-}
+/** The in-memory executor runs each batch once, so every claim and write uses attempt 1. */
+const ATTEMPT = 1;
 
 /**
- * In-process executor (EXE-11): streams pending items in batches, honours cancel after the
- * current batch. Phase 5 runs the same contract against the Temporal implementation.
+ * In-process executor (EXE-11) on the same repository port as the durable one: the start checks
+ * and limits run in `startExecution` (POL-4, POL-6), batches are claimed and completed through the
+ * fenced batch rows (EXE-3), a stored cancel request ends the run after the current batch (EXE-7),
+ * and the failure threshold stops remaining batches (EXE-5).
  */
 export class InMemoryExecutor implements ChangeSetExecutor {
-  private readonly runs = new Map<string, Run>();
+  private readonly runs = new Map<string, Promise<void>>();
   private readonly repository: ChangeSetRepository;
   private readonly writer: ChangeWriter;
   private readonly batchSizeOf: (operation: string) => number;
+  private readonly failureThreshold: number;
   private readonly now: () => Date;
   private readonly newId: () => string;
 
@@ -54,129 +54,131 @@ export class InMemoryExecutor implements ChangeSetExecutor {
     this.repository = deps.repository;
     this.writer = deps.writer;
     this.batchSizeOf = deps.batchSizeOf;
+    this.failureThreshold = deps.failureThreshold ?? 0.5;
     this.now = deps.now ?? (() => new Date());
     this.newId = deps.newId ?? randomUUID;
   }
 
   /** Resolves when the run of the change-set has ended (immediately when none is active). */
   async settled(changesetId: string): Promise<void> {
-    await this.runs.get(changesetId)?.done;
-  }
-
-  private audit(
-    changeset: ChangeSetRecord,
-    from: ChangeSetStatus,
-    to: ChangeSetStatus,
-    actor: string,
-    correlationId: string,
-  ): AuditEventInput {
-    return changesetTransitionEvent({ id: this.newId(), actor, changeset, from, to, correlationId });
+    await this.runs.get(changesetId);
   }
 
   async start(req: StartRequest): Promise<StartOutcome> {
-    let record = await this.repository.get(req.changesetId);
-    if (record === undefined) return { ok: false, reason: 'not_found' };
-    const now = this.now();
-    if (isExpiryDue(record, now)) {
-      const expired = await this.repository.transition(
-        record.id,
-        [record.status],
-        'expired',
-        this.audit(record, record.status, 'expired', 'system', req.correlationId),
-        { expiredBefore: now },
-      );
-      if (expired !== undefined) return { ok: false, reason: 'expired' };
-      // Lost a race with another writer: continue with the normal checks on the current state.
-      record = await this.repository.get(req.changesetId);
-      if (record === undefined) return { ok: false, reason: 'not_found' };
-    }
-    // No hash means the change-set never reached prepared (preparing, or failed or cancelled there): not executable.
-    if (record.hash === undefined) return { ok: false, reason: 'not_executable' };
-    if (record.hash !== req.expectedHash) return { ok: false, reason: 'hash_mismatch' };
-    const executing = await this.repository.transition(
-      record.id,
-      ['prepared', 'approved'],
-      'executing',
-      this.audit(record, record.status, 'executing', req.actor, req.correlationId),
+    const groups = req.groups ?? [];
+    const clientId = req.clientId === undefined ? {} : { clientId: req.clientId };
+    const started = await this.repository.startExecution({
+      changesetId: req.changesetId,
+      expectedHash: req.expectedHash,
+      request: { actor: req.actor, groups, ...clientId, correlationId: req.correlationId },
+      ...(req.limits === undefined ? {} : { limits: req.limits }),
+      now: this.now(),
+      event: startEventFactory({
+        newId: this.newId,
+        actor: req.actor,
+        ...clientId,
+        groups,
+        correlationId: req.correlationId,
+      }),
+    });
+    if (!started.ok) return started;
+    const id = started.changeset.id;
+    // Registered before the run's first await, so `settled` right after start finds it.
+    this.runs.set(
+      id,
+      this.run(started.changeset, req.correlationId).finally(() => this.runs.delete(id)),
     );
-    if (executing === undefined) return { ok: false, reason: 'not_executable' };
-    const run: Run = { done: Promise.resolve() };
-    // Registered before the run's first await, so a cancel right after start finds it.
-    this.runs.set(record.id, run);
-    run.done = this.run(executing, run, req.correlationId).finally(() => this.runs.delete(record.id));
     return { ok: true };
   }
 
-  private async run(record: ChangeSetRecord, run: Run, correlationId: string): Promise<void> {
-    let writerFailed = false;
+  private async run(changeset: ChangeSetRecord, correlationId: string): Promise<void> {
     try {
-      const size = this.batchSizeOf(record.operation);
+      const size = this.batchSizeOf(changeset.operation);
       if (!Number.isInteger(size) || size < 1) throw new Error('invalid batch size');
-      for (;;) {
-        if (run.cancel !== undefined) {
-          await this.repository.transition(
-            record.id,
-            ['executing'],
-            'cancelled',
-            this.audit(record, 'executing', 'cancelled', run.cancel.actor, run.cancel.correlationId),
-          );
-          return;
-        }
-        const items = await this.nextBatch(record.id, size);
-        if (items.length === 0) break;
-        let outcomes: readonly ItemOutcome[];
-        try {
-          outcomes = await this.writer.writeBatch({ changeset: record, items, batch: NO_BATCH });
-        } catch {
-          writerFailed = true;
-          break;
-        }
-        await this.repository.recordItemOutcomes(record.id, coverBatch(items, outcomes));
-      }
-      const stats = await this.repository.stats(record.id);
-      let to: ChangeSetStatus;
-      if (writerFailed || (stats.included > 0 && stats.failed === stats.included)) to = 'failed';
-      else if (stats.failed > 0) to = 'completed_with_errors';
-      else to = 'completed';
-      await this.repository.transition(
-        record.id,
-        ['executing'],
-        to,
-        this.audit(record, 'executing', to, 'system', correlationId),
-        writerFailed ? { errorCode: 'writer_error' } : undefined,
-      );
+      const outcome = await this.runBatches(changeset.id, size, correlationId);
+      await this.finish(changeset.id, outcome, correlationId);
     } catch {
       // Unexpected error: best effort to leave a terminal state; the run has no caller to report to.
       try {
-        await this.repository.transition(
-          record.id,
-          ['executing'],
-          'failed',
-          this.audit(record, 'executing', 'failed', 'system', correlationId),
-          { errorCode: 'executor_error' },
-        );
+        await this.finish(changeset.id, 'executor_error', correlationId);
       } catch {
         // Nothing more can be done; the change-set stays `executing` for inspection.
       }
     }
   }
 
-  /** Next pending items, up to `size`, read in pages of at most 500 (the repository limit). */
-  private async nextBatch(changesetId: string, size: number): Promise<ChangeItemRecord[]> {
-    const items: ChangeItemRecord[] = [];
-    let after: string | undefined;
-    while (items.length < size) {
-      const page = await this.repository.itemsPage(changesetId, {
-        status: 'pending',
-        limit: Math.min(500, size - items.length),
-        ...(after === undefined ? {} : { after }),
-      });
-      items.push(...page);
-      const last = page[page.length - 1];
-      if (last === undefined) break;
-      after = last.targetId;
+  /** Runs batches until none is left, a cancel is stored or the failure threshold is exceeded. */
+  private async runBatches(changesetId: string, size: number, correlationId: string): Promise<FinishOutcome> {
+    for (let batchNo = 0; ; batchNo++) {
+      const current = await this.repository.get(changesetId);
+      if (current === undefined) throw new Error('change-set vanished');
+      if (current.cancelRequest !== undefined) return 'cancelled';
+      if (failureThresholdExceeded(current.stats, this.failureThreshold)) return 'failure_threshold';
+      const claim = await this.repository.claimBatch(changesetId, batchNo, ATTEMPT, size);
+      if (claim.kind === 'empty') return 'done';
+      if (claim.kind === 'done') continue;
+      if (claim.kind === 'fenced') throw new Error('batch fenced');
+      const batch: BatchContext = {
+        key: `${changesetId}:${String(batchNo)}`,
+        ...(claim.batch.submission === undefined ? {} : { submission: claim.batch.submission }),
+        recordSubmission: async (submission) => {
+          if (!(await this.repository.recordSubmission(changesetId, batchNo, ATTEMPT, submission))) {
+            throw new BatchFenced();
+          }
+        },
+        heartbeat: () => undefined,
+      };
+      let outcomes: readonly ItemOutcome[];
+      try {
+        outcomes = await this.writer.writeBatch({ changeset: current, items: claim.items, batch });
+      } catch {
+        return 'writer_error';
+      }
+      const covered = coverBatch(claim.items, outcomes);
+      // Claimed items are pending, so these are exactly the counts completeBatch applies.
+      const counts = { written: 0, failed: 0, skipped: 0 };
+      for (const o of covered) counts[o.status] += 1;
+      const completed = await this.repository.completeBatch(
+        changesetId,
+        batchNo,
+        ATTEMPT,
+        covered,
+        changesetBatchEvent({ id: this.newId(), changeset: current, batchNo, counts, correlationId }),
+      );
+      if (!completed.ok) throw new Error('batch fenced');
     }
-    return items;
+  }
+
+  /** Terminal transition (EXE-6); a cancel carries the stored request's actor and correlation ID (EXE-7). */
+  private async finish(changesetId: string, outcome: FinishOutcome, correlationId: string): Promise<void> {
+    const record = await this.repository.get(changesetId);
+    if (record === undefined) return;
+    if (outcome === 'cancelled' && record.cancelRequest !== undefined) {
+      const { actor, correlationId: cancelCorrelation } = record.cancelRequest;
+      await this.repository.transition(
+        changesetId,
+        ['executing'],
+        'cancelled',
+        this.transitionEvent(record, 'cancelled', actor, cancelCorrelation),
+      );
+      return;
+    }
+    // `cancelled` without a stored request cannot happen (runBatches returns it only with one); fail closed.
+    const terminal = executionTerminal(
+      await this.repository.stats(changesetId),
+      outcome === 'cancelled' ? 'executor_error' : outcome,
+    );
+    await this.repository.transition(
+      changesetId,
+      ['executing'],
+      terminal.status,
+      this.transitionEvent(record, terminal.status, 'system', correlationId),
+      terminal.errorCode === undefined ? undefined : { errorCode: terminal.errorCode },
+    );
+  }
+
+  private transitionEvent(changeset: ChangeSetRecord, to: ChangeSetStatus, actor: string, correlationId: string) {
+    return changesetTransitionEvent({ id: this.newId(), actor, changeset, from: 'executing', to, correlationId });
   }
 
   async cancel(req: {
@@ -184,25 +186,30 @@ export class InMemoryExecutor implements ChangeSetExecutor {
     actor: string;
     correlationId: string;
   }): Promise<{ ok: true; status: ChangeSetStatus } | { ok: false; reason: 'not_found' | 'not_cancellable' }> {
-    // The run registry is consulted before any await, so an active run sees the request at once.
-    const run = this.runs.get(req.changesetId);
-    if (run !== undefined) {
-      run.cancel ??= { actor: req.actor, correlationId: req.correlationId };
-      await run.done;
-      const after = await this.repository.get(req.changesetId);
-      return after?.status === 'cancelled'
-        ? { ok: true, status: 'cancelled' }
-        : { ok: false, reason: 'not_cancellable' };
-    }
     const record = await this.repository.get(req.changesetId);
     if (record === undefined) return { ok: false, reason: 'not_found' };
-    if (record.status === 'executing') return { ok: false, reason: 'not_cancellable' };
+    if (record.status === 'executing') {
+      // Stored, not audited on its own: the run's final `executing → cancelled` carries the request (EXE-7).
+      const stored = await this.repository.requestCancel(record.id, {
+        actor: req.actor,
+        correlationId: req.correlationId,
+        requestedAt: this.now(),
+      });
+      return stored.ok ? { ok: true, status: 'executing' } : { ok: false, reason: 'not_cancellable' };
+    }
     if (!CANCELLABLE.includes(record.status)) return { ok: false, reason: 'not_cancellable' };
     const cancelled = await this.repository.transition(
       record.id,
       [record.status],
       'cancelled',
-      this.audit(record, record.status, 'cancelled', req.actor, req.correlationId),
+      changesetTransitionEvent({
+        id: this.newId(),
+        actor: req.actor,
+        changeset: record,
+        from: record.status,
+        to: 'cancelled',
+        correlationId: req.correlationId,
+      }),
     );
     return cancelled === undefined ? { ok: false, reason: 'not_cancellable' } : { ok: true, status: 'cancelled' };
   }
@@ -224,18 +231,28 @@ type ScriptedStatus = 'written' | 'failed' | 'skipped';
 
 export interface ScriptedWriterOptions {
   readonly outcomes?: Readonly<Record<string, ScriptedStatus>>;
-  /** Zero-based index of the batch whose call throws. */
+  /** Zero-based index of the batch (by distinct first target) whose every call throws. */
   readonly throwOnBatch?: number;
   /** Targets for which the writer returns no outcome. */
   readonly dropOutcomes?: readonly string[];
 }
 
-/** Writer with per-target outcomes, an optional throwing batch and pausable batches. */
+/**
+ * Writer with per-target outcomes, a throwing batch and pausable batches. A batch is identified by
+ * its first target, so a retry of the same batch is the same batch (NFR-2): `throwAt` fails every
+ * attempt, `pauseAt` holds only the first call, and a call that resumes a recorded submission polls
+ * only: it is not counted in `batches` and records nothing.
+ */
 export class ScriptedWriter implements ChangeWriter {
+  /** Target IDs of every batch submitted (resumed calls excluded). */
   readonly batches: string[][] = [];
+  /** Every invocation, resumed calls and throwing calls included. */
+  calls = 0;
   private readonly outcomes = new Map<string, ScriptedStatus>();
   private throwOnBatch: number | undefined;
   private readonly dropped = new Set<string>();
+  /** Distinct first targets in the order seen; the index is the batch index. */
+  private readonly firstTargets: string[] = [];
   /** Appended to every batch's outcomes (to test that strangers and duplicates are ignored). */
   extraOutcomes: ItemOutcome[] = [];
   private readonly pauses = new Map<number, { reached: () => void; gate: Promise<void> }>();
@@ -255,12 +272,12 @@ export class ScriptedWriter implements ChangeWriter {
     this.outcomes.set(targetId, status);
   }
 
-  /** Makes the batch with this zero-based index throw. */
+  /** Makes every call of the batch with this zero-based index throw. */
   throwAt(batchIndex: number): void {
     this.throwOnBatch = batchIndex;
   }
 
-  /** Holds the batch with this zero-based index open until `release()`. */
+  /** Holds the next call of the batch with this zero-based index open until `release()`. */
   pauseAt(batchIndex: number): { reached: Promise<void>; release(): void } {
     let release: () => void = () => undefined; // replaced synchronously by the Promise executor
     let reach: () => void = () => undefined; // replaced synchronously by the Promise executor
@@ -274,15 +291,32 @@ export class ScriptedWriter implements ChangeWriter {
     return { reached, release };
   }
 
+  private batchIndex(items: readonly ChangeItemRecord[]): number {
+    const first = items[0]?.targetId ?? '';
+    const known = this.firstTargets.indexOf(first);
+    if (known >= 0) return known;
+    this.firstTargets.push(first);
+    return this.firstTargets.length - 1;
+  }
+
   async writeBatch(input: {
     changeset: ChangeSetRecord;
     items: readonly ChangeItemRecord[];
-    batch?: BatchContext;
+    batch: BatchContext;
   }): Promise<readonly ItemOutcome[]> {
-    const index = this.batches.length;
-    this.batches.push(input.items.map((i) => i.targetId));
+    this.calls += 1;
+    const index = this.batchIndex(input.items);
+    if (input.batch.submission === undefined) {
+      this.batches.push(input.items.map((i) => i.targetId));
+      // A BatchFenced from here propagates: a superseded attempt stops before writing anything more.
+      await input.batch.recordSubmission({
+        upstreamBatchId: input.batch.key,
+        plan: input.items.map((i) => ({ targetId: i.targetId, action: 'write' as const })),
+      });
+    }
     const pause = this.pauses.get(index);
     if (pause !== undefined) {
+      this.pauses.delete(index);
       pause.reached();
       await pause.gate;
     }

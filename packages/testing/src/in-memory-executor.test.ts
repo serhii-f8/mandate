@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_STATS,
+  type BatchContext,
+  type BatchSubmission,
   type ChangeItemRecord,
   type ChangeSetRecord,
   type ChangeSetRepository,
-  type ItemOutcome,
+  BatchFenced,
 } from '@aiops/core';
 import { describeExecutorContract, EXECUTOR_CONTRACT_HASH } from './executor-contract.js';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
@@ -20,8 +22,9 @@ function build(
   const repository = opts.wrap?.(base) ?? base;
   const writer = opts.writer ?? new ScriptedWriter();
   const batchSize = opts.batchSize ?? 2;
-  const executor = new InMemoryExecutor({ repository, writer, batchSizeOf: () => batchSize });
-  const prepared = async (items: number, o: { expiresAt?: Date } = {}): Promise<ChangeSetRecord> => {
+  const failureThreshold = 0.5;
+  const executor = new InMemoryExecutor({ repository, writer, batchSizeOf: () => batchSize, failureThreshold });
+  const prepared = async (items: number, o: { expiresAt?: Date; requester?: string } = {}): Promise<ChangeSetRecord> => {
     const id = randomUUID();
     const now = new Date();
     await repository.create(
@@ -29,7 +32,7 @@ function build(
         id,
         operation: 'catalog.update',
         connection: 'shop',
-        requester: 'alice',
+        requester: o.requester ?? 'alice',
         args: {},
         configHash: 'cfg',
         correlationId: 'corr-prep',
@@ -56,7 +59,7 @@ function build(
     if (record === undefined) throw new Error('preparation failed');
     return record;
   };
-  return { audit, repository, writer, batchSize, executor, prepared };
+  return { audit, repository, writer, batchSize, failureThreshold, executor, prepared };
 }
 
 describeExecutorContract('in-memory', () => {
@@ -66,6 +69,7 @@ describeExecutorContract('in-memory', () => {
     repository: h.repository,
     writer: h.writer,
     batchSize: h.batchSize,
+    failureThreshold: h.failureThreshold,
     prepared: h.prepared,
     auditEvents: () => Promise.resolve([...h.audit.events]),
   });
@@ -80,9 +84,13 @@ describe('EXE-11 in-memory executor', () => {
     const pause = h.writer.pauseAt(0);
     await h.executor.start({ changesetId: cs.id, ...START });
     await pause.reached;
-    const cancelled = h.executor.cancel({ changesetId: cs.id, actor: 'bob', correlationId: 'c' });
+    expect(await h.executor.cancel({ changesetId: cs.id, actor: 'bob', correlationId: 'c' })).toEqual({
+      ok: true,
+      status: 'executing',
+    });
     pause.release();
-    expect(await cancelled).toEqual({ ok: true, status: 'cancelled' });
+    await h.executor.settled(cs.id);
+    expect((await h.repository.get(cs.id))?.status).toBe('cancelled');
     expect(h.writer.batches).toHaveLength(1);
   });
 
@@ -101,19 +109,19 @@ describe('EXE-11 in-memory executor', () => {
     expect((await h.repository.get(cs.id))?.status).toBe('completed');
   });
 
-  it('EXE-11 an unexpected error fails the change-set with executor_error and cancel does not claim success', async () => {
+  it('EXE-11 an unexpected error fails the change-set with executor_error even with a stored cancel request', async () => {
     let thrown = false;
     const h = build({
       wrap: (r) =>
         new Proxy(r, {
           get(target, prop, receiver) {
-            if (prop === 'recordItemOutcomes') {
-              return (id: string, outcomes: readonly ItemOutcome[]) => {
+            if (prop === 'completeBatch') {
+              return (...args: Parameters<ChangeSetRepository['completeBatch']>) => {
                 if (!thrown) {
                   thrown = true;
                   return Promise.reject(new Error('db down'));
                 }
-                return target.recordItemOutcomes(id, outcomes);
+                return target.completeBatch(...args);
               };
             }
             return Reflect.get(target, prop, receiver) as unknown;
@@ -124,14 +132,18 @@ describe('EXE-11 in-memory executor', () => {
     const pause = h.writer.pauseAt(0);
     await h.executor.start({ changesetId: cs.id, ...START });
     await pause.reached;
-    const cancelled = h.executor.cancel({ changesetId: cs.id, actor: 'bob', correlationId: 'c' });
+    expect(await h.executor.cancel({ changesetId: cs.id, actor: 'bob', correlationId: 'c' })).toEqual({
+      ok: true,
+      status: 'executing',
+    });
     pause.release();
-    expect(await cancelled).toEqual({ ok: false, reason: 'not_cancellable' });
+    await h.executor.settled(cs.id);
     const record = await h.repository.get(cs.id);
     expect(record?.status).toBe('failed');
     expect(record?.errorCode).toBe('executor_error');
     const failedEvents = h.audit.events.filter((e) => e.changesetId === cs.id && e.details.to === 'failed');
     expect(failedEvents).toHaveLength(1);
+    expect(h.audit.events.filter((e) => e.changesetId === cs.id && e.details.to === 'cancelled')).toHaveLength(0);
   });
 
   it.each([0, 1.5, Number.NaN])('EXE-11 batch size %s fails the run with executor_error', async (size) => {
@@ -154,27 +166,73 @@ describe('EXE-11 in-memory executor', () => {
     expect(all).toHaveLength(0);
     expect((await h.repository.get(cs.id))?.status).toBe('completed');
   });
+});
 
-  it('EXE-11 lazy expiry that loses the race continues with the normal checks', async () => {
-    const h = build({
-      wrap: (r) =>
-        new Proxy(r, {
-          get(target, prop, receiver) {
-            if (prop === 'transition') {
-              return async (id: string, from: never, to: string, audit: never, extra: never) => {
-                if (to === 'expired') {
-                  await target.transition(id, ['prepared'], 'cancelled', { ...(audit as object), id: randomUUID() } as never);
-                  return undefined;
-                }
-                return target.transition(id, from, to as never, audit, extra);
-              };
-            }
-            return Reflect.get(target, prop, receiver) as unknown;
-          },
-        }),
-    });
-    const cs = await h.prepared(1, { expiresAt: new Date('2000-01-01T00:00:00Z') });
-    expect(await h.executor.start({ changesetId: cs.id, ...START })).toEqual({ ok: false, reason: 'not_executable' });
-    expect((await h.repository.get(cs.id))?.status).toBe('cancelled');
+describe('NFR-2 ScriptedWriter', () => {
+  const changeset = { id: 'cs-1', operation: 'catalog.update' } as ChangeSetRecord;
+  const item = (targetId: string): ChangeItemRecord => ({ targetId, status: 'pending', before: {}, after: {} });
+  const context = (key: string, recorded: BatchSubmission[], submission?: BatchSubmission): BatchContext => ({
+    key,
+    ...(submission === undefined ? {} : { submission }),
+    recordSubmission: (s) => {
+      recorded.push(s);
+      return Promise.resolve();
+    },
+    heartbeat: () => undefined,
+  });
+
+  it('NFR-2 ScriptedWriter.throwAt fails every attempt of the batch it names', async () => {
+    const writer = new ScriptedWriter();
+    writer.throwAt(1);
+    const recorded: BatchSubmission[] = [];
+    const first = [item('t-0001'), item('t-0002')];
+    const second = [item('t-0003'), item('t-0004')];
+    await expect(writer.writeBatch({ changeset, items: first, batch: context('k0', recorded) })).resolves.toHaveLength(2);
+    await expect(writer.writeBatch({ changeset, items: second, batch: context('k1', recorded) })).rejects.toThrow();
+    await expect(
+      writer.writeBatch({ changeset, items: second, batch: context('k1', recorded, recorded[1]) }),
+    ).rejects.toThrow();
+    await expect(writer.writeBatch({ changeset, items: first, batch: context('k0', recorded) })).resolves.toHaveLength(2);
+    expect(writer.calls).toBe(4);
+  });
+
+  it('NFR-2 ScriptedWriter records each batch once and resumes a recorded submission without writing again', async () => {
+    const writer = new ScriptedWriter();
+    const recorded: BatchSubmission[] = [];
+    const items = [item('t-0001'), item('t-0002')];
+    const first = await writer.writeBatch({ changeset, items, batch: context('cs-1:0', recorded) });
+    expect(recorded).toEqual([
+      {
+        upstreamBatchId: 'cs-1:0',
+        plan: [
+          { targetId: 't-0001', action: 'write' },
+          { targetId: 't-0002', action: 'write' },
+        ],
+      },
+    ]);
+    const resumed = await writer.writeBatch({ changeset, items, batch: context('cs-1:0', recorded, recorded[0]) });
+    expect(resumed).toEqual(first);
+    expect(writer.batches).toEqual([['t-0001', 't-0002']]);
+    expect(recorded).toHaveLength(1);
+    expect(writer.calls).toBe(2);
+  });
+
+  it('NFR-2 ScriptedWriter rethrows a fenced submission and pauses only the first call of a batch', async () => {
+    const writer = new ScriptedWriter();
+    const items = [item('t-0001')];
+    const fenced: BatchContext = {
+      key: 'k',
+      recordSubmission: () => Promise.reject(new BatchFenced()),
+      heartbeat: () => undefined,
+    };
+    await expect(writer.writeBatch({ changeset, items, batch: fenced })).rejects.toBeInstanceOf(BatchFenced);
+    const pause = writer.pauseAt(0);
+    const recorded: BatchSubmission[] = [];
+    // The batch was already seen (first call above), so it is batch 0; its pause applies to the next call.
+    const paused = writer.writeBatch({ changeset, items, batch: context('k', recorded) });
+    await pause.reached;
+    pause.release();
+    await expect(paused).resolves.toHaveLength(1);
+    await expect(writer.writeBatch({ changeset, items, batch: context('k', recorded, recorded[0]) })).resolves.toHaveLength(1);
   });
 });
