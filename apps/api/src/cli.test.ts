@@ -75,8 +75,8 @@ async function run(argv: string[], env: Record<string, string> = {}, stored = tr
 describe('CFG-3 aiops validate and test-connection', () => {
   it('CFG-3 validate of the development configuration exits 0', async () => {
     const { code, lines } = await run(['validate', DEV_CONFIG, '--preset-dir', REPO_PRESETS]);
-    // support.lookup_order from configuration, catalog.search_products and catalog.get_product from the Magento preset.
-    expect(lines.join('\n')).toMatch(/^Configuration valid: 1 connections, 3 operations, 3 roles$/m);
+    // support.lookup_order from configuration, plus the four Magento preset operations (search, get, get by SKU, update content).
+    expect(lines.join('\n')).toMatch(/^Configuration valid: 1 connections, 5 operations, 3 roles$/m);
     expect(lines.join('\n')).not.toContain('skipped');
     expect(code).toBe(0);
   });

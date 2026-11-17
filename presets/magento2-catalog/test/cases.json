@@ -2,7 +2,16 @@
   {
     "name": "search-products-acme",
     "operation": "catalog.search_products",
-    "args": { "brand": "acme", "fields": ["sku", "name", "price", "brand", "description"] },
+    "args": {
+      "brand": "acme",
+      "fields": [
+        "sku",
+        "name",
+        "price",
+        "brand",
+        "description"
+      ]
+    },
     "request": {
       "method": "GET",
       "path": "/V1/products",
@@ -14,15 +23,34 @@
         "searchCriteria[filter_groups][1][filters][0][value]": "%",
         "searchCriteria[filter_groups][1][filters][0][condition_type]": "like",
         "searchCriteria[pageSize]": "20",
-        "searchCriteria[currentPage]": "1"
+        "searchCriteria[currentPage]": "1",
+        "searchCriteria[sortOrders][0][field]": "sku",
+        "searchCriteria[sortOrders][0][direction]": "ASC"
       }
     },
-    "expect": { "skus": ["ACME-001", "ACME-002", "ACME-003"], "total": 3 }
+    "expect": {
+      "skus": [
+        "ACME-001",
+        "ACME-002",
+        "ACME-003"
+      ],
+      "total": 3
+    }
   },
   {
     "name": "search-products-globex-name-like",
     "operation": "catalog.search_products",
-    "args": { "brand": "globex", "fields": ["sku", "name", "brand"], "name_like": "%Lamp%", "page_size": 5, "current_page": 1 },
+    "args": {
+      "brand": "globex",
+      "fields": [
+        "sku",
+        "name",
+        "brand"
+      ],
+      "name_like": "%Lamp%",
+      "page_size": 5,
+      "current_page": 1
+    },
     "request": {
       "method": "GET",
       "path": "/V1/products",
@@ -34,15 +62,28 @@
         "searchCriteria[filter_groups][1][filters][0][value]": "%Lamp%",
         "searchCriteria[filter_groups][1][filters][0][condition_type]": "like",
         "searchCriteria[pageSize]": "5",
-        "searchCriteria[currentPage]": "1"
+        "searchCriteria[currentPage]": "1",
+        "searchCriteria[sortOrders][0][field]": "sku",
+        "searchCriteria[sortOrders][0][direction]": "ASC"
       }
     },
-    "expect": { "skus": ["GLOBEX-002"], "total": 1 }
+    "expect": {
+      "skus": [
+        "GLOBEX-002"
+      ],
+      "total": 1
+    }
   },
   {
     "name": "search-products-connection-test",
     "operation": "catalog.search_products",
-    "args": { "brand": "acme", "fields": ["sku"], "page_size": 1 },
+    "args": {
+      "brand": "acme",
+      "fields": [
+        "sku"
+      ],
+      "page_size": 1
+    },
     "request": {
       "method": "GET",
       "path": "/V1/products",
@@ -54,15 +95,30 @@
         "searchCriteria[filter_groups][1][filters][0][value]": "%",
         "searchCriteria[filter_groups][1][filters][0][condition_type]": "like",
         "searchCriteria[pageSize]": "1",
-        "searchCriteria[currentPage]": "1"
+        "searchCriteria[currentPage]": "1",
+        "searchCriteria[sortOrders][0][field]": "sku",
+        "searchCriteria[sortOrders][0][direction]": "ASC"
       }
     },
-    "expect": { "skus": ["ACME-001"], "total": 3 }
+    "expect": {
+      "skus": [
+        "ACME-001"
+      ],
+      "total": 3
+    }
   },
   {
     "name": "get-product-acme",
     "operation": "catalog.get_product",
-    "args": { "brand": "acme", "sku": "ACME-003", "fields": ["sku", "brand", "description"] },
+    "args": {
+      "brand": "acme",
+      "sku": "ACME-003",
+      "fields": [
+        "sku",
+        "brand",
+        "description"
+      ]
+    },
     "request": {
       "method": "GET",
       "path": "/V1/products",
@@ -76,12 +132,24 @@
         "searchCriteria[pageSize]": "1"
       }
     },
-    "expect": { "skus": ["ACME-003"], "total": 1 }
+    "expect": {
+      "skus": [
+        "ACME-003"
+      ],
+      "total": 1
+    }
   },
   {
     "name": "get-product-other-brand",
     "operation": "catalog.get_product",
-    "args": { "brand": "acme", "sku": "GLOBEX-001", "fields": ["sku", "brand"] },
+    "args": {
+      "brand": "acme",
+      "sku": "GLOBEX-001",
+      "fields": [
+        "sku",
+        "brand"
+      ]
+    },
     "request": {
       "method": "GET",
       "path": "/V1/products",
@@ -95,6 +163,84 @@
         "searchCriteria[pageSize]": "1"
       }
     },
-    "expect": { "skus": [], "total": 0 }
+    "expect": {
+      "skus": [],
+      "total": 0
+    }
+  },
+  {
+    "name": "search-products-acme-sorted-page-2",
+    "operation": "catalog.search_products",
+    "args": {
+      "brand": "acme",
+      "fields": [
+        "sku",
+        "name"
+      ],
+      "page_size": 2,
+      "current_page": 2
+    },
+    "request": {
+      "method": "GET",
+      "path": "/V1/products",
+      "query": {
+        "searchCriteria[filter_groups][0][filters][0][field]": "brand",
+        "searchCriteria[filter_groups][0][filters][0][value]": "acme",
+        "searchCriteria[filter_groups][0][filters][0][condition_type]": "eq",
+        "searchCriteria[filter_groups][1][filters][0][field]": "name",
+        "searchCriteria[filter_groups][1][filters][0][value]": "%",
+        "searchCriteria[filter_groups][1][filters][0][condition_type]": "like",
+        "searchCriteria[pageSize]": "2",
+        "searchCriteria[currentPage]": "2",
+        "searchCriteria[sortOrders][0][field]": "sku",
+        "searchCriteria[sortOrders][0][direction]": "ASC"
+      }
+    },
+    "expect": {
+      "skus": [
+        "ACME-003"
+      ],
+      "total": 3
+    }
+  },
+  {
+    "name": "get-products-by-sku-acme",
+    "operation": "catalog.get_products_by_sku",
+    "args": {
+      "brand": "acme",
+      "skus": [
+        "ACME-001",
+        "ACME-003",
+        "GLOBEX-001"
+      ],
+      "fields": [
+        "sku",
+        "name",
+        "brand",
+        "meta_title",
+        "meta_keyword",
+        "meta_description"
+      ]
+    },
+    "request": {
+      "method": "GET",
+      "path": "/V1/products",
+      "query": {
+        "searchCriteria[filter_groups][0][filters][0][field]": "brand",
+        "searchCriteria[filter_groups][0][filters][0][value]": "acme",
+        "searchCriteria[filter_groups][0][filters][0][condition_type]": "eq",
+        "searchCriteria[filter_groups][1][filters][0][field]": "sku",
+        "searchCriteria[filter_groups][1][filters][0][value]": "ACME-001,ACME-003,GLOBEX-001",
+        "searchCriteria[filter_groups][1][filters][0][condition_type]": "in",
+        "searchCriteria[pageSize]": "100"
+      }
+    },
+    "expect": {
+      "skus": [
+        "ACME-001",
+        "ACME-003"
+      ],
+      "total": 2
+    }
   }
 ]

@@ -10,7 +10,9 @@
       "searchCriteria[filter_groups][1][filters][0][value]": "%",
       "searchCriteria[filter_groups][1][filters][0][condition_type]": "like",
       "searchCriteria[pageSize]": "20",
-      "searchCriteria[currentPage]": "1"
+      "searchCriteria[currentPage]": "1",
+      "searchCriteria[sortOrders][0][field]": "sku",
+      "searchCriteria[sortOrders][0][direction]": "ASC"
     }
   },
   "response": {
@@ -27,7 +29,7 @@
           "visibility": 4,
           "type_id": "simple",
           "created_at": "2026-11-16 22:21:39",
-          "updated_at": "2026-11-16 22:21:54",
+          "updated_at": "2026-11-17 09:14:40",
           "weight": 1,
           "extension_attributes": {
             "website_ids": [
@@ -99,7 +101,7 @@
           "visibility": 4,
           "type_id": "simple",
           "created_at": "2026-11-16 22:21:39",
-          "updated_at": "2026-11-16 22:21:54",
+          "updated_at": "2026-11-17 09:14:40",
           "weight": 1,
           "extension_attributes": {
             "website_ids": [
@@ -171,7 +173,7 @@
           "visibility": 4,
           "type_id": "simple",
           "created_at": "2026-11-16 22:21:39",
-          "updated_at": "2026-11-16 22:21:54",
+          "updated_at": "2026-11-17 09:14:40",
           "weight": 1,
           "extension_attributes": {
             "website_ids": [
@@ -253,6 +255,12 @@
                 "condition_type": "like"
               }
             ]
+          }
+        ],
+        "sort_orders": [
+          {
+            "field": "sku",
+            "direction": "ASC"
           }
         ],
         "page_size": 20,

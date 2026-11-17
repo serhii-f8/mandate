@@ -53,7 +53,7 @@ async function loadPreset(baseUrl: string): Promise<LoadedConfiguration> {
   const config = [
     'version: 1',
     'presets:',
-    "  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '0.1.0' }",
+    "  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '0.2.0' }",
     'connections:',
     '  - id: magento',
     '    adapter: openapi',
@@ -99,7 +99,10 @@ function expectMappedItems(c: ContractCase, items: readonly Record<string, unkno
   expect(items?.map((i) => i.sku)).toEqual(c.expect.skus);
   for (const item of items ?? []) {
     // Projection keeps exactly the requested fields: nothing more (cost, POL-3), nothing less.
-    expect(Object.keys(item).sort()).toEqual([...fields].sort());
+    // Unset meta_* attributes are absent upstream, so they are absent here (ADR 0024).
+    const maybeAbsent = new Set(['meta_title', 'meta_keyword', 'meta_description']);
+    expect(Object.keys(item).sort()).toEqual(fields.filter((f) => f in item || !maybeAbsent.has(f)).sort());
+    expect(Object.keys(item).every((k) => fields.includes(k))).toBe(true);
     if (fields.includes('brand')) expect(item.brand).toBe(c.args.brand);
   }
 }
@@ -111,12 +114,12 @@ describe('NFR-17 magento2-catalog contract', () => {
     config = await loadPreset(`http://magento-sandbox.invalid${BASE_PATH}`);
   });
 
-  it('NFR-17 CONN-2 the preset loads against its vendored spec with both read operations, connection test and bearer auth', () => {
+  it('NFR-17 CONN-2 the preset loads against its vendored spec with three read operations, the write operation, connection test and bearer auth', () => {
     const ids = config.policy.operations.map((o) => o.id).sort();
-    expect(ids).toEqual(['catalog.get_product', 'catalog.search_products']);
+    expect(ids).toEqual(['catalog.get_product', 'catalog.get_products_by_sku', 'catalog.search_products', 'catalog.update_content']);
     for (const op of config.policy.operations) {
-      expect(op.risk).toBe('read');
-      expect(op.fieldsArg).toBe('fields');
+      expect(op.risk).toBe(op.id === 'catalog.update_content' ? 'write' : 'read');
+      expect(op.fieldsArg).toBe(op.id === 'catalog.update_content' ? 'changes' : 'fields');
       expect(op.source).toBe('preset:magento-catalog');
     }
     expect(settingsOf(config).auth).toEqual({ scheme: 'bearer' });
@@ -126,6 +129,28 @@ describe('NFR-17 magento2-catalog contract', () => {
     });
     // The imported write endpoints stay disabled: no preset operation enables them (CONN-2, OPS-1).
     expect(config.disabled.length).toBeGreaterThan(0);
+  });
+
+  it('NFR-17 OPS-2 OPS-4 catalog.update_content carries a manifest with batch size 100 and the sorted selector', () => {
+    const op = config.policy.operations.find((o) => o.id === 'catalog.update_content');
+    expect(op?.manifest).toMatchObject({
+      idField: 'sku',
+      idsArg: 'skus',
+      valuesArg: 'changes',
+      batchSize: 100,
+      maxTargets: 10000,
+      scopeArgs: { brand: 'brand' },
+      readBefore: { operation: 'catalog.get_products_by_sku', idsArg: 'skus' },
+      selector: { operation: 'catalog.search_products', pageSize: 100 },
+      rollback: { strategy: 'replay_previous_state' },
+    });
+    const v = config.validators.get('catalog.update_content');
+    expect(v?.({ brand: 'acme', skus: ['ACME-001'], changes: { name: 'x' } }).ok).toBe(true);
+    expect(v?.({ brand: 'acme', name_like: '%a%', changes: { meta_title: 'x' } }).ok).toBe(true);
+    expect(v?.({ brand: 'acme', skus: ['A,B'], changes: { name: 'x' } }).ok).toBe(false);
+    expect(v?.({ brand: 'acme', skus: ['A'], changes: {} }).ok).toBe(false);
+    expect(v?.({ brand: 'acme', skus: ['A'], changes: { price: 'x' } }).ok).toBe(false);
+    expect(v?.({ skus: ['A'], changes: { name: 'x' } }).ok).toBe(false);
   });
 
   it('NFR-17 every case is recorded, and its arguments are valid input', () => {

@@ -1,7 +1,7 @@
-# Magento 2 catalog preset, first cut (CONN-8, design part 1 §6, ADR 0007: scope `all`).
+# Magento 2 catalog preset 0.2.0 (CONN-8, OPS-2, OPS-4; ADR 0007: scope `all`; Phase 4 design §8).
 # Bind it to an openapi connection whose base_url ends in /rest/all, for example
 #   base_url: http://magento-sandbox/rest/all
-# Both operations read GET /V1/products with search criteria. The brand filter is always
+# The read operations use GET /V1/products with search criteria. The brand filter is always
 # filter group 0, so a grant scoped by brand holds upstream without a pre-read; a product of
 # another brand is simply not found. Items are flattened (custom_attributes) and projected to
 # exactly the requested `fields`, so a field nobody asked for (e.g. cost) is never returned.
@@ -31,7 +31,7 @@ operations:
           description: Product fields to return.
           items:
             type: string
-            enum: [sku, name, price, status, visibility, type_id, description, short_description, brand, cost, url_key, meta_title, updated_at]
+            enum: [sku, name, price, status, visibility, type_id, description, short_description, brand, cost, url_key, meta_title, meta_keyword, meta_description, updated_at]
         page_size:
           type: integer
           minimum: 1
@@ -62,6 +62,9 @@ operations:
         searchCriteria[filter_groups][1][filters][0][field]: name
         searchCriteria[filter_groups][1][filters][0][value]: { arg: name_like, default: '%' }
         searchCriteria[filter_groups][1][filters][0][condition_type]: like
+        # A stable order keeps selector pages from overlapping or skipping (OPS-4).
+        searchCriteria[sortOrders][0][field]: sku
+        searchCriteria[sortOrders][0][direction]: ASC
         searchCriteria[pageSize]: { arg: page_size, default: 20 }
         searchCriteria[currentPage]: { arg: current_page, default: 1 }
       response: &response
@@ -105,3 +108,107 @@ operations:
         searchCriteria[filter_groups][1][filters][0][condition_type]: eq
         searchCriteria[pageSize]: 1
       response: *response
+  - id: catalog.get_products_by_sku
+    risk: read
+    title: Get products by SKU
+    description: >-
+      Look up up to 100 products of one brand by SKU in one call. SKUs of another brand are
+      not found. SKUs containing a comma are not supported. Returns only the requested fields.
+    input_schema:
+      type: object
+      properties:
+        brand:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: The product brand (exact match).
+        skus:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          description: Product SKUs (exact match, no commas).
+          items: &sku
+            type: string
+            minLength: 1
+            maxLength: 64
+            pattern: '^[^,]+$'
+        fields: *fields
+      required: [brand, skus, fields]
+      additionalProperties: false
+    fields_arg: fields
+    upstream:
+      method: GET
+      path: /V1/products
+      query:
+        searchCriteria[filter_groups][0][filters][0][field]: brand
+        searchCriteria[filter_groups][0][filters][0][value]: { arg: brand }
+        searchCriteria[filter_groups][0][filters][0][condition_type]: eq
+        # Magento's `in` takes a comma-separated list (ADR 0024).
+        searchCriteria[filter_groups][1][filters][0][field]: sku
+        searchCriteria[filter_groups][1][filters][0][value]: { arg: skus, join: ',' }
+        searchCriteria[filter_groups][1][filters][0][condition_type]: in
+        searchCriteria[pageSize]: 100
+      response: *response
+  - id: catalog.update_content
+    risk: write
+    title: Update product content
+    description: >-
+      Change content fields (name, descriptions, meta data, URL key) of products of one brand.
+      Name the products by SKU (up to 1000) or select them with a name pattern. The change is
+      prepared as a change-set for approval; nothing is written upstream until it is approved.
+    input_schema:
+      type: object
+      properties:
+        brand:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: The product brand (exact match).
+        skus:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          uniqueItems: true
+          description: Product SKUs to change (no commas). Omit to select by name_like.
+          items: *sku
+        name_like:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Select products by name pattern (% wildcard) when skus is omitted.
+        changes:
+          type: object
+          minProperties: 1
+          additionalProperties: false
+          description: Field to new value.
+          properties:
+            name: { type: string, maxLength: 65535 }
+            description: { type: string, maxLength: 65535 }
+            short_description: { type: string, maxLength: 65535 }
+            meta_title: { type: string, maxLength: 65535 }
+            meta_keyword: { type: string, maxLength: 65535 }
+            meta_description: { type: string, maxLength: 65535 }
+            url_key: { type: string, maxLength: 65535 }
+      required: [brand, changes]
+      additionalProperties: false
+    upstream: { method: POST, path: /async/bulk/V1/products }
+    manifest:
+      id_field: sku
+      ids_arg: skus
+      values_arg: changes
+      fields: [name, description, short_description, meta_title, meta_keyword, meta_description, url_key]
+      scope_args: { brand: brand }
+      read_before:
+        operation: catalog.get_products_by_sku
+        ids_arg: skus
+        args: { brand: { arg: brand } }
+      selector:
+        operation: catalog.search_products
+        args: { brand: { arg: brand }, name_like: { arg: name_like } }
+        page_arg: current_page
+        page_size_arg: page_size
+        page_size: 100
+      batch_size: 100
+      max_targets: 10000
+      rollback: { strategy: replay_previous_state }

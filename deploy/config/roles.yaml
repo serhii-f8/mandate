@@ -7,6 +7,10 @@ roles:
         id: own-brands
         scope: { brand: [acme, globex] }
         deny_fields: [cost]
+      - operation: catalog.update_content
+        id: own-brands-content
+        scope: { brand: [acme, globex] }
+        deny_fields: [cost]
   - id: support_agent
     grants:
       - operation: support.lookup_order
