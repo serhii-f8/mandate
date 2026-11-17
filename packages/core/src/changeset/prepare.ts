@@ -86,7 +86,9 @@ export async function prepareChangeSet(deps: PrepareDeps, req: PrepareRequest): 
   const manifest = operation.manifest;
   const args = normalizeArgs(req.args, manifest.idsArg);
   const rawIds = manifest.idsArg === undefined ? undefined : args[manifest.idsArg];
-  const explicitIds = Array.isArray(rawIds) && rawIds.length > 0 ? (rawIds as string[]) : undefined;
+  // normalizeArgs turned a present ids argument into a string array; an empty one names no targets (no selector fallback).
+  const explicitIds = Array.isArray(rawIds) ? (rawIds as string[]) : undefined;
+  if (explicitIds?.length === 0) return { ok: false, code: 'targets_missing' };
   if (explicitIds === undefined && manifest.selector === undefined) return { ok: false, code: 'targets_missing' };
 
   const id = deps.newId();

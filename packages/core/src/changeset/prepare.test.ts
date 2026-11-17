@@ -280,6 +280,15 @@ describe('CS-1 CS-2 CS-4 preparation', () => {
     expect(reader.calls).toHaveLength(0);
   });
 
+  it('CS-1 an empty ids argument gives targets_missing without falling back to the selector', async () => {
+    const reader = new ScriptedReader({}, { selector: () => ({ ok: true, items: [{ sku: 'A' }], truncated: false }) });
+    const { deps, repository } = setup(reader);
+    const out = await prepareChangeSet(deps, request({ ...explicitArgs, skus: [] }));
+    expect(out).toEqual({ ok: false, code: 'targets_missing' });
+    expect(repository.sets.size).toBe(0);
+    expect(reader.calls).toHaveLength(0);
+  });
+
   it('CS-1 max_targets exceeded fails too_many_targets with the code stored and audited', async () => {
     const skus = ['A', 'B', 'C', 'D', 'E'];
     const reader = new ScriptedReader(Object.fromEntries(skus.map((s) => [s, product(s)])));
