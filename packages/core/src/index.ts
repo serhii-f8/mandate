@@ -54,3 +54,4 @@ export type {
   UpstreamReader,
 } from './changeset/ports.js';
 export { changesetTransitionEvent, type ChangesetTransitionInput } from './changeset/audit.js';
+export { buildItems, touchedFields } from './changeset/items.js';
