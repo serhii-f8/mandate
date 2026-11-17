@@ -4,14 +4,14 @@
  * terminal statuses a decision stores, and executes once started. The replay fixtures of these paths
  * are recorded by `scripts/record-history.ts` (EXE-10).
  */
-import type { ChangeSetRecord, ReadPage, UpstreamReader } from '@aiops/core';
+import type { ReadPage, UpstreamReader } from '@aiops/core';
 import { PROGRESS_QUERY, type WorkflowProgress } from '@aiops/temporal';
-import { recordApproval, ScriptedWriter, submitChangeSet } from '@aiops/testing';
+import { recordApproval, ScriptedWriter } from '@aiops/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { changesetWorkflow } from '../../src/workflows/changeset.js';
 import { APPROVING_GROUP, REVIEWER_GROUP } from '../support/configuration.js';
 import { startInfrastructure, startTestWorker, type Infra, type TestWorker, type TestWorkerOptions } from '../support/harness.js';
-import { preparedByWorkflow, waitForWorkflowStatus } from '../support/prepared-by-workflow.js';
+import { preparedByWorkflow, SHORT_EXPIRY_MS, submitted, waitForWorkflowStatus } from '../support/prepared-by-workflow.js';
 
 let infra: Infra;
 
@@ -40,20 +40,13 @@ async function withWorker<T>(opts: TestWorkerOptions, fn: (worker: TestWorker) =
   }
 }
 
-/** Submits for the one `reviewer` step of `approving_editor` and wakes the waiting workflow. */
-async function submitted(worker: TestWorker, cs: ChangeSetRecord): Promise<ChangeSetRecord> {
-  const pending = await submitChangeSet(infra.repository, cs, { steps: ['reviewer'], groups: [APPROVING_GROUP] });
-  await worker.executor.wake(cs.id);
-  return pending;
-}
-
 const handleOf = (id: string) => infra.client.workflow.getHandle<typeof changesetWorkflow>(id);
 
 describe('changesetWorkflow approvals', () => {
   it('EXE-1 APR-1 a change-set in pending_approval stays parked; the progress query answers pending_approval', async () => {
     await withWorker({}, async (worker) => {
       const cs = await preparedByWorkflow(infra, worker, ['t-0001', 't-0002']);
-      await submitted(worker, cs);
+      await submitted(infra, worker, cs);
       await waitForWorkflowStatus(infra, cs.id, 'pending_approval');
       const handle = handleOf(cs.id);
       expect((await handle.describe()).status.name).toBe('RUNNING');
@@ -69,7 +62,7 @@ describe('changesetWorkflow approvals', () => {
     const writer = new ScriptedWriter();
     await withWorker({ writer }, async (worker) => {
       const cs = await preparedByWorkflow(infra, worker, ['t-0001', 't-0002', 't-0003']);
-      const approved = await recordApproval(infra.repository, await submitted(worker, cs), { approver: 'rita' });
+      const approved = await recordApproval(infra.repository, await submitted(infra, worker, cs), { approver: 'rita' });
       expect(approved.status).toBe('approved');
       if (approved.hash === undefined) throw new Error('approved change-set has no hash');
       const started = await worker.executor.start({
@@ -96,7 +89,7 @@ describe('changesetWorkflow approvals', () => {
   it('APR-4 rejected while pending: the wake ends the workflow with status rejected', async () => {
     await withWorker({}, async (worker) => {
       const cs = await preparedByWorkflow(infra, worker, ['t-0001']);
-      const pending = await submitted(worker, cs);
+      const pending = await submitted(infra, worker, cs);
       await waitForWorkflowStatus(infra, cs.id, 'pending_approval');
       await recordApproval(infra.repository, pending, { approver: 'rita', decision: 'rejected' });
       await worker.executor.wake(cs.id);
@@ -107,15 +100,14 @@ describe('changesetWorkflow approvals', () => {
 
   it('APR-4 returned, resubmitted as round 2, then expired: the workflow ends expired', async () => {
     await withWorker({}, async (worker) => {
-      const cs = await preparedByWorkflow(infra, worker, ['t-0001'], { expiresAt: new Date(Date.now() + 3_000) });
-      const returned = await recordApproval(infra.repository, await submitted(worker, cs), {
-        approver: 'rita',
-        decision: 'returned',
-        comment: 'fix the name',
-      });
+      const cs = await preparedByWorkflow(infra, worker, ['t-0001'], { expiresAt: new Date(Date.now() + SHORT_EXPIRY_MS) });
+      const pending = await submitted(infra, worker, cs);
+      await waitForWorkflowStatus(infra, cs.id, 'pending_approval');
+      const returned = await recordApproval(infra.repository, pending, { approver: 'rita', decision: 'returned', comment: 'fix the name' });
       expect(returned).toMatchObject({ status: 'prepared', approvalRound: 1 });
       await worker.executor.wake(cs.id);
-      const round2 = await submitted(worker, returned);
+      await waitForWorkflowStatus(infra, cs.id, 'prepared');
+      const round2 = await submitted(infra, worker, returned);
       expect(round2).toMatchObject({ status: 'pending_approval', approvalRound: 2 });
       await expect(handleOf(cs.id).result()).resolves.toEqual({ status: 'expired' });
       expect(await infra.repository.get(cs.id)).toMatchObject({ status: 'expired', approvalRound: 2 });
@@ -124,8 +116,8 @@ describe('changesetWorkflow approvals', () => {
 
   it('CS-6 a change-set in pending_approval expires by the workflow timer', async () => {
     await withWorker({}, async (worker) => {
-      const cs = await preparedByWorkflow(infra, worker, ['t-0001'], { expiresAt: new Date(Date.now() + 3_000) });
-      await submitted(worker, cs);
+      const cs = await preparedByWorkflow(infra, worker, ['t-0001'], { expiresAt: new Date(Date.now() + SHORT_EXPIRY_MS) });
+      await submitted(infra, worker, cs);
       await waitForWorkflowStatus(infra, cs.id, 'pending_approval');
       await expect(handleOf(cs.id).result()).resolves.toEqual({ status: 'expired' });
       expect((await infra.repository.get(cs.id))?.status).toBe('expired');

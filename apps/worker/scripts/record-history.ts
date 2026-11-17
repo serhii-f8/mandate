@@ -12,20 +12,27 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   BatchFenced,
-  type ChangeSetRecord,
   type ExecutionGuard,
   type ItemOutcome,
   type ReadPage,
   type UpstreamReader,
 } from '@aiops/core';
 import { CHANGESET_WORKFLOW, PROGRESS_QUERY, WAKE_SIGNAL, type WorkflowProgress } from '@aiops/temporal';
-import { recordApproval, ScriptedWriter, submitChangeSet } from '@aiops/testing';
+import { recordApproval, ScriptedWriter } from '@aiops/testing';
 import type { WorkflowHandle, WorkflowHandleWithSignaledRunId } from '@temporalio/client';
 import { historyToJSON } from '@temporalio/common/lib/proto-utils';
 import type { changesetWorkflow } from '../src/workflows/changeset.js';
 import { createPrepared } from '../test/support/changesets.js';
 import { APPROVING_GROUP, EDITOR_GROUP, REVIEWER_GROUP } from '../test/support/configuration.js';
-import { created, preparedByWorkflow, statusOf, waitFor, waitForWorkflowStatus } from '../test/support/prepared-by-workflow.js';
+import {
+  created,
+  preparedByWorkflow,
+  SHORT_EXPIRY_MS,
+  statusOf,
+  submitted,
+  waitFor,
+  waitForWorkflowStatus,
+} from '../test/support/prepared-by-workflow.js';
 import { startInfrastructure, startTestWorker, type Infra, type TestWorker, type TestWorkerOptions } from '../test/support/harness.js';
 
 type History = Awaited<ReturnType<WorkflowHandle['fetchHistory']>>;
@@ -72,13 +79,6 @@ function signalWithStart(infra: Infra, worker: TestWorker, changesetId: string):
     signal: WAKE_SIGNAL,
     signalArgs: [],
   });
-}
-
-/** Submits for the one `reviewer` step of `approving_editor` and wakes the waiting workflow. */
-async function submitted(infra: Infra, worker: TestWorker, cs: ChangeSetRecord): Promise<ChangeSetRecord> {
-  const pending = await submitChangeSet(infra.repository, cs, { steps: ['reviewer'], groups: [APPROVING_GROUP] });
-  await worker.executor.wake(cs.id);
-  return pending;
 }
 
 async function expectResult(handle: WorkflowHandle<typeof changesetWorkflow>, status: string): Promise<void> {
@@ -313,13 +313,12 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
     files: ['returned-resubmitted-expired'],
     run: (infra) =>
       withWorker(infra, { reader: catalogReader }, async (worker) => {
-        const cs = await preparedByWorkflow(infra, worker, ['t-0001'], { expiresAt: new Date(Date.now() + 3_000) });
-        const returned = await recordApproval(infra.repository, await submitted(infra, worker, cs), {
-          approver: 'rita',
-          decision: 'returned',
-          comment: 'fix the name',
-        });
+        const cs = await preparedByWorkflow(infra, worker, ['t-0001'], { expiresAt: new Date(Date.now() + SHORT_EXPIRY_MS) });
+        const pending = await submitted(infra, worker, cs);
+        await waitForWorkflowStatus(infra, cs.id, 'pending_approval');
+        const returned = await recordApproval(infra.repository, pending, { approver: 'rita', decision: 'returned', comment: 'fix the name' });
         await worker.executor.wake(cs.id);
+        await waitForWorkflowStatus(infra, cs.id, 'prepared');
         const round2 = await submitted(infra, worker, returned);
         if (round2.approvalRound !== 2) throw new Error(`expected round 2, got ${round2.approvalRound}`);
         const handle = infra.client.workflow.getHandle<typeof changesetWorkflow>(cs.id);
@@ -333,7 +332,7 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
     files: ['expired-pending-approval'],
     run: (infra) =>
       withWorker(infra, { reader: catalogReader }, async (worker) => {
-        const cs = await preparedByWorkflow(infra, worker, ['t-0001'], { expiresAt: new Date(Date.now() + 3_000) });
+        const cs = await preparedByWorkflow(infra, worker, ['t-0001'], { expiresAt: new Date(Date.now() + SHORT_EXPIRY_MS) });
         await submitted(infra, worker, cs);
         await waitForWorkflowStatus(infra, cs.id, 'pending_approval');
         const handle = infra.client.workflow.getHandle<typeof changesetWorkflow>(cs.id);

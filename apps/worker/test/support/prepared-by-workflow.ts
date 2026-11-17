@@ -5,9 +5,20 @@
 import { randomUUID } from 'node:crypto';
 import { createChangeSet, type ChangeSetRecord } from '@aiops/core';
 import { PROGRESS_QUERY, type WorkflowProgress } from '@aiops/temporal';
+import { submitChangeSet } from '@aiops/testing';
 import { createPreparing } from './changesets.js';
-import { EDITOR_GROUP, WRITE_OPERATION } from './configuration.js';
+import { APPROVING_GROUP, EDITOR_GROUP, WRITE_OPERATION } from './configuration.js';
 import type { Infra, TestWorker } from './harness.js';
+
+/**
+ * Expiry, from creation, of change-sets that a case leaves to expire while it waits for an approval.
+ * The time is real: preparation, submission and (in the returned case) return and resubmission must
+ * fit before it. Measured here: a whole approved case (prepare, submit, approve, execute) takes
+ * about 1 s, so the sequence fits well under 1 s; 10 s leaves room for a slow CI machine and keeps
+ * each such case near 10.6 s. The committed fixtures were recorded with a 3 s window (replay does
+ * not depend on it).
+ */
+export const SHORT_EXPIRY_MS = 10_000;
 
 export interface CreatedOptions {
   /**
@@ -71,4 +82,11 @@ export async function preparedByWorkflow(
   const prepared = await infra.repository.get(cs.id);
   if (prepared === undefined) throw new Error('prepared change-set not found');
   return prepared;
+}
+
+/** Submits for the one `reviewer` step of `approving_editor` and wakes the waiting workflow. */
+export async function submitted(infra: Infra, worker: TestWorker, cs: ChangeSetRecord): Promise<ChangeSetRecord> {
+  const pending = await submitChangeSet(infra.repository, cs, { steps: ['reviewer'], groups: [APPROVING_GROUP] });
+  await worker.executor.wake(cs.id);
+  return pending;
 }
