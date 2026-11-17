@@ -353,6 +353,42 @@ describe('EXE-4 CS-7 NFR-2 manifest batch writer', () => {
     expect(batch.recorded).toEqual([]);
   });
 
+  it('EXE-4 an invalid_response submit (accepted, batch ID unusable) fails every to-write item no_outcome and never resubmits', async () => {
+    const { events, reader, bulk, batch, writer } = setup();
+    reader.pages = [page(product('A', 'old'), product('B', 'new'), product('C', 'old'))];
+    bulk.submits = [{ ok: false, code: 'invalid_response', retriable: false }];
+    const outcomes = await writer.writeBatch({
+      changeset: changesetFor(['A', 'B', 'C']),
+      items: [item('A'), item('B'), item('C')],
+      batch,
+    });
+    expect(bulk.submitted).toHaveLength(1);
+    expect(batch.recorded).toEqual([]);
+    expect(events).not.toContain('status');
+    expect(outcomes).toEqual([
+      { targetId: 'A', status: 'failed', error: 'no_outcome' },
+      { targetId: 'B', status: 'written', error: 'already_applied' },
+      { targetId: 'C', status: 'failed', error: 'no_outcome' },
+    ]);
+  });
+
+  it.each(['mapping', 'egress_denied', 'credential_missing', 'credential_unusable', 'http_status'])(
+    'EXE-4 a non-retriable %s submit failure fails every to-write item upstream_rejected without resubmitting',
+    async (code) => {
+      const { events, reader, bulk, batch, writer } = setup();
+      reader.pages = [page(product('A', 'old'), product('B', 'new'))];
+      bulk.submits = [{ ok: false, code, retriable: false }];
+      const outcomes = await writer.writeBatch({ changeset: changesetFor(['A', 'B']), items: [item('A'), item('B')], batch });
+      expect(bulk.submitted).toHaveLength(1);
+      expect(batch.recorded).toEqual([]);
+      expect(events).not.toContain('status');
+      expect(outcomes).toEqual([
+        { targetId: 'A', status: 'failed', error: 'upstream_rejected' },
+        { targetId: 'B', status: 'written', error: 'already_applied' },
+      ]);
+    },
+  );
+
   it('EXE-4 NFR-2 a retry after a timed-out submit re-reads: items the upstream applied are already_applied, the rest is submitted again', async () => {
     const { reader, bulk, batch, writer } = setup();
     const ids = ['A', 'B'];
@@ -607,6 +643,36 @@ describe('EXE-4 resume and polling', () => {
       { targetId: 'B', status: 'written', error: 'already_applied' },
       { targetId: 'C', status: 'failed', error: 'no_outcome' },
     ]);
+  });
+
+  it.each([
+    ['http_status 401', { code: 'http_status', status: 401 }],
+    ['http_status 403', { code: 'http_status', status: 403 }],
+    ['credential_missing', { code: 'credential_missing' }],
+    ['credential_unusable', { code: 'credential_unusable' }],
+  ])('EXE-4 a status failure from authentication (%s) is retried as status_failed, not no_outcome', async (_label, failure) => {
+    const { reader, bulk, batch, writer } = setup();
+    reader.pages = [page(product('A', 'old')), page(product('A', 'new'))];
+    bulk.statuses = [{ ok: false, retriable: false, ...failure }, DONE];
+    await expect(writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch })).rejects.toMatchObject({
+      name: 'RetryableWriteError',
+      code: 'status_failed',
+    });
+    expect(batch.recorded).toHaveLength(1);
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch });
+    expect(bulk.submitted).toHaveLength(1);
+    expect(outcomes).toEqual([{ targetId: 'A', status: 'written' }]);
+  });
+
+  it.each([
+    ['http_status 404', { code: 'http_status', status: 404 }],
+    ['invalid_response', { code: 'invalid_response' }],
+  ])('EXE-5 a non-retriable status failure (%s) keeps failing the submitted items no_outcome', async (_label, failure) => {
+    const { reader, bulk, batch, writer } = setup();
+    reader.pages = [page(product('A', 'old'))];
+    bulk.statuses = [{ ok: false, retriable: false, ...failure }];
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch });
+    expect(outcomes).toEqual([{ targetId: 'A', status: 'failed', error: 'no_outcome' }]);
   });
 
   it('EXE-4 a status answer with an empty item list counts as still open', async () => {

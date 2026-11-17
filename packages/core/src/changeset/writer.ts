@@ -62,12 +62,23 @@ export interface BulkWriter {
   submit(
     records: readonly Readonly<Record<string, unknown>>[],
   ): Promise<{ ok: true; batchId: string } | { ok: false; code: string; retriable: boolean }>;
+  /** `status` on a failure: the HTTP status of an `http_status` failure (a number, never upstream text). */
   status(
     batchId: string,
   ): Promise<
     | { ok: true; items: readonly { index: number; state: BulkItemState }[] }
-    | { ok: false; code: string; retriable: boolean }
+    | { ok: false; code: string; retriable: boolean; status?: number }
   >;
+}
+
+/**
+ * A status failure the retry of the batch may clear although the port calls it non-retriable: the
+ * credential (a missing, unusable or expired token: 401, 403) is replaced while the upstream may
+ * still apply the batch, so it is not given up as `no_outcome` (EXE-4).
+ */
+function authenticationFailure(failure: { readonly code: string; readonly status?: number }): boolean {
+  if (failure.code === 'credential_missing' || failure.code === 'credential_unusable') return true;
+  return failure.code === 'http_status' && (failure.status === 401 || failure.status === 403);
 }
 
 export interface Clock {
@@ -136,16 +147,15 @@ export class ManifestBatchWriter implements ChangeWriter {
     if (records.length === 0) return outcomesOf(plan, new Map());
 
     const bulk = this.deps.bulkFor(changeset);
-    const batchId = await this.submit(bulk, records);
-    if (batchId === undefined) {
-      const rejected = new Map<string, ItemOutcome>();
+    const submitted = await this.submit(bulk, records);
+    if (!submitted.ok) {
+      const failed = new Map<string, ItemOutcome>();
       for (const e of plan) {
-        if (e.action === 'write') {
-          rejected.set(e.targetId, { targetId: e.targetId, status: 'failed', error: 'upstream_rejected' });
-        }
+        if (e.action === 'write') failed.set(e.targetId, { targetId: e.targetId, status: 'failed', error: submitted.error });
       }
-      return outcomesOf(plan, rejected);
+      return outcomesOf(plan, failed);
     }
+    const batchId = submitted.batchId;
     // A fenced attempt throws BatchFenced here; it propagates and nothing is polled (EXE-4).
     await batch.recordSubmission({ upstreamBatchId: batchId, plan });
     const polled = await this.poll(bulk, batchId, records.length, batch);
@@ -188,20 +198,30 @@ export class ManifestBatchWriter implements ChangeWriter {
     return { plan, records };
   }
 
-  /** Answers the upstream batch ID, or undefined when the upstream rejected the batch. */
-  private async submit(bulk: BulkWriter, records: readonly Record<string, unknown>[]): Promise<string | undefined> {
+  /**
+   * Answers the upstream batch ID, or the outcome of every to-write item when the submit failed for
+   * good. Only a retriable failure is retried (`submit_failed`). A non-retriable one is never sent
+   * again: `invalid_response` came with a success status, so the upstream may have taken the batch
+   * without an ID to poll (`no_outcome`); any other (`rejected`, `mapping`, `egress_denied`,
+   * `credential_*`, ...) was refused or never sent (`upstream_rejected`).
+   */
+  private async submit(
+    bulk: BulkWriter,
+    records: readonly Record<string, unknown>[],
+  ): Promise<{ ok: true; batchId: string } | { ok: false; error: 'no_outcome' | 'upstream_rejected' }> {
     const res = await bulk.submit(records);
-    if (res.ok) return res.batchId;
-    if (res.code === 'rejected') return undefined;
-    throw new RetryableWriteError('submit_failed');
+    if (res.ok) return res;
+    if (res.retriable) throw new RetryableWriteError('submit_failed');
+    return { ok: false, error: res.code === 'invalid_response' ? 'no_outcome' : 'upstream_rejected' };
   }
 
   /**
    * Polls until no submitted index is open; answers the worst state per index in 0..writeCount-1.
    * One heartbeat per round; waits 1 s growing x1.5 up to 5 s; still open after 10 min throws
    * `poll_timeout` (the retry resumes from the recorded submission). An empty item list counts as
-   * still open. A non-retriable status failure (the upstream no longer knows the batch) answers no
-   * states, so every submitted item ends `failed/no_outcome` and nothing is verified (EXE-5).
+   * still open. A non-retriable status failure (the upstream no longer knows the batch, or answers
+   * what cannot be read) answers no states, so every submitted item ends `failed/no_outcome` and
+   * nothing is verified (EXE-5); an authentication failure is retried instead (`status_failed`).
    */
   private async poll(
     bulk: BulkWriter,
@@ -216,7 +236,7 @@ export class ManifestBatchWriter implements ChangeWriter {
       await clock.sleep(Math.min(POLL_MAX_MS, POLL_INITIAL_MS * POLL_FACTOR ** round));
       const res = await bulk.status(batchId);
       if (!res.ok) {
-        if (res.retriable) throw new RetryableWriteError('status_failed');
+        if (res.retriable || authenticationFailure(res)) throw new RetryableWriteError('status_failed');
         return new Map();
       }
       const states = new Map<number, BulkItemState>();

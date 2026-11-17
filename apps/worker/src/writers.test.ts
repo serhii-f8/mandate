@@ -12,8 +12,8 @@ import {
   type Clock,
 } from '@aiops/core';
 import { installFakeMagentoCatalog, startFakeUpstream, type FakeMagentoCatalog, type FakeUpstream } from '@aiops/testing';
-import type { UpstreamCallLog } from '@aiops/upstream';
-import { loadMagentoPreset, MAGENTO_BASE_PATH, vaultWithToken, type MemoryVault } from '../test/support/magento.js';
+import { createBulkWriter, createUpstreamReader, type UpstreamCallLog } from '@aiops/upstream';
+import { loadMagentoPreset, MAGENTO_BASE_PATH, MemoryVault, vaultWithToken } from '../test/support/magento.js';
 import { createWriterFor } from './writers.js';
 
 const FAKE_TOKEN = 'writers-test-only-token';
@@ -181,6 +181,37 @@ describe('EXE-4 OPS-6 worker writerFor', () => {
     const logged = JSON.stringify(lines);
     expect(logged).not.toContain(FAKE_TOKEN);
     expect(logged).not.toContain('new text');
+  });
+
+  it('EXE-4 a submit without a stored credential (credential_missing) fails the to-write items upstream_rejected, sends no batch and is not retried', async () => {
+    const operation = configuration.policy.operations.find((o) => o.id === 'catalog.update_content');
+    const manifest = operation?.manifest;
+    if (operation === undefined || manifest === undefined) throw new Error('preset operation missing');
+    const adapter = createOpenApiAdapter();
+    const readOperation = configuration.policy.operations.find((o) => o.id === manifest.readBefore.operation);
+    // The read still has its credential; the bulk calls look theirs up in an empty vault.
+    const writer = new ManifestBatchWriter({
+      operation: { ...operation, manifest },
+      readFieldsArg: readOperation?.fieldsArg,
+      readerFor: (cs) => createUpstreamReader({ configuration, vault, adapter, correlationId: cs.correlationId }),
+      bulkFor: (cs) => {
+        const bulk = createBulkWriter({ configuration, vault: new MemoryVault(), adapter, operationId: operation.id, correlationId: cs.correlationId });
+        if (bulk === undefined) throw new Error('preset operation has no bulk binding');
+        return bulk;
+      },
+      clock: new FakeClock(),
+    });
+    const batch = new FakeBatch(statusPolls);
+
+    const outcomes = await writer.writeBatch({ changeset: changesetFor('catalog.update_content'), items: ITEMS, batch });
+
+    expect(outcomes).toEqual([
+      { targetId: 'A', status: 'failed', error: 'upstream_rejected' },
+      { targetId: 'B', status: 'failed', error: 'upstream_rejected' },
+    ]);
+    expect(catalog.submissions).toEqual([]);
+    expect(batch.recorded).toEqual([]);
+    expect(statusPolls()).toBe(0);
   });
 
   it('EXE-4 writerFor resumes a recorded submission without a second submission', async () => {

@@ -29,6 +29,10 @@ const UNUSABLE: Failure = { ok: false, code: 'credential_unusable', retriable: f
 /** The port's failure: the fixed code and whether a retry may help; status and duration stay behind. */
 const failure = (outcome: WriteFailure): Failure => ({ ok: false, code: outcome.code, retriable: outcome.retriable });
 
+/** A status failure also keeps the HTTP status of an `http_status` failure: the writer retries a 401 or 403 (EXE-4). */
+const statusFailure = (outcome: WriteFailure): Failure & { status?: number } =>
+  outcome.code === 'http_status' && outcome.status !== undefined ? { ...failure(outcome), status: outcome.status } : failure(outcome);
+
 /** undefined when the operation has no binding, no connection settings or no `bulk`. */
 export function createBulkWriter(deps: BulkWriterDeps): BulkWriter | undefined {
   const { configuration, adapter } = deps;
@@ -63,7 +67,7 @@ export function createBulkWriter(deps: BulkWriterDeps): BulkWriter | undefined {
       if (credential === 'unusable') return UNUSABLE;
       const outcome = await adapter.bulkStatus({ connection, mapping, batchId, ...(credential === undefined ? {} : { credential }) });
       log(bulk.status.method, outcome);
-      return outcome.ok ? { ok: true, items: outcome.items.map(({ index, state }) => ({ index, state })) } : failure(outcome);
+      return outcome.ok ? { ok: true, items: outcome.items.map(({ index, state }) => ({ index, state })) } : statusFailure(outcome);
     },
   };
 }

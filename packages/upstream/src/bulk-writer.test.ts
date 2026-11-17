@@ -163,6 +163,11 @@ describe('OPS-6 EXE-4 bulk writer port over the connection write adapter', () =>
     expect(await failed.writer.status('b-1')).toEqual({ ok: false, code: 'rejected', retriable: false });
   });
 
+  it('EXE-4 a status http_status failure keeps its HTTP status, so the writer can retry a 401 or 403', async () => {
+    const unauthorized = await setup(SUBMIT_OK, { ok: false, code: 'http_status', status: 401, durationMs: 3, retriable: false });
+    expect(await unauthorized.writer.status('b-1')).toEqual({ ok: false, code: 'http_status', status: 401, retriable: false });
+  });
+
   it('OPS-6 is undefined for an operation without bulk and for an unknown operation', () => {
     const base = { configuration: CONFIG, vault: new MemoryVault(), adapter: new FakeWriteAdapter(SUBMIT_OK, STATUS_OK), correlationId: 'c' };
     expect(createBulkWriter({ ...base, operationId: 'catalog.update_plain' })).toBeUndefined();
