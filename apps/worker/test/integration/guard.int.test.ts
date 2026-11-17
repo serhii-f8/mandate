@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { LoadedConfiguration } from '@aiops/config';
+import type { RoleApprovalRule } from '@aiops/core';
 import { DrizzleAuditLog, PostgresChangeSetRepository } from '@aiops/db';
 import { recordApproval, submitChangeSet } from '@aiops/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -64,6 +65,20 @@ describe('production execution guard', () => {
 describe('execution guard approval re-check', () => {
   const requester = { actor: 'alice', groups: [APPROVING_GROUP] };
 
+  /** The test configuration with one role's approval rule replaced (undefined removes it), as a reload would. */
+  function withApprovalRule(
+    role: string,
+    change: (rule: RoleApprovalRule) => RoleApprovalRule | undefined,
+  ): LoadedConfiguration {
+    const current = configuration.approval.get(role);
+    if (current === undefined) throw new Error(`no approval rule for ${role}`);
+    const next = change(current);
+    const approval = new Map(configuration.approval);
+    if (next === undefined) approval.delete(role);
+    else approval.set(role, next);
+    return { ...configuration, approval };
+  }
+
   it('POL-5 SEC-9 a change-set of a role that requires approval passes with an approved row carrying the recomputed hash', async () => {
     const prepared = await createPrepared(repository, 3);
     const submitted = await submitChangeSet(repository, prepared, { steps: ['reviewer'], groups: [APPROVING_GROUP] });
@@ -79,19 +94,55 @@ describe('execution guard approval re-check', () => {
   });
 
   it('SEC-9 an approval row for another hash is approval_missing', async () => {
-    // reviewer approves step 1 for another hash, the second step returns it to prepared (round 1 stays).
+    // The repository refuses to start an approved change-set whose rows carry another hash
+    // (not_approved), so the guard sees the approved record with the execution request attached.
+    const prepared = await createPrepared(repository, 3);
+    const submitted = await submitChangeSet(repository, prepared, { steps: ['reviewer'], groups: [APPROVING_GROUP] });
+    const approved = await recordApproval(repository, submitted, { approver: 'rita', hash: 'f'.repeat(64) });
+    expect(approved.status).toBe('approved');
+    const cs = { ...approved, executionRequest: { ...requester, correlationId: 'corr-exec', startedAt: new Date() } };
+    await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: false, outcome: 'approval_missing' });
+    // Control: the same record with a row for its hash passes.
+    const good = await recordApproval(
+      repository,
+      await submitChangeSet(repository, await createPrepared(repository, 3), { steps: ['reviewer'], groups: [APPROVING_GROUP] }),
+      { approver: 'rita' },
+    );
+    const goodCs = { ...good, executionRequest: { ...requester, correlationId: 'corr-exec', startedAt: new Date() } };
+    await expect(guardFor(configuration).check(goodCs)).resolves.toEqual({ ok: true });
+  });
+
+  it('APR-4 a current round that was returned counts as having no approvals', async () => {
+    // reviewer approves step 1 for the right hash, the second step returns it to prepared (round 1 stays).
     const prepared = await createPrepared(repository, 3);
     const submitted = await submitChangeSet(repository, prepared, { steps: ['reviewer', 'lead'], groups: [APPROVING_GROUP] });
-    const afterStep1 = await recordApproval(repository, submitted, { approver: 'rita', hash: 'f'.repeat(64) });
+    const afterStep1 = await recordApproval(repository, submitted, { approver: 'rita' });
     const returned = await recordApproval(repository, afterStep1, { approver: 'larry', decision: 'returned', comment: 'later' });
     expect(returned).toMatchObject({ status: 'prepared', approvalRound: 1 });
-    const rows = await repository.approvals(returned.id, 1);
-    expect(rows.map((r) => [r.role, r.decision])).toEqual([
+    expect((await repository.approvals(returned.id, 1)).map((r) => [r.role, r.decision])).toEqual([
       ['reviewer', 'approved'],
       ['lead', 'returned'],
     ]);
     const cs = await startExecutionOf(repository, returned, requester);
     await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: false, outcome: 'approval_missing' });
+  });
+
+  it('POL-5 SEC-9 a repeated step role needs one approved row per occurrence', async () => {
+    const prepared = await createPrepared(repository, 3);
+    const submitted = await submitChangeSet(repository, prepared, { steps: ['reviewer'], groups: [APPROVING_GROUP] });
+    const cs = await startExecutionOf(repository, await recordApproval(repository, submitted, { approver: 'rita' }), requester);
+    await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: true });
+    const tightened = withApprovalRule('approving_editor', (rule) => ({ ...rule, steps: ['reviewer', 'reviewer'] }));
+    await expect(guardFor(tightened).check(cs)).resolves.toEqual({ ok: false, outcome: 'approval_missing' });
+  });
+
+  it('POL-5 SEC-11 a required approval without configured steps is approval_missing', async () => {
+    // The role lost its approval rule: approval is required by default and nobody can approve it.
+    const prepared = await createPrepared(repository, 3);
+    const submitted = await submitChangeSet(repository, prepared, { steps: ['reviewer'], groups: [APPROVING_GROUP] });
+    const cs = await startExecutionOf(repository, await recordApproval(repository, submitted, { approver: 'rita' }), requester);
+    const unroutable = withApprovalRule('approving_editor', () => undefined);
+    await expect(guardFor(unroutable).check(cs)).resolves.toEqual({ ok: false, outcome: 'approval_missing' });
   });
 
   it('APR-4 approvals of an earlier round do not count', async () => {

@@ -28,9 +28,10 @@ export interface ExecutionGuardDeps {
  *    operation with the change-set's arguments under the worker's current configuration (POL-6).
  *    A denial is audited as a `policy.decision` with the change-set ID (POL-8, AUD-1);
  * 3. the approval requirement is recomputed from the current configuration, the allowing role of
- *    that re-evaluation and `stats.included` (POL-5). When required, every step role needs an
- *    `approved` row of the current round whose hash equals the recomputed hash (SEC-9, APR-4);
- *    otherwise, or when no step is configured, `approval_missing`. A change-set started from
+ *    that re-evaluation and `stats.included` (POL-5). When required, each step needs its own
+ *    `approved` row of the current round with that step's role and the recomputed hash (a role
+ *    named twice needs two rows; SEC-9, APR-2), and a round holding a `returned` row counts as
+ *    unapproved (APR-4); otherwise, or when no step is configured, `approval_missing`. A change-set started from
  *    `prepared` that now needs approval fails closed (design §7).
  */
 export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: LoadedConfiguration) => ExecutionGuard {
@@ -63,10 +64,17 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
     });
     if (!requirement.required) return true;
     if (requirement.unroutable === true) return false;
-    const approved = (await deps.repository.approvals(changeset.id, changeset.approvalRound)).filter(
-      (a) => a.decision === 'approved' && a.hash === hash,
-    );
-    return requirement.steps.every((step) => approved.some((a) => a.role === step));
+    const rows = await deps.repository.approvals(changeset.id, changeset.approvalRound);
+    // A returned round was sent back explicitly: none of its approvals count (APR-4).
+    if (rows.some((a) => a.decision === 'returned')) return false;
+    // Each step is its own approver (APR-2): a role named k times needs k approved rows (POL-5).
+    const approvedBy = new Map<string, number>();
+    for (const a of rows) {
+      if (a.decision === 'approved' && a.hash === hash) approvedBy.set(a.role, (approvedBy.get(a.role) ?? 0) + 1);
+    }
+    const needed = new Map<string, number>();
+    for (const step of requirement.steps) needed.set(step, (needed.get(step) ?? 0) + 1);
+    return [...needed].every(([role, count]) => (approvedBy.get(role) ?? 0) >= count);
   }
   return (configuration) => ({
     async check(changeset) {
