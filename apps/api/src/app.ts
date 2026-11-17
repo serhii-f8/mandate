@@ -30,6 +30,7 @@ import { ProtectedResourceController } from './auth/protected-resource.controlle
 import { HealthController } from './health/health.controller.js';
 import { bodyErrorHandler } from './http/body-errors.js';
 import { createLogger, PinoNestLogger } from './logger.js';
+import { ApprovalService } from './approvals/approval-service.js';
 import { createBuiltinTools } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
 import { createServerFactory } from './mcp/mcp-server-factory.js';
@@ -198,6 +199,7 @@ class AppModule {
             const tasks = overrides.tasks ?? new PostgresTaskRepository(database.db);
             const executor = overrides.executor ?? new TemporalExecutor({ client: temporalOf(temporal).client, taskQueue: env.taskQueue, repository: changesets, newId: randomUUID, now: () => new Date() });
             const starter = overrides.starter ?? new TemporalWorkflowStarter({ client: temporalOf(temporal).client, taskQueue: env.taskQueue });
+            const approvals = new ApprovalService({ repository: changesets, executor, audit, newId: randomUUID, now: () => new Date() });
             const io: UpstreamIo = {
               vault,
               adapter,
@@ -210,7 +212,16 @@ class AppModule {
               createServerFactory(
                 {
                   snapshot: () => snapshotOf(configuration.current),
-                  builtins: createBuiltinTools({ repository: changesets, newId: randomUUID, now: () => new Date(), executor, tasks, audit }),
+                  builtins: createBuiltinTools({
+                    repository: changesets,
+                    newId: randomUUID,
+                    now: () => new Date(),
+                    executor,
+                    tasks,
+                    audit,
+                    approvals,
+                    publicUrl: env.publicUrl,
+                  }),
                   invokerFor: invokerFactory(overrides.invoker, io, { tasks, starter, prepareWaitMs: env.prepareWaitMs }),
                   audit,
                   newId: randomUUID,

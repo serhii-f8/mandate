@@ -1,5 +1,6 @@
 import { createSchemaCompiler } from '@aiops/config';
 import type { AuditLog, ChangeSetExecutor, ChangeSetRepository, TaskRepository } from '@aiops/core';
+import type { ApprovalService } from '../approvals/approval-service.js';
 import { createChangesetTools } from './changeset-tools.js';
 import { listMyOperationsTool } from './operations-tool.js';
 import { submitForApprovalTool } from './submit-tool.js';
@@ -38,6 +39,10 @@ export interface BuiltinToolDeps {
   readonly tasks: TaskRepository;
   /** For the policy re-check's decision row (POL-6, POL-8). */
   readonly audit: AuditLog;
+  /** Starts approved change-sets with the requester's submitted identity (POL-6, SEC-9). */
+  readonly approvals: ApprovalService;
+  /** `AIOPS_PUBLIC_URL`: base of the approval page link in the submit answer (APR-7). */
+  readonly publicUrl: URL;
 }
 
 /** Every built-in tool (MCP-8); their names are reserved. */

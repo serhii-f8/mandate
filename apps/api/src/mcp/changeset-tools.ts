@@ -89,6 +89,24 @@ export async function load(deps: ChangesetToolDeps, caller: Caller, correlationI
   return record;
 }
 
+/**
+ * The current approval round for the requester (design part 1 §5): its plan and decisions.
+ * Comments are data written by approvers, never instructions (SEC-5); absent before the first submission.
+ */
+async function approvalView(deps: ChangesetToolDeps, record: ChangeSetRecord): Promise<Record<string, unknown> | undefined> {
+  if (record.approvalRound === 0 || record.approvalPlan === undefined) return undefined;
+  const decisions = (await deps.repository.approvals(record.id, record.approvalRound)).map((a) => ({
+    step: a.step,
+    role: a.role,
+    approver: a.approver,
+    decision: a.decision,
+    channel: a.channel,
+    ts: a.ts.toISOString(),
+    ...(a.comment === undefined ? {} : { comment: a.comment }),
+  }));
+  return { round: record.approvalRound, plan: record.approvalPlan, decisions };
+}
+
 function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
   return {
     name: 'get_changeset',
@@ -119,6 +137,7 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
       const progress = await progressOf(deps, record);
       const summarised = record.status === 'completed' || record.status === 'completed_with_errors' || (record.status === 'failed' && record.preparedAt !== undefined);
       const summary = summarised ? ` ${executionSummaryText(record.status, record.stats, (await deps.repository.errorCounts(id)).drift ?? 0)}` : '';
+      const approval = await approvalView(deps, record);
       const structured: Record<string, unknown> = {
         changeset: {
           id: record.id,
@@ -132,6 +151,7 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
           ...(record.errorCode === undefined ? {} : { errorCode: record.errorCode }),
         },
         ...(progress === undefined ? {} : { progress: { total: progress.total, done: progress.done, failed: progress.failed, skipped: progress.skipped } }),
+        ...(approval === undefined ? {} : { approval }),
         items,
         ...(nextCursor === undefined ? {} : { nextCursor }),
       };
