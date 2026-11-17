@@ -89,6 +89,7 @@ export async function startInfrastructure(opts: InfraOptions = {}): Promise<Infr
 
 /** Short timeouts and retries, so failure paths finish within seconds. */
 export const FAST_TUNING: ActivityTuning = {
+  prepareTimeoutMs: 60_000,
   batchHeartbeatMs: 2_000,
   batchTimeoutMs: 30_000,
   batchMaxAttempts: 3,
@@ -128,8 +129,8 @@ export interface TestWorkerOptions {
   readonly maxCachedWorkflows?: number;
   /** The worker's Temporal identity. Default: the SDK's (`<pid>@<hostname>`). */
   readonly identity?: string;
-  /** Called with the activity name before every activity invocation. */
-  readonly spy?: (activity: string) => void;
+  /** Called with the activity name before every activity invocation; the activity waits for a returned promise. */
+  readonly spy?: (activity: string) => unknown;
 }
 
 export interface TestWorker {
@@ -147,15 +148,18 @@ const noReads: UpstreamReader = {
   read: () => Promise.reject(new Error('no reader configured for this test')),
 };
 
-function spied(a: ChangesetActivities, spy: ((activity: string) => void) | undefined): ChangesetActivities {
+function spied(a: ChangesetActivities, spy: ((activity: string) => unknown) | undefined): ChangesetActivities {
   if (spy === undefined) return a;
+  const before = async (activity: string): Promise<void> => {
+    await Promise.resolve(spy(activity));
+  };
   return {
-    inspect: (id) => (spy('inspect'), a.inspect(id)),
-    prepare: (id) => (spy('prepare'), a.prepare(id)),
-    expire: (id) => (spy('expire'), a.expire(id)),
-    beginExecution: (id, options) => (spy('beginExecution'), a.beginExecution(id, options)),
-    executeBatch: (id, batchNo) => (spy('executeBatch'), a.executeBatch(id, batchNo)),
-    finishExecution: (id, outcome) => (spy('finishExecution'), a.finishExecution(id, outcome)),
+    inspect: async (id) => (await before('inspect'), a.inspect(id)),
+    prepare: async (id) => (await before('prepare'), a.prepare(id)),
+    expire: async (id) => (await before('expire'), a.expire(id)),
+    beginExecution: async (id, options) => (await before('beginExecution'), a.beginExecution(id, options)),
+    executeBatch: async (id, batchNo) => (await before('executeBatch'), a.executeBatch(id, batchNo)),
+    finishExecution: async (id, outcome) => (await before('finishExecution'), a.finishExecution(id, outcome)),
   };
 }
 

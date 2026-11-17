@@ -51,6 +51,8 @@ export interface ApiEnv {
 
 /** Activity timeouts and retries of the operation workflow (same shape as `ActivityTuning` of `@aiops/temporal`). */
 export interface WorkerActivityTuning {
+  /** Start-to-close of one preparation attempt, the ceiling of a whole preparation (NFR-7). */
+  readonly prepareTimeoutMs: number;
   readonly batchHeartbeatMs: number;
   readonly batchTimeoutMs: number;
   readonly batchMaxAttempts: number;
@@ -146,6 +148,8 @@ const apiSchema = z.object({
  */
 const HEARTBEAT_MARGIN_MS = 5_000;
 const MIN_BATCH_HEARTBEAT_MS = POLL_MAX_MS + HEARTBEAT_MARGIN_MS;
+/** The fixed heartbeat timeout of `prepare` (`PREPARE_HEARTBEAT_MS` of `@aiops/temporal`). */
+const PREPARE_HEARTBEAT_MS = 60_000;
 
 const workerSchema = z.object({
   TEMPORAL_ADDRESS: nonEmpty('localhost:7233'),
@@ -157,6 +161,7 @@ const workerSchema = z.object({
   AIOPS_PRESET_DIRS: presetDirs,
   AIOPS_MASTER_KEYS: z.string().trim().min(1),
   AIOPS_TEMPORAL_KEYS: z.string().trim().min(1),
+  AIOPS_PREPARE_TIMEOUT_MS: positiveInt(3_600_000),
   AIOPS_BATCH_HEARTBEAT_MS: positiveInt(30_000),
   AIOPS_BATCH_TIMEOUT_MS: positiveInt(900_000),
   AIOPS_BATCH_MAX_ATTEMPTS: positiveInt(10),
@@ -166,6 +171,14 @@ const workerSchema = z.object({
   // Cross-field checks run only once every field parsed; the messages name variables, never values (SEC-3).
   if (e.AIOPS_RETRY_INITIAL_MS > e.AIOPS_RETRY_MAX_MS) {
     ctx.addIssue({ code: 'custom', path: ['AIOPS_RETRY_INITIAL_MS'], message: 'must not exceed AIOPS_RETRY_MAX_MS' });
+  }
+  // A preparation ceiling within the heartbeat timeout would end a healthy preparation first.
+  if (e.AIOPS_PREPARE_TIMEOUT_MS <= PREPARE_HEARTBEAT_MS) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['AIOPS_PREPARE_TIMEOUT_MS'],
+      message: `must be greater than ${String(PREPARE_HEARTBEAT_MS)} (the preparation heartbeat timeout)`,
+    });
   }
   // A shorter one could time a healthy batch out between two status polls, and its retry would resubmit.
   if (e.AIOPS_BATCH_HEARTBEAT_MS <= MIN_BATCH_HEARTBEAT_MS) {
@@ -240,6 +253,7 @@ export function parseWorkerEnv(env: NodeJS.ProcessEnv): WorkerEnv {
     masterKeys: e.AIOPS_MASTER_KEYS,
     temporalKeys: e.AIOPS_TEMPORAL_KEYS,
     activityTuning: {
+      prepareTimeoutMs: e.AIOPS_PREPARE_TIMEOUT_MS,
       batchHeartbeatMs: e.AIOPS_BATCH_HEARTBEAT_MS,
       batchTimeoutMs: e.AIOPS_BATCH_TIMEOUT_MS,
       batchMaxAttempts: e.AIOPS_BATCH_MAX_ATTEMPTS,

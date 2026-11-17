@@ -42,6 +42,8 @@ export interface WorkflowProgress extends ExecutionCounts {
 }
 
 export interface ActivityTuning {
+  /** Start-to-close of one `prepare` attempt: the ceiling of a whole preparation (NFR-7). */
+  readonly prepareTimeoutMs: number;
   readonly batchHeartbeatMs: number;
   readonly batchTimeoutMs: number;
   readonly batchMaxAttempts: number;
@@ -49,7 +51,11 @@ export interface ActivityTuning {
   readonly retryMaxMs: number;
 }
 
+/** Heartbeat timeout of `prepare` (fixed): a lost worker is noticed within it. */
+export const PREPARE_HEARTBEAT_MS = 60_000;
+
 export const DEFAULT_TUNING: ActivityTuning = {
+  prepareTimeoutMs: 3_600_000,
   batchHeartbeatMs: 30_000,
   batchTimeoutMs: 900_000,
   batchMaxAttempts: 10,

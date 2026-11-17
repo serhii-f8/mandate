@@ -21,6 +21,7 @@ import {
   workflowInfo,
 } from '@temporalio/workflow';
 import {
+  PREPARE_HEARTBEAT_MS,
   PREPARE_MAX_ATTEMPTS,
   PROGRESS_QUERY,
   WAKE_SIGNAL,
@@ -67,8 +68,9 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
   });
 
   let woken = false;
+  // A continued execution run is executing until its first inspect says otherwise.
   let progress: WorkflowProgress = {
-    status: 'preparing',
+    status: input.resume === undefined ? 'preparing' : 'executing',
     total: 0,
     ...(input.resume?.counts ?? { done: 0, failed: 0, skipped: 0 }),
   };
@@ -91,14 +93,22 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
     woken = false;
     const s = await db.inspect(id);
     progress = { status: s.status, total: s.total, done: s.done, failed: s.failed, skipped: s.skipped };
+    const slowRetry = {
+      initialInterval: s.tuning.retryInitialMs,
+      maximumInterval: s.tuning.retryMaxMs,
+      maximumAttempts: PREPARE_MAX_ATTEMPTS,
+    };
+    // A whole preparation is one attempt: its ceiling comes from the tuning (NFR-7); the heartbeat
+    // timeout notices a lost worker.
+    const preparing = proxyActivities<ChangesetActivities>({
+      startToCloseTimeout: s.tuning.prepareTimeoutMs,
+      heartbeatTimeout: PREPARE_HEARTBEAT_MS,
+      retry: slowRetry,
+    });
     const slow = proxyActivities<ChangesetActivities>({
       startToCloseTimeout: '15 minutes',
-      heartbeatTimeout: '60 seconds',
-      retry: {
-        initialInterval: s.tuning.retryInitialMs,
-        maximumInterval: s.tuning.retryMaxMs,
-        maximumAttempts: PREPARE_MAX_ATTEMPTS,
-      },
+      heartbeatTimeout: PREPARE_HEARTBEAT_MS,
+      retry: slowRetry,
     });
 
     if (s.status === 'preparing' || WAITING.includes(s.status)) {
@@ -107,7 +117,7 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
         expireTried = false;
         if (s.status === 'preparing') {
           try {
-            await slow.prepare(id);
+            await preparing.prepare(id);
           } catch (e) {
             if (!(e instanceof ActivityFailure)) throw e;
             // Still `preparing` (an infrastructure failure): inspect again after a pause, never past expiry.

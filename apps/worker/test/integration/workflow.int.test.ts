@@ -85,6 +85,65 @@ describe('changesetWorkflow', () => {
     expect(submissions).toBe(1);
   }, 60_000);
 
+  it('NFR-7 the prepare activity takes its start-to-close timeout from the tuning, not a fixed 15 minutes', async () => {
+    const cs = await createPreparing(infra.repository, {
+      configHash: infra.configuration.hash,
+      args: { brand: 'acme', skus: ['t-0001'], changes: { name: 'new' } },
+    });
+    const reader = {
+      read: (_operationId: string, args: Readonly<Record<string, unknown>>) =>
+        Promise.resolve({ ok: true as const, items: (args.skus as string[]).map((sku) => ({ sku, brand: 'acme', name: 'old' })), truncated: false }),
+    };
+    await withWorker({ reader, tuning: { prepareTimeoutMs: 7_200_000 } }, async (worker) => {
+      await worker.starter.start(cs.id);
+      await expect.poll(async () => (await infra.repository.get(cs.id))?.status, { timeout: 20_000 }).toBe('prepared');
+      const events = (await infra.client.workflow.getHandle(cs.id).fetchHistory()).events ?? [];
+      const prepare = events
+        .map((e) => e.activityTaskScheduledEventAttributes)
+        .find((a) => a?.activityType?.name === 'prepare');
+      expect(Number(String(prepare?.startToCloseTimeout?.seconds))).toBe(7_200);
+      // The heartbeat timeout stays the stuck-worker detector.
+      expect(Number(String(prepare?.heartbeatTimeout?.seconds))).toBe(60);
+      await worker.executor.cancel({ changesetId: cs.id, actor: 'alice', correlationId: 'corr-cleanup' });
+      await worker.executor.settled(cs.id);
+    });
+  });
+
+  it('EXE-9 EXE-6 after continue-as-new the progress query answers executing before the first inspect of the new run', async () => {
+    const cs = await createPrepared(infra.repository, 4, { execute: {} });
+    let inspects = 0;
+    let release: () => void = () => undefined; // replaced synchronously by the Promise executor
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached: () => void = () => undefined; // replaced synchronously by the Promise executor
+    const holding = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const spy = async (activity: string): Promise<void> => {
+      if (activity !== 'inspect') return;
+      inspects += 1;
+      // The first inspect of the second run.
+      if (inspects === 2) {
+        reached();
+        await held;
+      }
+    };
+    await withWorker({ settings: { batchSize: 2, itemsPerRun: 2 }, spy }, async (worker) => {
+      const handle = await signalWithStart(worker, cs.id);
+      await holding;
+      try {
+        await expect
+          .poll(async () => (await handle.query<WorkflowProgress>(PROGRESS_QUERY)).status, { timeout: 10_000 })
+          .toBe('executing');
+        expect(await handle.query<WorkflowProgress>(PROGRESS_QUERY)).toMatchObject({ status: 'executing', done: 2 });
+      } finally {
+        release();
+      }
+      await expect(handle.result()).resolves.toEqual({ status: 'completed' });
+    });
+  });
+
   it('EXE-6 the progress query reports counts while executing', async () => {
     const writer = new ScriptedWriter();
     const paused = writer.pauseAt(1);

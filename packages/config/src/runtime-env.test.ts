@@ -208,7 +208,7 @@ describe('worker runtime environment', () => {
       presetDirs: [],
       masterKeys: WORKER.AIOPS_MASTER_KEYS,
       temporalKeys: WORKER.AIOPS_TEMPORAL_KEYS,
-      activityTuning: { batchHeartbeatMs: 30_000, batchTimeoutMs: 900_000, batchMaxAttempts: 10, retryInitialMs: 1_000, retryMaxMs: 30_000 },
+      activityTuning: { prepareTimeoutMs: 3_600_000, batchHeartbeatMs: 30_000, batchTimeoutMs: 900_000, batchMaxAttempts: 10, retryInitialMs: 1_000, retryMaxMs: 30_000 },
     });
   });
 
@@ -222,6 +222,7 @@ describe('worker runtime environment', () => {
     const env = parseWorkerEnv({
       ...WORKER,
       AIOPS_PRESET_DIRS: '/app/presets: /opt/presets',
+      AIOPS_PREPARE_TIMEOUT_MS: '7200000',
       AIOPS_BATCH_HEARTBEAT_MS: '15000',
       AIOPS_BATCH_TIMEOUT_MS: '60000',
       AIOPS_BATCH_MAX_ATTEMPTS: '3',
@@ -234,7 +235,7 @@ describe('worker runtime environment', () => {
       presetDirs: ['/app/presets', '/opt/presets'],
       masterKeys: WORKER.AIOPS_MASTER_KEYS,
       temporalKeys: WORKER.AIOPS_TEMPORAL_KEYS,
-      activityTuning: { batchHeartbeatMs: 15_000, batchTimeoutMs: 60_000, batchMaxAttempts: 3, retryInitialMs: 200, retryMaxMs: 2_000 },
+      activityTuning: { prepareTimeoutMs: 7_200_000, batchHeartbeatMs: 15_000, batchTimeoutMs: 60_000, batchMaxAttempts: 3, retryInitialMs: 200, retryMaxMs: 2_000 },
     });
     for (const required of ['DATABASE_URL', 'AIOPS_CONFIG_DIR', 'AIOPS_MASTER_KEYS']) {
       expect(() => parseWorkerEnv(without(required))).toThrow(new RegExp(`${required}: is required`));
@@ -256,7 +257,7 @@ describe('worker runtime environment', () => {
   });
 
   it('NFR-4 activity tuning must be positive integers', () => {
-    for (const variable of ['AIOPS_BATCH_HEARTBEAT_MS', 'AIOPS_BATCH_TIMEOUT_MS', 'AIOPS_BATCH_MAX_ATTEMPTS', 'AIOPS_RETRY_INITIAL_MS', 'AIOPS_RETRY_MAX_MS']) {
+    for (const variable of ['AIOPS_PREPARE_TIMEOUT_MS', 'AIOPS_BATCH_HEARTBEAT_MS', 'AIOPS_BATCH_TIMEOUT_MS', 'AIOPS_BATCH_MAX_ATTEMPTS', 'AIOPS_RETRY_INITIAL_MS', 'AIOPS_RETRY_MAX_MS']) {
       for (const bad of ['0', '-5', '1.5', 'many']) {
         expect(() => parseWorkerEnv({ ...WORKER, [variable]: bad })).toThrow(new RegExp(`${variable}: invalid`));
       }
@@ -299,6 +300,20 @@ describe('worker runtime environment', () => {
     expect((error as EnvError).message).not.toContain('9999');
     expect(() => parseWorkerEnv({ ...WORKER, AIOPS_BATCH_HEARTBEAT_MS: '10000' })).toThrow(/AIOPS_BATCH_HEARTBEAT_MS: must be greater than 10000/);
     expect(parseWorkerEnv({ ...WORKER, AIOPS_BATCH_HEARTBEAT_MS: '10001' }).activityTuning.batchHeartbeatMs).toBe(10_001);
+  });
+
+  it('NFR-7 the preparation timeout must exceed the 60000 ms preparation heartbeat timeout, reported without values', () => {
+    let error: unknown;
+    try {
+      parseWorkerEnv({ ...WORKER, AIOPS_PREPARE_TIMEOUT_MS: '60000' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(EnvError);
+    expect((error as EnvError).issues).toEqual([
+      { variable: 'AIOPS_PREPARE_TIMEOUT_MS', reason: 'must be greater than 60000 (the preparation heartbeat timeout)' },
+    ]);
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_PREPARE_TIMEOUT_MS: '60001' }).activityTuning.prepareTimeoutMs).toBe(60_001);
   });
 
   it('NFR-4 the batch heartbeat must be shorter than the batch timeout, reported without values', () => {

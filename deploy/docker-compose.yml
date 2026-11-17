@@ -223,7 +223,7 @@ services:
       AIOPS_PRESET_DIRS: /app/presets
       AIOPS_MASTER_KEYS: ${AIOPS_MASTER_KEYS:-1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=}
       # Temporal payload encryption keys (SEC-4), development-only default. Activity tuning
-      # (AIOPS_BATCH_*, AIOPS_RETRY_*) keeps its built-in defaults unless set here with a value.
+      # (AIOPS_PREPARE_TIMEOUT_MS, AIOPS_BATCH_*, AIOPS_RETRY_*) keeps its built-in defaults unless set here with a value.
       AIOPS_TEMPORAL_KEYS: ${AIOPS_TEMPORAL_KEYS:-1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=}
     volumes:
       - ./config:/etc/aiops/config:ro
