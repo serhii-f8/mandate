@@ -28,6 +28,8 @@ describe('NFR-8 page queries and cursors', () => {
   it('NFR-8 an item cursor round-trips any targetId and refuses tampering', () => {
     const parsed = parseItemsQuery({ after: encodeItemCursor('ACME-1/ü') });
     expect(parsed).toEqual({ ok: true, value: { limit: 50, after: 'ACME-1/ü' } });
+    expect(parseItemsQuery({ after: encodeItemCursor('a\0b') })).toEqual({ ok: false });
+    expect(parseItemsQuery({ after: encodeItemCursor('a\nb') })).toEqual({ ok: false });
     for (const bad of ['***', 'x', 'x'.repeat(5000), `${b64('abc')}=`, 'YWJj\n', ['a', 'b']]) {
       expect(parseItemsQuery({ after: bad })).toEqual({ ok: false });
     }
@@ -44,6 +46,7 @@ describe('NFR-8 page queries and cursors', () => {
       b64('["2026-01-01T00:00:00.000Z","x"]'),
       b64(`["not a date","${UUID}"]`),
       b64(`["2026-01-01","${UUID}"]`),
+      b64(`["2026-01-01T00:00:00.000Z","aaaaaaaa-aaaa-4aaa-8aaa-AAAAAAAAAAAA"]`),
       b64(`["2026-01-01T00:00:00.000Z","${UUID}",1]`),
       '***',
       'x'.repeat(5000),
@@ -94,6 +97,13 @@ describe('SEC-8 decision body', () => {
   it('SEC-8 decisionBodySchema refuses unknown keys, a malformed hash and a negative count', () => {
     expect(decisionBodySchema.safeParse(ok).success).toBe(true);
     expect(decisionBodySchema.safeParse({ ...ok, comment: 'fine' }).success).toBe(true);
+    for (const decision of ['reject', 'return'] as const) {
+      expect(decisionBodySchema.safeParse({ ...ok, decision }).success).toBe(true);
+    }
+    for (const key of ['decision', 'hash', 'count'] as const) {
+      const rest = Object.fromEntries(Object.entries(ok).filter(([k]) => k !== key));
+      expect(decisionBodySchema.safeParse(rest).success).toBe(false);
+    }
     expect(decisionBodySchema.safeParse({ ...ok, extra: 1 }).success).toBe(false);
     expect(decisionBodySchema.safeParse({ ...ok, hash: 'sha256:abc' }).success).toBe(false);
     expect(decisionBodySchema.safeParse({ ...ok, count: -1 }).success).toBe(false);

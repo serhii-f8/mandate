@@ -32,6 +32,9 @@ export function encodeQueueCursor(c: { submittedAt: Date; id: string }): string 
 function decodeCursor(text: string): string | undefined {
   if (text.length === 0 || text.length > MAX_CURSOR_LENGTH) return undefined;
   const decoded = Buffer.from(text, 'base64url').toString('utf8');
+  // Control characters (NUL included) would fail later as a PostgreSQL text parameter (500).
+  // eslint-disable-next-line no-control-regex -- rejecting control characters is the point
+  if (/[\u0000-\u001f\u007f]/.test(decoded)) return undefined;
   return Buffer.from(decoded, 'utf8').toString('base64url') === text ? decoded : undefined;
 }
 
@@ -63,7 +66,9 @@ function parseQueueCursor(text: string): { submittedAt: Date; id: string } | und
   }
   if (!Array.isArray(json) || json.length !== 2) return undefined;
   const [iso, id] = json as unknown[];
-  if (typeof iso !== 'string' || typeof id !== 'string' || !CHANGESET_ID.test(id)) return undefined;
+  if (typeof iso !== 'string' || typeof id !== 'string' || !CHANGESET_ID.test(id) || id !== id.toLowerCase()) {
+    return undefined;
+  }
   const at = new Date(iso);
   if (Number.isNaN(at.getTime()) || at.toISOString() !== iso) return undefined;
   return { submittedAt: at, id };
