@@ -85,7 +85,9 @@ export class InMemoryExecutor implements ChangeSetExecutor {
       record = await this.repository.get(req.changesetId);
       if (record === undefined) return { ok: false, reason: 'not_found' };
     }
-    if (record.hash === undefined || record.hash !== req.expectedHash) return { ok: false, reason: 'hash_mismatch' };
+    // No hash means the change-set never reached prepared (preparing, or failed or cancelled there): not executable.
+    if (record.hash === undefined) return { ok: false, reason: 'not_executable' };
+    if (record.hash !== req.expectedHash) return { ok: false, reason: 'hash_mismatch' };
     const executing = await this.repository.transition(
       record.id,
       ['prepared', 'approved'],

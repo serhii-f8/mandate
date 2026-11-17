@@ -162,7 +162,10 @@ export function describeExecutorContract(label: string, setup: () => Promise<Exe
         await pause.reached;
         const cancelled = h.executor.cancel({ changesetId: cs.id, actor: 'bob', correlationId: 'corr-cancel' });
         pause.release();
-        expect(await cancelled).toEqual({ ok: true, status: 'cancelled' });
+        // A durable executor may answer while the run still drains (`executing`); the end state is what counts.
+        const answer = await cancelled;
+        expect(answer.ok).toBe(true);
+        expect(answer.ok && ['executing', 'cancelled'].includes(answer.status)).toBe(true);
         await h.executor.settled(cs.id);
         expect(await status(h, cs.id)).toBe('cancelled');
         // A durable executor may let one more batch through after the request; never all three.
@@ -255,6 +258,36 @@ export function describeExecutorContract(label: string, setup: () => Promise<Exe
         const b = await h.prepared(1, { expiresAt: new Date('2000-01-01T00:00:00Z') });
         expect(await start(h, b.id)).toEqual({ ok: false, reason: 'expired' });
         expect(await start(h, b.id)).toEqual({ ok: false, reason: 'not_executable' });
+      });
+    });
+
+    it('EXE-11 refuses to start a change-set that is still preparing as not executable', async () => {
+      await withExec(async (h) => {
+        const id = randomUUID();
+        await h.repository.create(
+          {
+            id,
+            operation: 'catalog.update',
+            connection: 'shop',
+            requester: 'alice',
+            args: {},
+            configHash: 'cfg',
+            correlationId: 'corr-exec',
+            createdAt: new Date(),
+            expiresAt: new Date(Date.now() + 3_600_000),
+          },
+          {
+            id: randomUUID(),
+            actor: 'alice',
+            action: 'changeset.transition',
+            outcome: 'ok',
+            correlationId: 'corr-exec',
+            changesetId: id,
+            details: {},
+          },
+        );
+        expect(await start(h, id)).toEqual({ ok: false, reason: 'not_executable' });
+        expect(await status(h, id)).toBe('preparing');
       });
     });
 
