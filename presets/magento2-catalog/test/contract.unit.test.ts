@@ -8,9 +8,9 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildRequest, createOpenApiAdapter, mapResponse } from '@aiops/adapters';
+import { buildBulkBody, buildRequest, createOpenApiAdapter, mapBulkStatus, mapResponse } from '@aiops/adapters';
 import { loadConfigurationSources, type LoadedConfiguration, type OperationBinding } from '@aiops/config';
-import type { ConnectionSettings, CredentialSource } from '@aiops/connector-sdk';
+import type { BulkItemState, BulkMapping, ConnectionSettings, CredentialSource } from '@aiops/connector-sdk';
 import { startFakeUpstream, type FakeUpstream } from '@aiops/testing';
 import { PRESET_DIR } from '../src/index.js';
 
@@ -53,7 +53,7 @@ async function loadPreset(baseUrl: string): Promise<LoadedConfiguration> {
   const config = [
     'version: 1',
     'presets:',
-    "  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '0.2.0' }",
+    "  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '0.3.0' }",
     'connections:',
     '  - id: magento',
     '    adapter: openapi',
@@ -81,6 +81,56 @@ function settingsOf(config: LoadedConfiguration): ConnectionSettings {
   const settings = config.connectionSettings.get('magento');
   if (settings === undefined) throw new Error('no settings for connection magento');
   return settings;
+}
+
+interface Poll {
+  readonly status: number;
+  readonly body: unknown;
+}
+interface WriteCase {
+  readonly name: string;
+  readonly operation: string;
+  readonly records: readonly Record<string, unknown>[];
+  readonly verify: { readonly operation: string; readonly args: Readonly<Record<string, unknown>> };
+  readonly expect: { readonly states: readonly BulkItemState[]; readonly values: Readonly<Record<string, Record<string, unknown>>> };
+}
+interface WriteRecording {
+  readonly request: { readonly method: string; readonly path: string; readonly body: unknown };
+  readonly response: { readonly status: number; readonly body: unknown };
+  readonly polls: readonly Poll[];
+  readonly verify: { readonly response: { readonly status: number; readonly body: unknown } };
+}
+const writeCases = JSON.parse(await readFile(join(PRESET_DIR, 'test', 'write-cases.json'), 'utf8')) as WriteCase[];
+const writeRecordings = new Map<string, WriteRecording>();
+for (const c of writeCases) {
+  writeRecordings.set(c.name, JSON.parse(await readFile(join(RECORDINGS, 'write', `${c.name}.json`), 'utf8')) as WriteRecording);
+}
+const writeRecordingOf = (c: WriteCase): WriteRecording => {
+  const r = writeRecordings.get(c.name);
+  if (r === undefined) throw new Error(`no write recording for ${c.name}`);
+  return r;
+};
+const lastPoll = (c: WriteCase): Poll => {
+  const polls = writeRecordingOf(c).polls;
+  const last = polls[polls.length - 1];
+  if (last === undefined) throw new Error(`no polls recorded for ${c.name}`);
+  return last;
+};
+function bulkOf(config: LoadedConfiguration): BulkMapping {
+  const bulk = bindingOf(config, 'catalog.update_content').mapping.bulk;
+  if (bulk === undefined) throw new Error('catalog.update_content has no bulk binding');
+  return bulk;
+}
+const sortedStates = (items: readonly { index: number; state: BulkItemState }[] | undefined): BulkItemState[] =>
+  [...(items ?? [])].sort((a, b) => a.index - b.index).map((i) => i.state);
+/** The verify read mapped to sku -> the checked fields only. */
+function verifyValues(c: WriteCase, items: readonly Record<string, unknown>[] | undefined): Record<string, Record<string, unknown>> {
+  const fields = c.verify.args.fields as string[];
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const item of items ?? []) {
+    out[String(item.sku)] = Object.fromEntries(fields.filter((f) => f !== 'sku').map((f) => [f, item[f]]));
+  }
+  return out;
 }
 
 const bearer = (token: string): CredentialSource => ({ ref: 'magento-token', scheme: 'bearer', open: () => Promise.resolve({ token }) });
@@ -269,6 +319,94 @@ describe('NFR-17 magento2-catalog contract', () => {
     });
   });
 
+  it('NFR-17 OPS-6 catalog.update_content binds the bulk route, the detailed status and carries status', () => {
+    expect(bindingOf(config, 'catalog.update_content').mapping).toMatchObject({
+      method: 'POST',
+      path: '/async/bulk/V1/products',
+      bulk: {
+        body: { wrap: 'product', nest: { path: 'custom_attributes', key: 'attribute_code', value: 'value', keep: ['sku', 'name', 'status'] } },
+        batchId: 'bulk_uuid',
+        status: {
+          method: 'GET',
+          path: '/V1/bulk/{batch_id}/detailed-status',
+          items: 'operations_list',
+          index: 'id',
+          state: 'status',
+          states: { ok: [1], retriable: [2], failed: [3, 5], open: [4] },
+        },
+      },
+    });
+    expect(config.policy.operations.find((o) => o.id === 'catalog.update_content')?.manifest?.write).toEqual({ carryFields: ['status'] });
+  });
+
+  it('NFR-17 every write case is recorded', () => {
+    expect(writeCases.length).toBeGreaterThan(0);
+    expect([...writeRecordings.keys()].sort()).toEqual(writeCases.map((c) => c.name).sort());
+  });
+
+  describe.each(writeCases)('NFR-17 write case $name', (c) => {
+    it('NFR-17 OPS-6 buildBulkBody from the preset mapping equals the recorded request body', () => {
+      expect(buildBulkBody(bulkOf(config).body, c.records)).toEqual(writeRecordingOf(c).request.body);
+    });
+
+    it('NFR-17 EXE-5 the recorded polls map to the expected states by index', () => {
+      expect(sortedStates(mapBulkStatus(bulkOf(config).status, lastPoll(c).body))).toEqual(c.expect.states);
+    });
+
+    it('NFR-17 CS-7 the recorded verify read maps to the expected values', () => {
+      const binding = bindingOf(config, c.verify.operation);
+      const mapped = mapResponse(binding.mapping.response, writeRecordingOf(c).verify.response.body, c.verify.args);
+      expect(verifyValues(c, mapped.items)).toEqual(c.expect.values);
+    });
+  });
+
+  describe('NFR-17 write replay through the adapter (fake upstream)', () => {
+    let upstream: FakeUpstream;
+    let replay: LoadedConfiguration;
+
+    beforeAll(async () => {
+      upstream = await startFakeUpstream();
+      replay = await loadPreset(`${upstream.url}${BASE_PATH}`);
+    });
+    afterAll(async () => {
+      await upstream.close();
+    });
+
+    it.each(writeCases)('NFR-17 OPS-6 EXE-5 $name: submitBulk sends the recorded body with the bearer token; bulkStatus walks the recorded polls to the expected states', async (c) => {
+      const recording = writeRecordingOf(c);
+      const uuid = (recording.response.body as { bulk_uuid: string }).bulk_uuid;
+      upstream.route('POST', `${BASE_PATH}${recording.request.path}`, () => ({ status: recording.response.status, body: recording.response.body }));
+      let served = 0;
+      upstream.route('GET', `${BASE_PATH}/V1/bulk/${uuid}/detailed-status`, () => {
+        const poll = recording.polls[Math.min(served, recording.polls.length - 1)];
+        served += 1;
+        return { status: poll?.status ?? 500, body: poll?.body };
+      });
+      const adapter = createOpenApiAdapter();
+      const common = { connection: settingsOf(replay), mapping: bindingOf(replay, c.operation).mapping, credential: bearer(FAKE_TOKEN) };
+      const before = upstream.requests.length;
+      const submitted = await adapter.submitBulk({ ...common, records: c.records });
+      const sent = upstream.requests.slice(before);
+      expect(sent).toHaveLength(1);
+      expect(JSON.parse(sent[0]?.body ?? 'null')).toEqual(recording.request.body);
+      expect(sent[0]?.headers.authorization).toBe(`Bearer ${FAKE_TOKEN}`);
+      expect(submitted.ok).toBe(true);
+      if (!submitted.ok) return;
+      expect(submitted.batchId).toBe(uuid);
+
+      let states: readonly { index: number; state: BulkItemState }[] = [];
+      for (let i = 0; i <= recording.polls.length; i += 1) {
+        const status = await adapter.bulkStatus({ ...common, batchId: submitted.batchId });
+        expect(status.ok, status.ok ? '' : status.code).toBe(true);
+        if (!status.ok) return;
+        states = status.items;
+        if (!states.some((s) => s.state === 'open')) break;
+      }
+      expect(states.some((s) => s.state === 'open')).toBe(false);
+      expect(sortedStates(states)).toEqual(c.expect.states);
+    });
+  });
+
   const liveUrl = process.env.MAGENTO_SANDBOX_URL;
   const liveToken = process.env.MAGENTO_SANDBOX_TOKEN;
   describe.runIf(liveUrl !== undefined && liveUrl !== '' && liveToken !== undefined && liveToken !== '')(
@@ -278,6 +416,35 @@ describe('NFR-17 magento2-catalog contract', () => {
       beforeAll(async () => {
         live = await loadPreset(`${(liveUrl ?? '').replace(/\/+$/, '')}${BASE_PATH}`);
       });
+
+      it.each(writeCases)('NFR-17 OPS-6 CS-7 $name live write: submitBulk, poll bulkStatus, verify read', async (c) => {
+        const adapter = createOpenApiAdapter();
+        const common = { connection: settingsOf(live), mapping: bindingOf(live, c.operation).mapping, credential: bearer(liveToken ?? '') };
+        const submitted = await adapter.submitBulk({ ...common, records: c.records });
+        expect(submitted.ok, submitted.ok ? '' : submitted.code).toBe(true);
+        if (!submitted.ok) return;
+        let states: readonly { index: number; state: BulkItemState }[];
+        const deadline = Date.now() + 120_000;
+        for (;;) {
+          const status = await adapter.bulkStatus({ ...common, batchId: submitted.batchId });
+          expect(status.ok, status.ok ? '' : status.code).toBe(true);
+          if (!status.ok) return;
+          states = status.items;
+          if (!states.some((s) => s.state === 'open') && states.length === c.records.length) break;
+          if (Date.now() > deadline) throw new Error('bulk batch still open after 120 s');
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+        expect(sortedStates(states)).toEqual(c.expect.states);
+        const verify = await adapter.read({
+          connection: settingsOf(live),
+          mapping: bindingOf(live, c.verify.operation).mapping,
+          args: c.verify.args,
+          credential: bearer(liveToken ?? ''),
+        });
+        expect(verify.ok, verify.ok ? '' : `${verify.code} ${verify.message}`).toBe(true);
+        if (!verify.ok) return;
+        expect(verifyValues(c, verify.items)).toEqual(c.expect.values);
+      }, 150_000);
 
       it.each(cases)('NFR-17 $name live', async (c) => {
         const outcome = await createOpenApiAdapter().read({
