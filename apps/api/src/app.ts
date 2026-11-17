@@ -10,7 +10,18 @@ import type { Logger } from 'pino';
 import { createOpenApiAdapter } from '@aiops/adapters';
 import type { ReadAdapter } from '@aiops/connector-sdk';
 import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
-import { ExecutorUnavailable, resolveRoles, type AuditLog, type ChangeSetExecutor, type ChangeSetRepository, type CredentialVault, type OperationInvoker } from '@aiops/core';
+import {
+  ExecutorUnavailable,
+  resolveRoles,
+  runPreparation,
+  type AuditLog,
+  type ChangeSetExecutor,
+  type ChangeSetRepository,
+  type CredentialVault,
+  type OperationInvoker,
+  type TaskRepository,
+  type WorkflowStarter,
+} from '@aiops/core';
 import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, PostgresRateCounter, PostgresSessionStore, PostgresTaskRepository, type Database } from '@aiops/db';
 import { createBearerGate } from './auth/bearer-gate.js';
 import { createJwtVerifier } from './auth/jwt-verifier.js';
@@ -37,8 +48,8 @@ import {
   PAGE_SESSIONS,
 } from './tokens.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
-import { operationInvokers } from './upstream/operation-router.js';
-import { assertFullyChecked } from '@aiops/upstream';
+import { operationInvokers, type OperationInvokersBase } from './upstream/operation-router.js';
+import { assertFullyChecked, createUpstreamReader } from '@aiops/upstream';
 import { PageAccessGuard, type PageChecks } from './web/access.js';
 import { AuthController, SessionController } from './web/auth.controller.js';
 import { ConnectionsController } from './web/connections.controller.js';
@@ -62,8 +73,8 @@ export interface AppOverrides {
 }
 
 /**
- * Placeholder until the Temporal executor is wired (Phase 5 tasks plan, Task 10). Unreachable in
- * the meantime: no task rows are created yet, so every `tasks/*` call ends at "Task not found".
+ * Placeholder until the Temporal executor is wired (Phase 5 tasks plan, Task 10). Only prepare
+ * tasks exist in the meantime; their `tasks/get` never asks the executor.
  */
 const UNWIRED_EXECUTOR: ChangeSetExecutor = {
   start: () => Promise.reject(new ExecutorUnavailable()),
@@ -71,24 +82,63 @@ const UNWIRED_EXECUTOR: ChangeSetExecutor = {
   progress: () => Promise.reject(new ExecutorUnavailable()),
 };
 
+/** `AIOPS_PREPARE_WAIT_MS` default; read from the environment from Task 10 on. */
+const PREPARE_WAIT_MS = 20_000;
+
+interface UpstreamIo {
+  readonly configuration: ConfigurationHolder;
+  readonly vault: CredentialVault;
+  readonly adapter: ReadAdapter;
+  readonly repository: ChangeSetRepository;
+  readonly log: NonNullable<OperationInvokersBase['log']>;
+}
+
+/**
+ * Placeholder until the Temporal workflow starter is wired (Phase 5 tasks plan, Task 10): prepares
+ * the change-set in this process before `start` returns, as the workflow's prepare activity does,
+ * so a call without Tasks keeps its Phase 4 answer.
+ */
+function inProcessPreparation(io: UpstreamIo): WorkflowStarter {
+  return {
+    async start(changesetId) {
+      const configuration = io.configuration.current;
+      const changeset = await io.repository.get(changesetId);
+      const operation = configuration.policy.operations.find((o) => o.id === changeset?.operation);
+      const manifest = operation?.manifest;
+      if (changeset === undefined || operation === undefined || manifest === undefined) return;
+      await runPreparation(
+        {
+          repository: io.repository,
+          reader: createUpstreamReader({ configuration, vault: io.vault, adapter: io.adapter, correlationId: changeset.correlationId, log: io.log }),
+          newId: randomUUID,
+          now: () => new Date(),
+        },
+        {
+          changesetId,
+          operation: { ...operation, manifest },
+          readFieldsArg: (id) => configuration.policy.operations.find((o) => o.id === id)?.fieldsArg,
+          actor: changeset.requester,
+          ...(changeset.clientId === undefined ? {} : { clientId: changeset.clientId }),
+          correlationId: changeset.correlationId,
+        },
+      );
+    },
+  };
+}
+
 /** The invoker per call: the override, or the risk router bound to the request's snapshot. */
-function invokerFactory(
-  override: OperationInvoker | undefined,
-  vault: CredentialVault,
-  adapter: ReadAdapter,
-  repository: ChangeSetRepository,
-  logger: Logger,
-): PipelineDeps['invokerFor'] {
+function invokerFactory(override: OperationInvoker | undefined, io: UpstreamIo, tasks: TaskRepository): PipelineDeps['invokerFor'] {
   if (override !== undefined) return () => override;
   return operationInvokers({
-    vault,
-    adapter,
-    repository,
+    vault: io.vault,
+    adapter: io.adapter,
+    repository: io.repository,
+    tasks,
+    starter: inProcessPreparation(io),
+    prepareWaitMs: PREPARE_WAIT_MS,
     newId: randomUUID,
     now: () => new Date(),
-    log: (record) => {
-      logger.info(record, 'upstream call completed');
-    },
+    log: io.log,
   });
 }
 
@@ -156,19 +206,30 @@ class AppModule {
           useFactory: (audit: AuditLog, vault: CredentialVault, database: Database) => {
             // One repository for the write path and the built-in change-set tools.
             const changesets = overrides.changesets ?? new PostgresChangeSetRepository(database.db);
+            // One task store for the write path that creates tasks and the handlers that read them.
+            const tasks = new PostgresTaskRepository(database.db);
+            const io: UpstreamIo = {
+              configuration,
+              vault,
+              adapter,
+              repository: changesets,
+              log: (record) => {
+                logger.info(record, 'upstream call completed');
+              },
+            };
             return createMcpHandler(
               createServerFactory(
                 {
                   snapshot: () => snapshotOf(configuration.current),
                   builtins: createBuiltinTools({ repository: changesets, newId: randomUUID, now: () => new Date() }),
-                  invokerFor: invokerFactory(overrides.invoker, vault, adapter, changesets, logger),
+                  invokerFor: invokerFactory(overrides.invoker, io, tasks),
                   audit,
                   newId: randomUUID,
                   now: () => performance.now(),
                   rateCounter: new PostgresRateCounter(database.db),
                   wallClock: () => new Date(),
                 },
-                { tasks: new PostgresTaskRepository(database.db), repository: changesets, executor: UNWIRED_EXECUTOR, audit, newId: randomUUID },
+                { tasks, repository: changesets, executor: UNWIRED_EXECUTOR, audit, newId: randomUUID },
               ),
               {
                 legacy: 'stateless',
