@@ -26,10 +26,10 @@ export function touchedFields(manifest: ManifestDefinition, args: Readonly<Recor
   return manifest.fields.filter((f) => Object.hasOwn(values, f));
 }
 
-function inScope(
+export function inScope(
   manifest: ManifestDefinition,
   args: Readonly<Record<string, unknown>>,
-  record: Record<string, unknown>,
+  record: Readonly<Record<string, unknown>>,
 ): boolean {
   for (const [arg, field] of Object.entries(manifest.scopeArgs)) {
     const allowed = args[arg];

@@ -70,7 +70,7 @@ class LostRace extends Error {
   }
 }
 
-function resolveTemplates(
+export function resolveTemplates(
   templates: Readonly<Record<string, ManifestTemplate>>,
   args: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> {

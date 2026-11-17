@@ -84,9 +84,11 @@ export {
   type StartEventContext,
 } from './changeset/execution.js';
 export { changesetTransitionEvent, type ChangesetTransitionInput } from './changeset/audit.js';
-export { buildItems, touchedFields } from './changeset/items.js';
+export { buildItems, inScope, touchedFields } from './changeset/items.js';
+export { classifyForWrite, type WriteClassification, type WriteOutcomeCode } from './changeset/writer.js';
 export {
   createChangeSet,
+  resolveTemplates,
   prepareChangeSet,
   runPreparation,
   type CreateRequest,
