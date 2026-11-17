@@ -68,8 +68,29 @@ describe('POL-3 projection keeps unrequested fields out', () => {
     expect(Object.keys(r.items?.[0] ?? {})).toEqual(['a', '__proto__']);
     expect(({} as Record<string, unknown>).x).toBeUndefined();
   });
-  it('returns non-object items unchanged and never projects them', () => {
-    const r = mapResponse({ items: 'items', fieldsFromArg: 'f', maxItems: 5 }, { items: ['s', 2] }, { f: ['a'] });
+  it('drops non-object items when projection is configured', () => {
+    const r = mapResponse({ items: 'items', fieldsFromArg: 'f', maxItems: 5 }, { items: ['s', 2, { a: 1, b: 2 }] }, { f: ['a'] });
+    expect(r.items).toEqual([{ a: 1 }]);
+  });
+  it('returns non-object items unchanged without projection', () => {
+    const r = mapResponse({ items: 'items', maxItems: 5 }, { items: ['s', 2] }, {});
     expect(r.items).toEqual(['s', 2]);
+  });
+  it('flattens and projects a single-object response', () => {
+    const body = { sku: 'A', cost: 5, custom_attributes: [{ attribute_code: 'cost', value: 9 }] };
+    const r = mapResponse({ flatten, fieldsFromArg: 'fields', maxItems: 1 }, body, { fields: ['sku'] });
+    expect(r.value).toEqual({ sku: 'A' });
+    expect(JSON.stringify(r)).not.toContain('cost');
+  });
+  it('fails closed for a single-object response when the fields argument is missing', () => {
+    expect(() => mapResponse({ fieldsFromArg: 'fields', maxItems: 1 }, { sku: 'A' }, {})).toThrow(new MappingError('fields argument is missing'));
+  });
+  it('a projected single response that is not an object yields no value', () => {
+    const r = mapResponse({ fieldsFromArg: 'fields', maxItems: 1 }, 'secret', { fields: ['sku'] });
+    expect(r.value).toEqual({});
+  });
+  it('flattens a single-object response without projection', () => {
+    const r = mapResponse({ flatten, maxItems: 1 }, { sku: 'A', custom_attributes: [{ attribute_code: 'brand', value: 'x' }] }, {});
+    expect(r.value).toEqual({ sku: 'A', brand: 'x' });
   });
 });

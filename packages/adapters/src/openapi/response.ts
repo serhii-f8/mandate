@@ -60,33 +60,39 @@ export function mapResponse(
     if (typeof t === 'number' && Number.isFinite(t)) result.total = t;
   }
 
+  let fields: string[] | undefined;
+  if (mapping.fieldsFromArg !== undefined) {
+    // Fail closed: without an explicit field list nothing is returned (POL-3).
+    const arg = Object.hasOwn(args, mapping.fieldsFromArg) ? args[mapping.fieldsFromArg] : undefined;
+    if (!Array.isArray(arg) || !arg.every((x): x is string => typeof x === 'string')) throw new MappingError('fields argument is missing');
+    fields = arg;
+  }
+
+  /** Flatten, then project; undefined means the entry cannot be projected and is dropped. */
+  const shape = (entry: unknown): unknown => {
+    const flat = mapping.flatten ? flattenItem(entry, mapping.flatten) : entry;
+    if (fields === undefined) return clip(flat);
+    if (!isObj(flat)) return undefined;
+    const proj: Obj = {};
+    for (const k of fields) if (Object.hasOwn(flat, k)) set(proj, k, flat[k]);
+    return clip(proj);
+  };
+
   if (mapping.items === undefined) {
-    result.value = clip(body);
+    // A single object goes through the same flatten and projection as items (POL-3).
+    result.value = shape(body) ?? {};
     return result;
   }
   const raw = dotted(body, mapping.items);
   if (!Array.isArray(raw)) throw new MappingError('response items path is not an array');
   if (raw.length > mapping.maxItems) result.truncated = true;
 
-  let fields: string[] | undefined;
-  if (mapping.fieldsFromArg !== undefined) {
-    // Fail closed: without an explicit field list nothing is returned.
-    const arg = Object.hasOwn(args, mapping.fieldsFromArg) ? args[mapping.fieldsFromArg] : undefined;
-    if (!Array.isArray(arg) || !arg.every((x): x is string => typeof x === 'string')) throw new MappingError('fields argument is missing');
-    fields = arg;
+  const items: Obj[] = [];
+  for (const it of (raw as unknown[]).slice(0, mapping.maxItems)) {
+    const shaped = shape(it);
+    // Without projection non-object items pass through unchanged; with it they are dropped.
+    if (shaped !== undefined) items.push(shaped as Obj);
   }
-
-  result.items = (raw as unknown[]).slice(0, mapping.maxItems).map((it) => {
-    const flat = mapping.flatten ? flattenItem(it, mapping.flatten) : it;
-    // Non-object items are returned unchanged and never projected.
-    if (!isObj(flat)) return clip(flat) as Obj;
-    let item: Obj = flat;
-    if (fields) {
-      const proj: Obj = {};
-      for (const k of fields) if (Object.hasOwn(item, k)) set(proj, k, item[k]);
-      item = proj;
-    }
-    return clip(item) as Obj;
-  });
+  result.items = items;
   return result;
 }
