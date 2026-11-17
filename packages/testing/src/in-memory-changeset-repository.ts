@@ -86,6 +86,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       createdAt: copyDate(cs.createdAt),
       updatedAt: new Date(),
       expiresAt: copyDate(cs.expiresAt),
+      approvalRound: 0,
     };
     // Apply before awaiting the audit append so concurrent callers see the change; undo if the append fails.
     this.entries.set(cs.id, { record, items: new Map() });

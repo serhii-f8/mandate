@@ -239,7 +239,8 @@ export type FinishOutcome =
   | 'writer_error'
   | 'hash_mismatch'
   | 'policy_denied'
-  | 'executor_error';
+  | 'executor_error'
+  | 'approval_missing';
 
 export interface ExecutionGuard {
   check(
@@ -269,7 +270,7 @@ export interface ExecutionProgress {
 /** Alias of the progress shape for the workflow query result. */
 export type WorkflowProgress = ExecutionProgress;
 
-export type StartRefusal = 'not_found' | 'hash_mismatch' | 'expired' | 'not_executable' | 'limit_exceeded';
+export type StartRefusal = 'not_found' | 'hash_mismatch' | 'expired' | 'not_executable' | 'limit_exceeded' | 'not_approved';
 
 /** Executor port (EXE-11). `cancel` may answer `{ ok: true, status: 'executing' }` while a run winds down. */
 export interface ChangeSetExecutor {

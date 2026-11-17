@@ -12,7 +12,7 @@ const EXPECTED: readonly (readonly [ChangeSetStatus, ChangeSetStatus])[] = [
   ['prepared', 'pending_approval'], ['prepared', 'executing'], ['prepared', 'rejected'],
   ['prepared', 'expired'], ['prepared', 'cancelled'],
   ['pending_approval', 'approved'], ['pending_approval', 'rejected'],
-  ['pending_approval', 'expired'], ['pending_approval', 'cancelled'],
+  ['pending_approval', 'expired'], ['pending_approval', 'cancelled'], ['pending_approval', 'prepared'],
   ['approved', 'executing'], ['approved', 'expired'], ['approved', 'cancelled'],
   ['executing', 'completed'], ['executing', 'completed_with_errors'], ['executing', 'failed'],
   ['executing', 'cancelled'],
@@ -29,6 +29,10 @@ describe('CS-6 lifecycle', () => {
       }
     }
     expect(Object.keys(TRANSITIONS).sort()).toEqual([...ALL].sort());
+  });
+
+  it('APR-4 pending_approval may return to prepared', () => {
+    expect(canTransition('pending_approval', 'prepared')).toBe(true);
   });
 
   it('CS-6 terminal states have no way out', () => {

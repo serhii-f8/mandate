@@ -26,6 +26,7 @@ class FakeRepository implements PreparationRepository {
     const record: ChangeSetRecord = {
       ...cs,
       status: 'preparing',
+      approvalRound: 0,
       stats: { total: 0, included: 0, excluded: {}, written: 0, failed: 0, skipped: 0 },
     };
     this.sets.set(cs.id, record);

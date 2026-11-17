@@ -66,6 +66,7 @@ function toRecord(row: ChangeSetRow): ChangeSetRecord {
     updatedAt: row.updatedAt,
     ...(row.preparedAt === null ? {} : { preparedAt: row.preparedAt }),
     expiresAt: row.expiresAt,
+    approvalRound: 0,
     ...(row.executionActor === null ||
     row.executionGroups === null ||
     row.executionCorrelationId === null ||

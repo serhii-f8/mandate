@@ -39,6 +39,8 @@ function refusalText(id: string, role: string, refusal: Exclude<StartOutcome, { 
       return `Change-set ${id} has expired.`;
     case 'not_executable':
       return `Change-set ${id} cannot be executed in its current state.`;
+    case 'not_approved':
+      return `Change-set ${id} lacks the approvals its execution needs.`;
     case 'limit_exceeded':
       return `Execution refused: limit ${refusal.limit} of role ${role} reached.`;
   }

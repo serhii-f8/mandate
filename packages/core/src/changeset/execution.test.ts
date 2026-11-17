@@ -82,7 +82,7 @@ describe('EXE-6 executionTerminal', () => {
     expect(executionTerminal(stats(0, 2), 'done')).toEqual({ status: 'failed' });
   });
   it('EXE-6 maps every other outcome to failed with its code', () => {
-    for (const o of ['failure_threshold', 'writer_error', 'hash_mismatch', 'policy_denied', 'executor_error'] as const) {
+    for (const o of ['failure_threshold', 'writer_error', 'hash_mismatch', 'policy_denied', 'executor_error', 'approval_missing'] as const) {
       expect(executionTerminal(stats(1, 1), o)).toEqual({ status: 'failed', errorCode: o });
     }
   });
@@ -100,6 +100,7 @@ const cs: ChangeSetRecord = {
   correlationId: 'corr0',
   createdAt: new Date(0),
   expiresAt: new Date(1),
+  approvalRound: 0,
 };
 
 describe('AUD-1 execution audit events', () => {

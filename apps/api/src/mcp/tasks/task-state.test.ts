@@ -15,6 +15,7 @@ function record(status: ChangeSetStatus, prepared: boolean): ChangeSetRecord {
     correlationId: 'corr',
     createdAt: new Date(0),
     expiresAt: new Date(1),
+    approvalRound: 0,
     ...(prepared ? { preparedAt: new Date(0) } : {}),
   };
 }

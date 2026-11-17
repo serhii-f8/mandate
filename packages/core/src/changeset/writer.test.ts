@@ -129,6 +129,7 @@ function changesetFor(skus: readonly string[]): ChangeSetRecord {
     correlationId: 'corr-1',
     createdAt: new Date('2026-11-17T10:00:00.000Z'),
     expiresAt: new Date('2026-11-20T10:00:00.000Z'),
+    approvalRound: 0,
   };
 }
 
