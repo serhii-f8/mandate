@@ -685,6 +685,17 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         expect((await c.repository.usage(alice, NOW)).executing).toBe(1);
       }));
 
+    it('EXE-11 parallel starts of one change-set: exactly one wins and exactly one executing event is written', async () =>
+      withRepo(async (c) => {
+        await preparedSet(c, c.id, 2, { requester: requester('alice') });
+        const results = await Promise.all([start(c, c.id), start(c, c.id)]);
+        expect(results.filter((r) => r.ok)).toHaveLength(1);
+        expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, reason: 'not_executable' }]);
+        expect((await c.repository.get(c.id))?.status).toBe('executing');
+        const executing = (await c.events()).filter((e) => e.details.to === 'executing');
+        expect(executing).toHaveLength(1);
+      }));
+
     it('EXE-7 requestCancel stores the first request only and only while executing', async () =>
       withRepo(async (c) => {
         const bob = { actor: 'bob', correlationId: 'corr-bob', requestedAt: at(1) };
@@ -775,6 +786,59 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         expect(await c.repository.recordSubmission(c.id, 0, 5, { upstreamBatchId: 'late', plan: [] })).toBe(false);
       }));
 
+    it('EXE-3 claimBatch refuses a new claim or a takeover unless the change-set is executing', async () =>
+      withRepo(async (c) => {
+        // Prepared, not started: no batch is claimed.
+        await preparedSet(c, c.id, 3);
+        expect(await c.repository.claimBatch(c.id, 0, 1, 2)).toEqual({ kind: 'fenced' });
+        expect((await start(c, c.id)).ok).toBe(true);
+        // The refused claim stored nothing: batch 0 starts at the first target.
+        const claim = await c.repository.claimBatch(c.id, 0, 1, 1);
+        if (claim.kind !== 'claimed') throw new Error(`expected claimed, got ${claim.kind}`);
+        expect(claim.batch.targetIds).toEqual(['t-0001']);
+        const outcomes = written(['t-0001']);
+        await c.repository.completeBatch(c.id, 0, 1, outcomes, batchAudit(c.id, 0, outcomes));
+        expect((await c.repository.claimBatch(c.id, 1, 1, 1)).kind).toBe('claimed');
+
+        await c.repository.transition(c.id, ['executing'], 'cancelled', auditEvent(c.id));
+        // A takeover of the open batch and a new batch are both refused once it left executing.
+        expect(await c.repository.claimBatch(c.id, 1, 2, 1)).toEqual({ kind: 'fenced' });
+        expect(await c.repository.claimBatch(c.id, 2, 1, 1)).toEqual({ kind: 'fenced' });
+        // A done batch still answers its counts.
+        expect(await c.repository.claimBatch(c.id, 0, 2, 1)).toEqual({
+          kind: 'done',
+          counts: { written: 1, failed: 0, skipped: 0 },
+        });
+        expect(await c.repository.recordSubmission(c.id, 2, 1, { upstreamBatchId: 'none', plan: [] })).toBe(false);
+      }));
+
+    it('EXE-3 a takeover racing the completion of the previous attempt answers done or fenced, never throws', async () =>
+      withRepo(async (c) => {
+        await preparedSet(c, c.id, 8);
+        expect((await start(c, c.id)).ok).toBe(true);
+        for (let batchNo = 0; batchNo < 4; batchNo += 1) {
+          const first = await c.repository.claimBatch(c.id, batchNo, 1, 2);
+          if (first.kind !== 'claimed') throw new Error(`batch ${batchNo}: expected claimed, got ${first.kind}`);
+          const outcomes = written(first.batch.targetIds);
+          const [completed, takeover] = await Promise.all([
+            c.repository.completeBatch(c.id, batchNo, 1, outcomes, batchAudit(c.id, batchNo, outcomes)),
+            c.repository.claimBatch(c.id, batchNo, 2, 2),
+          ]);
+          if (completed.ok) {
+            expect(['done', 'fenced']).toContain(takeover.kind);
+            if (takeover.kind === 'done') expect(takeover.counts).toEqual({ written: 2, failed: 0, skipped: 0 });
+          } else {
+            expect(takeover.kind).toBe('claimed');
+            const settled = written(first.batch.targetIds);
+            expect(
+              await c.repository.completeBatch(c.id, batchNo, 2, settled, batchAudit(c.id, batchNo, settled)),
+            ).toMatchObject({ ok: true });
+          }
+        }
+        expect(Object.values(await itemStatuses(c, c.id)).every((s) => s === 'written')).toBe(true);
+        expect((await c.events()).filter((e) => e.action === 'changeset.batch')).toHaveLength(4);
+      }));
+
     it('NFR-2 recordSubmission stores the upstream ID and plan for the owning attempt only', async () =>
       withRepo(async (c) => {
         await preparedSet(c, c.id, 2);
@@ -835,6 +899,31 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         // Done: the owning attempt cannot complete twice.
         expect(await c.repository.completeBatch(c.id, 0, 2, outcomes, batchAudit(c.id, 0, outcomes))).toEqual({ ok: false });
         expect(await c.events()).toHaveLength(before + 1);
+      }));
+
+    it('EXE-3 completeBatch applies and counts only pending targets of the batch', async () =>
+      withRepo(async (c) => {
+        await preparedSet(c, c.id, 3);
+        expect((await start(c, c.id)).ok).toBe(true);
+        await c.repository.claimBatch(c.id, 0, 1, 2);
+        // t-0002 is settled before the batch completes; t-0003 belongs to no claimed batch.
+        await c.repository.recordItemOutcomes(c.id, [{ targetId: 't-0002', status: 'failed', error: 'upstream_5xx' }]);
+        const outcomes: ItemOutcome[] = [
+          { targetId: 't-0001', status: 'written' },
+          { targetId: 't-0002', status: 'written' },
+          { targetId: 't-0003', status: 'skipped' },
+          { targetId: 'unknown', status: 'written' },
+        ];
+        expect(await c.repository.completeBatch(c.id, 0, 1, outcomes, batchAudit(c.id, 0, outcomes))).toEqual({
+          ok: true,
+          counts: { written: 1, failed: 0, skipped: 0 },
+        });
+        expect(await itemStatuses(c, c.id)).toEqual({ 't-0001': 'written', 't-0002': 'failed', 't-0003': 'pending' });
+        expect(await c.repository.claimBatch(c.id, 0, 2, 2)).toEqual({
+          kind: 'done',
+          counts: { written: 1, failed: 0, skipped: 0 },
+        });
+        expect((await c.repository.get(c.id))?.stats).toMatchObject({ written: 1, failed: 1, skipped: 0 });
       }));
 
     it('EXE-3 completeBatch is refused unless the change-set is executing', async () =>

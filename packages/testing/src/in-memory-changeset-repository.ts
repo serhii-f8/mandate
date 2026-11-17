@@ -63,6 +63,8 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
   largestPage = 0;
   private readonly entries = new Map<string, Entry>();
   private readonly batches = new Map<string, Map<number, Batch>>();
+  /** Highest batch number per change-set, tracked as batches are created. */
+  private readonly highestBatch = new Map<string, number>();
 
   constructor(audit: InMemoryAuditLog = new InMemoryAuditLog()) {
     this.audit = audit;
@@ -263,9 +265,11 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     const row = batches.get(batchNo);
     if (row === undefined) {
       if (entry === undefined) return Promise.resolve({ kind: 'empty' });
+      // No batch is claimed once the change-set left executing.
+      if (entry.record.status !== 'executing') return Promise.resolve({ kind: 'fenced' });
       // Continue after the last target of the highest existing batch.
-      const highest = Math.max(-1, ...batches.keys());
-      const after = batches.get(highest)?.lastTarget;
+      const highest = this.highestBatch.get(changesetId);
+      const after = highest === undefined ? undefined : batches.get(highest)?.lastTarget;
       const items = [...entry.items.values()]
         .filter((i) => i.status === 'pending' && (after === undefined || compareTargetIds(i.targetId, after) > 0))
         .sort((a, b) => compareTargetIds(a.targetId, b.targetId))
@@ -281,10 +285,11 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       };
       batches.set(batchNo, created);
       this.batches.set(changesetId, batches);
+      if (highest === undefined || batchNo > highest) this.highestBatch.set(changesetId, batchNo);
       return Promise.resolve(claimed(changesetId, batchNo, created, entry));
     }
     if (row.state === 'done') return Promise.resolve({ kind: 'done', counts: { ...row.counts } });
-    if (row.attempt >= attempt || entry === undefined) return Promise.resolve({ kind: 'fenced' });
+    if (row.attempt >= attempt || entry?.record.status !== 'executing') return Promise.resolve({ kind: 'fenced' });
     row.attempt = attempt;
     return Promise.resolve(claimed(changesetId, batchNo, row, entry));
   }
@@ -307,18 +312,20 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     const row = this.batches.get(changesetId)?.get(batchNo);
     if (entry === undefined || row?.attempt !== attempt || row.state !== 'open') return { ok: false };
     if (entry.record.status !== 'executing') throw new Error('batch outcomes rejected: change-set is not executing');
-    // The first outcome per target wins; check and apply synchronously, undo if the audit append fails.
+    // The first outcome per target of the batch wins; only pending items change and count.
+    // Check and apply synchronously, undo if the audit append fails.
+    const inBatch = new Set(row.targetIds);
     const first = new Map<string, ItemOutcome>();
-    for (const o of outcomes) if (!first.has(o.targetId)) first.set(o.targetId, o);
+    for (const o of outcomes) if (inBatch.has(o.targetId) && !first.has(o.targetId)) first.set(o.targetId, o);
     const replaced = new Map<string, ChangeItemRecord>();
+    const counts: { -readonly [K in keyof BatchCounts]: number } = { written: 0, failed: 0, skipped: 0 };
     for (const o of first.values()) {
       const current = entry.items.get(o.targetId);
       if (current?.status !== 'pending') continue;
       replaced.set(o.targetId, current);
       entry.items.set(o.targetId, { ...current, status: o.status, ...(o.error === undefined ? {} : { error: o.error }) });
+      counts[o.status] += 1;
     }
-    const counts: { -readonly [K in keyof BatchCounts]: number } = { written: 0, failed: 0, skipped: 0 };
-    for (const o of first.values()) counts[o.status] += 1;
     entry.record = { ...entry.record, stats: computeStats(entry.items) };
     row.state = 'done';
     row.counts = counts;

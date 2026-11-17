@@ -13,7 +13,7 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { ChangeSetStats, ChangeSetStatus, ExclusionReason, ItemStatus } from '@aiops/core';
+import type { ChangeSetStats, ChangeSetStatus, ExclusionReason, ItemStatus, PlanEntry } from '@aiops/core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => 'bytea',
@@ -180,7 +180,7 @@ export const changeBatch = pgTable(
     targetIds: jsonb('target_ids').$type<string[]>().notNull(),
     lastTarget: text('last_target').notNull(),
     upstreamBatchId: text('upstream_batch_id'),
-    plan: jsonb('plan').$type<unknown[]>(),
+    plan: jsonb('plan').$type<PlanEntry[]>(),
     written: integer('written').notNull().default(0),
     failed: integer('failed').notNull().default(0),
     skipped: integer('skipped').notNull().default(0),

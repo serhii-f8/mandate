@@ -91,7 +91,8 @@ export interface ChangeSetRepository {
   /**
    * Claims batch `batchNo` for `attempt` (EXE-3, size 1..1000). A new batch takes the next `size`
    * pending items after the highest existing batch's last target; `empty` when none. A done batch
-   * answers its stored counts; an equal or higher stored attempt answers `fenced`.
+   * answers its stored counts; an equal or higher stored attempt answers `fenced`, and so does a new
+   * claim or a takeover while the change-set is not `executing`.
    */
   claimBatch(
     changesetId: string,
@@ -107,9 +108,10 @@ export interface ChangeSetRepository {
   /** Stores the upstream batch ID and plan for the owning attempt of an open batch; false when fenced (NFR-2). */
   recordSubmission(changesetId: string, batchNo: number, attempt: number, submission: BatchSubmission): Promise<boolean>;
   /**
-   * One transaction for the owning attempt of an open batch (EXE-3, AUD-1): item outcomes (pending
-   * items only; rejected unless executing), batch `done` with counts from `outcomes` (first per
-   * target), and `audit`. Fenced answers `{ ok: false }` and writes nothing.
+   * One transaction for the owning attempt of an open batch (EXE-3, AUD-1): item outcomes (first per
+   * target, only for the batch's targets that are still pending; rejected unless executing), batch
+   * `done` with counts of exactly those applied outcomes, and `audit`. Fenced answers `{ ok: false }`
+   * and writes nothing.
    */
   completeBatch(
     changesetId: string,
