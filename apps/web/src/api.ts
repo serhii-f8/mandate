@@ -5,8 +5,12 @@ export interface Session {
   username?: string;
   roles: string[];
   csrfToken: string;
-  authTime: number;
+  /** ISO 8601 time of the login at the identity provider. */
+  authTime: string;
+  /** Recent enough to change credentials (SEC-8). */
   fresh: boolean;
+  /** ISO 8601 time the page session ends. */
+  expiresAt: string;
 }
 
 export interface CredentialListEntry extends CredentialRow {

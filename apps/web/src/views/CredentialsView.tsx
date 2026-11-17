@@ -31,6 +31,10 @@ export interface CredentialsViewProps {
   onTest: (connection: string) => Promise<ConnectionTestReport>;
   /** The form field names of a scheme. */
   fields: (scheme: string) => readonly string[];
+  /** The session is recent enough to change credentials (SEC-8); otherwise the forms are disabled. */
+  fresh: boolean;
+  /** Where a fresh login starts, offered before a secret is typed when `fresh` is false. */
+  freshLoginUrl: string;
 }
 
 // Every string below comes from configuration or the api and is rendered as React text (escaped, SEC-5).
@@ -135,6 +139,7 @@ function CredentialCard({ row, props }: { row: CredentialRow; props: Credentials
                 name={name}
                 type={name === 'username' ? 'text' : 'password'}
                 autoComplete="off"
+                disabled={!props.fresh}
                 value={values[name] ?? ''}
                 onChange={(event) => {
                   setValues({ ...values, [name]: event.target.value });
@@ -143,7 +148,7 @@ function CredentialCard({ row, props }: { row: CredentialRow; props: Credentials
             </div>
           );
         })}
-        <button type="submit" disabled={busy}>
+        <button type="submit" disabled={busy || !props.fresh}>
           Save
         </button>
       </form>
@@ -163,6 +168,11 @@ export function CredentialsView(props: CredentialsViewProps): ReactElement {
   if (props.credentials.length === 0) return <p>You do not manage any credentials.</p>;
   return (
     <div>
+      {props.fresh ? null : (
+        <p className="reauthenticate">
+          Changing a credential needs a recent login. <a href={props.freshLoginUrl}>Log in again to change credentials</a>
+        </p>
+      )}
       {props.credentials.map((row) => (
         <CredentialCard key={row.ref} row={row} props={props} />
       ))}

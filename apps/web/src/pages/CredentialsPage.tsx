@@ -39,6 +39,8 @@ export function CredentialsPage(): ReactElement {
     <CredentialsView
       credentials={credentials}
       fields={(scheme) => schemeFields.get(scheme) ?? []}
+      fresh={session.fresh}
+      freshLoginUrl={loginUrl(true)}
       onSave={async (ref, secret) => {
         try {
           const result = await api.save(session.csrfToken, ref, secret);
