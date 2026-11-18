@@ -24,6 +24,8 @@ export interface NewChangeSet {
   readonly correlationId: string;
   readonly createdAt: Date;
   readonly expiresAt: Date;
+  /** CS-5: the source change-set of a derived one. */
+  readonly derivedFrom?: string;
 }
 
 export interface ItemsPageQuery {
@@ -62,6 +64,26 @@ export interface ChangeSetRepository {
    * `targetId` (APR-5); size 1..500; unknown and non-UUID IDs give `[]`.
    */
   sampleItems(changesetId: string, seed: string, size: number): Promise<readonly ChangeItemRecord[]>;
+  /**
+   * CS-5: over the source's items, `unknown` = distinct `exclude` targets that are not `pending` plus distinct
+   * `include` targets that are not `excluded` with reason `requester` (a target named in both lists counts once,
+   * as unknown); `includedAfter` = items whose status after the copy rules would not be `excluded`. Unknown or
+   * non-UUID source → { unknown: |exclude ∪ include|, includedAfter: 0 }.
+   */
+  deriveCheck(
+    sourceId: string,
+    exclude: readonly string[],
+    include: readonly string[],
+  ): Promise<{ unknown: number; includedAfter: number }>;
+  /**
+   * CS-5, NFR-7: one transaction. Locks `newId` FOR UPDATE; rejects ('change-set is not preparing') unless it is
+   * `preparing`, rejects ('change-set already has items') when it has items; then one INSERT … SELECT copying every
+   * item of `sourceId` with the copy rules: a `pending` target in `exclude` becomes `excluded` with reason
+   * `requester`; a target in `include` (and not in `exclude`) excluded with reason `requester` becomes `pending`
+   * without a reason; every other item keeps status and reason. `before`, `after` and `target_id` are copied and
+   * `error` stays empty. Returns the number of rows copied.
+   */
+  copyItems(newId: string, sourceId: string, exclude: readonly string[], include: readonly string[]): Promise<number>;
   /** Compare-and-set from preparing. */
   completePreparation(
     changesetId: string,

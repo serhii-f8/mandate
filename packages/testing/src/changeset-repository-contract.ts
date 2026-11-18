@@ -1158,6 +1158,122 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         expect(await c.repository.sampleItems('x', SEED, 5)).toEqual([]);
       }));
 
+    describe('CS-5 derived change-sets', () => {
+      /** The source: t-0001..t-0003 pending, t-0004 excluded not_found, prepared with hash 'h'. */
+      async function source(c: Ctx): Promise<void> {
+        await created(c);
+        await c.repository.appendItems(c.id, [
+          ...targets(3).map((t) => item(t)),
+          item('t-0004', { status: 'excluded', reason: 'not_found' }),
+        ]);
+        await c.repository.completePreparation(
+          c.id,
+          { status: 'prepared', hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
+          auditEvent(c.id),
+        );
+      }
+
+      async function createDerived(c: Ctx, from: string): Promise<string> {
+        const id = randomUUID();
+        await c.repository.create({ ...newChangeSet(id), derivedFrom: from }, auditEvent(id));
+        return id;
+      }
+
+      /** D: derived from the source with t-0002 excluded by the requester, then prepared. */
+      async function derivedD(c: Ctx): Promise<string> {
+        await source(c);
+        const d = await createDerived(c, c.id);
+        expect(await c.repository.copyItems(d, c.id, ['t-0002'], [])).toBe(4);
+        await c.repository.completePreparation(
+          d,
+          { status: 'prepared', hash: 'h2', stats: await c.repository.stats(d), preparedAt: NOW },
+          auditEvent(d),
+        );
+        return d;
+      }
+
+      async function allItems(c: Ctx, id: string): Promise<readonly ChangeItemRecord[]> {
+        return c.repository.itemsPage(id, { limit: 10 });
+      }
+
+      it('CS-5 create stores derivedFrom and get returns it', async () =>
+        withRepo(async (c) => {
+          await created(c);
+          const d = await createDerived(c, c.id);
+          expect((await c.repository.get(d))?.derivedFrom).toBe(c.id);
+          expect(await c.repository.get(c.id)).not.toHaveProperty('derivedFrom');
+        }));
+
+      it('CS-5 deriveCheck counts unknown targets and the included items left', async () =>
+        withRepo(async (c) => {
+          await source(c);
+          expect(await c.repository.deriveCheck(c.id, ['t-0001', 't-0004', 'nope'], [])).toEqual({ unknown: 2, includedAfter: 2 });
+          expect(await c.repository.deriveCheck(c.id, ['t-0001', 't-0001'], [])).toEqual({ unknown: 0, includedAfter: 2 });
+          expect(await c.repository.deriveCheck(c.id, [], ['t-0004'])).toEqual({ unknown: 1, includedAfter: 3 });
+          // A target named in both lists cannot qualify on both sides: it counts once, as unknown.
+          expect(await c.repository.deriveCheck(c.id, ['t-0001', 'nope'], ['t-0001', 'nope'])).toEqual({
+            unknown: 2,
+            includedAfter: 2,
+          });
+        }));
+
+      it('CS-5 copyItems copies every item with the exclusion applied, and only into an empty preparing change-set', async () =>
+        withRepo(async (c) => {
+          await source(c);
+          const before = await allItems(c, c.id);
+          const d = await createDerived(c, c.id);
+          expect(await c.repository.copyItems(d, c.id, ['t-0002'], [])).toBe(4);
+          expect(await allItems(c, d)).toEqual(
+            before.map((i) => (i.targetId === 't-0002' ? { ...i, status: 'excluded', reason: 'requester' } : i)),
+          );
+          expect(await allItems(c, c.id)).toEqual(before);
+          await expect(c.repository.copyItems(d, c.id, ['t-0002'], [])).rejects.toThrow('change-set already has items');
+          await expect(c.repository.copyItems(c.id, c.id, [], [])).rejects.toThrow('change-set is not preparing');
+          await expect(c.repository.copyItems(randomUUID(), c.id, [], [])).rejects.toThrow();
+          expect(await allItems(c, d)).toHaveLength(4);
+        }));
+
+      it('CS-5 copyItems applies include only to requester exclusions and exclude only to pending items; exclude wins', async () =>
+        withRepo(async (c) => {
+          const d = await derivedD(c);
+          const e = await createDerived(c, d);
+          expect(await c.repository.copyItems(e, d, ['t-0004'], ['t-0002', 't-0004'])).toBe(4);
+          const byId = Object.fromEntries((await allItems(c, e)).map((i) => [i.targetId, i]));
+          expect(byId['t-0004']).toMatchObject({ status: 'excluded', reason: 'not_found' });
+          expect(byId['t-0002']?.status).toBe('pending');
+          const f = await createDerived(c, d);
+          expect(await c.repository.copyItems(f, d, ['t-0001', 't-0002'], ['t-0001', 't-0002'])).toBe(4);
+          const fById = Object.fromEntries((await allItems(c, f)).map((i) => [i.targetId, i]));
+          expect(fById['t-0001']).toMatchObject({ status: 'excluded', reason: 'requester' });
+          expect(fById['t-0002']).toMatchObject({ status: 'excluded', reason: 'requester' });
+        }));
+
+      it('CS-5 an item excluded by the requester can be included back', async () =>
+        withRepo(async (c) => {
+          const d = await derivedD(c);
+          const e = await createDerived(c, d);
+          expect(await c.repository.copyItems(e, d, [], ['t-0002'])).toBe(4);
+          const t2 = (await allItems(c, e)).find((i) => i.targetId === 't-0002');
+          expect(t2?.status).toBe('pending');
+          expect(t2).not.toHaveProperty('reason');
+          expect(t2).not.toHaveProperty('error');
+          expect(await c.repository.deriveCheck(d, [], ['t-0002'])).toEqual({ unknown: 0, includedAfter: 3 });
+        }));
+
+      it('CS-5 stats count requester exclusions separately', async () =>
+        withRepo(async (c) => {
+          const d = await derivedD(c);
+          expect(await c.repository.stats(d)).toEqual(stats({ total: 4, included: 2, excluded: { not_found: 1, requester: 1 } }));
+        }));
+
+      it('CS-5 deriveCheck of an unknown or non-UUID source counts every target as unknown', async () =>
+        withRepo(async (c) => {
+          for (const id of [randomUUID(), 'x']) {
+            expect(await c.repository.deriveCheck(id, ['a', 'b', 'a'], ['b', 'c'])).toEqual({ unknown: 3, includedAfter: 0 });
+          }
+        }));
+    });
+
     describe('NTF-1 outbox rows commit with the event they announce', () => {
       const ask = (target: string, step = 1): NewNotification => ({ kind: 'approval_requested', round: 1, step, target });
 
