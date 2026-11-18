@@ -61,7 +61,7 @@ export const REFUSAL_STATUS: Readonly<Record<PageRefusal, 400 | 403 | 404 | 409>
 /** Non-sensitive fields a refusal answer adds beside `error`, e.g. a count or a limit name (SEC-3). */
 export type RefusalExtra = Readonly<Record<string, string | number>>;
 
-/** Audits (when `audit` given) then answers `{ error: reason, ...extra }`; an audit failure propagates (500), nothing is sent. */
+/** Audits (when `audit` given) then answers `{ ...extra, error: reason }`; an audit failure propagates (500), nothing is sent. */
 export async function refuse(
   res: Response,
   reason: PageRefusal,
@@ -69,7 +69,8 @@ export async function refuse(
   extra?: RefusalExtra,
 ): Promise<void> {
   if (audit !== undefined) await audit.log.append(audit.event);
-  res.status(REFUSAL_STATUS[reason]).json({ error: reason, ...extra });
+  // `error` last: an extra key can never overwrite the code.
+  res.status(REFUSAL_STATUS[reason]).json({ ...extra, error: reason });
 }
 
 /**

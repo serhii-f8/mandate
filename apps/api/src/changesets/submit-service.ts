@@ -48,6 +48,11 @@ export interface SubmitRequest {
   readonly changesetId: string;
   readonly hash: string;
   readonly snapshot: Snapshot;
+  /**
+   * The statuses this channel may submit; both by default (MCP). The page passes `['prepared']`: an
+   * approved change-set is started there only by `POST :id/start`, with its fresh login (SEC-8, ruling F3).
+   */
+  readonly statuses?: readonly ('prepared' | 'approved')[];
 }
 
 type PlainReason = 'not_found' | 'hash_mismatch' | 'expired' | 'approval_unroutable' | 'executor_unavailable' | 'audit_unavailable';
@@ -79,8 +84,9 @@ export class SubmitService {
     const record = await load(deps, caller, correlationId, id);
     if (record === undefined) return refused('not_found');
 
-    // 2. Only prepared and approved change-sets can be submitted; a second submit finds it pending or executing.
-    if (record.status !== 'prepared' && record.status !== 'approved') return { kind: 'refused', reason: 'wrong_status', status: record.status };
+    // 2. Only prepared and approved change-sets (or the channel's subset) can be submitted; a second submit finds it pending or executing.
+    const statuses = req.statuses ?? ['prepared', 'approved'];
+    if (!statuses.some((status) => status === record.status)) return { kind: 'refused', reason: 'wrong_status', status: record.status };
 
     // 3. SEC-9: the hash the caller reviewed, on every path and before anything changes.
     if (record.hash !== hash) return refused('hash_mismatch');

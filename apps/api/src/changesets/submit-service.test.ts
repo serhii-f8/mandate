@@ -208,8 +208,15 @@ async function setup(options: { stage?: Stage; racing?: boolean; refusing?: 'has
   const newId = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
   const now = () => NOW;
   const service = new SubmitService({ repository, executor, audit, newId, now, approvals: new ApprovalService({ repository, executor, audit, newId, now }) });
-  const submit = (caller: Caller, opts: { id?: string; hash?: string; snapshot?: Snapshot } = {}) =>
-    service.submit({ caller, correlationId: 'corr-5', changesetId: opts.id ?? ID, hash: opts.hash ?? HASH, snapshot: opts.snapshot ?? CURRENT });
+  const submit = (caller: Caller, opts: { id?: string; hash?: string; snapshot?: Snapshot; statuses?: readonly ('prepared' | 'approved')[] } = {}) =>
+    service.submit({
+      caller,
+      correlationId: 'corr-5',
+      changesetId: opts.id ?? ID,
+      hash: opts.hash ?? HASH,
+      snapshot: opts.snapshot ?? CURRENT,
+      ...(opts.statuses === undefined ? {} : { statuses: opts.statuses }),
+    });
   const policyRows = () => audit.events.filter((e) => e.action === 'policy.decision');
   return { repository, executor, audit, submit, policyRows };
 }
@@ -283,6 +290,17 @@ describe('MCP-8 SubmitService', () => {
     const down = await setup({ stage: 'approved' });
     down.executor.answer = 'unavailable';
     expect(await down.submit(alice)).toEqual({ kind: 'refused', reason: 'executor_unavailable' });
+  });
+
+  it('SEC-8 MCP-8 statuses [prepared] refuses an approved change-set wrong_status and starts nothing', async () => {
+    const approved = await setup({ stage: 'approved' });
+    expect(await approved.submit(alice, { statuses: ['prepared'] })).toEqual({ kind: 'refused', reason: 'wrong_status', status: 'approved' });
+    expect(approved.executor.starts).toEqual([]);
+    expect(approved.policyRows()).toEqual([]);
+    expect((await approved.repository.get(ID))?.status).toBe('approved');
+    // A prepared one still goes ahead under the same option.
+    const prepared = await setup();
+    expect(await prepared.submit(alice, { statuses: ['prepared'] })).toMatchObject({ kind: 'started' });
   });
 
   it('MCP-8 wrong_status for a pending change-set; not_prepared with the current status when the submission loses the race', async () => {

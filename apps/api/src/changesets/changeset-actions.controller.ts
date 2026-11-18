@@ -125,6 +125,8 @@ export class ChangeSetActionsController {
       changesetId: changeset.id,
       hash: c.body.hash,
       snapshot: snapshotOf(this.configuration.current),
+      // Re-checked by the service on the row it reads, so a change-set approved meanwhile is not started (F3).
+      statuses: ['prepared'],
     });
     await this.answerSubmit(c, res, outcome);
   }

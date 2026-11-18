@@ -93,10 +93,13 @@ describe('AUD-1 refusal answers', () => {
     const calls: string[] = [];
     await refuse(fakeRes(calls), 'unknown_items', { log, event: EVENT }, { count: 2 });
     expect(log.events).toEqual([EVENT]);
-    expect(calls).toEqual(['status:409', 'json:{"error":"unknown_items","count":2}']);
+    expect(calls).toEqual(['status:409', 'json:{"count":2,"error":"unknown_items"}']);
     const plain: string[] = [];
     await refuse(fakeRes(plain), 'limit_exceeded', undefined, { limit: 'records_per_day' });
-    expect(plain).toEqual(['status:409', 'json:{"error":"limit_exceeded","limit":"records_per_day"}']);
+    expect(plain).toEqual(['status:409', 'json:{"limit":"records_per_day","error":"limit_exceeded"}']);
+    const hostile: string[] = [];
+    await refuse(fakeRes(hostile), 'unknown_items', undefined, { error: 'not_found' });
+    expect(hostile).toEqual(['status:409', 'json:{"error":"unknown_items"}']);
   });
 });
 
