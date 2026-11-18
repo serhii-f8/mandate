@@ -1,0 +1,41 @@
+# Commands
+
+The full command reference, moved from CLAUDE.md (ADR 0033). CLAUDE.md keeps the everyday
+commands; keep this file current when a phase adds a command.
+
+Run from the repository root. pnpm comes from the `packageManager` field through
+corepack (`corepack enable` once); the user's global corepack cannot run pnpm 12
+(ADR 0010). Integration and e2e tests need Docker (Testcontainers) and network.
+
+| Purpose | Command |
+| --- | --- |
+| Install | `pnpm install` (CI: `pnpm install --frozen-lockfile`) |
+| Build | `pnpm build` |
+| Type-check | `pnpm typecheck` |
+| Lint (incl. package boundaries) | `pnpm lint` |
+| Unit tests | `pnpm test` |
+| Integration tests | `pnpm test:int` |
+| End-to-end tests | `pnpm test:e2e` |
+| Single package / single test | `pnpm --filter @aiops/<pkg> test` (or `test:int`, `test:e2e`); one file: `cd <pkg> && pnpm exec vitest run --project <unit\|integration\|e2e> <path>` |
+| Full CI run locally | `bash scripts/ci.sh` |
+| Phase 1 acceptance (fresh clone of HEAD, Compose) | `bash scripts/acceptance/phase-1.sh` |
+| Phase 2 acceptance (fresh clone of HEAD, Compose, real Keycloak logins) | `bash scripts/acceptance/phase-2.sh` |
+| Phase 3 acceptance (fresh clone of HEAD, Compose, Magento sandbox, page login, credential entry) | `bash scripts/acceptance/phase-3.sh` (brings the sandbox up and seeds it itself; not in CI: needs the sandbox) |
+| Phase 4 acceptance (fresh clone of HEAD, Compose, Magento sandbox, change-set preparation) | `bash scripts/acceptance/phase-4.sh` (brings the sandbox up and seeds it itself; not in CI: needs the sandbox) |
+| Phase 5 acceptance (fresh clone of HEAD, Compose with two workers, Magento sandbox, 3000-item run with killed workers, drift) | `bash scripts/acceptance/phase-5.sh` (brings the sandbox up and seeds it itself, including 3000 umbrella products; not in CI: needs the sandbox) |
+| Compose up / down / logs | `docker compose up -d --build --wait` / `docker compose down` (`-v` drops data) / `docker compose logs -f <service>` |
+| Database migrate | Runs on `api` start (NFR-5). New migration: edit `packages/db/src/schema.ts`, then `pnpm --filter @aiops/db db:generate --name <name>` (custom SQL: add `--custom`) |
+| Record a workflow history fixture | `pnpm --filter @aiops/worker record-history <scenario>` (changesetWorkflow, encrypted with the test key, Temporal identity `aiops-recorder`; no argument lists the scenarios; refuses to overwrite) |
+| Worker environment (Compose sets it) | `DATABASE_URL`, `AIOPS_CONFIG_DIR`, `AIOPS_PRESET_DIRS`, `AIOPS_MASTER_KEYS` as for `api`, plus `AIOPS_TEMPORAL_KEYS` (`<version>:<base64 of 32 bytes>`, comma-separated, highest encrypts; SEC-4) and `TEMPORAL_ADDRESS`/`TEMPORAL_NAMESPACE`/`TEMPORAL_TASK_QUEUE`; optional `AIOPS_PREPARE_TIMEOUT_MS` (default 3600000, > 60000), `AIOPS_BATCH_HEARTBEAT_MS` (> 10000), `AIOPS_BATCH_TIMEOUT_MS`, `AIOPS_BATCH_MAX_ATTEMPTS`, `AIOPS_RETRY_INITIAL_MS`, `AIOPS_RETRY_MAX_MS` (never set empty). The worker starts after `api` is healthy (migrated) and logs `worker polling` |
+| Smoke workflow through the payload codec | `docker compose exec -T worker node dist/smoke-cli.js <message>` prints `{"echoed":"<message>"}` |
+| Config CLI (validate) | `pnpm build` once, then `pnpm aiops-config validate deploy/config` (exit 0 valid, 1 invalid, 2 usage); in the image: `node node_modules/@aiops/config/dist/cli.js validate /etc/aiops/config` |
+| Reload configuration in a running api | `docker compose kill -s HUP api` (an invalid set is logged and the previous one stays active) |
+| Keycloak realm bootstrap (PKCE, CIMD, DCR switch) | Runs as Compose service `keycloak-setup`; re-run with `docker compose run --rm keycloak-setup` (set `AIOPS_DCR=on` to allow anonymous DCR) |
+| Magento sandbox (Mage-OS 4.0.0, port 4390, network `aiops-sandbox`, alias `magento-sandbox`) | Up (idempotent; first run installs for a long while; also starts the `async.operations.all` bulk consumer once, `AIOPS_RESTART_CONSUMER=1` restarts it, needed after the first seed): `bash deploy/sandbox/magento/up.sh`; seed (idempotent; also 3000 `umbrella` products via async bulk; needs the consumer up.sh starts): `node deploy/sandbox/magento/seed.mjs http://127.0.0.1:4390`; admin token (24 h, prints it, keep it out of logs): `bash deploy/sandbox/magento/token.sh`; down: `bash deploy/sandbox/magento/down.sh` |
+| Record the Magento preset's contract recordings (NFR-17) | Sandbox up and seeded, consumer restarted after the seed (`AIOPS_RESTART_CONSUMER=1 bash deploy/sandbox/magento/up.sh`), then `MAGENTO_SANDBOX_URL=http://127.0.0.1:4390 MAGENTO_SANDBOX_TOKEN="$(bash deploy/sandbox/magento/token.sh)" pnpm --filter @aiops/magento2-catalog record` (also records the bulk write cases of `test/write-cases.json`: changes `meta_keyword` of GLOBEX-001/002 and attempts a conflicting `url_key` on GLOBEX-001; ACME data stays untouched); the same two variables on `pnpm --filter @aiops/magento2-catalog test` also run the contract cases live |
+| Log in to the trusted pages (prints the `aiops_session` cookie) | `node tooling/acceptance/page-login.mjs http://localhost:8400 carol dev-only-password`; then `AIOPS_PAGE_COOKIE=... node tooling/acceptance/page-api.mjs http://localhost:8400 session \| put-credential <ref> (secret on stdin) \| test <connection>` |
+| Log in a development user (prints an access token) | `node tooling/acceptance/login.mjs http://localhost:8480 alice dev-only-password http://localhost:8400/mcp` |
+| Full configuration check (specs resolved, presets loaded) | `pnpm build` once, then `pnpm aiops validate <dir> [--preset-dir <dir>]` (presets: `--preset-dir` or `AIOPS_PRESET_DIRS`, else the repository `presets/` when present; exit 0 valid, 1 invalid, 2 usage); in the image (presets at `/app/presets`, `AIOPS_PRESET_DIRS` set): `docker compose exec api node dist/cli.js validate /etc/aiops/config` |
+| Test a connection (CONN-7) | `pnpm aiops test-connection <connection>` with `AIOPS_CONFIG_DIR`, `DATABASE_URL`, `AIOPS_MASTER_KEYS` set and the database already migrated; prints `ok status=<s> items=<n> ms=<d> scopes=...`, audits `connection.test` as `cli` |
+| Rotate credential master keys (SEC-2) | Add the new key as the highest version in `AIOPS_MASTER_KEYS` (keep the old ones), then `pnpm aiops credentials rotate` with `DATABASE_URL` and `AIOPS_MASTER_KEYS` set; prints `rewrapped=<n> on_old_versions=<m>`; drop old keys only when `on_old_versions=0` |
+| Audit chain verify | _TBD in Phase 8_ |
