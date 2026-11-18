@@ -40,6 +40,7 @@ import { createBuiltinTools } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
 import { createServerFactory } from './mcp/mcp-server-factory.js';
 import { snapshotOf, type PipelineDeps } from './mcp/tool-pipeline.js';
+import { resolveWidgetDir, WidgetBundles } from './mcp/widget-bundles.js';
 import {
   API_ENV,
   APPROVAL_SERVICE,
@@ -58,6 +59,7 @@ import {
   PAGE_SESSIONS,
   SUBMIT_SERVICE,
   TEMPORAL,
+  WIDGET_BUNDLES,
   WORKFLOW_STARTER,
 } from './tokens.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
@@ -233,8 +235,16 @@ class AppModule {
             overrides.starter ?? new TemporalWorkflowStarter({ client: temporalOf(temporal).client, taskQueue: env.taskQueue }),
         },
         {
+          // Read once at start; a missing or empty bundle is warned about and left out (MCP-5, MCP-6).
+          provide: WIDGET_BUNDLES,
+          useFactory: (): Promise<WidgetBundles> =>
+            WidgetBundles.load(resolveWidgetDir(env.widgetDir), (m, d) => {
+              logger.warn(d, m);
+            }),
+        },
+        {
           provide: MCP_HANDLER,
-          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE, WORKFLOW_STARTER],
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE, WORKFLOW_STARTER, WIDGET_BUNDLES],
           useFactory: (
             audit: AuditLog,
             vault: CredentialVault,
@@ -243,6 +253,7 @@ class AppModule {
             executor: ChangeSetExecutor,
             approvals: ApprovalService,
             starter: WorkflowStarter,
+            widgets: WidgetBundles,
           ) => {
             // One task store for the write path that creates tasks and the handlers that read them.
             const tasks = overrides.tasks ?? new PostgresTaskRepository(database.db);
@@ -283,6 +294,8 @@ class AppModule {
                   now: () => performance.now(),
                   rateCounter: overrides.rateCounter ?? new PostgresRateCounter(database.db),
                   wallClock: () => new Date(),
+                  widgets,
+                  publicUrl: env.publicUrl,
                 },
                 { tasks, repository: changesets, executor, audit, newId: randomUUID },
               ),

@@ -16,4 +16,5 @@ export const PAGE_CHECKS = Symbol('PageChecks');
 export const PAGE_SESSIONS = Symbol('SessionService');
 export const SUBMIT_SERVICE = Symbol('SubmitService');
 export const TEMPORAL = Symbol('Temporal');
+export const WIDGET_BUNDLES = Symbol('WidgetBundles');
 export const WORKFLOW_STARTER = Symbol('WorkflowStarter');

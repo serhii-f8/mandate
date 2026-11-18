@@ -15,6 +15,7 @@ import { ApprovalService } from '../approvals/approval-service.js';
 import { callerFromAuthInfo } from '../auth/caller-from-auth.js';
 import { pingTool, type BuiltinToolDeps } from './builtin-tools.js';
 import { DECIDE_TOOL, decideChangesetTool } from './decide-tool.js';
+import { WidgetBundles } from './widget-bundles.js';
 import type { BuiltinTool } from './tool-catalog.js';
 import { callTool, listTools, minuteWindow, snapshotOf, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
@@ -90,6 +91,8 @@ function setup() {
     now: () => 0,
     rateCounter: new InMemoryRateCounter(),
     wallClock: () => new Date('2026-11-17T12:00:30.000Z'),
+    widgets: WidgetBundles.empty(),
+    publicUrl: new URL('https://aiops.example.test'),
   };
   const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot(), tasks: false });
   return { audit, invoker, deps, req };
@@ -254,6 +257,8 @@ function setupWith(config: LoadedConfiguration, invoker: OperationInvoker) {
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
     now: () => 0,    rateCounter: new InMemoryRateCounter(),
     wallClock: () => new Date(0),
+    widgets: WidgetBundles.empty(),
+    publicUrl: new URL('https://aiops.example.test'),
   };
   const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot(), tasks: false });
   return { audit, deps, req };
@@ -341,6 +346,8 @@ describe('SEC-1 POL-2 the operation runs under the snapshot the decision used', 
       now: () => 0,
       rateCounter: new InMemoryRateCounter(),
       wallClock: () => new Date(0),
+      widgets: WidgetBundles.empty(),
+      publicUrl: new URL('https://aiops.example.test'),
     };
     const req: PipelineRequest = { caller: alice, correlationId: 'corr-9', snapshot: deps.snapshot(), tasks: false };
     current = OVERRIDDEN; // a reload lands while the request is in flight

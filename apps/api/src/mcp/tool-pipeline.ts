@@ -24,6 +24,7 @@ import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-re
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
 import { deniedResult, recordDecision } from './policy-answers.js';
 import type { BuiltinTool } from './tool-catalog.js';
+import type { WidgetCatalog } from './widget-bundles.js';
 
 /** One configuration and its engine, taken once per HTTP request. */
 export interface Snapshot {
@@ -47,6 +48,10 @@ export interface PipelineDeps {
   readonly rateCounter: RateCounter;
   /** Wall-clock time, for the rate-limit window only. */
   readonly wallClock: () => Date;
+  /** The widget bundles served as UI resources and linked from tools (MCP-5, MCP-6). */
+  readonly widgets: WidgetCatalog;
+  /** `AIOPS_PUBLIC_URL`, the base of the change-set page links (MCP-6). */
+  readonly publicUrl: URL;
 }
 
 /** The start of the UTC minute containing `now`. */
