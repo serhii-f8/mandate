@@ -4,6 +4,7 @@ import { ApprovalsPage } from './pages/ApprovalsPage.js';
 import { ChangeSetPage } from './pages/ChangeSetPage.js';
 import { CredentialsPage } from './pages/CredentialsPage.js';
 import { route } from './routes.js';
+import '@aiops/widgets/styles.css';
 import './styles.css';
 
 // The api serves index.html for every path under /app/; the path picks the page (UI-2, no router library).

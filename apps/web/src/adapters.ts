@@ -1,0 +1,114 @@
+import type {
+  ApprovalStateModel,
+  ApprovalViewModel,
+  ChangeSetViewModel,
+  ItemFilter,
+  ItemRowModel,
+  ItemsPageModel,
+} from '@aiops/widgets';
+import type { ChangeSetDetail, ItemRow, ItemsPage, Sample } from './api.js';
+
+/** The page entry's mapping from the typed REST answers to the shared view models (UI-1). */
+
+function toItemRow(row: ItemRow): ItemRowModel {
+  return {
+    targetId: row.targetId,
+    status: row.status,
+    ...(row.reason === undefined ? {} : { reason: row.reason }),
+    before: row.before,
+    after: row.after,
+    ...(row.error === undefined ? {} : { error: row.error }),
+  };
+}
+
+export function toItemsPage(page: ItemsPage): ItemsPageModel {
+  return { items: page.items.map(toItemRow), ...(page.next === undefined ? {} : { next: page.next }) };
+}
+
+/** Decisions name the approver's display name when known, else the subject (APR-5). */
+function toApproval(approval: NonNullable<ChangeSetDetail['approval']>): ApprovalStateModel {
+  return {
+    round: approval.round,
+    steps: approval.steps.map((s) => {
+      const d = s.decision;
+      return {
+        step: s.step,
+        role: s.role,
+        ...(d === undefined
+          ? {}
+          : {
+              decision: {
+                decision: d.decision,
+                by: d.name ?? d.approver,
+                channel: d.channel,
+                ...(d.comment === undefined ? {} : { comment: d.comment }),
+                ts: d.ts,
+              },
+            }),
+      };
+    }),
+    ...(approval.awaitingRole === undefined ? {} : { awaitingRole: approval.awaitingRole }),
+  };
+}
+
+/**
+ * The requester's model. Permissions come from the server's viewer block; the page has no cancel
+ * route in this phase, and it is the page itself, so there is no `pageUrl`.
+ */
+export function toChangeSetModel(detail: ChangeSetDetail, items: ItemsPage, filter?: ItemFilter): ChangeSetViewModel {
+  const { operation } = detail;
+  return {
+    id: detail.id,
+    operation: { id: operation.id, ...(operation.title === undefined ? {} : { title: operation.title }) },
+    status: detail.status,
+    ...(detail.hash === undefined ? {} : { hash: detail.hash }),
+    createdAt: detail.request.createdAt,
+    expiresAt: detail.expiresAt,
+    stats: detail.stats,
+    items: toItemsPage(items),
+    ...(filter === undefined ? {} : { itemFilter: filter }),
+    ...(detail.progress === undefined ? {} : { progress: detail.progress }),
+    ...(detail.approval === undefined ? {} : { approval: toApproval(detail.approval) }),
+    ...(detail.drift === undefined ? {} : { drift: detail.drift }),
+    ...(detail.errorCode === undefined ? {} : { errorCode: detail.errorCode }),
+    ...(detail.derivedFrom === undefined ? {} : { derivedFrom: detail.derivedFrom }),
+    rollback: { available: detail.rollback.available },
+    permissions: { canExclude: detail.viewer.canExclude, canSubmit: detail.viewer.canSubmit, canCancel: false },
+  };
+}
+
+/**
+ * The approver's model on the page channel. A decider whose login is stale or misses the step-up
+ * is sent to `freshLoginUrl` (SEC-8, AUTH-6).
+ */
+export function toApprovalModel(
+  detail: ChangeSetDetail,
+  items: ItemsPage,
+  sample: Sample,
+  freshLoginUrl: string,
+  filter?: ItemFilter,
+): ApprovalViewModel {
+  const { viewer } = detail;
+  return {
+    id: detail.id,
+    status: detail.status,
+    ...(detail.hash === undefined ? {} : { hash: detail.hash }),
+    operation: detail.operation,
+    request: detail.request,
+    ...(detail.policy === undefined ? {} : { policy: detail.policy }),
+    stats: detail.stats,
+    expiresAt: detail.expiresAt,
+    ...(detail.approval === undefined ? {} : { approval: toApproval(detail.approval) }),
+    sample: { seed: sample.seed, items: sample.items.map(toItemRow) },
+    items: toItemsPage(items),
+    ...(filter === undefined ? {} : { itemFilter: filter }),
+    viewer: {
+      channel: 'page',
+      canDecide: viewer.canDecide,
+      reason: viewer.reason,
+      needsFreshLogin: viewer.canDecide && (!viewer.fresh || !viewer.stepUpSatisfied),
+      canStart: viewer.canStart,
+    },
+    freshLoginUrl,
+  };
+}

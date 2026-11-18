@@ -5,5 +5,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: '/app/',
   plugins: [react()],
+  // One React for the page and @aiops/widgets, which takes React as a peer.
+  resolve: { dedupe: ['react', 'react-dom'] },
   build: { outDir: 'dist', emptyOutDir: true },
 });

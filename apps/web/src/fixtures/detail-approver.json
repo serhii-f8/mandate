@@ -1,0 +1,36 @@
+{
+  "id": "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b",
+  "status": "pending_approval",
+  "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "operation": { "id": "catalog.update_prices", "title": "Update prices", "description": "Sets the price of catalog products.", "risk": "medium" },
+  "connection": "shop",
+  "request": {
+    "args": { "sku_prefix": "TS-", "percent": 10 },
+    "requester": "ann",
+    "clientId": "claude-desktop",
+    "createdAt": "2030-01-01T09:00:00.000Z",
+    "submittedAt": "2030-01-01T09:05:00.000Z"
+  },
+  "policy": { "rule": "price-updates", "role": "content_editor", "approval": { "reason": "threshold", "threshold": 1, "included": 2 } },
+  "stats": { "total": 2, "included": 2, "excluded": {}, "written": 0, "failed": 0, "skipped": 0 },
+  "expiresAt": "2030-01-08T09:00:00.000Z",
+  "approval": {
+    "round": 2,
+    "steps": [
+      { "step": 1, "role": "content_lead", "decision": { "approver": "dave", "name": "Dave Lead", "decision": "approve", "channel": "widget", "comment": "Prices checked.", "ts": "2030-01-01T10:00:00.000Z" } },
+      { "step": 2, "role": "finance" }
+    ],
+    "awaitingRole": "finance",
+    "stepUp": { "maxAgeSeconds": 300 }
+  },
+  "rollback": { "available": false },
+  "viewer": {
+    "canDecide": true,
+    "reason": null,
+    "fresh": true,
+    "stepUpSatisfied": false,
+    "canStart": false,
+    "canSubmit": false,
+    "canExclude": false
+  }
+}

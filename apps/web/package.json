@@ -12,6 +12,7 @@
     "test": "vitest run --project unit --passWithNoTests"
   },
   "dependencies": {
+    "@aiops/widgets": "workspace:*",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
