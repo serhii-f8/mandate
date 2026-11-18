@@ -209,6 +209,8 @@ describe('worker runtime environment', () => {
       masterKeys: WORKER.AIOPS_MASTER_KEYS,
       temporalKeys: WORKER.AIOPS_TEMPORAL_KEYS,
       activityTuning: { prepareTimeoutMs: 3_600_000, batchHeartbeatMs: 30_000, batchTimeoutMs: 900_000, batchMaxAttempts: 10, retryInitialMs: 1_000, retryMaxMs: 30_000 },
+      mailFrom: 'aiops@localhost',
+      publicUrl: new URL('http://localhost:8400/'),
     });
   });
 
@@ -332,5 +334,68 @@ describe('worker runtime environment', () => {
       batchHeartbeatMs: 54_320,
       batchTimeoutMs: 54_321,
     });
+  });
+});
+
+/** The EnvError thrown by `parseWorkerEnv` for `env`, or a failure when it parses. */
+function workerEnvError(env: Record<string, string>): EnvError {
+  try {
+    parseWorkerEnv(env);
+  } catch (e) {
+    if (e instanceof EnvError) return e;
+    throw e;
+  }
+  throw new Error('expected an EnvError');
+}
+
+describe('NTF-1 worker notification environment', () => {
+  it('NTF-1 parseWorkerEnv reads AIOPS_SMTP_URL, AIOPS_MAIL_FROM and AIOPS_PUBLIC_URL', () => {
+    const env = parseWorkerEnv({
+      ...WORKER,
+      AIOPS_SMTP_URL: 'smtp://mailpit:1025',
+      AIOPS_MAIL_FROM: ' ops@example.test ',
+      AIOPS_PUBLIC_URL: 'https://aiops.example.test',
+    });
+    expect(env.smtpUrl).toBe('smtp://mailpit:1025');
+    expect(env.mailFrom).toBe('ops@example.test');
+    expect(env.publicUrl).toEqual(new URL('https://aiops.example.test/'));
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_SMTP_URL: 'smtps://mail.example.test:465/' }).smtpUrl).toBe('smtps://mail.example.test:465/');
+  });
+
+  it('NTF-1 notification defaults', () => {
+    const env = parseWorkerEnv(WORKER);
+    expect(env.smtpUrl).toBeUndefined();
+    expect('smtpUrl' in env).toBe(false);
+    expect(env.mailFrom).toBe('aiops@localhost');
+    expect(env.publicUrl.href).toBe('http://localhost:8400/');
+  });
+
+  it('SEC-3 an invalid AIOPS_SMTP_URL is reported by name without its value', () => {
+    const error = workerEnvError({ ...WORKER, AIOPS_SMTP_URL: 'http://u:pw-secret@x' });
+    expect(error.message).toContain('AIOPS_SMTP_URL');
+    expect(error.message).not.toContain('pw-secret');
+    expect(() => parseWorkerEnv({ ...WORKER, AIOPS_SMTP_URL: 'smtp://mail:1025/path' })).toThrow(/AIOPS_SMTP_URL/);
+  });
+
+  it('SEC-3 an smtp URL with credentials parses and its error never echoes it', () => {
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_SMTP_URL: 'smtp://user:pw@mail:587' }).smtpUrl).toBe('smtp://user:pw@mail:587');
+    const error = workerEnvError({ ...WORKER, AIOPS_SMTP_URL: 'smtp://user:pw@mail:99999' });
+    expect(error.issues.map((i) => i.variable)).toEqual(['AIOPS_SMTP_URL']);
+    expect(error.message).not.toContain('user:pw');
+    expect(error.message).not.toContain('99999');
+  });
+
+  it('NTF-1 AIOPS_MAIL_FROM must be one address of at most 254 characters, reported without its value', () => {
+    for (const bad of ['no-at-sign', 'a b@example.test', 'Ops <ops@example.test>', `${'a'.repeat(250)}@x.test`]) {
+      const error = workerEnvError({ ...WORKER, AIOPS_MAIL_FROM: bad });
+      expect(error.issues.map((i) => i.variable)).toEqual(['AIOPS_MAIL_FROM']);
+      expect(error.message).not.toContain(bad);
+    }
+  });
+
+  it('NTF-1 the worker AIOPS_PUBLIC_URL must be an origin, as in api', () => {
+    for (const bad of ['not a url', 'http://localhost:8400/app', 'http://localhost:8400/?a=1', 'http://localhost:8400/#x', 'ftp://x']) {
+      expect(() => parseWorkerEnv({ ...WORKER, AIOPS_PUBLIC_URL: bad })).toThrow(/AIOPS_PUBLIC_URL/);
+    }
   });
 });
