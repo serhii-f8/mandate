@@ -37,6 +37,8 @@ export interface ApiEnv {
   readonly freshAuthSeconds: number;
   /** Directory of the built web bundle, when the api serves it. */
   readonly webDir?: string;
+  /** Directory of the widget bundles (`AIOPS_WIDGET_DIR`); the development location when unset. */
+  readonly widgetDir?: string;
   /** Directories of presets (colon-separated in the environment). */
   readonly presetDirs: readonly string[];
   /** Temporal frontend the api starts, signals and queries workflows on (EXE-11). */
@@ -161,6 +163,7 @@ const apiSchema = z.object({
   AIOPS_SESSION_MAX_AGE_SECONDS: z.coerce.number().int().min(1).default(28_800),
   AIOPS_FRESH_AUTH_SECONDS: z.coerce.number().int().min(1).default(300),
   AIOPS_WEB_DIR: z.string().trim().min(1).optional(),
+  AIOPS_WIDGET_DIR: z.string().trim().min(1).optional(),
   AIOPS_PRESET_DIRS: presetDirs,
   TEMPORAL_ADDRESS: nonEmpty('localhost:7233'),
   TEMPORAL_NAMESPACE: nonEmpty('default'),
@@ -261,6 +264,7 @@ export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
     sessionMaxAgeSeconds: e.AIOPS_SESSION_MAX_AGE_SECONDS,
     freshAuthSeconds: e.AIOPS_FRESH_AUTH_SECONDS,
     ...(e.AIOPS_WEB_DIR === undefined ? {} : { webDir: e.AIOPS_WEB_DIR }),
+    ...(e.AIOPS_WIDGET_DIR === undefined ? {} : { widgetDir: e.AIOPS_WIDGET_DIR }),
     presetDirs: e.AIOPS_PRESET_DIRS,
     temporalAddress: e.TEMPORAL_ADDRESS,
     temporalNamespace: e.TEMPORAL_NAMESPACE,

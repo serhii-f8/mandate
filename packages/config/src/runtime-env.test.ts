@@ -141,6 +141,14 @@ describe('AUTH-1 api identity settings', () => {
   });
 });
 
+describe('MCP-5 widget directory environment', () => {
+  it('MCP-5 parseApiEnv reads AIOPS_WIDGET_DIR and leaves it unset by default', () => {
+    expect(parseApiEnv({ ...API, AIOPS_WIDGET_DIR: '/srv/widgets' })).toMatchObject({ widgetDir: '/srv/widgets' });
+    expect('widgetDir' in parseApiEnv({ ...API })).toBe(false);
+    expect(() => parseApiEnv({ ...API, AIOPS_WIDGET_DIR: '' })).toThrow(/AIOPS_WIDGET_DIR/);
+  });
+});
+
 describe('AUTH-5 page login environment', () => {
   it('derives endpoint defaults from the issuer and reads overrides', () => {
     const env = parseApiEnv({

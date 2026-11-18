@@ -175,8 +175,9 @@ services:
       AIOPS_MASTER_KEYS: ${AIOPS_MASTER_KEYS:-1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=}
       AIOPS_SESSION_MAX_AGE_SECONDS: ${AIOPS_SESSION_MAX_AGE_SECONDS:-28800}
       AIOPS_FRESH_AUTH_SECONDS: ${AIOPS_FRESH_AUTH_SECONDS:-300}
-      # Built into the image: the trusted pages' bundle and the shipped presets (CONN-8).
+      # Built into the image: the trusted pages' bundle, the widget bundles and the shipped presets (CONN-8).
       AIOPS_WEB_DIR: /app/web
+      AIOPS_WIDGET_DIR: /app/widgets
       AIOPS_PRESET_DIRS: /app/presets
       # Execution on Temporal (EXE-11): the same frontend, namespace, task queue and payload keys
       # (SEC-4, development-only default) as the worker.

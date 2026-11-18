@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -65,6 +67,8 @@ export interface StartApiOptions {
   readonly adapter?: OpenApiAdapter;
   /** Directory of the web bundle to serve under /app/ (`AIOPS_WEB_DIR`). */
   readonly webDir?: string;
+  /** Directory of the widget bundles (`AIOPS_WIDGET_DIR`); a directory that never exists by default. */
+  readonly widgetDir?: string;
   /** The executor; an `InMemoryExecutor` with a `ScriptedWriter` (batches of 100) by default. */
   readonly executor?: ChangeSetExecutor;
   /** The workflow starter; `'in-process'` (default) prepares in this process, without Temporal. */
@@ -82,7 +86,7 @@ const TEST_TEMPORAL_KEYS = '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=';
 export function testApiEnv(
   databaseUrl: string,
   port: number,
-  options: Pick<StartApiOptions, 'issuer' | 'configDir' | 'resource' | 'webDir' | 'prepareWaitMs'>,
+  options: Pick<StartApiOptions, 'issuer' | 'configDir' | 'resource' | 'webDir' | 'widgetDir' | 'prepareWaitMs'>,
 ): ApiEnv {
   const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
   return {
@@ -103,6 +107,7 @@ export function testApiEnv(
     sessionMaxAgeSeconds: 28_800,
     freshAuthSeconds: 300,
     ...(options.webDir === undefined ? {} : { webDir: options.webDir }),
+    widgetDir: options.widgetDir ?? join(tmpdir(), 'aiops-e2e-no-widgets'),
     presetDirs: [],
     temporalAddress: 'localhost:7233',
     temporalNamespace: 'default',
