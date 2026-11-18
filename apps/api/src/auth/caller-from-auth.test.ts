@@ -40,9 +40,9 @@ describe('AUTH-3 groups claim', () => {
 });
 
 describe('AUTH-6 authentication time', () => {
-  it('AUTH-6 auth_time becomes authTime; a non-number is ignored', () => {
+  it('AUTH-6 auth_time becomes authTime; a non-number or out-of-range value is ignored', () => {
     expect(callerFromAuthInfo(info({ sub: 'a', auth_time: 1_794_909_570 })).authTime).toEqual(new Date(1_794_909_570_000));
-    for (const auth_time of ['1794909570', null, Number.NaN, Number.POSITIVE_INFINITY, { t: 1 }]) {
+    for (const auth_time of ['1794909570', null, Number.NaN, Number.POSITIVE_INFINITY, { t: 1 }, 1e300, -1, 8.64e12 + 1]) {
       expect(Object.keys(callerFromAuthInfo(info({ sub: 'a', auth_time }))), JSON.stringify(auth_time)).not.toContain('authTime');
     }
   });

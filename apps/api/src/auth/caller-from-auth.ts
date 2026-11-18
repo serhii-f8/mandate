@@ -3,6 +3,8 @@ import type { Caller } from '@aiops/core';
 
 const MAX_GROUPS = 256;
 const MAX_GROUP_LENGTH = 255;
+/** Largest seconds value a JavaScript Date can hold (8.64e15 ms). */
+const MAX_AUTH_TIME_SECONDS = 8.64e12;
 
 /**
  * The caller of a verified request: `sub`, the OAuth client (`azp`) and the flat
@@ -17,12 +19,13 @@ export function callerFromAuthInfo(info: AuthInfo): Caller {
   const groups = Array.isArray(raw)
     ? raw.filter((g): g is string => typeof g === 'string' && g.length > 0 && g.length <= MAX_GROUP_LENGTH).slice(0, MAX_GROUPS)
     : [];
-  // OIDC `auth_time` is seconds since the epoch; anything else is ignored rather than guessed.
+  // OIDC `auth_time` is seconds since the epoch; anything else, or a value outside what a Date can
+  // hold, is ignored rather than guessed (the step-up check then fails closed).
   const authTime = extra.auth_time;
   return {
     subject: sub,
     ...(info.clientId === '' ? {} : { clientId: info.clientId }),
     groups,
-    ...(typeof authTime === 'number' && Number.isFinite(authTime) ? { authTime: new Date(authTime * 1000) } : {}),
+    ...(typeof authTime === 'number' && Number.isFinite(authTime) && authTime > 0 && authTime <= MAX_AUTH_TIME_SECONDS ? { authTime: new Date(authTime * 1000) } : {}),
   };
 }

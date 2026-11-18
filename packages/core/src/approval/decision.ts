@@ -8,6 +8,9 @@ import type {
   DecisionRequest,
 } from './model.js';
 
+/** Tolerated lead of the identity provider's clock over the server's for `auth_time` (AUTH-6). */
+const AUTH_TIME_SKEW_MS = 60_000;
+
 export const MAX_COMMENT_LENGTH = 2000;
 // Control characters except tab (\u0009) and newline (\u000A).
 // eslint-disable-next-line no-control-regex -- the point of the check
@@ -70,7 +73,10 @@ export function checkDecision(input: {
   // 7. AUTH-6, page channel only.
   if (channel === 'page' && plan.stepUp !== undefined) {
     const authTime = approver.authTime;
-    if (authTime === undefined) return 'step_up_required';
+    // Fail closed on an unusable time: an Invalid Date compares false both ways, and a login
+    // later than the server clock beyond a small skew cannot be a real login (AUTH-6).
+    if (authTime === undefined || !Number.isFinite(authTime.getTime())) return 'step_up_required';
+    if (authTime.getTime() > now.getTime() + AUTH_TIME_SKEW_MS) return 'step_up_required';
     if (changeset.submission !== undefined && authTime.getTime() < changeset.submission.at.getTime()) {
       return 'step_up_required';
     }

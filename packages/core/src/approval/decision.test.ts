@@ -166,6 +166,20 @@ describe('AUTH-6 step-up in checkDecision', () => {
     expect(decide({ changeset: stepUp, approver: { ...lead, authTime: T0 } })).toBeUndefined();
   });
 
+  it('AUTH-6 step_up_required when authTime is an invalid date', () => {
+    expect(decide({ changeset: stepUp, approver: { ...lead, authTime: new Date(Number.NaN) } })).toBe('step_up_required');
+  });
+
+  it('AUTH-6 step_up_required when authTime is more than the allowed skew in the future', () => {
+    const authTime = new Date(NOW.getTime() + 61_000);
+    expect(decide({ changeset: stepUp, approver: { ...lead, authTime } })).toBe('step_up_required');
+  });
+
+  it('AUTH-6 an authTime slightly ahead of the server clock is allowed (clock skew)', () => {
+    const authTime = new Date(NOW.getTime() + 30_000);
+    expect(decide({ changeset: stepUp, approver: { ...lead, authTime } })).toBeUndefined();
+  });
+
   it('AUTH-6 no step-up check on a plan without stepUp', () => {
     expect(decide({ approver: { ...lead, authTime: new Date(0) } })).toBeUndefined();
   });
