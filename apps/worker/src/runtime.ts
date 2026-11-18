@@ -1,21 +1,32 @@
 import { randomUUID } from 'node:crypto';
 import { createOpenApiAdapter } from '@aiops/adapters';
 import { ConfigurationError, ConfigurationHolder, formatIssue, type WorkerEnv } from '@aiops/config';
-import { assertMigrated, createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault } from '@aiops/db';
+import {
+  assertMigrated,
+  createDb,
+  DrizzleAuditLog,
+  parseMasterKeys,
+  PostgresChangeSetRepository,
+  PostgresCredentialVault,
+  PostgresNotificationOutbox,
+} from '@aiops/db';
 import { parseTemporalKeys, workerDataConverter, type ActivityTuning } from '@aiops/temporal';
 import { assertFullyChecked, configurationLoadOptions, createUpstreamReader, type UpstreamCallLog } from '@aiops/upstream';
 import { heartbeat } from '@temporalio/activity';
 import { NativeConnection } from '@temporalio/worker';
 import type { Logger } from 'pino';
 import { createActivities, createExecutionGuard, echo, type WorkerActivities } from './activities/index.js';
+import { createNotificationDispatcher } from './notifications/dispatcher.js';
+import { createSmtpSender } from './notifications/email.js';
+import { createWebhookSender } from './notifications/webhook.js';
 import { installReload } from './reload.js';
 import { createWorker } from './worker.js';
 import { createWriterFor } from './writers.js';
 
 export interface WorkerRuntime {
-  /** Polls the task queue until SIGINT/SIGTERM (`Worker.run` installs those handlers). */
+  /** Polls the task queue until SIGINT/SIGTERM (`Worker.run` installs those handlers); dispatches notifications meanwhile (NTF-3). */
   run(): Promise<void>;
-  /** Closes the Temporal connection and the database pool. */
+  /** Closes the SMTP transport, the Temporal connection and the database pool. */
   close(): Promise<void>;
 }
 
@@ -102,14 +113,32 @@ export async function startWorkerRuntime(
     },
   });
   let connection: NativeConnection | undefined;
+  // Without a relay, e-mail rows fail with channel_unconfigured on the retry schedule (NTF-3).
+  const email = env.smtpUrl === undefined ? undefined : createSmtpSender({ url: env.smtpUrl, from: env.mailFrom });
+  if (email === undefined && configuration.current.notifications.some((n) => n.kind === 'email')) {
+    logger.warn('AIOPS_SMTP_URL is not set: email notifications fail with channel_unconfigured');
+  }
   try {
+    const repository = new PostgresChangeSetRepository(database.db);
+    const vault = new PostgresCredentialVault(database.db, masterKeys);
     const activities = activitiesFor({
       configuration,
       adapter,
-      repository: new PostgresChangeSetRepository(database.db),
+      repository,
       audit: new DrizzleAuditLog(database.db),
-      vault: new PostgresCredentialVault(database.db, masterKeys),
+      vault,
       tuning: env.activityTuning,
+      logger,
+    });
+    const dispatcher = createNotificationDispatcher({
+      outbox: new PostgresNotificationOutbox(database.db),
+      repository,
+      configuration: () => configuration.current,
+      ...(email === undefined ? {} : { email }),
+      webhook: createWebhookSender({ vault }),
+      publicUrl: env.publicUrl.origin,
+      newId: randomUUID,
+      now: () => new Date(),
       logger,
     });
     connection = await NativeConnection.connect({ address: env.temporalAddress });
@@ -123,11 +152,18 @@ export async function startWorkerRuntime(
     const open = connection;
     return {
       run: async () => {
-        await worker.run();
+        // Delivery runs beside the worker; a channel that is down never stops polling (NTF-3).
+        const delivery = dispatcher.start();
+        try {
+          await worker.run();
+        } finally {
+          await delivery.stop();
+        }
       },
       close: async () => {
         // The pool is closed even when closing the Temporal connection fails.
         try {
+          email?.close();
           await open.close();
         } finally {
           await database.close();
@@ -136,6 +172,7 @@ export async function startWorkerRuntime(
     };
   } catch (error) {
     try {
+      email?.close();
       await connection?.close();
     } catch {
       // The start failure is the error worth reporting; the pool is closed regardless.
