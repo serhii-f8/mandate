@@ -8,6 +8,7 @@
 #   host-tool-links-resource, host-preview-exclude-submit, host-csp-blocks-fetch, host-theme-applied,
 #   host-result-counts, host-approval-default, reconfigure-allow-widget, host-approval-widget-decides.
 # Then prints the MANUAL CHECKS for Claude Desktop and ChatGPT (criteria 1 and 2).
+# `phase-7.sh --manual-config DIR` only writes the acceptance configuration those checks use.
 # Tests the committed HEAD (a fresh clone sees only commits), with a Compose override that joins
 # the api and the worker to the sandbox network and mounts a generated configuration.
 # Prints one PASS/FAIL line per check and `# RESULT: PASS (automated checks)|FAIL`; exits non-zero
@@ -95,36 +96,20 @@ link_count() { node -e 'console.log(process.argv[1].split(process.argv[2]).lengt
 # The first text block of an mcp-call.mjs answer (the summary; content[1] is the JSON block).
 text0() { json "$1" '.content[0]'; }
 
-echo "# Phase 7 acceptance of ${SHA:0:12} (project $PROJECT, api port $AIOPS_API_PORT)"
-
-# 1. The sandbox is up (idempotent) and seeded (idempotent); its token is the credential.
-if bash "$REPO/deploy/sandbox/magento/up.sh" >"$WORK/sandbox.log" 2>&1 &&
-  node "$REPO/deploy/sandbox/magento/seed.mjs" "$SANDBOX" >>"$WORK/sandbox.log" 2>&1 &&
-  TOKEN="$(bash "$REPO/deploy/sandbox/magento/token.sh" "$SANDBOX" 2>>"$WORK/sandbox.log")" && [[ -n "$TOKEN" ]]; then
-  if docker network inspect aiops-sandbox >/dev/null 2>&1; then
-    pass sandbox-ready "$(grep -o 'SANDBOX UP.*' "$WORK/sandbox.log" | tail -1); $(grep -o 'SEEDED umbrella.*' "$WORK/sandbox.log" | tail -1); token present; network aiops-sandbox present"
-  else
-    fail sandbox-ready "network aiops-sandbox missing"; exit 1
-  fi
-else
-  fail sandbox-ready "see sandbox output below"; tail -30 "$WORK/sandbox.log"; exit 1
-fi
-
-git clone --quiet --no-local --no-checkout "$REPO" "$WORK/aiops"
-git -C "$WORK/aiops" checkout --quiet --detach "$SHA"
-cd "$WORK/aiops"
-
 # The acceptance configuration: the development configuration with the sandbox URL, and roles with
 # a record threshold of 2 whose approver may not decide in the widget (yet; check 21 allows it).
-mkdir -p "$AIOPS_ACCEPT_CONFIG_DIR"
-cp deploy/config/*.yaml "$AIOPS_ACCEPT_CONFIG_DIR/"
-sed -i 's#^\(    base_url: \).*#\1http://magento-sandbox/rest/all#' "$AIOPS_ACCEPT_CONFIG_DIR/connections.yaml"
-grep -q '^    base_url: http://magento-sandbox/rest/all$' "$AIOPS_ACCEPT_CONFIG_DIR/connections.yaml" || { fail acceptance-config "base_url not replaced"; exit 1; }
-grep -q '^    allow_private_network: true$' "$AIOPS_ACCEPT_CONFIG_DIR/connections.yaml" || { fail acceptance-config "allow_private_network missing"; exit 1; }
-if grep -lE '^(changesets|notifications):' "$AIOPS_ACCEPT_CONFIG_DIR"/*.yaml >/dev/null; then
-  fail acceptance-config "the development configuration already has changesets: or notifications: ($(grep -lE '^(changesets|notifications):' "$AIOPS_ACCEPT_CONFIG_DIR"/*.yaml | xargs -n1 basename | xargs))"; exit 1
+# write_config DIR SRC: SRC is a deploy/config directory.
+write_config() {
+  local dir="$1" src="$2"
+mkdir -p "$dir"
+cp "$src"/*.yaml "$dir/"
+sed -i 's#^\(    base_url: \).*#\1http://magento-sandbox/rest/all#' "$dir/connections.yaml"
+grep -q '^    base_url: http://magento-sandbox/rest/all$' "$dir/connections.yaml" || { fail acceptance-config "base_url not replaced"; exit 1; }
+grep -q '^    allow_private_network: true$' "$dir/connections.yaml" || { fail acceptance-config "allow_private_network missing"; exit 1; }
+if grep -lE '^(changesets|notifications):' "$dir"/*.yaml >/dev/null; then
+  fail acceptance-config "the development configuration already has changesets: or notifications: ($(grep -lE '^(changesets|notifications):' "$dir"/*.yaml | xargs -n1 basename | xargs))"; exit 1
 fi
-cat >"$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml" <<'YAML'
+cat >"$dir/roles.yaml" <<'YAML'
 version: 1
 notifications:
   - { id: content-leads-mail, kind: email, to: [content-leads@example.test] }
@@ -145,6 +130,36 @@ role_mapping:
   - { group: support, roles: [support_agent] }
   - { group: admins, roles: [integration_admin] }
 YAML
+}
+
+# `phase-7.sh --manual-config DIR` only writes the acceptance configuration into DIR (for the
+# manual checks in Claude Desktop and ChatGPT, which use the same stack) and exits.
+if [[ "${1:-}" == --manual-config ]]; then
+  write_config "${2:?usage: phase-7.sh --manual-config DIR}" "$REPO/deploy/config"
+  echo "acceptance configuration written to $2"
+  exit 0
+fi
+
+echo "# Phase 7 acceptance of ${SHA:0:12} (project $PROJECT, api port $AIOPS_API_PORT)"
+
+# 1. The sandbox is up (idempotent) and seeded (idempotent); its token is the credential.
+if bash "$REPO/deploy/sandbox/magento/up.sh" >"$WORK/sandbox.log" 2>&1 &&
+  node "$REPO/deploy/sandbox/magento/seed.mjs" "$SANDBOX" >>"$WORK/sandbox.log" 2>&1 &&
+  TOKEN="$(bash "$REPO/deploy/sandbox/magento/token.sh" "$SANDBOX" 2>>"$WORK/sandbox.log")" && [[ -n "$TOKEN" ]]; then
+  if docker network inspect aiops-sandbox >/dev/null 2>&1; then
+    pass sandbox-ready "$(grep -o 'SANDBOX UP.*' "$WORK/sandbox.log" | tail -1); $(grep -o 'SEEDED umbrella.*' "$WORK/sandbox.log" | tail -1); token present; network aiops-sandbox present"
+  else
+    fail sandbox-ready "network aiops-sandbox missing"; exit 1
+  fi
+else
+  fail sandbox-ready "see sandbox output below"; tail -30 "$WORK/sandbox.log"; exit 1
+fi
+
+git clone --quiet --no-local --no-checkout "$REPO" "$WORK/aiops"
+git -C "$WORK/aiops" checkout --quiet --detach "$SHA"
+cd "$WORK/aiops"
+
+write_config "$AIOPS_ACCEPT_CONFIG_DIR" deploy/config
 
 # 2. One command from a fresh clone; one worker; Mailpit up.
 MAILPIT="http://127.0.0.1:${AIOPS_MAILPIT_PORT}"
@@ -338,8 +353,9 @@ fi
 # ---- Group 2: the reference MCP Apps host in headless Chromium (MCP-5, UI-6) --------------------
 
 # 16. The host page builds from this checkout.
-if pnpm --dir "$REPO" --filter @aiops/tooling build:widget-host >"$WORK/host-build.log" 2>&1; then
-  pass host-build "pnpm --filter @aiops/tooling build:widget-host → $(grep -o 'dist/index.html.*' "$WORK/host-build.log" | tail -1)"
+if pnpm --dir "$REPO" --filter @aiops/tooling build:widget-host >"$WORK/host-build.log" 2>&1 &&
+  test -s "$REPO/tooling/acceptance/widget-host/dist/index.html"; then
+  pass host-build "pnpm --filter @aiops/tooling build:widget-host → dist/index.html $(wc -c <"$REPO/tooling/acceptance/widget-host/dist/index.html") bytes"
 else
   fail host-build "$(tail -20 "$WORK/host-build.log")"
 fi
@@ -370,10 +386,12 @@ H_CHECK="$(node -e '
   const ex = o.calls.find((c) => c.name === "exclude_changeset_items");
   const sub = o.calls.find((c) => c.name === "submit_for_approval");
   console.log(JSON.stringify({ state: o.state, rows: o.rows, triggerHash: ex?.args?.hash ?? null, excludeHash: ex?.structuredContent?.changeset?.hash ?? null,
+    excludeId: ex?.structuredContent?.changeset?.id ?? null, excludeIncluded: ex?.structuredContent?.changeset?.stats?.included ?? null,
     submitted: sub?.args?.changeset_id ?? null, submitStatus: sub?.structuredContent?.status ?? null, errors: o.errors }));' "$RENDER_H" 2>/dev/null || echo '{}')"
 CS_H="$(json "$H_CHECK" '.submitted')"
 if [[ "$(json "$H_CHECK" '.state')" == initialized && "$(json "$H_CHECK" '.rows')" -ge 4 && -n "$(json "$H_CHECK" '.excludeHash')" &&
-  "$(json "$H_CHECK" '.excludeHash')" != "$(json "$H_CHECK" '.triggerHash')" && "$(json "$H_CHECK" '.submitStatus')" == pending_approval ]]; then
+  "$(json "$H_CHECK" '.excludeHash')" != "$(json "$H_CHECK" '.triggerHash')" && "$(json "$H_CHECK" '.submitStatus')" == pending_approval &&
+  -n "$CS_H" && "$CS_H" == "$(json "$H_CHECK" '.excludeId')" && "$(json "$H_CHECK" '.errors')" == '[]' ]]; then
   pass host-preview-exclude-submit "$H_CHECK; buttons $(json "$RENDER_H" '.buttons')"
 else
   fail host-preview-exclude-submit "check=$H_CHECK render=${RENDER_H:0:2000}"
@@ -403,7 +421,7 @@ R_STATUS="$(node -e '
 # The trigger itself may already be terminal (then the widget polls nothing).
 [[ -n "$R_STATUS" ]] || R_STATUS="$(json "$(alice_mcp get_changeset "{\"changeset_id\":\"${CS_H:-none}\",\"page_size\":1}")" '.structuredContent.changeset.status')"
 R_BODY="$(json "$RENDER_R" '.bodyText')"
-if [[ "$(json "$APPROVE" '.status')" == 200 && "$R_STATUS" == completed && "$R_BODY" == *3* && "${R_BODY,,}" == *written* ]]; then
+if [[ "$(json "$APPROVE" '.status')" == 200 && "$APPROVE_COUNT" == 3 && "$R_STATUS" == completed && "$R_BODY" =~ (^|[^0-9])3\ written && "$(json "$RENDER_R" '.errors')" == '[]' ]]; then
   pass host-result-counts "dave approved $CS_H ($APPROVE_COUNT); widget status $R_STATUS; body: $(tr '\n' ' ' <<<"${R_BODY:0:400}")"
 else
   fail host-result-counts "decide=$APPROVE status=$R_STATUS render=${RENDER_R:0:2000}"
@@ -419,13 +437,16 @@ D_CHECK="$(node -e '
   const o = JSON.parse(process.argv[1]);
   console.log(JSON.stringify({ approveButton: o.buttons.some((b) => /^Approve/.test(b)), links: o.links, errors: o.errors }));' "$RENDER_D" 2>/dev/null || echo '{}')"
 if [[ "$(json "$SUB_D" '.structuredContent.status')" == pending_approval && "$(json "$D_CHECK" '.approveButton')" == false &&
-  "$(json "$D_CHECK" '.links')" == "[\"$AIOPS_PUBLIC_URL/app/changesets/$CS_D\"]" ]]; then
+  "$(json "$D_CHECK" '.links')" == "[\"$AIOPS_PUBLIC_URL/app/changesets/$CS_D\"]" && "$(json "$D_CHECK" '.errors')" == '[]' ]]; then
   pass host-approval-default "dave: review_changeset $CS_D (pending) → $D_CHECK; buttons $(json "$RENDER_D" '.buttons')"
 else
   fail host-approval-default "submit=$(json "$SUB_D" '.structuredContent.status') check=$D_CHECK render=${RENDER_D:0:2000}"
 fi
 
 # 23. Allow widget decisions and reload; decide_changeset becomes visible to dave.
+DAVE_TOKEN="$(login dave 2>/dev/null || true)"
+BEFORE="$(AIOPS_MCP_TOKEN="$DAVE_TOKEN" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --list 2>&1 || true)"
+LISTED_BEFORE="$(json "$BEFORE" '.tools.includes("decide_changeset")')"
 sed -i 's/allow_widget: false }/allow_widget: true }/' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml"
 compose kill -s HUP api worker >/dev/null 2>&1 || true
 LISTED=no
@@ -436,10 +457,10 @@ while ((SECONDS - T0 < 60)); do
   if [[ "$(json "$DLIST" '.tools.includes("decide_changeset")')" == true ]]; then LISTED=yes; break; fi
   sleep 2
 done
-if grep -q 'allow_widget: true }' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml" && [[ "$LISTED" == yes ]]; then
-  pass reconfigure-allow-widget "allow_widget: true, SIGHUP api worker; dave lists decide_changeset after $((SECONDS - T0)) s"
+if grep -q 'allow_widget: true }' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml" && [[ "$LISTED_BEFORE" == false && "$LISTED" == yes ]]; then
+  pass reconfigure-allow-widget "before: decide_changeset listed to dave: $LISTED_BEFORE; allow_widget: true, SIGHUP api worker; dave lists decide_changeset after $((SECONDS - T0)) s"
 else
-  fail reconfigure-allow-widget "listed=$LISTED tools=${DLIST:0:800}"
+  fail reconfigure-allow-widget "before=$LISTED_BEFORE listed=$LISTED tools=${DLIST:0:800}"
 fi
 
 # 24. The approval widget decides; the decision is audited on the widget channel (APR-8).
@@ -456,7 +477,7 @@ W_CHECK="$(node -e '
 W_AUDIT="$(psql_q "select count(*) from audit_event where action = 'approval.decision' and outcome = 'ok' and changeset_id = '${CS_W:-00000000-0000-0000-0000-000000000000}' and details->>'channel' = 'widget'" 2>&1 || true)"
 poll_cs "${CS_W:-none}" "$TERMINAL" 300 || true
 if [[ "$(json "$SUB_W" '.structuredContent.status')" == pending_approval && "$(json "$W_CHECK" '.decided')" == true && "$(json "$W_CHECK" '.isError')" == false &&
-  "$(json "$W_CHECK" '.status')" =~ ^(approved|executing)$ && "$W_AUDIT" == 1 && "$POLL_STATUS" == completed ]]; then
+  "$(json "$W_CHECK" '.status')" =~ ^(approved|executing)$ && "$W_AUDIT" == 1 && "$POLL_STATUS" == completed && "$(json "$W_CHECK" '.errors')" == '[]' ]]; then
   pass host-approval-widget-decides "dave: widget approve $CS_W → $W_CHECK; ok approval.decision audit events (widget): $W_AUDIT; then $POLL_STATUS; sandbox $(sandbox_descriptions "$SKUS_W")"
 else
   fail host-approval-widget-decides "submit=$(json "$SUB_W" '.structuredContent.status') check=$W_CHECK audit=$W_AUDIT status=$POLL_STATUS render=${RENDER_W:0:2000}"
@@ -464,11 +485,18 @@ fi
 
 cat <<'MANUAL'
 # MANUAL CHECKS (criteria 1 and 2; not automatable here)
-# 1. Start the stack for HTTPS clients:
+# 1. Start the stack for HTTPS clients, with the sandbox and the acceptance configuration (sandbox URL,
+#    record_threshold 2 so dave approves, allow_widget false):
+#    - `bash deploy/sandbox/magento/up.sh && node deploy/sandbox/magento/seed.mjs http://127.0.0.1:4390`.
+#    - `bash scripts/acceptance/phase-7.sh --manual-config "$HOME/aiops-phase7-config"`.
 #    - Open two HTTPS tunnels of your choice, for example `cloudflared tunnel --url http://localhost:8400` (api)
 #      and `cloudflared tunnel --url http://localhost:8480` (Keycloak). Note the hosts <api-host> and <kc-host>.
-#    - Start the stack: `AIOPS_PUBLIC_URL=https://<api-host> AIOPS_MCP_RESOURCE=https://<api-host>/mcp AIOPS_KEYCLOAK_PUBLIC_URL=https://<kc-host> API_ALLOWED_HOSTS=localhost,127.0.0.1,<api-host> docker compose up -d --build --wait`.
-#    - Store the Magento token as carol on `https://<api-host>/app/credentials`.
+#    - Start the stack: `AIOPS_ACCEPT_CONFIG_DIR="$HOME/aiops-phase7-config" AIOPS_PUBLIC_URL=https://<api-host>
+#      AIOPS_MCP_RESOURCE=https://<api-host>/mcp AIOPS_KEYCLOAK_PUBLIC_URL=https://<kc-host>
+#      API_ALLOWED_HOSTS=localhost,127.0.0.1,<api-host>
+#      docker compose -f compose.yaml -f scripts/acceptance/phase-7.compose.yaml up -d --build --wait`.
+#    - Store the Magento token (`bash deploy/sandbox/magento/token.sh http://127.0.0.1:4390`) as carol on
+#      `https://<api-host>/app/credentials`.
 #    - Check that `curl -s https://<api-host>/readyz` answers ok.
 # 2. Claude Desktop:
 #    - Add the connector: claude.ai → Customize → Connectors → add custom connector `aiops`, URL `https://<api-host>/mcp`.
@@ -486,7 +514,7 @@ cat <<'MANUAL'
 #    - Run the same flow with UMBRELLA-0411..0414 and expect the same results.
 # 4. Record pass or fail per client, with the date, client version and what was observed, in PROGRESS.md
 #    "Blockers and manual checks" under Phase 7.
-# 5. Stop the tunnels and `docker compose down`.
+# 5. Stop the tunnels and `docker compose -f compose.yaml -f scripts/acceptance/phase-7.compose.yaml down`.
 MANUAL
 
 if [[ "$FAILED" == 0 ]]; then echo "# RESULT: PASS (automated checks)"; else echo "# RESULT: FAIL"; fi
