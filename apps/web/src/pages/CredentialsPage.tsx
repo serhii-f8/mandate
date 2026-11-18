@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
-import { createApi, loginUrl, Unauthenticated, type CredentialListEntry, type Session } from '../api.js';
+import { createApi, loginUrl, toLogin as login, Unauthenticated, type CredentialListEntry, type Session } from '../api.js';
 import { CredentialsView } from '../views/CredentialsView.js';
 
 type State = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; session: Session; credentials: CredentialListEntry[] };
 
-/** Leaves the page for a login; the promise never settles so no result is shown meanwhile. */
-function toLogin(fresh: boolean): Promise<never> {
-  window.location.assign(loginUrl(fresh));
-  return new Promise<never>(() => undefined);
-}
+const RETURN_TO = '/app/credentials';
+const toLogin = (fresh: boolean): Promise<never> => login(RETURN_TO, fresh);
 
 /** Container of `/app/credentials`: loads the session and the refs, turns view callbacks into REST calls. */
 export function CredentialsPage(): ReactElement {
@@ -40,7 +37,7 @@ export function CredentialsPage(): ReactElement {
       credentials={credentials}
       fields={(scheme) => schemeFields.get(scheme) ?? []}
       fresh={session.fresh}
-      freshLoginUrl={loginUrl(true)}
+      freshLoginUrl={loginUrl(RETURN_TO, true)}
       onSave={async (ref, secret) => {
         try {
           const result = await api.save(session.csrfToken, ref, secret);

@@ -27,3 +27,38 @@ describe('SEC-2 secret material per scheme', () => {
     expect(secretFieldNames('api_key')).toEqual(['key']);
   });
 });
+
+describe('SEC-2 webhook_url secret', () => {
+  it('SEC-2 accepts an https webhook URL', () => {
+    const r = parseSecret('webhook_url', { url: 'https://hooks.slack.com/services/T/B/x' });
+    expect(r).toEqual({ ok: true, secret: { url: 'https://hooks.slack.com/services/T/B/x' } });
+    expect(parseSecret('webhook_url', { url: 'http://chat.example.test/hook' }).ok).toBe(true);
+  });
+  it('SEC-2 rejects a non-http URL and a non-URL, naming the field only', () => {
+    for (const url of ['ftp://x', 'not a url']) {
+      const r = parseSecret('webhook_url', { url });
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.message).toBe('invalid secret for scheme webhook_url: check url');
+        expect(r.message).not.toContain('ftp');
+      }
+    }
+  });
+  it('SEC-2 rejects another scheme\'s field without quoting input or key names', () => {
+    const r = parseSecret('webhook_url', { token: 'https://hooks.slack.com/services/T/B/x' });
+    expect(r.ok).toBe(false);
+    // The unknown key is reported as `(value)`: key names are input too (SEC-3).
+    if (!r.ok) {
+      expect(r.message).toBe('invalid secret for scheme webhook_url: check url, (value)');
+      expect(r.message).not.toContain('hooks.slack.com');
+    }
+  });
+  it('SEC-2 limits the URL to 2048 characters', () => {
+    const base = 'https://hooks.slack.com/';
+    expect(parseSecret('webhook_url', { url: base + 'a'.repeat(2048 - base.length) }).ok).toBe(true);
+    expect(parseSecret('webhook_url', { url: base + 'a'.repeat(2049 - base.length) }).ok).toBe(false);
+  });
+  it('SEC-2 lists url as the only field', () => {
+    expect(secretFieldNames('webhook_url')).toEqual(['url']);
+  });
+});

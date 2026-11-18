@@ -7,15 +7,40 @@
 //   page-api.mjs <api-base-url> session                   → {"status":200,"body":{…}}
 //   page-api.mjs <api-base-url> put-credential <ref>      → {"status":204}  (body: {"token": stdin})
 //   page-api.mjs <api-base-url> test <connection-id>      → {"status":200,"body":<CONN-7 report>}
-// Prints one JSON line; the response body is printed only for session and test, which never
-// carry a secret. Exit 0 whenever a response arrived (the caller checks the status).
+//   page-api.mjs <api-base-url> approvals [after] | changeset <id> | items <id> [after]
+//   page-api.mjs <api-base-url> decide <id> <approve|reject|return> <hash> <count> [comment] | start <id>
+//                                                         → {"status":<n>,"body":<json>} (APR-7)
+// Prints one JSON line; the response body is printed for every command except put-credential; none of them
+// carries a secret. Exit 0 whenever a response arrived (the caller checks the status).
 
-const [base, command, name] = process.argv.slice(2);
+const [base, command, ...args] = process.argv.slice(2);
 const cookie = process.env.AIOPS_PAGE_COOKIE;
-if (base === undefined || !['session', 'put-credential', 'test'].includes(command) || (command !== 'session' && name === undefined)) {
-  console.error('usage: page-api.mjs <api-base-url> session | put-credential <ref> | test <connection-id>');
+const USAGE =
+  'usage: page-api.mjs <api-base-url> session | put-credential <ref> | test <connection-id> | approvals [after] | changeset <id> | items <id> [after] | decide <id> <approve|reject|return> <hash> <count> [comment] | start <id>';
+// Required and optional argument counts per subcommand.
+const ARITY = {
+  session: [0, 0],
+  'put-credential': [1, 1],
+  test: [1, 1],
+  approvals: [0, 1],
+  changeset: [1, 1],
+  items: [1, 2],
+  decide: [4, 5],
+  start: [1, 1],
+};
+const arity = Object.hasOwn(ARITY, command ?? '') ? ARITY[command] : undefined;
+const count = args[3] === undefined ? Number.NaN : Number(args[3]);
+if (
+  base === undefined ||
+  arity === undefined ||
+  args.length < arity[0] ||
+  args.length > arity[1] ||
+  (command === 'decide' && (!['approve', 'reject', 'return'].includes(args[1]) || !Number.isInteger(count) || count < 0))
+) {
+  console.error(USAGE);
   process.exit(2);
 }
+const name = args[0];
 if (cookie === undefined || cookie === '') {
   console.error('page-api.mjs: set AIOPS_PAGE_COOKIE');
   process.exit(2);
@@ -40,13 +65,18 @@ if (!session.ok || typeof sessionBody.csrfToken !== 'string') {
 }
 const headers = { cookie, origin: api.origin, 'x-csrf-token': sessionBody.csrfToken };
 
+const printResponse = async (response) =>
+  console.log(JSON.stringify({ status: response.status, body: await response.json().catch(() => undefined) }));
+const cursor = (path, after) => (after === undefined ? path : `${path}?after=${encodeURIComponent(after)}`);
+const id = name === undefined ? '' : encodeURIComponent(name);
+
 if (command === 'put-credential') {
   const token = await readStdin();
   if (token === '') {
     console.error('page-api.mjs: no secret on stdin');
     process.exit(2);
   }
-  const response = await fetch(new URL(`/api/v1/credentials/${encodeURIComponent(name)}`, api), {
+  const response = await fetch(new URL(`/api/v1/credentials/${id}`, api), {
     method: 'PUT',
     headers: { ...headers, 'content-type': 'application/json' },
     body: JSON.stringify({ token }),
@@ -54,7 +84,22 @@ if (command === 'put-credential') {
   // A refusal body holds a fixed error code only; it never echoes the secret.
   const body = await response.json().catch(() => undefined);
   console.log(JSON.stringify({ status: response.status, ...(body === undefined ? {} : { error: body.error }) }));
+} else if (command === 'test') {
+  await printResponse(await fetch(new URL(`/api/v1/connections/${id}/test`, api), { method: 'POST', headers }));
+} else if (command === 'approvals') {
+  await printResponse(await fetch(new URL(cursor('/api/v1/approvals', args[0]), api), { headers: { cookie } }));
+} else if (command === 'changeset') {
+  await printResponse(await fetch(new URL(`/api/v1/changesets/${id}`, api), { headers: { cookie } }));
+} else if (command === 'items') {
+  await printResponse(await fetch(new URL(cursor(`/api/v1/changesets/${id}/items`, args[1]), api), { headers: { cookie } }));
+} else if (command === 'decide') {
+  const [, decision, hash, , comment] = args;
+  const response = await fetch(new URL(`/api/v1/changesets/${id}/decision`, api), {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ decision, hash, count, ...(comment === undefined ? {} : { comment }) }),
+  });
+  await printResponse(response);
 } else {
-  const response = await fetch(new URL(`/api/v1/connections/${encodeURIComponent(name)}/test`, api), { method: 'POST', headers });
-  console.log(JSON.stringify({ status: response.status, body: await response.json().catch(() => undefined) }));
+  await printResponse(await fetch(new URL(`/api/v1/changesets/${id}/start`, api), { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: '{}' }));
 }

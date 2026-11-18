@@ -67,8 +67,13 @@ describe('AUTH-8 bundled realm registration policy', () => {
   it('AUTH-8 the pre-registered client gets a token for exactly the MCP resource, with groups', async () => {
     const claims = decodeJwt(tokenOf(await login('aiops-mcp', 'alice')));
     expect([claims.aud].flat()).toEqual([resource]);
-    expect(claims.groups).toEqual(['content']);
+    expect([...(claims.groups as string[])].sort()).toEqual(['content', 'content-leads']);
     expect(claims.azp).toBe('aiops-mcp');
+  });
+
+  it('APR-1 the development realm has dave in content-leads', async () => {
+    const claims = decodeJwt(tokenOf(await login('aiops-mcp', 'dave')));
+    expect(claims.groups).toEqual(['content-leads']);
   });
 
   it('AUTH-8 a Client ID Metadata Document client from a trusted domain gets a token', async () => {

@@ -1,15 +1,26 @@
 import { randomUUID } from 'node:crypto';
-import { Controller, Get, Inject, Param, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { ConfigurationHolder } from '@aiops/config';
-import { canView, type ApprovalRecord, type ChangeItemRecord, type ChangeSetExecutor, type ChangeSetRecord, type ChangeSetRepository } from '@aiops/core';
+import {
+  canView,
+  type ApprovalRecord,
+  type AuditAction,
+  type AuditLog,
+  type ChangeItemRecord,
+  type ChangeSetExecutor,
+  type ChangeSetRecord,
+  type ChangeSetRepository,
+  type StartOutcome,
+} from '@aiops/core';
 import { progressOf } from '../mcp/changeset-tools.js';
-import { CHANGESET_EXECUTOR, CHANGESET_REPOSITORY, CONFIGURATION, PAGE_CHECKS } from '../tokens.js';
+import { APPROVAL_SERVICE, AUDIT_LOG, CHANGESET_EXECUTOR, CHANGESET_REPOSITORY, CONFIGURATION, PAGE_CHECKS } from '../tokens.js';
 import { PageAccess, pageDenial, pageOf, type PageChecks, type PageRequest } from '../web/access.js';
 import { pageCorrelation } from '../web/correlation.js';
-import { changesetDetail, type PageViewer } from './detail.js';
-import { CHANGESET_ID, encodeItemCursor, newSeed, parseItemsQuery, parseSampleQuery } from './page-query.js';
-import { refuse } from './refusals.js';
+import type { ApprovalService } from './approval-service.js';
+import { changesetDetail, checkPageStart, toApprover, type PageViewer } from './detail.js';
+import { CHANGESET_ID, decisionBodySchema, encodeItemCursor, newSeed, parseItemsQuery, parseSampleQuery } from './page-query.js';
+import { refuse, REFUSAL_STATUS, type PageRefusal } from './refusals.js';
 
 /** Every page answer is per user and changes with the change-set: never cached (design part 2 §3). */
 export function pageAnswer(req: PageRequest, res: Response): void {
@@ -29,6 +40,15 @@ export function pageViewer(req: PageRequest, checks: PageChecks): PageViewer {
     fresh: pageDenial(req.headers, session, { fresh: true }, checks) === undefined,
   };
 }
+
+/** The decision answer's `start`: `'started'`, or why the start was refused (ruling D4). */
+function startAnswer(start: StartOutcome | 'executor_unavailable'): string {
+  if (start === 'executor_unavailable') return start;
+  return start.ok ? 'started' : start.reason;
+}
+
+/** Audits a refusal the controller finds itself, under the route's action, then answers it (AUD-1). */
+type Refuser = (reason: PageRefusal) => Promise<void>;
 
 function itemOf(i: ChangeItemRecord): Record<string, unknown> {
   return {
@@ -53,13 +73,19 @@ export class ChangeSetPagesController {
     @Inject(CHANGESET_EXECUTOR) private readonly executor: ChangeSetExecutor,
     @Inject(CONFIGURATION) private readonly configuration: ConfigurationHolder,
     @Inject(PAGE_CHECKS) private readonly checks: PageChecks,
+    @Inject(AUDIT_LOG) private readonly audit: AuditLog,
+    @Inject(APPROVAL_SERVICE) private readonly approvals: ApprovalService,
   ) {}
 
-  /** The change-set and its approvals when the viewer may see it; otherwise the 404 is already sent. */
+  /**
+   * The change-set and its approvals when the viewer may see it; otherwise the 404 is already sent
+   * (through `refuser` on the mutation routes, so it is audited).
+   */
   private async visible(
     id: string,
     viewer: PageViewer,
     res: Response,
+    refuser?: Refuser,
   ): Promise<{ changeset: ChangeSetRecord; approvals: readonly ApprovalRecord[] } | undefined> {
     if (CHANGESET_ID.test(id)) {
       const changeset = await this.repository.get(id);
@@ -68,8 +94,105 @@ export class ChangeSetPagesController {
         if (canView(changeset, approvals, viewer)) return { changeset, approvals };
       }
     }
-    await refuse(res, 'not_found');
+    await (refuser === undefined ? refuse(res, 'not_found') : refuser('not_found'));
     return undefined;
+  }
+
+  /** Refusals of a mutation route found here: one denied row of `action`, written before the answer. */
+  private refuser(action: AuditAction, viewer: PageViewer, id: string, correlationId: string, res: Response): Refuser {
+    // Only a UUID-shaped path value is recorded as the change-set; anything else is not stored.
+    const changesetId = CHANGESET_ID.test(id) ? id.toLowerCase() : undefined;
+    return (reason) =>
+      refuse(res, reason, {
+        log: this.audit,
+        event: {
+          id: randomUUID(),
+          actor: viewer.subject,
+          clientId: viewer.clientId,
+          action,
+          outcome: 'denied',
+          correlationId,
+          ...(changesetId === undefined ? {} : { changesetId, subject: changesetId }),
+          details: { reason },
+        },
+      });
+  }
+
+  /**
+   * Decides the awaited step (APR-2, APR-4, APR-6, SEC-9). Checks in the fixed order of SEC-8:
+   * visibility (404) → Origin + CSRF → fresh session → body → the approval checks of part 1.
+   */
+  @Post(':id/decision')
+  @PageAccess()
+  async decide(@Req() req: PageRequest, @Res() res: Response, @Param('id') id: string, @Body() body: unknown): Promise<void> {
+    pageAnswer(req, res);
+    const correlationId = pageCorrelation(req, res);
+    const viewer = pageViewer(req, this.checks);
+    const refuser = this.refuser('approval.decision', viewer, id, correlationId, res);
+    const found = await this.visible(id, viewer, res, refuser);
+    if (found === undefined) return;
+    const denial = pageDenial(req.headers, pageOf(req).session, { csrf: true, fresh: true }, this.checks);
+    if (denial !== undefined) {
+      await refuser(denial);
+      return;
+    }
+    const parsed = decisionBodySchema.safeParse(body);
+    if (!parsed.success) {
+      await refuser('invalid_body');
+      return;
+    }
+    const { decision, hash, count, comment } = parsed.data;
+    const result = await this.approvals.decide({
+      changesetId: found.changeset.id,
+      decision,
+      hash,
+      count,
+      ...(comment === undefined ? {} : { comment }),
+      approver: toApprover(viewer),
+      channel: 'page',
+      correlationId,
+      snapshot: this.configuration.current,
+    });
+    // The service audited its own refusal.
+    if (!result.ok) {
+      res.status(REFUSAL_STATUS[result.reason]).json({ error: result.reason });
+      return;
+    }
+    res.status(200).json({ status: result.status, ...(result.start === undefined ? {} : { start: startAnswer(result.start) }) });
+  }
+
+  /**
+   * Starts an approved change-set (APR-7): the same SEC-8 order, then the page start check
+   * (`not_approved_status`, `not_permitted`), then the service's start with the requester's identity.
+   */
+  @Post(':id/start')
+  @PageAccess()
+  async start(@Req() req: PageRequest, @Res() res: Response, @Param('id') id: string): Promise<void> {
+    pageAnswer(req, res);
+    const correlationId = pageCorrelation(req, res);
+    const viewer = pageViewer(req, this.checks);
+    const refuser = this.refuser('changeset.start', viewer, id, correlationId, res);
+    const found = await this.visible(id, viewer, res, refuser);
+    if (found === undefined) return;
+    const denial = pageDenial(req.headers, pageOf(req).session, { csrf: true, fresh: true }, this.checks);
+    if (denial !== undefined) {
+      await refuser(denial);
+      return;
+    }
+    const refusal = checkPageStart(found.changeset, found.approvals, viewer, new Date());
+    if (refusal !== undefined) {
+      await refuser(refusal);
+      return;
+    }
+    const changesetId = found.changeset.id;
+    const result = await this.approvals.startApproved({ changesetId, actor: viewer.subject, clientId: viewer.clientId, correlationId, snapshot: this.configuration.current });
+    // The service audited its own refusal.
+    if (!result.ok) {
+      res.status(REFUSAL_STATUS[result.reason]).json({ error: result.reason });
+      return;
+    }
+    const after = await this.repository.get(changesetId);
+    res.status(200).json({ status: after?.status ?? found.changeset.status });
   }
 
   @Get(':id')

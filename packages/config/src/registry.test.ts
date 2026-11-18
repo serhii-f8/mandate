@@ -285,7 +285,7 @@ connections:
       allowPrivateNetwork: true,
       extraHosts: ['specs.example.test'],
     });
-    expect(config.credentialRefs.get('shop-oauth')).toEqual({ scheme: 'oauth_client_credentials', connections: ['shop'] });
+    expect(config.credentialRefs.get('shop-oauth')).toEqual({ scheme: 'oauth_client_credentials', connections: ['shop'], notifications: [] });
   });
 
   it('covers spec files in the hash', async () => {
@@ -499,12 +499,12 @@ ${extraOps}`,
         'more.yaml': 'version: 1\nconnections:\n  - { id: shop2, adapter: openapi, base_url: https://x.example.test, credential_ref: shop-token, auth: { scheme: bearer } }\n',
       }),
     );
-    expect(shared.credentialRefs.get('shop-token')).toEqual({ scheme: 'bearer', connections: ['shop', 'shop2'] });
+    expect(shared.credentialRefs.get('shop-token')).toEqual({ scheme: 'bearer', connections: ['shop', 'shop2'], notifications: [] });
   });
 
   it('takes the credential scheme from the preset auth default', async () => {
     const config = ok(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: PRESET_DIRS }));
-    expect(config.credentialRefs.get('shop-token')).toEqual({ scheme: 'bearer', connections: ['shop'] });
+    expect(config.credentialRefs.get('shop-token')).toEqual({ scheme: 'bearer', connections: ['shop'], notifications: [] });
     expect(config.connectionSettings.get('shop')?.auth).toEqual({ scheme: 'bearer' });
   });
 });
@@ -669,24 +669,28 @@ roles:
     ]);
   });
 
-  it('UI-5 rejects a reference no connection uses', async () => {
+  it('UI-5 rejects a reference no connection or notification uses', async () => {
     const found = issues(await sources({ 'roles.yaml': 'version: 1\nroles:\n  - { id: admin, grants: [], manage_credentials: [shop-token, ghost] }\n' }));
     expect(found).toEqual([
-      expect.objectContaining({ file: 'roles.yaml', path: 'roles[0].manage_credentials[1]', message: 'names a credential that no connection uses' }),
+      expect.objectContaining({ file: 'roles.yaml', path: 'roles[0].manage_credentials[1]', message: 'names a credential that no connection or notification uses' }),
     ]);
   });
 
-  it('UI-5 rejects a notification credential until notifications land (Phase 6)', async () => {
-    const found = issues(
+  it('UI-5 accepts a webhook notification credential and rejects an undeclared one', async () => {
+    const config = ok(
       await sources({
         'roles.yaml': `version: 1
 roles:
   - { id: admin, grants: [], manage_credentials: [chat-hook] }
 notifications:
-  - { id: chat, kind: webhook, url_credential_ref: chat-hook }
+  - { id: chat, kind: webhook, url_credential_ref: chat-hook, allowed_hosts: [hooks.example.test] }
 `,
       }),
     );
-    expect(found).toEqual([expect.objectContaining({ file: 'roles.yaml', path: 'roles[0].manage_credentials[0]', message: 'names a credential that no connection uses' })]);
+    expect(config.credentialManagers.get('admin')).toEqual(['chat-hook']);
+    const found = issues(await sources({ 'roles.yaml': 'version: 1\nroles:\n  - { id: admin, grants: [], manage_credentials: [chat-hook] }\n' }));
+    expect(found).toEqual([
+      expect.objectContaining({ file: 'roles.yaml', path: 'roles[0].manage_credentials[0]', message: 'names a credential that no connection or notification uses' }),
+    ]);
   });
 });

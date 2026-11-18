@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
 import { InMemoryAuditLog, startFakeUpstream, type FakeUpstream } from '@aiops/testing';
+import { loadConfigurationDirectory } from '@aiops/config';
 import { runApiCli, type CliDeps, type CliStore } from './cli.js';
 
 const DEV_CONFIG = fileURLToPath(new URL('../../../deploy/config', import.meta.url));
@@ -76,9 +77,21 @@ describe('CFG-3 aiops validate and test-connection', () => {
   it('CFG-3 validate of the development configuration exits 0', async () => {
     const { code, lines } = await run(['validate', DEV_CONFIG, '--preset-dir', REPO_PRESETS]);
     // support.lookup_order from configuration, plus the four Magento preset operations (search, get, get by SKU, update content).
-    expect(lines.join('\n')).toMatch(/^Configuration valid: 1 connections, 5 operations, 3 roles$/m);
+    expect(lines.join('\n')).toMatch(/^Configuration valid: 1 connections, 5 operations, 4 roles$/m);
     expect(lines.join('\n')).not.toContain('skipped');
     expect(code).toBe(0);
+  });
+
+  it('POL-5 APR-3 the development configuration routes content_manager approvals above 25 changes to content_lead', async () => {
+    const result = await loadConfigurationDirectory(DEV_CONFIG, { presetDirs: [REPO_PRESETS] });
+    if (!result.ok) throw new Error(JSON.stringify(result.issues));
+    expect(result.configuration.approval.get('content_manager')).toEqual({
+      required: 'above_threshold',
+      recordThreshold: 25,
+      steps: ['content_lead'],
+      allowWidget: false,
+    });
+    expect(result.configuration.policy.roleMapping).toContainEqual({ group: 'content-leads', roles: ['content_lead'] });
   });
 
   it('CFG-3 CONN-2 validate resolves specs and exits 1 with the located issue', async () => {

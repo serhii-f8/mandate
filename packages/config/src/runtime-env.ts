@@ -75,6 +75,12 @@ export interface WorkerEnv {
   /** Raw `AIOPS_TEMPORAL_KEYS`; parsed at worker start-up with `parseTemporalKeys` (SEC-4). */
   readonly temporalKeys: string;
   readonly activityTuning: WorkerActivityTuning;
+  /** `smtp://host:port` or `smtps://host:port` of the mail relay (NTF-1); without it e-mail notifications fail with `channel_unconfigured`. */
+  readonly smtpUrl?: string;
+  /** Sender address of notification e-mails (NTF-1). */
+  readonly mailFrom: string;
+  /** Public origin of the api (no path); base of the change-set links in notifications (NTF-2). */
+  readonly publicUrl: URL;
 }
 
 export interface EnvIssue {
@@ -104,6 +110,35 @@ const presetDirs = z
 
 const httpUrl = z.url({ protocol: /^https?$/ });
 
+/** An http(s) origin without path, query or fragment; `api` and `worker` share the rule. */
+const originUrl = httpUrl.refine(
+  (v) => {
+    // Runs even after `z.url()` failed; that failure is already reported.
+    if (!URL.canParse(v)) return true;
+    const u = new URL(v);
+    return u.pathname === '/' && u.search === '' && u.hash === '' && !v.includes('?') && !v.includes('#');
+  },
+  { message: 'must be an origin without path, query or fragment' },
+);
+
+const SMTP_URL = /^smtps?:\/\/[^/?#\s]+(:\d{1,5})?\/?$/;
+
+/**
+ * `smtp://host:port` or `smtps://host:port`, user info allowed (relays may need auth). The
+ * pattern lets an out-of-range port through, so the value must also parse as a URL with a host.
+ * The message is fixed: the value can hold a password (SEC-3).
+ */
+const smtpUrl = z.string().refine(
+  (v) => SMTP_URL.test(v) && URL.canParse(v) && new URL(v).hostname !== '',
+  { message: 'must be smtp://host:port or smtps://host:port' },
+);
+
+const mailAddress = z
+  .string()
+  .trim()
+  .max(254)
+  .regex(/^[^\s@<>]+@[^\s@<>]+$/);
+
 const apiSchema = z.object({
   DATABASE_URL: postgresUrl,
   API_PORT: port(8080),
@@ -117,15 +152,7 @@ const apiSchema = z.object({
   AIOPS_MCP_RESOURCE: httpUrl.refine((v) => !v.includes('#'), { message: 'must not contain a fragment' }),
   OIDC_ISSUER: httpUrl,
   OIDC_JWKS_URL: httpUrl,
-  AIOPS_PUBLIC_URL: httpUrl.refine(
-    (v) => {
-      // Runs even after `z.url()` failed; that failure is already reported.
-      if (!URL.canParse(v)) return true;
-      const u = new URL(v);
-      return u.pathname === '/' && u.search === '' && u.hash === '' && !v.includes('?') && !v.includes('#');
-    },
-    { message: 'must be an origin without path, query or fragment' },
-  ),
+  AIOPS_PUBLIC_URL: originUrl,
   OIDC_WEB_CLIENT_ID: nonEmpty('aiops-web'),
   OIDC_WEB_CLIENT_SECRET: z.string().min(1),
   OIDC_AUTHORIZATION_URL: httpUrl.optional(),
@@ -167,6 +194,9 @@ const workerSchema = z.object({
   AIOPS_BATCH_MAX_ATTEMPTS: positiveInt(10),
   AIOPS_RETRY_INITIAL_MS: positiveInt(1_000),
   AIOPS_RETRY_MAX_MS: positiveInt(30_000),
+  AIOPS_SMTP_URL: smtpUrl.optional(),
+  AIOPS_MAIL_FROM: mailAddress.default('aiops@localhost'),
+  AIOPS_PUBLIC_URL: originUrl.default('http://localhost:8400'),
 }).superRefine((e, ctx) => {
   // Cross-field checks run only once every field parsed; the messages name variables, never values (SEC-3).
   if (e.AIOPS_RETRY_INITIAL_MS > e.AIOPS_RETRY_MAX_MS) {
@@ -260,5 +290,8 @@ export function parseWorkerEnv(env: NodeJS.ProcessEnv): WorkerEnv {
       retryInitialMs: e.AIOPS_RETRY_INITIAL_MS,
       retryMaxMs: e.AIOPS_RETRY_MAX_MS,
     },
+    ...(e.AIOPS_SMTP_URL === undefined ? {} : { smtpUrl: e.AIOPS_SMTP_URL }),
+    mailFrom: e.AIOPS_MAIL_FROM,
+    publicUrl: new URL(e.AIOPS_PUBLIC_URL),
   };
 }

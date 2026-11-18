@@ -2,6 +2,8 @@
 export { InMemoryAuditLog } from './in-memory-audit-log.js';
 export { InMemoryChangeSetRepository } from './in-memory-changeset-repository.js';
 export { describeChangeSetRepositoryContract, type ChangeSetRepositoryHarness } from './changeset-repository-contract.js';
+export { InMemoryNotificationOutbox } from './in-memory-notification-outbox.js';
+export { describeNotificationOutboxContract, type NotificationOutboxHarness } from './notification-outbox-contract.js';
 export { InMemoryTaskRepository } from './in-memory-task-repository.js';
 export { describeTaskRepositoryContract, type TaskRepositoryHarness } from './task-repository-contract.js';
 export { InMemoryRateCounter } from './in-memory-rate-counter.js';
@@ -37,6 +39,7 @@ export {
 } from './keycloak.js';
 export { startFakeUpstream, type FakeUpstream, type FakeHandler, type FakeResponse, type RecordedRequest } from './fake-upstream.js';
 export { FakeResolver, fakeCatalogEntry } from './fake-resolver.js';
+export { startSmtpSink, type SinkMessage, type SmtpSink } from './smtp-sink.js';
 export { installFakeMagentoCatalog, type FakeMagentoCatalog, type FakeMagentoProduct } from './fake-magento-catalog.js';
 export { recordApproval, submitChangeSet } from './approval-fixtures.js';
 export { describeApprovalRepositoryContract } from './approval-repository-contract.js';

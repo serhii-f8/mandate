@@ -7,6 +7,7 @@ import {
   type ChangeItemRecord,
   type ChangeSetRecord,
   type ChangeSetRepository,
+  type Submission,
 } from '@aiops/core';
 import { EDITOR_GROUP, WRITE_OPERATION } from './configuration.js';
 
@@ -92,6 +93,8 @@ export interface ExecuteOptions {
   readonly groups?: readonly string[];
   readonly correlationId?: string;
   readonly clientId?: string;
+  /** Stored as the change-set's submission, as a start without approval does (POL-6). */
+  readonly submission?: Submission;
 }
 
 /** Moves a prepared change-set to `executing` with an execution request, as the executor's start does. */
@@ -109,6 +112,7 @@ export async function startExecutionOf(
     changesetId: prepared.id,
     expectedHash: prepared.hash,
     request: { actor, groups, ...clientId, correlationId },
+    ...(execute.submission === undefined ? {} : { submission: execute.submission }),
     now: new Date(),
     event: startEventFactory({ newId: randomUUID, actor, groups, ...clientId, correlationId }),
   });

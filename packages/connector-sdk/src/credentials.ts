@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const CREDENTIAL_SCHEMES = ['bearer', 'api_key', 'basic', 'oauth_client_credentials'] as const;
+export const CREDENTIAL_SCHEMES = ['bearer', 'api_key', 'basic', 'oauth_client_credentials', 'webhook_url'] as const;
 export type CredentialScheme = (typeof CREDENTIAL_SCHEMES)[number];
 
 /** Secret material per scheme (SEC-2). */
@@ -8,18 +8,30 @@ export type SecretMaterial =
   | { readonly token: string }
   | { readonly key: string }
   | { readonly username: string; readonly password: string }
-  | { readonly client_id: string; readonly client_secret: string };
+  | { readonly client_id: string; readonly client_secret: string }
+  | { readonly url: string };
 
 const FIELDS: Record<CredentialScheme, readonly string[]> = {
   bearer: ['token'],
   api_key: ['key'],
   basic: ['username', 'password'],
   oauth_client_credentials: ['client_id', 'client_secret'],
+  webhook_url: ['url'],
 };
 
 const secretString = z.string().min(1).max(8192);
 
+function isHttpUrl(value: string): boolean {
+  if (!URL.canParse(value)) return false;
+  const { protocol } = new URL(value);
+  return protocol === 'http:' || protocol === 'https:';
+}
+
+/** A webhook URL is itself the secret (NTF-1): an http(s) URL of at most 2048 characters. */
+const webhookUrlSchema = z.strictObject({ url: secretString.max(2048).refine(isHttpUrl) });
+
 function schemaFor(scheme: CredentialScheme): z.ZodType<Record<string, string>> {
+  if (scheme === 'webhook_url') return webhookUrlSchema;
   const shape: Record<string, z.ZodString> = {};
   for (const f of FIELDS[scheme]) shape[f] = secretString;
   return z.strictObject(shape);

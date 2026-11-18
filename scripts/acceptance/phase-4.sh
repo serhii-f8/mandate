@@ -19,6 +19,7 @@ SANDBOX="http://127.0.0.1:${AIOPS_MAGENTO_PORT:-4390}"
 
 free_port() { node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})"; }
 export AIOPS_API_PORT="$(free_port)" AIOPS_KEYCLOAK_PORT="$(free_port)" AIOPS_TEMPORAL_PORT="$(free_port)" AIOPS_POSTGRES_PORT="$(free_port)"
+export AIOPS_MAILPIT_PORT="$(free_port)"  # Compose runs Mailpit since Phase 6; a fixed port breaks parallel runs
 export AIOPS_KEYCLOAK_PUBLIC_URL="http://localhost:${AIOPS_KEYCLOAK_PORT}"
 export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
 # Origin of the trusted pages and the realm's redirect URI of the aiops-web client.

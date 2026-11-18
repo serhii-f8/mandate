@@ -30,6 +30,10 @@
     {
       "name": "admins",
       "path": "/admins"
+    },
+    {
+      "name": "content-leads",
+      "path": "/content-leads"
     }
   ],
   "users": [
@@ -48,7 +52,8 @@
         }
       ],
       "groups": [
-        "/content"
+        "/content",
+        "/content-leads"
       ],
       "realmRoles": [
         "default-roles-aiops"
@@ -91,6 +96,27 @@
       ],
       "groups": [
         "/admins"
+      ],
+      "realmRoles": [
+        "default-roles-aiops"
+      ]
+    },
+    {
+      "username": "dave",
+      "enabled": true,
+      "email": "dave@example.test",
+      "emailVerified": true,
+      "firstName": "Dave",
+      "lastName": "Developer",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev-only-password",
+          "temporary": false
+        }
+      ],
+      "groups": [
+        "/content-leads"
       ],
       "realmRoles": [
         "default-roles-aiops"

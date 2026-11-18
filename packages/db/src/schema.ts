@@ -12,6 +12,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 import type {
@@ -22,6 +23,9 @@ import type {
   ChangeSetStatus,
   ExclusionReason,
   ItemStatus,
+  NotificationError,
+  NotificationKind,
+  NotificationState,
   PlanEntry,
   TaskKind,
 } from '@aiops/core';
@@ -291,4 +295,38 @@ export const rateBucket = pgTable(
     count: integer('count').notNull(),
   },
   (t) => [primaryKey({ columns: [t.key, t.windowStart] })],
+);
+
+/**
+ * Notification outbox (NTF-3). Producers insert in the transaction of the event they announce;
+ * one row per `(changeset_id, kind, round, step, target)`. Dispatchers claim due pending rows with
+ * `FOR UPDATE SKIP LOCKED` (NFR-4). `last_error` holds a fixed code only (SEC-3).
+ */
+export const notificationOutbox = pgTable(
+  'notification_outbox',
+  {
+    id: uuid('id').primaryKey(),
+    kind: text('kind').$type<NotificationKind>().notNull(),
+    changesetId: uuid('changeset_id')
+      .notNull()
+      .references(() => changeSet.id),
+    round: integer('round').notNull(),
+    step: integer('step').notNull(),
+    target: text('target').notNull(),
+    state: text('state').$type<NotificationState>().notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull(),
+    lastError: text('last_error').$type<NotificationError>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('notification_outbox_producer_key').on(t.changesetId, t.kind, t.round, t.step, t.target),
+    index('notification_outbox_due_idx').on(t.nextAttemptAt).where(sql`${t.state} = 'pending'`),
+    check(
+      'notification_outbox_kind_check',
+      sql`${t.kind} IN ('approval_requested', 'approval_decided', 'execution_finished')`,
+    ),
+    check('notification_outbox_state_check', sql`${t.state} IN ('pending', 'sent', 'failed')`),
+  ],
 );

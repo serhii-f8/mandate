@@ -20,6 +20,7 @@ import {
 import { DrizzleAuditLog } from '../../src/audit-log.js';
 import { PostgresChangeSetRepository } from '../../src/changeset-repository.js';
 import { createDb, type Database } from '../../src/client.js';
+import { PostgresNotificationOutbox } from '../../src/notification-outbox.js';
 import { runMigrations } from '../../src/migrate.js';
 import { auditEvent } from '../../src/schema.js';
 
@@ -77,6 +78,7 @@ function harness(): Promise<ChangeSetRepositoryHarness> {
     failNextAudit: () => {
       failNext = true;
     },
+    notifications: (changesetId) => new PostgresNotificationOutbox(database.db).listFor(changesetId),
   });
 }
 

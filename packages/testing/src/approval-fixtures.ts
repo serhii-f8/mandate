@@ -9,6 +9,7 @@ import {
   type ChangeSetRecord,
   type ChangeSetRepository,
   type DecisionRequest,
+  type NewNotification,
 } from '@aiops/core';
 
 const REQUEST_OF: Record<ApprovalDecision, DecisionRequest> = { approved: 'approve', rejected: 'reject', returned: 'return' };
@@ -23,6 +24,7 @@ export async function submitChangeSet(
     at?: Date;
     widget?: boolean;
     stepUp?: number;
+    notifications?: readonly NewNotification[];
   } = {},
 ): Promise<ChangeSetRecord> {
   const steps = opts.steps ?? ['lead'];
@@ -61,7 +63,7 @@ export async function submitChangeSet(
         correlationId,
       }),
     },
-    notifications: [],
+    notifications: opts.notifications ?? [],
   });
   if (!result.ok) throw new Error(`submitForApproval refused: ${result.reason}`);
   return result.changeset;
@@ -71,7 +73,13 @@ export async function submitChangeSet(
 export async function recordApproval(
   repository: ChangeSetRepository,
   cs: ChangeSetRecord,
-  opts: { approver: string; decision?: ApprovalDecision; hash?: string; comment?: string },
+  opts: {
+    approver: string;
+    decision?: ApprovalDecision;
+    hash?: string;
+    comment?: string;
+    notifications?: readonly NewNotification[];
+  },
 ): Promise<ChangeSetRecord> {
   const plan = cs.approvalPlan;
   if (plan === undefined || cs.hash === undefined) throw new Error('recordApproval needs a pending change-set');
@@ -136,7 +144,7 @@ export async function recordApproval(
           correlationId,
         }),
   ];
-  const result = await repository.recordDecision({ changesetId: cs.id, round, step, record, next, audit, notifications: [] });
+  const result = await repository.recordDecision({ changesetId: cs.id, round, step, record, next, audit, notifications: opts.notifications ?? [] });
   if (!result.ok) throw new Error(`recordDecision refused: ${result.reason}`);
   return result.changeset;
 }
