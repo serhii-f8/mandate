@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import { memo, type ReactElement } from 'react';
 import { fieldRows } from '../format.js';
 import type { ItemRowModel } from '../model.js';
 import { StatusBadge } from './StatusBadge.js';
@@ -9,6 +9,8 @@ export interface ItemTableProps {
   selection?: {
     selected: ReadonlySet<string>;
     canSelect: (row: ItemRowModel) => boolean;
+    /** A selectable row whose checkbox is shown but cannot be changed (selection limit). */
+    isDisabled?: (row: ItemRowModel) => boolean;
     toggle: (targetId: string) => void;
   };
 }
@@ -17,6 +19,81 @@ function note(row: ItemRowModel): string {
   if (row.status === 'excluded') return `excluded: ${row.reason ?? ''}`;
   if (row.status === 'failed') return row.error ?? '';
   return '';
+}
+
+interface RowProps {
+  row: ItemRowModel;
+  /** Absent without a selection column; otherwise whether the row has a checkbox and its state. */
+  box?: { selectable: boolean; checked: boolean; disabled: boolean; toggle: (targetId: string) => void };
+}
+
+/** One item; memoised so a selection change re-renders only the rows whose checkbox changed. */
+const ItemRows = memo(function ItemRows({ row, box }: RowProps): ReactElement {
+  const excluded = row.status === 'excluded';
+  const fields = excluded ? [] : fieldRows(row);
+  const span = excluded ? 1 : fields.length;
+  const head = (
+    <>
+      {box ? (
+        <td rowSpan={span}>
+          {box.selectable ? (
+            <input
+              type="checkbox"
+              aria-label={`Select ${row.targetId}`}
+              checked={box.checked}
+              disabled={box.disabled}
+              onChange={() => {
+                box.toggle(row.targetId);
+              }}
+            />
+          ) : null}
+        </td>
+      ) : null}
+      <td rowSpan={span}>{row.targetId}</td>
+      <td rowSpan={span}>
+        <StatusBadge status={row.status} />
+      </td>
+    </>
+  );
+  if (excluded) {
+    return (
+      <tr>
+        {head}
+        <td />
+        <td />
+        <td />
+        <td>{note(row)}</td>
+      </tr>
+    );
+  }
+  return (
+    <>
+      {fields.map((f, i) => (
+        <tr key={String(i)}>
+          {i === 0 ? head : null}
+          <td>{f.field ?? ''}</td>
+          <td>
+            <Value value={f.before} />
+          </td>
+          <td>
+            <Value value={f.after} />
+          </td>
+          <td rowSpan={1}>{i === 0 ? note(row) : ''}</td>
+        </tr>
+      ))}
+    </>
+  );
+}, sameRow);
+
+function sameRow(a: RowProps, b: RowProps): boolean {
+  if (a.row !== b.row) return false;
+  if (!a.box || !b.box) return a.box === b.box;
+  return (
+    a.box.selectable === b.box.selectable &&
+    a.box.checked === b.box.checked &&
+    a.box.disabled === b.box.disabled &&
+    a.box.toggle === b.box.toggle
+  );
 }
 
 export function ItemTable({ rows, selection }: ItemTableProps): ReactElement {
@@ -34,57 +111,22 @@ export function ItemTable({ rows, selection }: ItemTableProps): ReactElement {
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => {
-          const excluded = row.status === 'excluded';
-          const fields = excluded ? [] : fieldRows(row);
-          const span = excluded ? 1 : fields.length;
-          const head = (
-            <>
-              {selection ? (
-                <td rowSpan={span}>
-                  {selection.canSelect(row) ? (
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${row.targetId}`}
-                      checked={selection.selected.has(row.targetId)}
-                      onChange={() => {
-                        selection.toggle(row.targetId);
-                      }}
-                    />
-                  ) : null}
-                </td>
-              ) : null}
-              <td rowSpan={span}>{row.targetId}</td>
-              <td rowSpan={span}>
-                <StatusBadge status={row.status} />
-              </td>
-            </>
-          );
-          if (excluded) {
-            return (
-              <tr key={row.targetId}>
-                {head}
-                <td />
-                <td />
-                <td />
-                <td>{note(row)}</td>
-              </tr>
-            );
-          }
-          return fields.map((f, i) => (
-            <tr key={`${row.targetId}:${String(i)}`}>
-              {i === 0 ? head : null}
-              <td>{f.field ?? ''}</td>
-              <td>
-                <Value value={f.before} />
-              </td>
-              <td>
-                <Value value={f.after} />
-              </td>
-              <td rowSpan={1}>{i === 0 ? note(row) : ''}</td>
-            </tr>
-          ));
-        })}
+        {rows.map((row) => (
+          <ItemRows
+            key={row.targetId}
+            row={row}
+            {...(selection
+              ? {
+                  box: {
+                    selectable: selection.canSelect(row),
+                    checked: selection.selected.has(row.targetId),
+                    disabled: selection.isDisabled?.(row) ?? false,
+                    toggle: selection.toggle,
+                  },
+                }
+              : {})}
+          />
+        ))}
       </tbody>
     </table>
   );
