@@ -17,6 +17,22 @@ const ioMessage = 'Widgets do no network or storage I/O; data comes from props (
 const rawHtmlMessage = 'Values render as text (SEC-5).';
 const noDangerousHtml = { selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']", message: rawHtmlMessage };
 const mcpSdk = ['@modelcontextprotocol/*'];
+const ioAlternation = ioNames.join('|');
+const htmlSinks = '^(innerHTML|outerHTML)$';
+/** W1's syntax bans; W2 repeats them because the last entry's `no-restricted-syntax` options win. */
+const widgetSyntax = [
+  noDangerousHtml,
+  { selector: `AssignmentExpression > MemberExpression.left[property.name=/${htmlSinks}/]`, message: rawHtmlMessage },
+  // Computed keys: e['innerHTML'] = x, e['insertAdjacentHTML'](...).
+  { selector: `AssignmentExpression > MemberExpression.left[property.value=/${htmlSinks}/]`, message: rawHtmlMessage },
+  { selector: "CallExpression[callee.property.name='insertAdjacentHTML']", message: rawHtmlMessage },
+  { selector: "CallExpression[callee.property.value='insertAdjacentHTML']", message: rawHtmlMessage },
+  // A global reached through a nested window: globalThis.window.fetch, document.defaultView?.fetch, window.self.fetch.
+  {
+    selector: `MemberExpression[property.name=/^(${ioAlternation})$/][object.type='MemberExpression'][object.property.name=/^(window|self|globalThis|defaultView|parent|top|frames)$/]`,
+    message: ioMessage,
+  },
+];
 
 const nodeIo = ['node:http', 'node:https', 'node:net', 'node:dgram', 'node:child_process', 'http', 'https', 'net', 'child_process'];
 
@@ -127,20 +143,24 @@ export const boundaryRules = [
       'no-restricted-globals': ['error', ...ioNames.map((name) => ({ name, message: ioMessage }))],
       'no-restricted-properties': [
         'error',
-        ...['window', 'globalThis'].flatMap((object) => ioNames.map((property) => ({ object, property, message: ioMessage }))),
+        ...['window', 'globalThis', 'self'].flatMap((object) => ioNames.map((property) => ({ object, property, message: ioMessage }))),
       ],
-      'no-restricted-syntax': [
-        'error',
-        noDangerousHtml,
-        { selector: 'AssignmentExpression > MemberExpression.left[property.name=/^(innerHTML|outerHTML)$/]', message: rawHtmlMessage },
-        { selector: "CallExpression[callee.property.name='insertAdjacentHTML']", message: rawHtmlMessage },
-      ],
+      'no-restricted-syntax': ['error', ...widgetSyntax],
     },
   },
   {
     // W2: only src/widget/ talks to the MCP Apps bridge; the library never imports the widget entries.
-    files: ['packages/widgets/src/{components,views}/**/*.{ts,tsx}', 'packages/widgets/src/{model,format,poll,paging,index}.ts'],
+    // Everything in src/ except the widget entries, so a new file or directory is covered without editing this list.
+    files: ['packages/widgets/src/**/*.{ts,tsx}'],
+    ignores: ['packages/widgets/src/widget/**'],
     rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...widgetSyntax,
+        { selector: 'ImportExpression[source.value=/^@modelcontextprotocol\\//]', message: 'Only packages/widgets/src/widget/ talks to the MCP Apps bridge (UI-1).' },
+        { selector: 'ImportExpression[source.value=/(^|\\/)widget(\\/|$)/]', message: 'The library does not import the widget entries (UI-1).' },
+        { selector: 'ImportExpression[source.value=/^@aiops\\/(api|worker)(\\/|$)/]', message: 'Packages must not import an app.' },
+      ],
       'no-restricted-imports': [
         'error',
         {
