@@ -94,7 +94,7 @@ async function queueIds(page: Page): Promise<string[]> {
   return (answer.body as { items: QueueRow[] }).items.map((r) => r.id);
 }
 
-const seedAlice = (items = 3, extra: { excluded?: number; expiresAt?: Date } = {}) =>
+const seedAlice = (items = 3, extra: { excluded?: number; expiresAt?: Date; at?: Date } = {}) =>
   seedPending(repo, { requester: ALICE.sub, groups: ['content', 'leads'], role: 'content_manager', items, ...extra });
 
 interface ItemsPage {
@@ -129,8 +129,9 @@ describe('UI-7 change-sets are visible to requester and approvers only', () => {
     }
   });
 
-  it('UI-7 the approval queue lists what the user can decide now, not their own, not expired', async () => {
-    const seeded = await seedAlice();
+  it('UI-7 APR-6 the approval queue lists what the user can decide now, not their own, not expired', async () => {
+    // One excluded item: the queue shows the number an approver approves (included), not the total.
+    const seeded = await seedAlice(3, { excluded: 1 });
     const dave = await login(DAVE);
     const answer = await get(dave, '/api/v1/approvals?limit=100');
     expect(answer.headers.get('cache-control')).toBe('no-store');
@@ -156,10 +157,22 @@ describe('UI-7 change-sets are visible to requester and approvers only', () => {
     const erinRows = (await get(erin, '/api/v1/approvals?limit=100')).body as { items: QueueRow[] };
     expect(erinRows.items.find((r) => r.id === seeded.id)).toMatchObject({ step: 2, steps: 2 });
 
-    const soon = await seedAlice(3, { expiresAt: new Date(Date.now() + 1500) });
-    expect(await queueIds(dave)).toContain(soon.id);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    expect(await queueIds(dave)).not.toContain(soon.id);
+    // Seeded with the expiry already passed (no wall-clock wait); the workflow timer has not run.
+    const expired = await seedAlice(3, { at: new Date(Date.now() - 120_000), expiresAt: new Date(Date.now() - 60_000) });
+    const live = await seedAlice();
+    const daveIds = await queueIds(dave);
+    expect(daveIds).toContain(live.id);
+    expect(daveIds).not.toContain(expired.id);
+  });
+
+  it('UI-7 APR-2 the queue leaves out a change-set the user decided an earlier step of, though they hold the awaiting role', async () => {
+    const seeded = await seedAlice();
+    const record = await repo.get(seeded.id);
+    if (record === undefined) throw new Error('seeded change-set missing');
+    // dave (leads, brand) approves step 1; step 2 awaits brand_owner, which dave also holds.
+    await recordApproval(repo, record, { approver: DAVE.sub });
+    expect(await queueIds(await login(DAVE))).not.toContain(seeded.id);
+    expect(await queueIds(await login(ERIN))).toContain(seeded.id);
   });
 
   it('UI-7 NFR-8 the queue pages by cursor and validates its query', async () => {

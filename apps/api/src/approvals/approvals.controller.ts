@@ -2,9 +2,10 @@ import { Controller, Get, Inject, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { ConfigurationHolder } from '@aiops/config';
 import { currentStep, type ChangeSetRepository } from '@aiops/core';
-import { CHANGESET_REPOSITORY, CONFIGURATION } from '../tokens.js';
-import { PageAccess, pageOf, type PageRequest } from '../web/access.js';
-import { pageAnswer } from './changeset-pages.controller.js';
+import { CHANGESET_REPOSITORY, CONFIGURATION, PAGE_CHECKS } from '../tokens.js';
+import { PageAccess, pageOf, type PageChecks, type PageRequest } from '../web/access.js';
+import { pageAnswer, pageViewer } from './changeset-pages.controller.js';
+import { viewerBlock } from './detail.js';
 import { encodeQueueCursor, parseQueueQuery } from './page-query.js';
 import { refuse } from './refusals.js';
 
@@ -17,6 +18,7 @@ export class ApprovalsController {
   constructor(
     @Inject(CHANGESET_REPOSITORY) private readonly repository: ChangeSetRepository,
     @Inject(CONFIGURATION) private readonly configuration: ConfigurationHolder,
+    @Inject(PAGE_CHECKS) private readonly checks: PageChecks,
   ) {}
 
   @Get()
@@ -36,23 +38,28 @@ export class ApprovalsController {
       ...(after === undefined ? {} : { after }),
       limit: limit + 1,
     });
-    const now = Date.now();
+    const now = new Date();
+    const viewer = pageViewer(req, this.checks);
     const operations = this.configuration.current.policy.operations;
     const page = rows.slice(0, limit);
     // The cursor follows the query's order, so it is taken before expired rows are dropped.
     const last = page.at(-1);
-    const live = page.filter((cs) => cs.status === 'pending_approval' && cs.expiresAt.getTime() > now);
+    const live = page.filter((cs) => cs.status === 'pending_approval' && cs.expiresAt.getTime() > now.getTime());
     // One approvals read per row (at most 100 per page, indexed by change-set).
-    const items = await Promise.all(
+    const decidable = await Promise.all(
       live.map(async (cs) => {
         const approvals = await this.repository.approvals(cs.id, cs.approvalRound);
+        // The detail's own rule (checkDecision via viewerBlock): a person who decided an earlier step
+        // of this round is not offered the next one, though they hold its role (APR-2).
+        if (!viewerBlock(cs, approvals, viewer, now).canDecide) return undefined;
         const operation = operations.find((op) => op.id === cs.operation);
         return {
           id: cs.id,
           operation: cs.operation,
           title: operation?.title ?? cs.operation,
           requester: cs.requester,
-          total: cs.stats.total,
+          // The number an approver approves (APR-6), not every prepared item.
+          total: cs.stats.included,
           step: currentStep(cs, approvals) ?? 1,
           steps: cs.approvalPlan?.steps.length ?? 0,
           ...(cs.submission === undefined ? {} : { submittedAt: cs.submission.at.toISOString() }),
@@ -61,7 +68,7 @@ export class ApprovalsController {
       }),
     );
     res.status(200).json({
-      items,
+      items: decidable.filter((row) => row !== undefined),
       ...(rows.length > limit && last?.submission !== undefined ? { next: encodeQueueCursor({ submittedAt: last.submission.at, id: last.id }) } : {}),
     });
   }
