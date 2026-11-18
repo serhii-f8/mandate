@@ -1,88 +1,79 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ItemRowModel } from "../model.js";
-import { ItemTable } from "./ItemTable.js";
-import { Notice } from "./Notice.js";
-import { StatsSummary } from "./StatsSummary.js";
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ItemRowModel } from '../model.js';
+import { ItemTable } from './ItemTable.js';
+import { Notice } from './Notice.js';
+import { Pager } from './Pager.js';
+import { StatsSummary } from './StatsSummary.js';
 
 afterEach(cleanup);
 
 const row = (over: Partial<ItemRowModel>): ItemRowModel => ({
-  targetId: "SKU-1",
-  status: "pending",
-  before: "a",
-  after: "b",
+  targetId: 'SKU-1',
+  status: 'pending',
+  before: 'a',
+  after: 'b',
   ...over,
 });
 
-describe("components", () => {
-  it("SEC-5 hostile values render as text in the item table", () => {
-    const hostile = "<img src=x onerror=alert(1)>";
-    const { container } = render(
-      <ItemTable rows={[row({ before: hostile })]} />,
-    );
-    expect(container.querySelector("img")).toBeNull();
+describe('components', () => {
+  it('SEC-5 hostile values render as text in the item table', () => {
+    const hostile = '<img src=x onerror=alert(1)>';
+    const { container } = render(<ItemTable rows={[row({ before: hostile })]} />);
+    expect(container.querySelector('img')).toBeNull();
     expect(screen.getByText(hostile)).toBeTruthy();
   });
 
-  it("UI-3 the item table shows one row per changed field with before and after", () => {
+  it('UI-3 the item table shows one row per changed field with before and after', () => {
     const { container } = render(
       <ItemTable
         rows={[
           row({
-            before: { price: 1, name: "x" },
-            after: { price: 2, name: "y" },
+            before: { price: 1, name: 'x' },
+            after: { price: 2, name: 'y' },
           }),
         ]}
       />,
     );
-    expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
-    expect(screen.getByText("price")).toBeTruthy();
-    expect(screen.getByText("1")).toBeTruthy();
-    expect(screen.getByText("2")).toBeTruthy();
-    expect(
-      container.querySelectorAll('tbody tr:first-child td[rowspan="2"]'),
-    ).toHaveLength(2);
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
+    expect(screen.getByText('price')).toBeTruthy();
+    expect(screen.getByText('1')).toBeTruthy();
+    expect(screen.getByText('2')).toBeTruthy();
+    expect(container.querySelectorAll('tbody tr:first-child td[rowspan="2"]')).toHaveLength(2);
   });
 
-  it("UI-3 an excluded item shows its reason", () => {
-    const { container } = render(
-      <ItemTable rows={[row({ status: "excluded", reason: "no_change" })]} />,
-    );
-    expect(screen.getByText("excluded: no_change")).toBeTruthy();
-    expect(container.querySelectorAll("tbody tr")).toHaveLength(1);
+  it('UI-3 an excluded item shows its reason', () => {
+    const { container } = render(<ItemTable rows={[row({ status: 'excluded', reason: 'no_change' })]} />);
+    expect(screen.getByText('excluded: no_change')).toBeTruthy();
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
   });
 
-  it("UI-3 a failed item shows its error code", () => {
-    render(
-      <ItemTable
-        rows={[row({ status: "failed", error: "UPSTREAM_REJECTED" })]}
-      />,
-    );
-    expect(screen.getByText("UPSTREAM_REJECTED")).toBeTruthy();
+  it('UI-3 a failed item shows its error code', () => {
+    render(<ItemTable rows={[row({ status: 'failed', error: 'UPSTREAM_REJECTED' })]} />);
+    expect(screen.getByText('UPSTREAM_REJECTED')).toBeTruthy();
   });
 
-  it("UI-3 checkboxes appear only where canSelect allows and call toggle", () => {
+  it('UI-3 checkboxes appear only where canSelect allows and call toggle', () => {
     const toggle = vi.fn();
     render(
       <ItemTable
-        rows={[row({ targetId: "A" }), row({ targetId: "B" })]}
+        rows={[row({ targetId: 'A' }), row({ targetId: 'B' })]}
         selection={{
-          selected: new Set(["A"]),
-          canSelect: (r) => r.targetId === "A",
+          selected: new Set(['A']),
+          canSelect: (r) => r.targetId === 'A',
           toggle,
         }}
       />,
     );
-    expect(screen.queryByLabelText("Select B")).toBeNull();
-    const box = screen.getByLabelText<HTMLInputElement>("Select A");
+    expect(screen.queryByLabelText('Select B')).toBeNull();
+    const box = screen.getByLabelText<HTMLInputElement>('Select A');
     expect(box.checked).toBe(true);
     fireEvent.click(box);
-    expect(toggle).toHaveBeenCalledWith("A");
+    expect(toggle).toHaveBeenCalledWith('A');
   });
 
-  it("UI-3 StatsSummary states included, excluded per reason, hash and expiry", () => {
-    const hash = `sha256:6114edb2${"0".repeat(48)}`;
+  it('UI-3 StatsSummary states included, excluded per reason, hash and expiry', () => {
+    const hash = `sha256:6114edb2${'0'.repeat(48)}`;
     const { container } = render(
       <StatsSummary
         stats={{
@@ -97,24 +88,40 @@ describe("components", () => {
         expiresAt="2026-01-02T10:00:00Z"
       />,
     );
-    expect(container.textContent).toContain(
-      "3 changes · 1 excluded (no_change 1)",
-    );
-    expect(container.textContent).toContain("sha256:6114edb2…");
-    expect(container.querySelector("[title]")?.getAttribute("title")).toBe(
-      hash,
-    );
-    expect(container.textContent).toContain("Expires ");
+    expect(container.textContent).toContain('3 changes · 1 excluded (no_change 1)');
+    expect(container.textContent).toContain('sha256:6114edb2…');
+    expect(container.querySelector('[title]')?.getAttribute('title')).toBe(hash);
+    expect(container.textContent).toContain('Expires ');
   });
 
-  it("UI-6 Notice uses role alert for errors and status for info", () => {
+  it('UI-6 Notice uses role alert for errors and status for info', () => {
     render(
       <>
         <Notice kind="error">bad</Notice>
         <Notice kind="info">fine</Notice>
       </>,
     );
-    expect(screen.getByRole("alert").textContent).toBe("bad");
-    expect(screen.getByRole("status").textContent).toBe("fine");
+    expect(screen.getByRole('alert').textContent).toBe('bad');
+    expect(screen.getByRole('status').textContent).toBe('fine');
+  });
+});
+
+describe('pager', () => {
+  it('NFR-8 Pager disables buttons without a page or while busy and calls the handlers', () => {
+    const onPrevious = vi.fn();
+    const onNext = vi.fn();
+    const { rerender } = render(
+      <Pager hasPrevious={false} hasNext busy={false} onPrevious={onPrevious} onNext={onNext} />,
+    );
+    expect(screen.getByText<HTMLButtonElement>('Previous').disabled).toBe(true);
+    fireEvent.click(screen.getByText('Next'));
+    expect(onNext).toHaveBeenCalledTimes(1);
+    rerender(<Pager hasPrevious hasNext={false} busy={false} onPrevious={onPrevious} onNext={onNext} />);
+    expect(screen.getByText<HTMLButtonElement>('Next').disabled).toBe(true);
+    fireEvent.click(screen.getByText('Previous'));
+    expect(onPrevious).toHaveBeenCalledTimes(1);
+    rerender(<Pager hasPrevious hasNext busy onPrevious={onPrevious} onNext={onNext} />);
+    expect(screen.getByText<HTMLButtonElement>('Next').disabled).toBe(true);
+    expect(screen.getByText<HTMLButtonElement>('Previous').disabled).toBe(true);
   });
 });

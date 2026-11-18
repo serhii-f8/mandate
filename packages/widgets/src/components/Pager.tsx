@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { ReactElement } from 'react';
 
 export interface PagerProps {
   hasPrevious: boolean;
@@ -8,20 +8,10 @@ export interface PagerProps {
   onNext: () => void;
 }
 
-export function Pager({
-  hasPrevious,
-  hasNext,
-  busy,
-  onPrevious,
-  onNext,
-}: PagerProps): ReactElement {
+export function Pager({ hasPrevious, hasNext, busy, onPrevious, onNext }: PagerProps): ReactElement {
   return (
     <div className="pager">
-      <button
-        type="button"
-        disabled={!hasPrevious || busy}
-        onClick={onPrevious}
-      >
+      <button type="button" disabled={!hasPrevious || busy} onClick={onPrevious}>
         Previous
       </button>
       <button type="button" disabled={!hasNext || busy} onClick={onNext}>

@@ -1,8 +1,8 @@
-import type { ReactElement } from "react";
-import { fieldRows } from "../format.js";
-import type { ItemRowModel } from "../model.js";
-import { StatusBadge } from "./StatusBadge.js";
-import { Value } from "./Value.js";
+import type { ReactElement } from 'react';
+import { fieldRows } from '../format.js';
+import type { ItemRowModel } from '../model.js';
+import { StatusBadge } from './StatusBadge.js';
+import { Value } from './Value.js';
 
 export interface ItemTableProps {
   rows: ItemRowModel[];
@@ -14,9 +14,9 @@ export interface ItemTableProps {
 }
 
 function note(row: ItemRowModel): string {
-  if (row.status === "excluded") return `excluded: ${row.reason ?? ""}`;
-  if (row.status === "failed") return row.error ?? "";
-  return "";
+  if (row.status === 'excluded') return `excluded: ${row.reason ?? ''}`;
+  if (row.status === 'failed') return row.error ?? '';
+  return '';
 }
 
 export function ItemTable({ rows, selection }: ItemTableProps): ReactElement {
@@ -35,7 +35,7 @@ export function ItemTable({ rows, selection }: ItemTableProps): ReactElement {
       </thead>
       <tbody>
         {rows.map((row) => {
-          const excluded = row.status === "excluded";
+          const excluded = row.status === 'excluded';
           const fields = excluded ? [] : fieldRows(row);
           const span = excluded ? 1 : fields.length;
           const head = (
@@ -74,14 +74,14 @@ export function ItemTable({ rows, selection }: ItemTableProps): ReactElement {
           return fields.map((f, i) => (
             <tr key={`${row.targetId}:${String(i)}`}>
               {i === 0 ? head : null}
-              <td>{f.field ?? ""}</td>
+              <td>{f.field ?? ''}</td>
               <td>
                 <Value value={f.before} />
               </td>
               <td>
                 <Value value={f.after} />
               </td>
-              <td rowSpan={1}>{i === 0 ? note(row) : ""}</td>
+              <td rowSpan={1}>{i === 0 ? note(row) : ''}</td>
             </tr>
           ));
         })}

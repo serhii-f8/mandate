@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ActionResult, ItemFilter, ItemsPageModel } from "./model.js";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ActionResult, ItemFilter, ItemsPageModel } from './model.js';
 
 export interface ItemPages {
   page: ItemsPageModel;
@@ -12,10 +12,7 @@ export interface ItemPages {
   setFilter(f: ItemFilter | undefined): void;
 }
 
-type Load = (q: {
-  after?: string;
-  status?: ItemFilter;
-}) => Promise<ActionResult<ItemsPageModel>>;
+type Load = (q: { after?: string; status?: ItemFilter }) => Promise<ActionResult<ItemsPageModel>>;
 
 interface State {
   page: ItemsPageModel;
@@ -81,7 +78,7 @@ export function useItemPages(
           setState((s) => ({
             ...s,
             busy: false,
-            error: e instanceof Error ? e.message : "load failed",
+            error: e instanceof Error ? e.message : 'load failed',
           }));
         },
       );
