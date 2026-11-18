@@ -121,11 +121,14 @@ describe('UI-7 change-sets are visible to requester and approvers only', () => {
         expect({ path, status: answer.status, body: answer.body }).toEqual({ path, status: 404, body: { error: 'not_found' } });
         expect(answer.headers.get('cache-control')).toBe('no-store');
       }
-      // The decision and start routes arrive with plan 2 Task 5; until then only the status is shared.
-      const decision = await send(bob, 'POST', `/api/v1/changesets/${id}/decision`, { decision: 'approve', hash: seeded.hash, count: seeded.included });
-      expect(decision.status).toBe(404);
-      const start = await send(bob, 'POST', `/api/v1/changesets/${id}/start`, {});
-      expect(start.status).toBe(404);
+      for (const [path, body] of [
+        [`/api/v1/changesets/${id}/decision`, { decision: 'approve', hash: seeded.hash, count: seeded.included }],
+        [`/api/v1/changesets/${id}/start`, {}],
+      ] as const) {
+        const answer = await send(bob, 'POST', path, body);
+        expect({ path, status: answer.status, body: answer.body }).toEqual({ path, status: 404, body: { error: 'not_found' } });
+        expect(answer.headers.get('cache-control')).toBe('no-store');
+      }
     }
   });
 
