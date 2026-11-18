@@ -148,6 +148,7 @@ describe('CFG-2 invalid configuration is rejected as a whole', () => {
     ['an operation ID reserved for a built-in tool', { 'operations.yaml': OPERATIONS.replace('id: catalog.search_products', 'id: ping') }, 'operations[0].id'],
     ['MCP-8 the operation ID exclude_changeset_items (built-in)', { 'operations.yaml': OPERATIONS.replace('id: catalog.search_products', 'id: exclude_changeset_items') }, 'operations[0].id'],
     ['MCP-8 the operation ID decide_changeset (built-in)', { 'operations.yaml': OPERATIONS.replace('id: catalog.search_products', 'id: decide_changeset') }, 'operations[0].id'],
+    ['APR-8 the operation ID review_changeset (built-in)', { 'operations.yaml': OPERATIONS.replace('id: catalog.search_products', 'id: review_changeset') }, 'operations[0].id'],
   ])('rejects %s', async (_name, override, path) => {
     const found = issues(await load(override));
     expect(found.map((i) => i.path)).toContain(path);

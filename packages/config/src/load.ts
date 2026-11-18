@@ -42,6 +42,7 @@ export const BUILTIN_TOOL_NAMES: readonly string[] = [
   'rollback_changeset',
   'exclude_changeset_items',
   'decide_changeset',
+  'review_changeset',
 ];
 
 export type { OperationBinding };
