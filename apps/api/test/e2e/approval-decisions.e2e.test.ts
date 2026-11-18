@@ -1,13 +1,18 @@
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ExecutorUnavailable, type ChangeSetExecutor, type StartOutcome, type StartRequest } from '@aiops/core';
 import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
 import { InMemoryExecutor, pageLogin, ScriptedWriter, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@aiops/testing';
 import { seedPending, type Seeded } from './approval-seed.js';
 import { auditRows, startApi, startDatabase, type RunningApi } from './helpers.js';
+
+const PAGE_API = fileURLToPath(new URL('../../../../tooling/acceptance/page-api.mjs', import.meta.url));
+const run = promisify(execFile);
 
 const CONFIG = fileURLToPath(new URL('./fixtures/approvals-pages-config', import.meta.url));
 
@@ -332,5 +337,33 @@ describe('APR-7 starting an approved change-set from the page', () => {
       executor.unavailable = false;
     }
     expect(await statusOf(seeded.id)).toBe('approved');
+  });
+});
+
+describe('APR-7 page-api.mjs for the acceptance run', () => {
+  it('APR-7 page-api.mjs lists, reads, decides and starts through the page API', async () => {
+    const seeded = await seedAlice();
+    const dave = await login(DAVE);
+    const env = { ...process.env, AIOPS_PAGE_COOKIE: dave.cookie };
+    const call = async (...args: string[]): Promise<{ status: number; body: { viewer: { canDecide: boolean } } }> => {
+      const { stdout } = await run(process.execPath, [PAGE_API, api.url, ...args], { env });
+      const lines = stdout.trim().split('\n');
+      expect(lines).toHaveLength(1);
+      return JSON.parse(lines[0] ?? '') as { status: number; body: { viewer: { canDecide: boolean } } };
+    };
+
+    const queue = await call('approvals');
+    expect(queue.status).toBe(200);
+    expect(JSON.stringify(queue.body)).toContain(seeded.id);
+    const one = await call('changeset', seeded.id);
+    expect(one.status).toBe(200);
+    expect(one.body.viewer.canDecide).toBe(true);
+    expect((await call('items', seeded.id)).status).toBe(200);
+
+    const decided = await call('decide', seeded.id, 'approve', seeded.hash, String(seeded.included));
+    expect(decided).toEqual({ status: 200, body: { status: 'pending_approval' } });
+    expect((await call('start', seeded.id)).status).toBe(409);
+
+    await expect(run(process.execPath, [PAGE_API, api.url, 'decide', seeded.id, 'bogus', seeded.hash, '1'], { env })).rejects.toMatchObject({ code: 2 });
   });
 });
