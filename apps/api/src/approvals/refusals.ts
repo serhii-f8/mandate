@@ -2,8 +2,10 @@
  * One status per refusal reason, shared by the decision and start routes (SEC-11), and the helper
  * that audits a refusal before answering it (AUD-1).
  */
+import { randomUUID } from 'node:crypto';
 import type { Response } from 'express';
-import type { AuditEventInput, AuditLog, DecisionRefusal } from '@aiops/core';
+import type { AuditAction, AuditEventInput, AuditLog, DecisionRefusal } from '@aiops/core';
+import { CHANGESET_ID } from './page-query.js';
 
 export type PageRefusal =
   | DecisionRefusal
@@ -52,4 +54,39 @@ export async function refuse(
 ): Promise<void> {
   if (audit !== undefined) await audit.log.append(audit.event);
   res.status(REFUSAL_STATUS[reason]).json({ error: reason });
+}
+
+/** Audits a refusal the page route finds itself, under the route's action, then answers it (AUD-1). */
+export type Refuser = (reason: PageRefusal) => Promise<void>;
+
+/**
+ * The refuser of the Phase 7 page routes: one `denied` row of `action` with
+ * `details: { reason, channel: 'page' }`, written before the answer (SEC-11). `details` adds
+ * further non-sensitive context; it never replaces `reason` or `channel` (SEC-3).
+ */
+export function pageRefuser(o: {
+  audit: AuditLog;
+  action: AuditAction;
+  viewer: { readonly subject: string; readonly clientId: string };
+  /** The raw path value; only a UUID-shaped one is recorded as the change-set. */
+  id: string;
+  correlationId: string;
+  res: Response;
+  details?: Readonly<Record<string, unknown>>;
+}): Refuser {
+  const changesetId = CHANGESET_ID.test(o.id) ? o.id.toLowerCase() : undefined;
+  return (reason) =>
+    refuse(o.res, reason, {
+      log: o.audit,
+      event: {
+        id: randomUUID(),
+        actor: o.viewer.subject,
+        clientId: o.viewer.clientId,
+        action: o.action,
+        outcome: 'denied',
+        correlationId: o.correlationId,
+        ...(changesetId === undefined ? {} : { changesetId, subject: changesetId }),
+        details: { ...o.details, reason, channel: 'page' },
+      },
+    });
 }
