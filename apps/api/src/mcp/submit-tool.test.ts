@@ -669,3 +669,32 @@ describe('MCP-8 POL-5 POL-6 submit_for_approval', () => {
     );
   });
 });
+
+describe('NTF-1 submit_for_approval queues its notifications', () => {
+  /** content_manager is the step-1 role of always_role's plan; always_role is the requester role. */
+  const NOTIFYING = snapshotOf({
+    ...CURRENT.configuration,
+    notify: new Map([
+      ['content_manager', { approvalRequests: ['lead-mail'], results: [] }],
+      ['always_role', { approvalRequests: ['cm-mail'], results: ['cm-chat'] }],
+    ]),
+  });
+  const queued = async (repository: InMemoryChangeSetRepository) =>
+    (await repository.outbox.listFor(ID)).map(({ kind, round, step, target }) => ({ kind, round, step, target }));
+
+  it('NTF-1 submit_for_approval queues approval_requested for the step-1 role, not the requester role', async () => {
+    const { tool, ctx, repository } = await setup({ requester: 'always' });
+    const result = plain(await tool.handler(args(), ctx({ subject: 'always', groups: ['always'] }, { snapshot: NOTIFYING })));
+    expect(result.structuredContent).toMatchObject({ status: 'pending_approval' });
+    expect(await queued(repository)).toEqual([{ kind: 'approval_requested', round: 1, step: 1, target: 'lead-mail' }]);
+  });
+
+  it('NTF-1 a submission without approval queues nothing', async () => {
+    const { tool, ctx, repository, executor } = await setup();
+    const result = plain(await tool.handler(args(), ctx(alice, { snapshot: NOTIFYING })));
+    expect(result.structuredContent).toMatchObject({ status: 'executing' });
+    expect(executor.starts).toHaveLength(1);
+    expect(await queued(repository)).toEqual([]);
+  });
+});
+

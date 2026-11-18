@@ -10,12 +10,14 @@ import { createSchemaCompiler, executionLimits } from '@aiops/config';
 import {
   allowingRole,
   approvalRequestedEvent,
+  approvalRequestNotifications,
   approvalRequirement,
   changesetTransitionEvent,
   ExecutorUnavailable,
   TASK_TTL_MS,
   type ApprovalPlan,
   type ChangeSetRecord,
+  type RoleNotifyTargets,
   type StartOutcome,
   type Submission,
 } from '@aiops/core';
@@ -94,13 +96,21 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
   }
 
   /** Required approval (POL-5): one transaction to `pending_approval`; no task, since it waits for people (APR-1). */
-  async function sendForApproval(call: Call, record: ChangeSetRecord, hash: string, submission: Submission, plan: ApprovalPlan): Promise<ToolAnswer> {
+  async function sendForApproval(
+    call: Call,
+    record: ChangeSetRecord,
+    hash: string,
+    submission: Submission,
+    plan: ApprovalPlan,
+    notify: RoleNotifyTargets,
+  ): Promise<ToolAnswer> {
     const { caller, correlationId } = call;
     const id = record.id;
     const first = plan.steps[0];
     // A required plan always has steps; the unroutable case was answered before.
     if (first === undefined) throw new Error('approval plan has no steps');
     const clientId = caller.clientId === undefined ? {} : { clientId: caller.clientId };
+    const round = record.approvalRound + 1;
     const outcome = await deps.repository.submitForApproval({
       changesetId: id,
       expectedHash: hash,
@@ -121,13 +131,14 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
           actor: caller.subject,
           ...clientId,
           changeset: record,
-          round: record.approvalRound + 1,
+          round,
           step: 1,
           role: first,
           correlationId,
         }),
       },
-      notifications: [],
+      // NTF-1: the step-1 role is asked to decide, not the requester's role.
+      notifications: approvalRequestNotifications(notify, { role: first, round, step: 1 }),
     });
     if (!outcome.ok) {
       call.report({ errorCode: outcome.reason });
@@ -228,7 +239,7 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
       };
       if (requirement.required) {
         const { required: _required, unroutable: _unroutable, ...plan } = requirement; // eslint-disable-line @typescript-eslint/no-unused-vars -- not part of the plan
-        return sendForApproval(call, record, hash, submission, plan);
+        return sendForApproval(call, record, hash, submission, plan, snapshot.configuration.notify);
       }
 
       // 7. No approval: start with the role's limits (POL-4); a limit refusal's deny row is written by the start itself.

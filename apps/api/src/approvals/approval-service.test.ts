@@ -9,6 +9,7 @@ import {
   type DecisionRefusal,
   type DecisionRequest,
   type ExecutionProgress,
+  type NewNotification,
   type StartOutcome,
   type StartRequest,
 } from '@aiops/core';
@@ -101,6 +102,21 @@ role_mapping:
 const CONFIG = await configuration(50);
 const ONE_RECORD = await configuration(1);
 
+/**
+ * NTF-1 targets: `lead` and `brand` are the step roles of the two-step plan, `writer` is the
+ * requester role of `submitChangeSet` (the brief's content_lead, brand_owner and content_manager).
+ */
+const NOTIFYING: LoadedConfiguration = {
+  ...CONFIG,
+  notify: new Map([
+    ['lead', { approvalRequests: ['lead-mail'], results: [] }],
+    ['brand', { approvalRequests: ['brand-mail'], results: [] }],
+    ['writer', { approvalRequests: ['cm-mail'], results: ['cm-chat'] }],
+  ]),
+};
+const SUBMIT_ROW: NewNotification = { kind: 'approval_requested', round: 1, step: 1, target: 'lead-mail' };
+const TWO_STEPS = { steps: ['lead', 'brand'], notifications: [SUBMIT_ROW] };
+
 const bob: Approver = { subject: 'bob', name: 'Bob', roles: ['lead'], clientId: 'aiops-web' };
 const carol: Approver = { subject: 'carol', roles: ['brand'] };
 
@@ -127,7 +143,14 @@ class SpyExecutor implements ChangeSetExecutor {
 }
 
 async function setup(
-  options: { steps?: readonly string[]; stepUp?: number; submit?: boolean; expiresAt?: Date; items?: number } = {},
+  options: {
+    steps?: readonly string[];
+    stepUp?: number;
+    submit?: boolean;
+    expiresAt?: Date;
+    items?: number;
+    notifications?: readonly NewNotification[];
+  } = {},
 ) {
   const audit = new InMemoryAuditLog();
   const repository = new InMemoryChangeSetRepository(audit);
@@ -162,6 +185,7 @@ async function setup(
       groups: ['content'],
       at: SUBMITTED,
       ...(options.stepUp === undefined ? {} : { stepUp: options.stepUp }),
+      ...(options.notifications === undefined ? {} : { notifications: options.notifications }),
     });
   }
   const inner = new InMemoryExecutor({ repository, writer: new ScriptedWriter(), batchSizeOf: () => 100 });
@@ -440,5 +464,41 @@ describe('APR-1 APR-2 SEC-1 approval service', () => {
     expect(DECISION_REFUSAL_TEXT.comment_invalid(ID)).toBe(
       'The comment is longer than 2000 characters or contains control characters.',
     );
+  });
+});
+
+describe('NTF-1 decisions queue their notifications', () => {
+  const queued = async (s: Arrange) =>
+    (await s.repository.outbox.listFor(ID)).map(({ kind, round, step, target }) => ({ kind, round, step, target }));
+
+  it('NTF-1 a non-final approval queues approval_requested for the next step role', async () => {
+    const s = await setup(TWO_STEPS);
+    expect(await s.service.decide(input({ snapshot: NOTIFYING }))).toEqual({ ok: true, status: 'pending_approval' });
+    expect(await queued(s)).toEqual([SUBMIT_ROW, { kind: 'approval_requested', round: 1, step: 2, target: 'brand-mail' }]);
+  });
+
+  it.each(['reject', 'return'] as const)(
+    "NTF-1 reject and return queue approval_decided for the requester role's results (%s)",
+    async (decision) => {
+      const s = await setup(TWO_STEPS);
+      const answer = await s.service.decide(input({ decision, comment: 'not yet', snapshot: NOTIFYING }));
+      expect(answer.ok).toBe(true);
+      // The approver role's lists (lead-mail) and the requester's approval_requests (cm-mail) are not used.
+      expect(await queued(s)).toEqual([SUBMIT_ROW, { kind: 'approval_decided', round: 1, step: 1, target: 'cm-chat' }]);
+    },
+  );
+
+  it('NTF-1 the final approval queues no notification', async () => {
+    const s = await setup({ steps: ['lead'], notifications: [SUBMIT_ROW] });
+    const answer = await s.service.decide(input({ snapshot: NOTIFYING }));
+    expect(answer).toMatchObject({ ok: true, status: 'approved' });
+    expect(await queued(s)).toEqual([SUBMIT_ROW]);
+  });
+
+  it('NTF-1 a refused decision queues nothing', async () => {
+    const s = await setup(TWO_STEPS);
+    const answer = await s.service.decide(input({ approver: { subject: 'alice', roles: ['lead'] }, snapshot: NOTIFYING }));
+    expect(answer).toEqual({ ok: false, reason: 'separation_of_duties' });
+    expect(await queued(s)).toEqual([SUBMIT_ROW]);
   });
 });

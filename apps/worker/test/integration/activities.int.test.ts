@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { LoadedConfiguration } from '@aiops/config';
 import type { BatchContext, ChangeItemRecord, ChangeWriter, ExecutionGuard, ItemOutcome, ReadPage, UpstreamReader } from '@aiops/core';
-import { PostgresChangeSetRepository } from '@aiops/db';
+import { PostgresChangeSetRepository, PostgresNotificationOutbox } from '@aiops/db';
 import { DEFAULT_TUNING, PREPARE_MAX_ATTEMPTS, type ChangesetActivities } from '@aiops/temporal';
 import { allowAllGuard, ScriptedWriter } from '@aiops/testing';
 import { MockActivityEnvironment } from '@temporalio/testing';
@@ -70,12 +70,13 @@ interface Fixture {
   readonly writer?: ChangeWriter;
   readonly reader?: UpstreamReader;
   readonly guard?: ExecutionGuard;
+  readonly configuration?: LoadedConfiguration;
 }
 
 function activities(fixture: Fixture = {}): ChangesetActivities {
   return createActivities({
     repository,
-    configuration: () => configuration,
+    configuration: () => fixture.configuration ?? configuration,
     writerFor: () => fixture.writer ?? new ScriptedWriter(),
     readerFor: () => fixture.reader ?? new CatalogReader(),
     guardFor: () => fixture.guard ?? allowAllGuard,
@@ -394,6 +395,50 @@ describe('change-set activities', () => {
     await expect(attempt(1, () => activities().finishExecution(cs.id, 'cancelled'))).resolves.toEqual({ status: 'cancelled' });
     const last = (await auditEventsOf(postgres.database, cs.id)).at(-1);
     expect(last).toMatchObject({ actor: 'bob', correlationId: 'corr-cancel', details: { from: 'executing', to: 'cancelled' } });
+  });
+
+  describe('NTF-1 finishExecution notifications', () => {
+    const notifying = () => ({ ...configuration, notify: new Map([['editor', { approvalRequests: [], results: ['chat'] }]]) });
+    const submission = { actor: 'alice', groups: ['editors'], correlationId: 'corr-submit', at: new Date(), role: 'editor', rule: 'role:editor/grant:all' };
+    const queued = async (changesetId: string) =>
+      (await new PostgresNotificationOutbox(postgres.database.db).listFor(changesetId)).map(({ kind, round, step, target, state }) => ({
+        kind,
+        round,
+        step,
+        target,
+        state,
+      }));
+
+    it("NTF-1 finishExecution queues execution_finished for the requester role's results", async () => {
+      const cs = await createPrepared(repository, 1, { execute: { submission } });
+      const a = activities({ configuration: notifying() });
+      await attempt(1, () => a.executeBatch(cs.id, 0));
+      await expect(attempt(1, () => a.finishExecution(cs.id, 'done'))).resolves.toEqual({ status: 'completed' });
+      expect(await queued(cs.id)).toEqual([{ kind: 'execution_finished', round: 0, step: 0, target: 'chat', state: 'pending' }]);
+    });
+
+    it('NTF-3 a retried finishExecution queues one row', async () => {
+      const cs = await createPrepared(repository, 1, { execute: { submission } });
+      const a = activities({ configuration: notifying() });
+      await attempt(1, () => a.finishExecution(cs.id, 'writer_error'));
+      await attempt(2, () => a.finishExecution(cs.id, 'writer_error'));
+      expect(await queued(cs.id)).toHaveLength(1);
+    });
+
+    it('NTF-1 finishExecution without a submission queues nothing', async () => {
+      const cs = await createPrepared(repository, 1, { execute: {} });
+      await attempt(1, () => activities({ configuration: notifying() }).finishExecution(cs.id, 'writer_error'));
+      expect(await queued(cs.id)).toEqual([]);
+    });
+
+    it('NTF-1 a cancelled execution also notifies', async () => {
+      const cs = await createPrepared(repository, 1, { execute: { submission } });
+      await repository.requestCancel(cs.id, { actor: 'bob', correlationId: 'corr-cancel', requestedAt: new Date() });
+      await expect(attempt(1, () => activities({ configuration: notifying() }).finishExecution(cs.id, 'cancelled'))).resolves.toEqual({
+        status: 'cancelled',
+      });
+      expect(await queued(cs.id)).toEqual([{ kind: 'execution_finished', round: 0, step: 0, target: 'chat', state: 'pending' }]);
+    });
   });
 
   it('EXE-1 expire moves a due prepared change-set to expired with actor system', async () => {

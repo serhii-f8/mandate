@@ -14,6 +14,7 @@ import {
   executionTerminal,
   failureThresholdExceeded,
   PRE_EXECUTION,
+  resultNotifications,
   RetryableWriteError,
   runPreparation,
   type BatchContext,
@@ -259,6 +260,13 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
     async finishExecution(changesetId, outcome) {
       const changeset = await load(changesetId);
       const cancel = changeset.cancelRequest;
+      // NTF-1: the requester role's result targets, in the transition's transaction; a retry after success inserts nothing (NTF-3).
+      const notifications = resultNotifications(deps.configuration().notify, {
+        kind: 'execution_finished',
+        role: changeset.submission?.role,
+        round: changeset.approvalRound,
+        step: 0,
+      });
       let finished: ChangeSetRecord | undefined;
       if (outcome === 'cancelled' && cancel !== undefined) {
         // The stored request's actor and correlation ID end the run (EXE-7).
@@ -274,6 +282,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
             to: 'cancelled',
             correlationId: cancel.correlationId,
           }),
+          { notifications },
         );
       } else {
         // `cancelled` without a stored request cannot come from the workflow; fail closed as the in-memory executor does.
@@ -293,7 +302,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
             to: terminal.status,
             correlationId: changeset.executionRequest?.correlationId ?? changeset.correlationId,
           }),
-          terminal.errorCode === undefined ? undefined : { errorCode: terminal.errorCode },
+          { notifications, ...(terminal.errorCode === undefined ? {} : { errorCode: terminal.errorCode }) },
         );
       }
       // A lost compare-and-set (a retry after success, NFR-2) answers the current status.

@@ -8,10 +8,12 @@ import { executionLimits, type LoadedConfiguration } from '@aiops/config';
 import {
   approvalDecisionEvent,
   approvalRequestedEvent,
+  approvalRequestNotifications,
   changesetTransitionEvent,
   checkDecision,
   currentStep,
   ExecutorUnavailable,
+  resultNotifications,
   type ApprovalChannel,
   type ApprovalDecision,
   type ApprovalRecord,
@@ -190,7 +192,7 @@ export class ApprovalService {
       record: approval,
       next,
       audit,
-      notifications: [],
+      notifications: decisionNotifications(input.snapshot, record, step, next),
     });
     // A concurrent decision won the step (APR-3).
     if (!recorded.ok) return this.refuse(input, record, approvals, recorded.reason);
@@ -301,6 +303,23 @@ export class ApprovalService {
       },
     });
     return refusal;
+  }
+}
+
+/**
+ * NTF-1: the next step's role is asked to decide; a rejection or return is told to the requester's
+ * role; the final approval queues nothing (execution_finished follows when the run ends).
+ */
+function decisionNotifications(snapshot: LoadedConfiguration, record: ChangeSetRecord, step: number, next: Next) {
+  const round = record.approvalRound;
+  switch (next.kind) {
+    case 'next_step':
+      return approvalRequestNotifications(snapshot.notify, { role: next.awaitingRole, round, step: step + 1 });
+    case 'rejected':
+    case 'returned':
+      return resultNotifications(snapshot.notify, { kind: 'approval_decided', role: record.submission?.role, round, step });
+    case 'approved':
+      return [];
   }
 }
 
