@@ -484,7 +484,7 @@ else
 fi
 
 cat <<'MANUAL'
-# MANUAL CHECKS (criteria 1 and 2; not automatable here)
+# OPTIONAL MANUAL CHECKS in real clients (criteria 1 and 2 are met by the reference host above; ADR 0041)
 # 1. Start the stack for HTTPS clients, with the sandbox and the acceptance configuration (sandbox URL,
 #    record_threshold 2 so dave approves, allow_widget false):
 #    - `bash deploy/sandbox/magento/up.sh && node deploy/sandbox/magento/seed.mjs http://127.0.0.1:4390`.
@@ -512,8 +512,8 @@ cat <<'MANUAL'
 #    - Add the custom MCP server `aiops` at `https://<api-host>/mcp` with OAuth through the pre-registered client
 #      `aiops-mcp` (as in manual check M1).
 #    - Run the same flow with UMBRELLA-0411..0414 and expect the same results.
-# 4. Record pass or fail per client, with the date, client version and what was observed, in PROGRESS.md
-#    "Blockers and manual checks" under Phase 7.
+# 4. Record pass or fail per client, with the date, client version and what was observed, in
+#    docs/progress-history.md under "Phase 7 — optional client checks".
 # 5. Stop the tunnels and `docker compose -f compose.yaml -f scripts/acceptance/phase-7.compose.yaml down`.
 MANUAL
 
