@@ -8,3 +8,4 @@ coverage/
 *.tsbuildinfo
 .serena/
 .idea/
+tooling/acceptance/widget-host/dist/
