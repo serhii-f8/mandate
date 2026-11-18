@@ -1,0 +1,129 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Change-set 0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e (catalog.update_names) awaits finance: 2 change(s), hash sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa. This change-set must be decided on the approval page. Open: https://aiops.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e"
+    },
+    {
+      "type": "text",
+      "text": "{\"changesetId\":\"0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e\",\"detail\":{\"id\":\"0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e\",\"status\":\"pending_approval\",\"hash\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"operation\":{\"id\":\"catalog.update_names\",\"title\":\"Update names\",\"description\":\"Sets the name of catalog products.\",\"risk\":\"medium\"},\"connection\":\"shop\",\"request\":{\"args\":{\"sku_prefix\":\"UMBRELLA-\"},\"requester\":\"ann\",\"clientId\":\"claude-desktop\",\"createdAt\":\"2030-01-01T09:00:00.000Z\",\"submittedAt\":\"2030-01-01T09:05:00.000Z\"},\"policy\":{\"rule\":\"name-updates\",\"role\":\"content_editor\",\"approval\":{\"reason\":\"threshold\",\"threshold\":1,\"included\":2}},\"stats\":{\"total\":3,\"included\":2,\"excluded\":{\"no_change\":1},\"written\":0,\"failed\":0,\"skipped\":0},\"expiresAt\":\"2030-01-08T09:00:00.000Z\",\"approval\":{\"round\":1,\"steps\":[{\"step\":1,\"role\":\"content_lead\",\"decision\":{\"approver\":\"dave\",\"name\":\"Dave Lead\",\"decision\":\"approve\",\"channel\":\"widget\",\"comment\":\"Names checked.\",\"ts\":\"2030-01-01T10:00:00.000Z\"}},{\"step\":2,\"role\":\"finance\"}],\"awaitingRole\":\"finance\"},\"rollback\":{\"available\":false},\"viewer\":{\"canDecide\":false,\"reason\":\"widget_not_allowed\",\"fresh\":true,\"stepUpSatisfied\":true,\"canStart\":false,\"canSubmit\":false,\"canExclude\":false}},\"items\":[{\"targetId\":\"UMBRELLA-0001\",\"status\":\"pending\",\"before\":{\"name\":\"Old text\"},\"after\":{\"name\":\"New text\"}},{\"targetId\":\"UMBRELLA-0002\",\"status\":\"pending\",\"before\":{\"name\":\"Old text\"},\"after\":{\"name\":\"New text\"}}],\"nextCursor\":\"VU1CUkVMTEEtMDAwMg\",\"sample\":{\"seed\":\"seed-0001\",\"items\":[{\"targetId\":\"UMBRELLA-0002\",\"status\":\"pending\",\"before\":{\"name\":\"Old text\"},\"after\":{\"name\":\"New text\"}}]},\"pageUrl\":\"https://aiops.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e\"}"
+    }
+  ],
+  "structuredContent": {
+    "changesetId": "0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e",
+    "detail": {
+      "id": "0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e",
+      "status": "pending_approval",
+      "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "operation": {
+        "id": "catalog.update_names",
+        "title": "Update names",
+        "description": "Sets the name of catalog products.",
+        "risk": "medium"
+      },
+      "connection": "shop",
+      "request": {
+        "args": {
+          "sku_prefix": "UMBRELLA-"
+        },
+        "requester": "ann",
+        "clientId": "claude-desktop",
+        "createdAt": "2030-01-01T09:00:00.000Z",
+        "submittedAt": "2030-01-01T09:05:00.000Z"
+      },
+      "policy": {
+        "rule": "name-updates",
+        "role": "content_editor",
+        "approval": {
+          "reason": "threshold",
+          "threshold": 1,
+          "included": 2
+        }
+      },
+      "stats": {
+        "total": 3,
+        "included": 2,
+        "excluded": {
+          "no_change": 1
+        },
+        "written": 0,
+        "failed": 0,
+        "skipped": 0
+      },
+      "expiresAt": "2030-01-08T09:00:00.000Z",
+      "approval": {
+        "round": 1,
+        "steps": [
+          {
+            "step": 1,
+            "role": "content_lead",
+            "decision": {
+              "approver": "dave",
+              "name": "Dave Lead",
+              "decision": "approve",
+              "channel": "widget",
+              "comment": "Names checked.",
+              "ts": "2030-01-01T10:00:00.000Z"
+            }
+          },
+          {
+            "step": 2,
+            "role": "finance"
+          }
+        ],
+        "awaitingRole": "finance"
+      },
+      "rollback": {
+        "available": false
+      },
+      "viewer": {
+        "canDecide": false,
+        "reason": "widget_not_allowed",
+        "fresh": true,
+        "stepUpSatisfied": true,
+        "canStart": false,
+        "canSubmit": false,
+        "canExclude": false
+      }
+    },
+    "items": [
+      {
+        "targetId": "UMBRELLA-0001",
+        "status": "pending",
+        "before": {
+          "name": "Old text"
+        },
+        "after": {
+          "name": "New text"
+        }
+      },
+      {
+        "targetId": "UMBRELLA-0002",
+        "status": "pending",
+        "before": {
+          "name": "Old text"
+        },
+        "after": {
+          "name": "New text"
+        }
+      }
+    ],
+    "nextCursor": "VU1CUkVMTEEtMDAwMg",
+    "sample": {
+      "seed": "seed-0001",
+      "items": [
+        {
+          "targetId": "UMBRELLA-0002",
+          "status": "pending",
+          "before": {
+            "name": "Old text"
+          },
+          "after": {
+            "name": "New text"
+          }
+        }
+      ]
+    },
+    "pageUrl": "https://aiops.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e"
+  }
+}

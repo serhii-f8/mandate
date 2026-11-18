@@ -1,0 +1,130 @@
+/**
+ * The structured content the widget reads (design part 3 §3.2 and §4). Answers are untrusted
+ * input: every schema is used with `safeParse`, and unknown fields are ignored (UI-1).
+ */
+import { z } from 'zod';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const uuidSchema = z.string().regex(UUID);
+
+export const itemSchema = z.object({
+  targetId: z.string(),
+  status: z.string(),
+  reason: z.string().optional(),
+  before: z.unknown(),
+  after: z.unknown(),
+  error: z.string().optional(),
+});
+
+export const statsSchema = z.object({
+  total: z.number(),
+  included: z.number(),
+  excluded: z.record(z.string(), z.number()),
+  written: z.number(),
+  failed: z.number(),
+  skipped: z.number(),
+});
+
+const progressSchema = z.object({ total: z.number(), done: z.number(), failed: z.number(), skipped: z.number() });
+
+/** Today `get_changeset` sends the operation ID as a string; an object with a title is read too (ruling F13). */
+const operationSchema = z
+  .union([z.string(), z.object({ id: z.string(), title: z.string().optional() })])
+  .transform((op) => (typeof op === 'string' ? { id: op } : op));
+
+/** `get_changeset`, the prepared result and `exclude_changeset_items` (changeset-tools.ts, result.ts, exclude-tool.ts). */
+export const changeSetAnswerSchema = z.object({
+  changeset: z.object({
+    id: z.string(),
+    operation: operationSchema,
+    status: z.string(),
+    hash: z.string().optional(),
+    stats: statsSchema,
+    createdAt: z.string(),
+    expiresAt: z.string(),
+    errorCode: z.string().optional(),
+  }),
+  progress: progressSchema.optional(),
+  approval: z
+    .object({
+      round: z.number(),
+      plan: z.object({ steps: z.array(z.string()) }),
+      decisions: z.array(
+        z.object({
+          step: z.number(),
+          approver: z.string(),
+          decision: z.string(),
+          channel: z.string(),
+          ts: z.string(),
+          comment: z.string().optional(),
+        }),
+      ),
+    })
+    .optional(),
+  items: z.array(itemSchema),
+  nextCursor: z.string().optional(),
+  derivedFrom: z.string().optional(),
+  rollback: z.object({ available: z.boolean() }).optional(),
+  execution: z.object({ drift: z.number() }).optional(),
+  pageUrl: z.string().optional(),
+});
+
+/** The page detail block inside the `review_changeset` answer (apps/api/src/approvals/detail.ts). */
+const detailSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  hash: z.string().optional(),
+  operation: z.object({ id: z.string(), title: z.string().optional(), description: z.string().optional(), risk: z.string().optional() }),
+  request: z.object({
+    args: z.record(z.string(), z.unknown()),
+    requester: z.string(),
+    clientId: z.string().optional(),
+    createdAt: z.string(),
+    submittedAt: z.string().optional(),
+  }),
+  policy: z
+    .object({
+      rule: z.string(),
+      role: z.string(),
+      approval: z.object({ reason: z.string(), threshold: z.number().optional(), included: z.number() }).optional(),
+    })
+    .optional(),
+  stats: statsSchema,
+  expiresAt: z.string(),
+  approval: z
+    .object({
+      round: z.number(),
+      steps: z.array(
+        z.object({
+          step: z.number(),
+          role: z.string(),
+          decision: z
+            .object({
+              approver: z.string(),
+              name: z.string().optional(),
+              decision: z.string(),
+              channel: z.string(),
+              comment: z.string().optional(),
+              ts: z.string(),
+            })
+            .optional(),
+        }),
+      ),
+      awaitingRole: z.string().optional(),
+    })
+    .optional(),
+  viewer: z.object({ canDecide: z.boolean(), reason: z.string().nullable() }),
+});
+
+/** `review_changeset` (ADR 0036 R19); `changesetId` is ignored. */
+export const reviewAnswerSchema = z.object({
+  detail: detailSchema,
+  items: z.array(itemSchema),
+  nextCursor: z.string().optional(),
+  sample: z.object({ seed: z.string(), items: z.array(itemSchema) }),
+  pageUrl: z.string(),
+});
+
+export type ChangeSetAnswer = z.infer<typeof changeSetAnswerSchema>;
+export type ReviewAnswer = z.infer<typeof reviewAnswerSchema>;
+export type ItemAnswer = z.infer<typeof itemSchema>;
