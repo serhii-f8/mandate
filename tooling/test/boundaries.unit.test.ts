@@ -14,7 +14,7 @@ beforeAll(() => {
   eslint = new ESLint({
     cwd: repoRoot,
     overrideConfigFile: true,
-    overrideConfig: [{ files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } }, ...boundaryRules],
+    overrideConfig: [{ files: ['**/*.ts', '**/*.tsx'], languageOptions: { parser: tseslint.parser } }, ...boundaryRules],
   });
 });
 
@@ -24,6 +24,15 @@ async function restrictedImportErrors(filePath: string, specifier: string): Prom
   const [result] = await eslint.lintText(code, { filePath: `${repoRoot}${filePath}` });
   if (result === undefined) throw new Error('ESLint returned no result');
   return result.messages.filter((m) => m.ruleId === 'no-restricted-imports').length;
+}
+
+/** Lints `code` as if it were a file at `filePath` (relative to the repository) and counts one rule's errors. */
+async function ruleErrors(filePath: string, code: string, ruleId: string): Promise<number> {
+  const [result] = await eslint.lintText(code, { filePath: `${repoRoot}${filePath}` });
+  if (result === undefined) throw new Error('ESLint returned no result');
+  const fatal = result.messages.find((m) => m.fatal === true);
+  if (fatal !== undefined) throw new Error(`ESLint could not parse the probe: ${fatal.message}`);
+  return result.messages.filter((m) => m.ruleId === ruleId).length;
 }
 
 describe('package boundaries (CLAUDE.md engineering conventions)', () => {
@@ -120,5 +129,46 @@ describe('package boundaries (CLAUDE.md engineering conventions)', () => {
   it('packages never import an app', async () => {
     expect(await restrictedImportErrors('packages/db/src/probe.ts', '@aiops/api')).toBe(1);
     expect(await restrictedImportErrors('packages/config/src/probe.ts', '@aiops/worker')).toBe(1);
+    expect(await restrictedImportErrors('packages/widgets/src/views/Probe.tsx', '@aiops/api')).toBe(1);
+  });
+
+  describe('widgets (UI-1, SEC-1, SEC-5)', () => {
+    it('UI-1 widget views, components and models import nothing from the MCP SDK', async () => {
+      const sdk = '@modelcontextprotocol/ext-apps/react';
+      for (const file of ['packages/widgets/src/views/Probe.tsx', 'packages/widgets/src/components/Probe.tsx', 'packages/widgets/src/model.ts']) {
+        expect(await restrictedImportErrors(file, sdk)).toBe(1);
+      }
+      expect(await restrictedImportErrors('packages/widgets/src/widget/bridge.ts', sdk)).toBe(0);
+    });
+
+    it('UI-1 the library does not import the widget entries', async () => {
+      expect(await restrictedImportErrors('packages/widgets/src/views/Probe.tsx', '../widget/bridge.js')).toBe(1);
+    });
+
+    it('UI-1 apps/web imports @aiops/widgets and its stylesheet, not its widget entries', async () => {
+      const file = 'apps/web/src/pages/Probe.tsx';
+      expect(await restrictedImportErrors(file, '@aiops/widgets')).toBe(0);
+      expect(await restrictedImportErrors(file, '@aiops/widgets/styles.css')).toBe(0);
+      expect(await restrictedImportErrors(file, '@aiops/widgets/widget/bridge')).toBe(1);
+      expect(await restrictedImportErrors(file, '@modelcontextprotocol/ext-apps')).toBe(1);
+    });
+
+    it('SEC-1 widget code uses no network or storage globals', async () => {
+      const samples = ["fetch('/x');\n", "localStorage.getItem('k');\n", "window.fetch('/x');\n", "new WebSocket('ws://x');\n"];
+      for (const file of ['packages/widgets/src/widget/bridge.ts', 'packages/widgets/src/views/Probe.tsx']) {
+        for (const code of samples) {
+          const count =
+            (await ruleErrors(file, code, 'no-restricted-globals')) + (await ruleErrors(file, code, 'no-restricted-properties'));
+          expect(count, `${file}: ${code}`).toBe(1);
+        }
+      }
+    });
+
+    it('SEC-5 widget and web code never set raw HTML', async () => {
+      const jsx = "export const X = () => <div dangerouslySetInnerHTML={{ __html: 'x' }} />;\n";
+      expect(await ruleErrors('packages/widgets/src/views/Probe.tsx', jsx, 'no-restricted-syntax')).toBe(1);
+      expect(await ruleErrors('apps/web/src/pages/Probe.tsx', jsx, 'no-restricted-syntax')).toBe(1);
+      expect(await ruleErrors('packages/widgets/src/widget/bridge.ts', "document.body.innerHTML = 'x';\n", 'no-restricted-syntax')).toBe(1);
+    });
   });
 });

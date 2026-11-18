@@ -12,6 +12,12 @@ function workspaceExcept(/** @type {string[]} */ allowed, /** @type {string} */ 
   return { regex: `^@aiops/(?!(${allowed.join('|')})(/|$))`, message };
 }
 
+const ioNames = ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'localStorage', 'sessionStorage', 'indexedDB'];
+const ioMessage = 'Widgets do no network or storage I/O; data comes from props (SEC-1, UI-6).';
+const rawHtmlMessage = 'Values render as text (SEC-5).';
+const noDangerousHtml = { selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']", message: rawHtmlMessage };
+const mcpSdk = ['@modelcontextprotocol/*'];
+
 const nodeIo = ['node:http', 'node:https', 'node:net', 'node:dgram', 'node:child_process', 'http', 'https', 'net', 'child_process'];
 
 /** @type {import('eslint').Linter.Config[]} */
@@ -111,8 +117,57 @@ export const boundaryRules = [
     },
   },
   {
-    files: ['packages/db/**/*.ts', 'packages/widgets/**/*.ts', 'packages/testing/**/*.ts'],
+    files: ['packages/db/**/*.ts', 'packages/widgets/**/*.ts', 'packages/widgets/**/*.tsx', 'packages/testing/**/*.ts'],
     rules: { 'no-restricted-imports': ['error', { patterns: [apps] }] },
+  },
+  {
+    // W1: widget code, the bridge included, takes its data from props and renders values as text.
+    files: ['packages/widgets/src/**/*.ts', 'packages/widgets/src/**/*.tsx'],
+    rules: {
+      'no-restricted-globals': ['error', ...ioNames.map((name) => ({ name, message: ioMessage }))],
+      'no-restricted-properties': [
+        'error',
+        ...['window', 'globalThis'].flatMap((object) => ioNames.map((property) => ({ object, property, message: ioMessage }))),
+      ],
+      'no-restricted-syntax': [
+        'error',
+        noDangerousHtml,
+        { selector: 'AssignmentExpression > MemberExpression.left[property.name=/^(innerHTML|outerHTML)$/]', message: rawHtmlMessage },
+        { selector: "CallExpression[callee.property.name='insertAdjacentHTML']", message: rawHtmlMessage },
+      ],
+    },
+  },
+  {
+    // W2: only src/widget/ talks to the MCP Apps bridge; the library never imports the widget entries.
+    files: ['packages/widgets/src/{components,views}/**/*.{ts,tsx}', 'packages/widgets/src/{model,format,poll,paging,index}.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            apps,
+            { group: mcpSdk, message: 'Only packages/widgets/src/widget/ talks to the MCP Apps bridge (UI-1).' },
+            { group: ['**/widget', '**/widget/*'], message: 'The library does not import the widget entries (UI-1).' },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // W3: the trusted page uses the widgets library over REST, never the widget entries or the MCP SDK.
+    files: ['apps/web/src/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            { group: ['@aiops/widgets/*', '!@aiops/widgets/styles.css'], message: 'apps/web uses the library, not the widget entries (UI-1).' },
+            { group: mcpSdk, message: 'The trusted page talks REST only.' },
+          ],
+        },
+      ],
+      'no-restricted-syntax': ['error', noDangerousHtml],
+    },
   },
   {
     files: ['apps/worker/src/workflows/**/*.ts'],
