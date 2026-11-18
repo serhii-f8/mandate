@@ -3,6 +3,7 @@ import { ConfigurationError, ConfigurationHolder, formatIssue, parseApiEnv } fro
 import { runMigrations } from '@aiops/db';
 import { createApp } from './app.js';
 import { createLogger } from './logger.js';
+import { enableShutdown } from './shutdown.js';
 import { configurationLoadOptions } from '@aiops/upstream';
 
 /** Process entry: parse env, load configuration (CFG-2), apply migrations (NFR-5), serve. */
@@ -38,7 +39,7 @@ async function main(): Promise<void> {
   const { applied } = await runMigrations(env.databaseUrl);
   logger.info({ applied }, 'database migrations applied');
   const app = await createApp({ env, configuration, logger, overrides: { adapter } });
-  app.enableShutdownHooks();
+  enableShutdown(app);
   await app.listen(env.port, '0.0.0.0');
   logger.info({ port: env.port }, 'api listening');
 }
