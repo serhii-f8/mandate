@@ -288,7 +288,10 @@ fi
 ALICE="$(page_login alice 2>&1)" || { fail export-csv "page login: $ALICE"; ALICE=""; }
 EXP_CSV="$(page_api "$ALICE" export "$CS_N" csv "$WORK/export.csv" 2>&1 || true)"
 CSV_CHECK="$(node -e '
-  const text = require("fs").readFileSync(process.argv[1], "utf8");
+  // The export starts with a UTF-8 BOM (for spreadsheet programs); the header follows it.
+  const raw = require("fs").readFileSync(process.argv[1], "utf8");
+  const bom = raw.startsWith("\uFEFF");
+  const text = bom ? raw.slice(1) : raw;
   const lines = text.split(/\r?\n/).filter((l) => l !== "");
   // A minimal RFC 4180 split of one line (the stamps carry no line breaks).
   const cells = (l) => { const out = []; let cur = "", q = false; for (let i = 0; i < l.length; i++) { const c = l[i];
@@ -296,7 +299,7 @@ CSV_CHECK="$(node -e '
     else if (c === "\"") q = true; else if (c === ",") { out.push(cur); cur = ""; } else cur += c; } out.push(cur); return out; };
   const head = cells(lines[0]);
   const row = lines.slice(1).map(cells).find((r) => r[head.indexOf("target_id")] === "UMBRELLA-0301");
-  console.log(JSON.stringify({ lines: lines.length, headerOk: lines[0].startsWith("\"target_id\",\"status\",\"reason\",\"error\""),
+  console.log(JSON.stringify({ bom, lines: lines.length, headerOk: lines[0].startsWith("\"target_id\",\"status\",\"reason\",\"error\""),
     after: row?.[head.indexOf("after.description")] ?? null }));' "$WORK/export.csv" 2>/dev/null || echo '{}')"
 if [[ "$(json "$EXP_CSV" '.status')" == 200 && "$(json "$CSV_CHECK" '.lines')" == 5 && "$(json "$CSV_CHECK" '.headerOk')" == true &&
   "$(json "$CSV_CHECK" '.after')" == "'=1+1"* ]]; then
