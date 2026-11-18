@@ -53,7 +53,7 @@ page_api() { AIOPS_PAGE_COOKIE="$1" node "$REPO/tooling/acceptance/page-api.mjs"
 user_mcp() {
   local token
   token="$(login "$1" 2>&1)" || { echo "{\"loginError\":$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$token")}"; return 0; }
-  node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --token "$token" --tool "$2" --args "$3" 2>&1 || true
+  AIOPS_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --tool "$2" --args "$3" 2>&1 || true
 }
 alice_mcp() { user_mcp alice "$@"; }
 dave_mcp() { user_mcp dave "$@"; }
@@ -432,7 +432,7 @@ LISTED=no
 T0=$SECONDS
 while ((SECONDS - T0 < 60)); do
   DAVE_TOKEN="$(login dave 2>/dev/null || true)"
-  DLIST="$(node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --token "$DAVE_TOKEN" --list 2>&1 || true)"
+  DLIST="$(AIOPS_MCP_TOKEN="$DAVE_TOKEN" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --list 2>&1 || true)"
   if [[ "$(json "$DLIST" '.tools.includes("decide_changeset")')" == true ]]; then LISTED=yes; break; fi
   sleep 2
 done
