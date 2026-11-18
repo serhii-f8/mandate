@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
 import { pageLogin, recordApproval, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@aiops/testing';
-import { seedPending } from './approval-seed.js';
+import { seedPending, seedPrepared } from './approval-seed.js';
 import { startApi, startDatabase, type RunningApi } from './helpers.js';
 
 const CONFIG = fileURLToPath(new URL('./fixtures/approvals-pages-config', import.meta.url));
@@ -216,6 +216,13 @@ describe('APR-5 the detail is built from storage', () => {
       approval: { round: 1, awaitingRole: 'content_lead', steps: [{ step: 1, role: 'content_lead' }, { step: 2, role: 'brand_owner' }] },
       viewer: { canDecide: true, reason: null },
     });
+  });
+
+  it('UI-3 the requester sees canSubmit and canExclude on a prepared change-set', async () => {
+    const seeded = await seedPrepared(repo, { requester: ALICE.sub, items: 2 });
+    const own = await get(await login(ALICE), `/api/v1/changesets/${seeded.id}`);
+    expect(own.status).toBe(200);
+    expect(own.body).toMatchObject({ status: 'prepared', rollback: { available: false }, viewer: { canSubmit: true, canExclude: true } });
   });
 
   it('APR-5 the sample is deterministic per seed, included items only, and re-sampling draws a new seed', async () => {

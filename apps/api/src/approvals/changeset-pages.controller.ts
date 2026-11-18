@@ -18,6 +18,7 @@ import { APPROVAL_SERVICE, AUDIT_LOG, CHANGESET_EXECUTOR, CHANGESET_REPOSITORY, 
 import { PageAccess, pageDenial, pageOf, type PageChecks, type PageRequest } from '../web/access.js';
 import { pageCorrelation } from '../web/correlation.js';
 import type { ApprovalService } from './approval-service.js';
+import { isSummarised } from '../mcp/changeset-tools.js';
 import { changesetDetail, checkPageStart, toApprover, type PageViewer } from './detail.js';
 import { CHANGESET_ID, decisionBodySchema, encodeItemCursor, newSeed, parseItemsQuery, parseSampleQuery } from './page-query.js';
 import { refuse, REFUSAL_STATUS, type PageRefusal } from './refusals.js';
@@ -205,9 +206,11 @@ export class ChangeSetPagesController {
     const { changeset, approvals } = found;
     const operation = this.configuration.current.policy.operations.find((op) => op.id === changeset.operation);
     const progress = await progressOf({ repository: this.repository, executor: this.executor, newId: randomUUID, now: () => new Date() }, changeset);
+    const drift = isSummarised(changeset) ? ((await this.repository.errorCounts(changeset.id)).drift ?? 0) : undefined;
     res.status(200).json(
       changesetDetail({
         changeset,
+        ...(drift === undefined ? {} : { drift }),
         approvals,
         ...(operation === undefined ? {} : { operation }),
         ...(progress === undefined ? {} : { progress }),

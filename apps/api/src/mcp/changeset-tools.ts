@@ -59,6 +59,10 @@ function hasProgress(record: ChangeSetRecord): boolean {
   return PROGRESS_STATUSES.includes(record.status) || ((record.status === 'failed' || record.status === 'cancelled') && record.preparedAt !== undefined);
 }
 
+/** Execution is summarised once it completed, or failed after preparation (UI-4, MCP-4). */
+export const isSummarised = (record: ChangeSetRecord): boolean =>
+  record.status === 'completed' || record.status === 'completed_with_errors' || (record.status === 'failed' && record.preparedAt !== undefined);
+
 /** Live execution progress when the status has any; `undefined` when the executor is down. */
 export async function progressOf(deps: ChangesetToolDeps, record: ChangeSetRecord): Promise<ExecutionProgress | undefined> {
   if (!hasProgress(record)) return undefined;
@@ -136,7 +140,7 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
       const nextCursor = rows.length > limit && last !== undefined ? encodeCursor(last.targetId) : undefined;
       const excluded = Object.values(record.stats.excluded).reduce((sum, n) => sum + n, 0);
       const progress = await progressOf(deps, record);
-      const summarised = record.status === 'completed' || record.status === 'completed_with_errors' || (record.status === 'failed' && record.preparedAt !== undefined);
+      const summarised = isSummarised(record);
       const summary = summarised ? ` ${executionSummaryText(record.status, record.stats, (await deps.repository.errorCounts(id)).drift ?? 0)}` : '';
       const approval = await approvalView(deps, record);
       const structured: Record<string, unknown> = {

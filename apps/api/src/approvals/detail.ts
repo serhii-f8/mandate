@@ -39,6 +39,8 @@ export interface ViewerBlock {
   fresh: boolean;
   stepUpSatisfied: boolean;
   canStart: boolean;
+  canSubmit: boolean;
+  canExclude: boolean;
 }
 
 export interface StepDecision {
@@ -60,6 +62,7 @@ export interface ChangeSetDetail {
   id: string;
   status: ChangeSetStatus;
   hash?: string;
+  derivedFrom?: string;
   operation: { id: string; title?: string; description?: string; risk?: RiskClass };
   connection: string;
   request: {
@@ -80,6 +83,10 @@ export interface ChangeSetDetail {
     awaitingRole?: string;
     stepUp?: { maxAgeSeconds: number };
   };
+  /** Present once execution is summarised (UI-4). */
+  drift?: number;
+  /** Rollback is not offered in this phase (UI-4). */
+  rollback: { available: false };
   viewer: ViewerBlock;
 }
 
@@ -115,6 +122,8 @@ export function viewerBlock(cs: ChangeSetRecord, approvals: readonly ApprovalRec
     now,
   });
   // A missing step-up is solved by logging in again, so the panel still shows (design §5).
+  // Submitting and excluding belong to the requester of an unexpired prepared change-set (UI-3).
+  const own = viewer.subject === cs.requester && cs.status === 'prepared' && !isExpiryDue(cs, now);
   const reason = r === 'step_up_required' ? null : (r ?? null);
   return {
     canDecide: reason === null,
@@ -122,6 +131,8 @@ export function viewerBlock(cs: ChangeSetRecord, approvals: readonly ApprovalRec
     fresh: viewer.fresh,
     stepUpSatisfied: cs.approvalPlan?.stepUp === undefined || r !== 'step_up_required',
     canStart: checkPageStart(cs, approvals, viewer, now) === undefined,
+    canSubmit: own,
+    canExclude: own,
   };
 }
 
@@ -164,6 +175,7 @@ export function changesetDetail(input: {
   progress?: ExecutionProgress;
   viewer: PageViewer;
   now: Date;
+  drift?: number;
 }): ChangeSetDetail {
   const { changeset: cs, approvals, progress } = input;
   const submission = cs.submission;
@@ -173,6 +185,7 @@ export function changesetDetail(input: {
     id: cs.id,
     status: cs.status,
     ...(cs.hash === undefined ? {} : { hash: cs.hash }),
+    ...(cs.derivedFrom === undefined ? {} : { derivedFrom: cs.derivedFrom }),
     operation: operationOf(cs.operation, input.operation),
     connection: cs.connection,
     request: {
@@ -206,6 +219,8 @@ export function changesetDetail(input: {
       : { progress: { total: progress.total, done: progress.done, failed: progress.failed, skipped: progress.skipped } }),
     ...(cs.errorCode === undefined ? {} : { errorCode: cs.errorCode }),
     ...(approval === undefined ? {} : { approval }),
+    ...(input.drift === undefined ? {} : { drift: input.drift }),
+    rollback: { available: false },
     viewer: viewerBlock(cs, approvals, input.viewer, input.now),
   };
 }

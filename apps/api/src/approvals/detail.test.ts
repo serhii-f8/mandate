@@ -184,9 +184,35 @@ describe('changesetDetail', () => {
   });
 });
 
+describe('detail additions', () => {
+  it('CS-5 the detail carries derivedFrom of a derived change-set', () => {
+    const src = '22222222-2222-4222-8222-222222222222';
+    expect(changesetDetail({ changeset: { ...prepared(), derivedFrom: src }, approvals: [], viewer: alice, now: NOW }).derivedFrom).toBe(src);
+    expect('derivedFrom' in changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW })).toBe(false);
+  });
+
+  it('UI-4 drift is present once execution summarised; rollback is never available in this phase', () => {
+    const without = changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW });
+    expect('drift' in without).toBe(false);
+    expect(without.rollback).toStrictEqual({ available: false });
+    const withDrift = changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, drift: 0 });
+    expect(withDrift.drift).toBe(0);
+    expect(changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, drift: 2 }).drift).toBe(2);
+    expect(withDrift.rollback).toStrictEqual({ available: false });
+  });
+});
+
 describe('viewerBlock', () => {
+  it('UI-3 viewer.canSubmit and canExclude only for the requester of a prepared, unexpired change-set', () => {
+    expect(viewerBlock(prepared(), [], alice, NOW)).toMatchObject({ canSubmit: true, canExclude: true });
+    expect(viewerBlock(prepared(), [], dave, NOW)).toMatchObject({ canSubmit: false, canExclude: false });
+    expect(viewerBlock(pending(), [], alice, NOW)).toMatchObject({ canSubmit: false, canExclude: false });
+    const late = new Date(EXPIRES.getTime() + 1);
+    expect(viewerBlock(prepared(), [], alice, late)).toMatchObject({ canSubmit: false, canExclude: false });
+  });
+
   it('UI-7 viewer.canDecide only for the awaiting role', () => {
-    expect(viewerBlock(pending(), [], dave, NOW)).toStrictEqual({ canDecide: true, reason: null, fresh: true, stepUpSatisfied: true, canStart: false });
+    expect(viewerBlock(pending(), [], dave, NOW)).toStrictEqual({ canDecide: true, reason: null, fresh: true, stepUpSatisfied: true, canStart: false, canSubmit: false, canExclude: false });
     const e = viewerBlock(pending(), [], erin, NOW);
     expect(e.canDecide).toBe(false);
     expect(e.reason).toBe('not_approver');
