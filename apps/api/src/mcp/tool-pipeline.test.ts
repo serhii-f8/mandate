@@ -1,6 +1,6 @@
 import { ProtocolError, type CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import type { AuditEventInput, Caller, RateCounter, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
+import type { AuditEventInput, Caller, OperationDefinition, PolicyDecision, RateCounter, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
 import {
   FakeInvoker,
@@ -15,8 +15,9 @@ import { ApprovalService } from '../approvals/approval-service.js';
 import { callerFromAuthInfo } from '../auth/caller-from-auth.js';
 import { pingTool, type BuiltinToolDeps } from './builtin-tools.js';
 import { DECIDE_TOOL, decideChangesetTool } from './decide-tool.js';
+import { WidgetBundles, type WidgetCatalog, type WidgetKind } from './widget-bundles.js';
 import type { BuiltinTool } from './tool-catalog.js';
-import { callTool, listTools, minuteWindow, snapshotOf, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
+import { callTool, linksChangeset, listTools, minuteWindow, snapshotOf, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 
 /** Narrows an answer to a plain tool result; these tests never ask for a task. */
@@ -90,6 +91,8 @@ function setup() {
     now: () => 0,
     rateCounter: new InMemoryRateCounter(),
     wallClock: () => new Date('2026-11-17T12:00:30.000Z'),
+    widgets: WidgetBundles.empty(),
+    publicUrl: new URL('https://aiops.example.test'),
   };
   const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot(), tasks: false });
   return { audit, invoker, deps, req };
@@ -254,6 +257,8 @@ function setupWith(config: LoadedConfiguration, invoker: OperationInvoker) {
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
     now: () => 0,    rateCounter: new InMemoryRateCounter(),
     wallClock: () => new Date(0),
+    widgets: WidgetBundles.empty(),
+    publicUrl: new URL('https://aiops.example.test'),
   };
   const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot(), tasks: false });
   return { audit, deps, req };
@@ -341,6 +346,8 @@ describe('SEC-1 POL-2 the operation runs under the snapshot the decision used', 
       now: () => 0,
       rateCounter: new InMemoryRateCounter(),
       wallClock: () => new Date(0),
+      widgets: WidgetBundles.empty(),
+      publicUrl: new URL('https://aiops.example.test'),
     };
     const req: PipelineRequest = { caller: alice, correlationId: 'corr-9', snapshot: deps.snapshot(), tasks: false };
     current = OVERRIDDEN; // a reload lands while the request is in flight
@@ -618,5 +625,118 @@ describe('APR-8 MCP-2 decide_changeset visibility', () => {
       expect.objectContaining({ action: 'policy.decision', subject: 'no_such_tool', details: expect.objectContaining({ reason: 'unknown_tool' }) as unknown }),
     ]);
     expect(await repository.approvals(DECIDE_ARGS.changeset_id)).toEqual([]);
+  });
+});
+
+const URIS: Readonly<Record<WidgetKind, string>> = { changeset: 'ui://aiops/changeset.html', approval: 'ui://aiops/approval.html' };
+
+function catalog(missing?: WidgetKind): WidgetCatalog {
+  return { list: () => [], read: () => undefined, uriFor: (k: WidgetKind) => (k === missing ? undefined : URIS[k]) };
+}
+
+function operation(id: string, risk: OperationDefinition['risk'], withManifest: boolean): OperationDefinition {
+  // The manifest is opaque to listing; only its presence matters here.
+  const manifest = withManifest ? ({} as OperationDefinition['manifest']) : undefined;
+  return { id, toolName: id, source: 'config', connection: 'magento', risk, description: id, inputSchema: { type: 'object' }, ...(manifest === undefined ? {} : { manifest }) };
+}
+
+function linkSetup(widgets: WidgetCatalog, ops: readonly OperationDefinition[], builtins: BuiltinTool[] = []) {
+  const { deps, req } = setup();
+  const snapshot = { configuration: LOADED, engine: { grantedOperations: () => ops } as unknown as ReturnType<typeof snapshotOf>['engine'] };
+  const request = (caller: Caller): PipelineRequest => ({ ...req(caller), snapshot });
+  return { deps: { ...deps, widgets, builtins, snapshot: () => snapshot }, req: request };
+}
+
+const LINKED = { ui: { resourceUri: URIS.changeset }, 'ui/resourceUri': URIS.changeset };
+const widgetTool = (name: string, widget?: WidgetKind): BuiltinTool => ({
+  name,
+  description: name,
+  inputSchema: { type: 'object' },
+  ...(widget === undefined ? {} : { widget }),
+  validate: () => ({ ok: true }) as never,
+  handler: () => Promise.resolve({ content: [] }),
+});
+
+describe('MCP-5 tools link their widget', () => {
+  it('MCP-5 a write operation with a manifest links ui://aiops/changeset.html under _meta.ui.resourceUri and ui/resourceUri', async () => {
+    const write = operation('shop.update', 'write', true);
+    const destructive = operation('shop.retire', 'destructive', true);
+    expect(linksChangeset(write) && linksChangeset(destructive)).toBe(true);
+    const { deps, req } = linkSetup(catalog(), [write, destructive]);
+    const tools = await listTools(deps, req(alice));
+    expect(tools.map((t) => t._meta)).toEqual([LINKED, LINKED]);
+  });
+
+  it('MCP-5 read operations and operations without a manifest link nothing', async () => {
+    const ops = [operation('shop.get', 'read', false), operation('shop.read_with_manifest', 'read', true), operation('shop.write', 'write', false)];
+    expect(ops.map(linksChangeset)).toEqual([false, false, false]);
+    const { deps, req } = linkSetup(catalog(), ops);
+    for (const tool of await listTools(deps, req(alice))) expect(tool).not.toHaveProperty('_meta');
+  });
+
+  it('MCP-5 a built-in with widget changeset or approval links its resource; one without widget links nothing', async () => {
+    const { deps, req } = linkSetup(catalog(), [], [widgetTool('a', 'changeset'), widgetTool('b', 'approval'), widgetTool('c')]);
+    const [a, b, c] = await listTools(deps, req(alice));
+    expect(a?._meta).toEqual(LINKED);
+    expect(b?._meta).toEqual({ ui: { resourceUri: URIS.approval }, 'ui/resourceUri': URIS.approval });
+    expect(c).not.toHaveProperty('_meta');
+  });
+
+  it('MCP-6 a missing bundle leaves the tool listed and unlinked', async () => {
+    const { deps, req } = linkSetup(catalog('changeset'), [operation('shop.update', 'write', true)], [widgetTool('a', 'changeset')]);
+    const tools = await listTools(deps, req(alice));
+    expect(tools.map((t) => t.name)).toEqual(['a', 'shop.update']);
+    for (const tool of tools) expect(tool).not.toHaveProperty('_meta');
+  });
+
+  it('APR-8 decide_changeset keeps _meta.ui.visibility ["app"] and links no resource', async () => {
+    const { deps, req } = widgetSetup();
+    const tools = await listTools({ ...deps, widgets: catalog() }, req(dave));
+    expect(tools.find((t) => t.name === DECIDE_TOOL)?._meta).toEqual({ ui: { visibility: ['app'] } });
+  });
+});
+
+describe('MCP-6 change-set results link the page', () => {
+  const ID = '11111111-1111-4111-8111-111111111111';
+  const PAGE = `https://aiops.example.test/app/changesets/${ID}`;
+  const answering = (name: string, widget?: WidgetKind): BuiltinTool => ({
+    ...widgetTool(name, widget),
+    handler: () => Promise.resolve({ content: [{ type: 'text', text: `${name} done.` }], structuredContent: { changesetId: ID } }),
+  });
+
+  it('MCP-6 linked results get the link; ping, cancel_changeset and read operations do not', async () => {
+    const write = operation('shop.update', 'write', true);
+    const read = operation('shop.get', 'read', false);
+    const { deps, req, audit } = setup();
+    const configuration = { ...LOADED, validators: new Map([write, read].map((op) => [op.id, () => ({ ok: true as const })])) } as LoadedConfiguration;
+    const engine = {
+      grantedOperations: () => [write, read],
+      evaluate: (): PolicyDecision => ({ effect: 'allow', rule: 'test', roles: [] }),
+    } as unknown as ReturnType<typeof snapshotOf>['engine'];
+    const snapshot = { configuration, engine };
+    const invoker: OperationInvoker = {
+      invoke: (r: InvocationRequest): Promise<InvocationResult> => Promise.resolve({ text: `${r.operation.id} done.`, structured: { changesetId: ID } }),
+    };
+    const linkDeps: PipelineDeps = {
+      ...deps,
+      // A missing bundle does not remove the fallback link (MCP-6).
+      widgets: catalog('changeset'),
+      builtins: [answering('ping'), answering('cancel_changeset'), answering('get_changeset', 'changeset')],
+      snapshot: () => snapshot,
+      invokerFor: () => invoker,
+    };
+    const request: PipelineRequest = { ...req(alice), snapshot };
+    for (const name of ['get_changeset', 'shop.update']) {
+      const result = plain(await callTool(linkDeps, request, name, {}));
+      expect(text(result), name).toBe(`${name} done. Open: ${PAGE}`);
+      expect(result.structuredContent, name).toEqual({ changesetId: ID, pageUrl: PAGE });
+    }
+    for (const name of ['ping', 'cancel_changeset', 'shop.get']) {
+      const result = plain(await callTool(linkDeps, request, name, {}));
+      expect(text(result), name).toBe(`${name} done.`);
+      expect(result.structuredContent, name).toEqual({ changesetId: ID });
+    }
+    // The audit row is written before the link is added and never holds the URL.
+    expect(JSON.stringify(audit.events)).not.toContain('/app/changesets/');
   });
 });

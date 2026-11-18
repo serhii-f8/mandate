@@ -40,6 +40,9 @@ export const BUILTIN_TOOL_NAMES: readonly string[] = [
   'submit_for_approval',
   'cancel_changeset',
   'rollback_changeset',
+  'exclude_changeset_items',
+  'decide_changeset',
+  'review_changeset',
 ];
 
 export type { OperationBinding };

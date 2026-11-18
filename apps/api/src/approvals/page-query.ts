@@ -5,9 +5,12 @@
  */
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import type { DecisionRequest, ItemStatus } from '@aiops/core';
+import { decodeCursor as decodeCanonicalCursor, type DecisionRequest, type ItemStatus } from '@aiops/core';
 
 export const CHANGESET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A change-set hash as the server writes it (CS-4). */
+export const HASH = /^sha256:[0-9a-f]{64}$/;
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false };
 
@@ -28,14 +31,18 @@ export function encodeQueueCursor(c: { submittedAt: Date; id: string }): string 
   );
 }
 
-/** The decoded text of a canonical base64url cursor, or undefined. */
-function decodeCursor(text: string): string | undefined {
-  if (text.length === 0 || text.length > MAX_CURSOR_LENGTH) return undefined;
-  const decoded = Buffer.from(text, 'base64url').toString('utf8');
-  // Control characters (NUL included) would fail later as a PostgreSQL text parameter (500).
+/**
+ * The decoded text of a canonical base64url cursor, or undefined: the one cursor decoder for the
+ * page routes and the MCP tools (`get_changeset`, `review_changeset`). Control characters (NUL
+ * included) are refused here because PostgreSQL rejects NUL in a text parameter, which would turn a
+ * malformed cursor into an internal failure instead of an input error.
+ */
+export function decodeCursor(text: string): string | undefined {
+  if (text.length > MAX_CURSOR_LENGTH) return undefined;
+  const decoded = decodeCanonicalCursor(text);
   // eslint-disable-next-line no-control-regex -- rejecting control characters is the point
-  if (/[\u0000-\u001f\u007f]/.test(decoded)) return undefined;
-  return Buffer.from(decoded, 'utf8').toString('base64url') === text ? decoded : undefined;
+  if (decoded === undefined || /[\u0000-\u001f\u007f]/.test(decoded)) return undefined;
+  return decoded;
 }
 
 const INVALID = Symbol('invalid');
@@ -130,4 +137,19 @@ export const decisionBodySchema: z.ZodType<{
   hash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
   count: z.number().int().min(0).max(100_000_000),
   comment: z.string().max(10_000).optional(),
+});
+
+/** `POST /api/v1/changesets/:id/submit` (UI-3): the hash the requester reviewed (SEC-9). */
+export const submitBodySchema: z.ZodType<{ hash: string }> = z.strictObject({
+  hash: z.string().regex(HASH),
+});
+
+/** Target IDs of one list; their content (lengths, control characters, the total) is the core's to check (CS-5). */
+const targets = z.array(z.string().max(512)).max(1000).optional();
+
+/** `POST /api/v1/changesets/:id/exclusions` (CS-5). */
+export const exclusionBodySchema: z.ZodType<{ hash: string; exclude?: string[] | undefined; include?: string[] | undefined }> = z.strictObject({
+  hash: z.string().regex(HASH),
+  exclude: targets,
+  include: targets,
 });

@@ -17,6 +17,7 @@ export interface Seeded {
 
 const OPERATION = 'shop.update_content';
 const HOUR = 3_600_000;
+const ARGS = { brand: 'acme', changes: { name: 'new' } };
 
 /** The plan each fixture role produces (`approvals-pages-config/roles.yaml`). */
 function planOf(role: 'content_manager' | 'catalog_editor', included: number): ApprovalPlan {
@@ -25,27 +26,29 @@ function planOf(role: 'content_manager' | 'catalog_editor', included: number): A
     : { reason: 'role_always', steps: ['content_lead'], stepUp: { maxAgeSeconds: 120 }, widget: false, included };
 }
 
+interface PrepareOptions {
+  requester: string;
+  items: number;
+  excluded?: number;
+  expiresAt?: Date;
+  at?: Date;
+  /** Items appended after the generated ones, included in the hash and the stats. */
+  extra?: ChangeItemRecord[];
+}
+
 /**
  * Seeds a prepared change-set of `shop.update_content` with `items` included items (targets
- * `SKU-0001…`) plus `excluded` excluded ones (the first with reason `not_found`), and submits it
- * for approval under the fixture role's plan. The hash is the real one of the stored items.
+ * `SKU-0001…`) plus `excluded` excluded ones (the first with reason `not_found`, the rest
+ * `no_change`), then the `extra` items as given. The hash is the real one of the stored items.
  */
-export async function seedPending(
-  repo: ChangeSetRepository,
-  o: {
-    requester: string;
-    groups: string[];
-    role: 'content_manager' | 'catalog_editor';
-    items: number;
-    excluded?: number;
-    expiresAt?: Date;
-    at?: Date;
-  },
-): Promise<Seeded> {
+export function seedPrepared(repo: ChangeSetRepository, o: PrepareOptions): Promise<Seeded> {
+  return prepare(repo, o, randomUUID());
+}
+
+/** The create → append → complete part, under one correlation ID the caller may reuse. */
+async function prepare(repo: ChangeSetRepository, o: PrepareOptions, correlationId: string): Promise<Seeded> {
   const id = randomUUID();
   const at = o.at ?? new Date();
-  const correlationId = randomUUID();
-  const args = { brand: 'acme', changes: { name: 'new' } };
   const changeset = { id, operation: OPERATION };
   await repo.create(
     {
@@ -54,7 +57,7 @@ export async function seedPending(
       connection: 'shop',
       requester: o.requester,
       clientId: 'aiops-mcp',
-      args,
+      args: ARGS,
       configHash: 'seeded',
       correlationId,
       createdAt: at,
@@ -72,9 +75,11 @@ export async function seedPending(
     if (i < o.items) return { targetId, status: 'pending', before, after };
     return { targetId, status: 'excluded', reason: i === o.items ? 'not_found' : 'no_change', before, after };
   });
+  items.push(...(o.extra ?? []));
+  const included = items.filter((item) => item.status === 'pending').length;
   if (items.length > 0) await repo.appendItems(id, items);
 
-  const hasher = new ChangeSetHasher(OPERATION, args);
+  const hasher = new ChangeSetHasher(OPERATION, ARGS);
   for (const item of items) hasher.add(item);
   const hash = hasher.digest();
   const excludedStats: Record<string, number> = {};
@@ -84,13 +89,31 @@ export async function seedPending(
     {
       status: 'prepared',
       hash,
-      stats: { total: items.length, included: o.items, excluded: excludedStats, written: 0, failed: 0, skipped: 0 },
+      stats: { total: items.length, included, excluded: excludedStats, written: 0, failed: 0, skipped: 0 },
       preparedAt: at,
     },
     changesetTransitionEvent({ id: randomUUID(), actor: 'system', changeset, from: 'preparing', to: 'prepared', correlationId }),
   );
+  return { id, hash, included };
+}
 
-  const plan = planOf(o.role, o.items);
+/**
+ * Seeds a prepared change-set as `seedPrepared` does and submits it for approval under the
+ * fixture role's plan.
+ */
+export async function seedPending(
+  repo: ChangeSetRepository,
+  o: PrepareOptions & {
+    groups: string[];
+    role: 'content_manager' | 'catalog_editor';
+  },
+): Promise<Seeded> {
+  const at = o.at ?? new Date();
+  const correlationId = randomUUID();
+  const { id, hash, included } = await prepare(repo, { ...o, at }, correlationId);
+  const changeset = { id, operation: OPERATION };
+
+  const plan = planOf(o.role, included);
   const first = plan.steps[0] ?? 'content_lead';
   const result = await repo.submitForApproval({
     changesetId: id,
@@ -112,5 +135,5 @@ export async function seedPending(
     notifications: [],
   });
   if (!result.ok) throw new Error(`seedPending: submitForApproval refused: ${result.reason}`);
-  return { id, hash, included: o.items };
+  return { id, hash, included };
 }

@@ -137,7 +137,8 @@ describe('MCP-8 built-in change-set tools', () => {
     const first = await call(alice, 'get_changeset', { changeset_id: id, page_size: 3 });
     expect(first.result.isError).toBeUndefined();
     expect(text(first.result)).toBe(
-      `Change-set ${id} (shop.update_content) is prepared: 5 change(s), 0 excluded. Showing 3 item(s); more with cursor. ${READ_RESULT_TEXT.dataNote}`,
+      `Change-set ${id} (shop.update_content) is prepared: 5 change(s), 0 excluded. Showing 3 item(s); more with cursor. ${READ_RESULT_TEXT.dataNote} ` +
+        `Open: ${api.url}/app/changesets/${id}`,
     );
     const s1 = first.result.structuredContent as { changeset: { status: string; hash: string }; items: { targetId: string }[]; nextCursor?: string };
     expect(s1.changeset).toMatchObject({ id, status: 'prepared', operation: 'shop.update_content' });
@@ -161,6 +162,14 @@ describe('MCP-8 built-in change-set tools', () => {
   it('MCP-8 an invalid cursor is a validation-style error that does not echo it', async () => {
     const id = await prepare();
     const { result } = await call(alice, 'get_changeset', { changeset_id: id, cursor: 'not*a*cursor' });
+    expect(result.isError).toBe(true);
+    expect(text(result)).toBe('Input validation error: Invalid arguments for tool get_changeset: cursor is not valid');
+  });
+
+  it('MCP-4 get_changeset cursor with NUL is an input error, not a database failure', async () => {
+    const id = await prepare();
+    const cursor = Buffer.from('\u0000', 'utf8').toString('base64url');
+    const { result } = await call(alice, 'get_changeset', { changeset_id: id, cursor });
     expect(result.isError).toBe(true);
     expect(text(result)).toBe('Input validation error: Invalid arguments for tool get_changeset: cursor is not valid');
   });

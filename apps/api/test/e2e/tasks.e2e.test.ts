@@ -139,8 +139,10 @@ describe('MCP-7 Tasks across api instances', () => {
     const result = await plainCall(c, 'shop.update_content', ARGS);
     expect(result.isError).toBeUndefined();
     const changesetId = String(structured(result).changesetId);
-    expect(result.structuredContent).toEqual({ changesetId, status: 'preparing' });
-    expect(text(result)).toBe(`Change-set ${changesetId} is being prepared. Call get_changeset with this ID to see the result.`);
+    expect(result.structuredContent).toEqual({ changesetId, status: 'preparing', pageUrl: `${c.url}/app/changesets/${changesetId}` });
+    expect(text(result)).toBe(
+      `Change-set ${changesetId} is being prepared. Call get_changeset with this ID to see the result. Open: ${c.url}/app/changesets/${changesetId}`,
+    );
 
     let status = 'preparing';
     for (const deadline = Date.now() + 10_000; status !== 'prepared' && Date.now() < deadline; ) {
@@ -215,7 +217,11 @@ describe('MCP-7 Tasks across api instances', () => {
       expect(outcome.status).toBe('completed');
       const result = outcome.status === 'completed' ? (outcome.result as unknown as ToolResult) : undefined;
       expect(result?.isError).toBeUndefined();
-      expect(result?.content[0]?.text).toBe('completed: 2 written, 0 failed, 0 skipped (0 changed upstream since preparation).');
+      // The instance that answered the final poll builds the link from its own public URL.
+      const final = wire.filter((w) => w.method === 'tasks/get').at(-1);
+      expect(result?.content[0]?.text).toBe(
+        `completed: 2 written, 0 failed, 0 skipped (0 changed upstream since preparation). Open: http://127.0.0.1:${String(final?.port)}/app/changesets/${id}`,
+      );
     } finally {
       await session.close();
     }

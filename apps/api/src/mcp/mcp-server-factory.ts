@@ -2,6 +2,7 @@ import { CLIENT_INFO_META_KEY, Server, type AuthInfo, type CallToolResult, type 
 import { z } from 'zod';
 import type { Caller } from '@aiops/core';
 import { declaresTasks, TASKS_EXTENSION } from './tasks/extension.js';
+import { listResources, readResource } from './resources.js';
 import { createTaskHandlers, type TaskHandlerDeps, type TaskRequestContext } from './tasks/task-handlers.js';
 import { isTaskAnswer } from './tasks/task-result.js';
 import { callTool, listTools, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
@@ -56,7 +57,8 @@ const TASK_PARAMS = z.looseObject({ taskId: z.string() });
  * `tools/list` and `tools/call` handlers are `api`'s own, so every rejection is
  * audited. The configuration snapshot is taken once per request. Nothing
  * survives the request (NFR-3). It advertises the Tasks extension in
- * `server/discover` and serves `tasks/get|update|cancel` (MCP-7, ADR 0029).
+ * `server/discover` and serves `tasks/get|update|cancel` (MCP-7, ADR 0029), and the widget
+ * bundles as UI resources (MCP-5).
  */
 export function createServerFactory(deps: PipelineDeps, tasks: TaskHandlerDeps): McpServerFactory {
   const handlers = createTaskHandlers(tasks);
@@ -66,7 +68,9 @@ export function createServerFactory(deps: PipelineDeps, tasks: TaskHandlerDeps):
     // `Server` is deprecated for ordinary use in favour of `McpServer`; owning the
     // tools/* handlers so every rejection is audited is the advanced use it keeps (ADR 0016).
     // eslint-disable-next-line @typescript-eslint/no-deprecated
-    const server = new Server(SERVER_INFO, { capabilities: { tools: { listChanged: false }, extensions: { [TASKS_EXTENSION]: {} } } });
+    const server = new Server(SERVER_INFO, {
+      capabilities: { tools: { listChanged: false }, resources: { listChanged: false }, extensions: { [TASKS_EXTENSION]: {} } },
+    });
     const request = (envelope: object | undefined): PipelineRequest => {
       const name = declaredClientName(envelope);
       return { caller, correlationId, snapshot, tasks: declaresTasks(envelope), ...(name === undefined ? {} : { declaredClientName: name }) };
@@ -80,6 +84,12 @@ export function createServerFactory(deps: PipelineDeps, tasks: TaskHandlerDeps):
       // task variant, hence the cast.
       return isTaskAnswer(answer) ? (answer as unknown as CallToolResult) : server.projectCallToolResult(answer, undefined);
     });
+    // UI resources (MCP-5): the bundles hold no data, so they are the same for every caller and are not
+    // audited (ADR 0035); the controller's bearer check still guards them. SDK 2.4.0 refuses these
+    // handlers unless `capabilities.resources` is declared (assertRequestHandlerCapability).
+    server.setRequestHandler('resources/list', () => listResources(deps.widgets));
+    server.setRequestHandler('resources/read', (req) => readResource(deps.widgets, req.params.uri));
+    server.setRequestHandler('resources/templates/list', () => ({ resourceTemplates: [] }));
     // The 3-argument (custom-schema) form: on 2026-07-28, `tasks/get` and `tasks/cancel` are
     // extension methods, which the SDK dispatches only when registered this way (ADR 0029).
     const taskContext = (envelope: object | undefined): TaskRequestContext => ({ caller, correlationId, declared: declaresTasks(envelope) });

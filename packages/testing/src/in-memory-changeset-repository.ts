@@ -97,6 +97,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       updatedAt: new Date(),
       expiresAt: copyDate(cs.expiresAt),
       approvalRound: 0,
+      ...(cs.derivedFrom === undefined ? {} : { derivedFrom: cs.derivedFrom }),
     };
     // Apply before awaiting the audit append so concurrent callers see the change; undo if the append fails.
     this.entries.set(cs.id, { record, items: new Map(), approvals: [] });
@@ -202,6 +203,37 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       .slice(0, size)
       .map((x) => copyItem(x.i));
     return Promise.resolve(sample);
+  }
+
+  deriveCheck(
+    sourceId: string,
+    exclude: readonly string[],
+    include: readonly string[],
+  ): Promise<{ unknown: number; includedAfter: number }> {
+    const ex = new Set(exclude);
+    const inc = new Set(include);
+    const items = this.entries.get(sourceId)?.items ?? new Map<string, ChangeItemRecord>();
+    let unknown = 0;
+    for (const t of new Set([...ex, ...inc])) {
+      const it = items.get(t);
+      const qualifies = ex.has(t) ? !inc.has(t) && it?.status === 'pending' : it !== undefined && isRequesterExclusion(it);
+      if (!qualifies) unknown += 1;
+    }
+    let includedAfter = 0;
+    for (const it of items.values()) if (derivedItem(it, ex, inc).status !== 'excluded') includedAfter += 1;
+    return Promise.resolve({ unknown, includedAfter });
+  }
+
+  copyItems(newId: string, sourceId: string, exclude: readonly string[], include: readonly string[]): Promise<number> {
+    const entry = this.entries.get(newId);
+    if (entry === undefined) return Promise.reject(new Error('unknown change-set'));
+    if (entry.record.status !== 'preparing') return Promise.reject(new Error('change-set is not preparing'));
+    if (entry.items.size > 0) return Promise.reject(new Error('change-set already has items'));
+    const ex = new Set(exclude);
+    const inc = new Set(include);
+    const source = this.entries.get(sourceId)?.items ?? new Map<string, ChangeItemRecord>();
+    for (const it of source.values()) entry.items.set(it.targetId, derivedItem(it, ex, inc));
+    return Promise.resolve(source.size);
   }
 
   async completePreparation(
@@ -576,6 +608,18 @@ function approvalsCover(record: ChangeSetRecord, approvals: readonly ApprovalRec
 }
 
 const OUTCOME_STATUSES: ReadonlySet<ChangeSetStatus> = new Set<ChangeSetStatus>(['executing', 'rolling_back']);
+
+function isRequesterExclusion(it: ChangeItemRecord): boolean {
+  return it.status === 'excluded' && it.reason === 'requester';
+}
+
+/** CS-5 copy rules: exclude applies to pending items only, include to requester exclusions only; exclude wins. */
+function derivedItem(it: ChangeItemRecord, exclude: ReadonlySet<string>, include: ReadonlySet<string>): ChangeItemRecord {
+  const base = { targetId: it.targetId, before: structuredClone(it.before), after: structuredClone(it.after) };
+  if (exclude.has(it.targetId) && it.status === 'pending') return { ...base, status: 'excluded', reason: 'requester' };
+  if (include.has(it.targetId) && !exclude.has(it.targetId) && isRequesterExclusion(it)) return { ...base, status: 'pending' };
+  return { ...base, status: it.status, ...(it.reason === undefined ? {} : { reason: it.reason }) };
+}
 
 function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetStats {
   const excluded: Partial<Record<ExclusionReason, number>> = {};

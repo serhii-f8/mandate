@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
@@ -160,6 +161,9 @@ export const changeSet = pgTable(
     submission: jsonb('submission').$type<StoredSubmission>(),
     approvalPlan: jsonb('approval_plan').$type<ApprovalPlan>(),
     awaitingRole: text('awaiting_role'),
+    // CS-5: the source of a derived change-set, set on insert and fixed by the identity-column
+    // guard of migration `0011_derived_change_sets`; NULL for a change-set prepared by a tool call.
+    derivedFrom: uuid('derived_from').references((): AnyPgColumn => changeSet.id),
   },
   (t) => [
     index('change_set_requester_created_at_idx').on(t.requester, t.createdAt),

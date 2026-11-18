@@ -6,6 +6,7 @@
 //   mcp-call.mjs <mcp-url> --token T --list                      → {"correlationId","tools":[...]}
 //   mcp-call.mjs <mcp-url> --token T --tool NAME --args JSON     → {"correlationId","text","isError","content","structuredContent"}
 //       `text` joins every text part; `content` lists them one by one (MCP-4: summary first).
+// The token comes from AIOPS_MCP_TOKEN (preferred: argv shows in `ps`, SEC-3) or from --token.
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
 const positional = [];
@@ -18,15 +19,16 @@ for (let i = 0; i < argv.length; i++) {
   else positional.push(arg);
 }
 const [url, message = 'acceptance'] = positional;
+const token = flags.token ?? (process.env.AIOPS_MCP_TOKEN || undefined);
 if (url === undefined) {
-  console.error('usage: mcp-call.mjs <mcp-url> [message] [--token T] [--list | --tool NAME --args JSON]');
+  console.error('usage: [AIOPS_MCP_TOKEN=T] mcp-call.mjs <mcp-url> [message] [--token T] [--list | --tool NAME --args JSON]');
   process.exit(2);
 }
 
 let lastCorrelationId;
 const recordingFetch = async (input, init) => {
   const headers = new Headers(init?.headers);
-  if (flags.token) headers.set('authorization', `Bearer ${flags.token}`);
+  if (token) headers.set('authorization', `Bearer ${token}`);
   const response = await fetch(input, { ...init, headers });
   const id = response.headers.get('x-correlation-id');
   if (id !== null) lastCorrelationId = id;

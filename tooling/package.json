@@ -8,9 +8,16 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --project unit"
+    "test": "vitest run --project unit",
+    "build:widget-host": "vite build -c acceptance/widget-host/vite.config.mjs"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.4.0"
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/core": "2.4.0",
+    "@modelcontextprotocol/ext-apps": "2.1.0",
+    "playwright": "1.65.1",
+    "vite": "8.3.8",
+    "vite-plugin-singlefile": "2.3.4",
+    "zod": "4.6.7"
   }
 }

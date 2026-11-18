@@ -17,7 +17,8 @@ export type ChangeSetStatus =
 
 export type ItemStatus = 'pending' | 'excluded' | 'written' | 'failed' | 'skipped';
 
-export type ExclusionReason = 'not_found' | 'out_of_scope' | 'missing_data' | 'no_change';
+/** `requester`: excluded by the requester when deriving a change-set (CS-5). */
+export type ExclusionReason = 'not_found' | 'out_of_scope' | 'missing_data' | 'no_change' | 'requester';
 
 export interface ChangeSetStats {
   readonly total: number;
@@ -70,6 +71,8 @@ export interface ChangeSetRecord {
   readonly approvalPlan?: ApprovalPlan;
   /** Role of the step awaiting a decision while `pending_approval`. */
   readonly awaitingRole?: string;
+  /** CS-5: the source change-set this one was derived from; absent for one prepared by a tool call. */
+  readonly derivedFrom?: string;
 }
 
 export interface ChangeItemRecord {

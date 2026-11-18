@@ -7,7 +7,6 @@ import {
   type ApprovalRecord,
   type AuditAction,
   type AuditLog,
-  type ChangeItemRecord,
   type ChangeSetExecutor,
   type ChangeSetRecord,
   type ChangeSetRepository,
@@ -18,7 +17,8 @@ import { APPROVAL_SERVICE, AUDIT_LOG, CHANGESET_EXECUTOR, CHANGESET_REPOSITORY, 
 import { PageAccess, pageDenial, pageOf, type PageChecks, type PageRequest } from '../web/access.js';
 import { pageCorrelation } from '../web/correlation.js';
 import type { ApprovalService } from './approval-service.js';
-import { changesetDetail, checkPageStart, toApprover, type PageViewer } from './detail.js';
+import { isSummarised } from '../mcp/changeset-tools.js';
+import { changesetDetail, checkPageStart, itemRow, toApprover, type PageViewer } from './detail.js';
 import { CHANGESET_ID, decisionBodySchema, encodeItemCursor, newSeed, parseItemsQuery, parseSampleQuery } from './page-query.js';
 import { refuse, REFUSAL_STATUS, type PageRefusal } from './refusals.js';
 
@@ -49,17 +49,6 @@ function startAnswer(start: StartOutcome | 'executor_unavailable'): string {
 
 /** Audits a refusal the controller finds itself, under the route's action, then answers it (AUD-1). */
 type Refuser = (reason: PageRefusal) => Promise<void>;
-
-function itemOf(i: ChangeItemRecord): Record<string, unknown> {
-  return {
-    targetId: i.targetId,
-    status: i.status,
-    ...(i.reason === undefined ? {} : { reason: i.reason }),
-    before: i.before,
-    after: i.after,
-    ...(i.error === undefined ? {} : { error: i.error }),
-  };
-}
 
 /**
  * The change-set view of the trusted pages (UI-2, APR-5): detail, item pages (NFR-8) and a seeded
@@ -205,9 +194,11 @@ export class ChangeSetPagesController {
     const { changeset, approvals } = found;
     const operation = this.configuration.current.policy.operations.find((op) => op.id === changeset.operation);
     const progress = await progressOf({ repository: this.repository, executor: this.executor, newId: randomUUID, now: () => new Date() }, changeset);
+    const drift = isSummarised(changeset) ? ((await this.repository.errorCounts(changeset.id)).drift ?? 0) : undefined;
     res.status(200).json(
       changesetDetail({
         changeset,
+        ...(drift === undefined ? {} : { drift }),
         approvals,
         ...(operation === undefined ? {} : { operation }),
         ...(progress === undefined ? {} : { progress }),
@@ -237,7 +228,7 @@ export class ChangeSetPagesController {
     const page = rows.slice(0, limit);
     const last = page.at(-1);
     res.status(200).json({
-      items: page.map(itemOf),
+      items: page.map(itemRow),
       ...(rows.length > limit && last !== undefined ? { next: encodeItemCursor(last.targetId) } : {}),
     });
   }
@@ -255,6 +246,6 @@ export class ChangeSetPagesController {
     }
     const seed = parsed.value.seed ?? newSeed();
     const items = await this.repository.sampleItems(found.changeset.id, seed, parsed.value.size);
-    res.status(200).json({ seed, items: items.map(itemOf) });
+    res.status(200).json({ seed, items: items.map(itemRow) });
   }
 }

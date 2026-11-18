@@ -5,11 +5,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ExecutorUnavailable, type ChangeSetExecutor, type StartOutcome, type StartRequest } from '@aiops/core';
 import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
 import { InMemoryExecutor, pageLogin, ScriptedWriter, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@aiops/testing';
 import { seedPending, type Seeded } from './approval-seed.js';
 import { auditRows, startApi, startDatabase, type RunningApi } from './helpers.js';
+import { ToggleExecutor } from './toggle-executor.js';
 
 const PAGE_API = fileURLToPath(new URL('../../../../tooling/acceptance/page-api.mjs', import.meta.url));
 const run = promisify(execFile);
@@ -23,35 +23,6 @@ const BOB: TestLoginUser = { sub: 'bob-id', username: 'bob', groups: ['support']
 const EVE: TestLoginUser = { sub: 'eve-id', username: 'eve', groups: ['editors'] };
 
 const SECRET_COMMENT = 'audit-must-not-see-this-comment';
-
-/** Wraps the in-memory executor; a test can make starts refuse or the executor unreachable. */
-class ToggleExecutor implements ChangeSetExecutor {
-  refuseStarts = false;
-  unavailable = false;
-  readonly started: string[] = [];
-
-  constructor(readonly inner: InMemoryExecutor) {}
-
-  async start(req: StartRequest): Promise<StartOutcome> {
-    if (this.unavailable) throw new ExecutorUnavailable();
-    if (this.refuseStarts) return { ok: false, reason: 'not_executable' };
-    this.started.push(req.changesetId);
-    return this.inner.start(req);
-  }
-
-  cancel(req: Parameters<ChangeSetExecutor['cancel']>[0]): ReturnType<ChangeSetExecutor['cancel']> {
-    return this.inner.cancel(req);
-  }
-
-  progress(changesetId: string): ReturnType<ChangeSetExecutor['progress']> {
-    return this.inner.progress(changesetId);
-  }
-
-  // The in-memory run never waits for a signal, so its wake takes no argument.
-  wake(): Promise<void> {
-    return this.inner.wake();
-  }
-}
 
 let postgres: StartedPostgres;
 let databaseUrl: string;

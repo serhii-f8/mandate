@@ -1,0 +1,14 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Execution of 2 changes started. Call get_changeset with this ID to follow it."
+    }
+  ],
+  "structuredContent": {
+    "changesetId": "0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e",
+    "status": "executing",
+    "total": 2,
+    "pageUrl": "https://aiops.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e"
+  }
+}

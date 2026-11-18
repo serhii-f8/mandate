@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Response } from 'express';
 import type { AuditEventInput } from '@aiops/core';
 import { InMemoryAuditLog } from '@aiops/testing';
-import { refuse, REFUSAL_STATUS } from './refusals.js';
+import { pageRefuser, refuse, REFUSAL_STATUS } from './refusals.js';
 
 const EVENT: AuditEventInput = {
   id: 'e1',
@@ -79,6 +79,61 @@ describe('AUD-1 refusal answers', () => {
       invalid_query: 400,
       comment_required: 400,
       comment_invalid: 400,
+      not_prepared: 409,
+      approval_unroutable: 409,
+      empty_request: 409,
+      unknown_items: 409,
+      nothing_left: 409,
+      policy_denied: 403,
     });
+  });
+
+  it('AUD-1 refuse adds extra fields to the answer', async () => {
+    const log = new InMemoryAuditLog();
+    const calls: string[] = [];
+    await refuse(fakeRes(calls), 'unknown_items', { log, event: EVENT }, { count: 2 });
+    expect(log.events).toEqual([EVENT]);
+    expect(calls).toEqual(['status:409', 'json:{"count":2,"error":"unknown_items"}']);
+    const plain: string[] = [];
+    await refuse(fakeRes(plain), 'limit_exceeded', undefined, { limit: 'records_per_day' });
+    expect(plain).toEqual(['status:409', 'json:{"limit":"records_per_day","error":"limit_exceeded"}']);
+    const hostile: string[] = [];
+    await refuse(fakeRes(hostile), 'unknown_items', undefined, { error: 'not_found' });
+    expect(hostile).toEqual(['status:409', 'json:{"error":"unknown_items"}']);
+  });
+});
+
+describe('AUD-1 SEC-11 page refuser', () => {
+  const VIEWER = { subject: 'alice-id', clientId: 'aiops-web' };
+  const ID = 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
+
+  it('AUD-1 SEC-11 pageRefuser writes one denied row with reason and channel page, then answers', async () => {
+    const audit = new InMemoryAuditLog();
+    const calls: string[] = [];
+    const refuser = pageRefuser({ audit, action: 'changeset.export', viewer: VIEWER, id: ID, correlationId: 'c1', res: fakeRes(calls) });
+    await refuser('invalid_query');
+    expect(audit.events).toEqual([
+      {
+        id: expect.stringMatching(/^[0-9a-f-]{36}$/) as unknown,
+        actor: 'alice-id',
+        clientId: 'aiops-web',
+        action: 'changeset.export',
+        outcome: 'denied',
+        correlationId: 'c1',
+        changesetId: ID.toLowerCase(),
+        subject: ID.toLowerCase(),
+        details: { reason: 'invalid_query', channel: 'page' },
+      },
+    ]);
+    expect(calls).toEqual(['status:400', 'json:{"error":"invalid_query"}']);
+  });
+
+  it('AUD-1 pageRefuser records no change-set for a path value that is not UUID-shaped', async () => {
+    const audit = new InMemoryAuditLog();
+    await pageRefuser({ audit, action: 'changeset.export', viewer: VIEWER, id: 'x', correlationId: 'c2', res: fakeRes([]) })('not_found');
+    const [event] = audit.events;
+    expect(event?.changesetId).toBeUndefined();
+    expect(event?.subject).toBeUndefined();
+    expect(event?.details).toEqual({ reason: 'not_found', channel: 'page' });
   });
 });

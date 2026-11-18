@@ -19,11 +19,13 @@ import {
   type PolicyEngine,
   type RateCounter,
 } from '@aiops/core';
+import { withPageLink } from '../changesets/links.js';
 import { toCallToolResult } from '../changesets/results.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
 import { deniedResult, recordDecision } from './policy-answers.js';
 import type { BuiltinTool } from './tool-catalog.js';
+import type { WidgetCatalog } from './widget-bundles.js';
 
 /** One configuration and its engine, taken once per HTTP request. */
 export interface Snapshot {
@@ -47,6 +49,10 @@ export interface PipelineDeps {
   readonly rateCounter: RateCounter;
   /** Wall-clock time, for the rate-limit window only. */
   readonly wallClock: () => Date;
+  /** The widget bundles served as UI resources and linked from tools (MCP-5, MCP-6). */
+  readonly widgets: WidgetCatalog;
+  /** `AIOPS_PUBLIC_URL`, the base of the change-set page links (MCP-6). */
+  readonly publicUrl: URL;
 }
 
 /** The start of the UTC minute containing `now`. */
@@ -80,24 +86,38 @@ export function snapshotOf(configuration: LoadedConfiguration): Snapshot {
   return { configuration, engine };
 }
 
+/** Write and destructive operations with a manifest prepare a change-set, so they link the change-set widget (MCP-5). */
+export function linksChangeset(op: OperationDefinition): boolean {
+  return (op.risk === 'write' || op.risk === 'destructive') && op.manifest !== undefined;
+}
+
+/** `_meta` with the MCP Apps linkage: the nested form and the flat legacy key (MCP-5). */
+export function uiMeta(existing: Readonly<Record<string, unknown>> | undefined, resourceUri: string): Record<string, unknown> {
+  return { ...existing, ui: { ...(existing?.ui as object | undefined), resourceUri }, 'ui/resourceUri': resourceUri };
+}
+
 /** Operations are published under their tool name (MCP-9); policy and audit use the operation ID. */
-function operationTool(op: OperationDefinition): Tool {
+function operationTool(op: OperationDefinition, widgets: WidgetCatalog): Tool {
+  const uri = linksChangeset(op) ? widgets.uriFor('changeset') : undefined;
   return {
     name: op.toolName,
     ...(op.title === undefined ? {} : { title: op.title }),
     description: op.description,
     inputSchema: op.inputSchema as Tool['inputSchema'],
     annotations: { readOnlyHint: op.risk === 'read', destructiveHint: op.risk === 'destructive' },
+    ...(uri === undefined ? {} : { _meta: uiMeta(undefined, uri) }),
   };
 }
 
-function builtinTool(tool: BuiltinTool): Tool {
+function builtinTool(tool: BuiltinTool, widgets: WidgetCatalog): Tool {
+  const uri = tool.widget === undefined ? undefined : widgets.uriFor(tool.widget);
+  const meta = uri === undefined ? tool.meta : uiMeta(tool.meta, uri);
   return {
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema as Tool['inputSchema'],
     annotations: { readOnlyHint: tool.readOnlyHint ?? true },
-    ...(tool.meta === undefined ? {} : { _meta: { ...tool.meta } }),
+    ...(meta === undefined ? {} : { _meta: { ...meta } }),
   };
 }
 
@@ -109,7 +129,7 @@ function visibleBuiltins(builtins: readonly BuiltinTool[], caller: Caller, confi
 export async function listTools(deps: PipelineDeps, req: PipelineRequest): Promise<Tool[]> {
   const granted = req.snapshot.engine.grantedOperations(req.caller);
   const builtins = visibleBuiltins(deps.builtins, req.caller, req.snapshot.configuration);
-  const tools = [...builtins.map(builtinTool), ...granted.map(operationTool)];
+  const tools = [...builtins.map((t) => builtinTool(t, deps.widgets)), ...granted.map((op) => operationTool(op, deps.widgets))];
   try {
     await deps.audit.append({
       id: deps.newId(),
@@ -221,7 +241,7 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
   if (!recorded) return AUDIT_UNAVAILABLE;
 
   // 4. Run (SEC-1: only after an allow decision of this request is on record).
-  return auditedRun(
+  const answer = await auditedRun(
     name,
     async (report) => {
       if (builtin !== undefined) {
@@ -248,4 +268,8 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
     },
     runDeps,
   );
+  // MCP-6: the tools linked to a widget answer with the page link too, bundle or not; added after
+  // the tool.call row is written, so the audit never holds the URL.
+  const linked = builtin !== undefined ? builtin.widget !== undefined : operation !== undefined && linksChangeset(operation);
+  return linked ? withPageLink(answer, deps.publicUrl) : answer;
 }

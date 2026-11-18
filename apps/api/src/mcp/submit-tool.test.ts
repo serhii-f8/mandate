@@ -662,6 +662,83 @@ describe('MCP-8 POL-5 POL-6 submit_for_approval', () => {
     });
   });
 
+  it("MCP-6 refusals for the requester's own change-set name it in structuredContent; not_found and policy denials do not", async () => {
+    const unroutable = snapshotOf({
+      ...CURRENT.configuration,
+      approval: new Map([...CURRENT.configuration.approval, ['always_role', { required: 'always' as const, steps: [], allowWidget: false }]]),
+    });
+    type Run = (s: Awaited<ReturnType<typeof setup>>) => Promise<ToolAnswer>;
+    const named: [string, Parameters<typeof setup>[0], Run][] = [
+      ['hash mismatch', {}, (s) => s.tool.handler(args(ID, `sha256:${'b'.repeat(64)}`), s.ctx(alice))],
+      ['wrong status', { stage: 'preparing' }, (s) => s.tool.handler(args(), s.ctx(alice))],
+      ['expired', { expiresAt: new Date('2026-11-17T09:00:00.000Z') }, (s) => s.tool.handler(args(), s.ctx(alice))],
+      [
+        'approval unroutable',
+        { requester: 'always' },
+        (s) => s.tool.handler(args(), s.ctx({ subject: 'always', groups: ['always'] }, { snapshot: unroutable })),
+      ],
+      [
+        'not_prepared race',
+        { requester: 'carol' },
+        (s) => {
+          const submit = s.repository.submitForApproval.bind(s.repository);
+          s.repository.submitForApproval = async (req) => {
+            await submit(req);
+            return { ok: false, reason: 'not_prepared' };
+          };
+          return s.tool.handler(args(), s.ctx(carol));
+        },
+      ],
+      [
+        'executor unavailable',
+        {},
+        (s) => {
+          s.executor.answer = 'unavailable';
+          return s.tool.handler(args(), s.ctx(alice));
+        },
+      ],
+      ...(['hash_mismatch', 'expired', 'not_executable', 'not_approved'] as const).map((reason): [string, Parameters<typeof setup>[0], Run] => [
+        `start refused ${reason}`,
+        {},
+        (s) => {
+          s.executor.answer = { ok: false, reason };
+          return s.tool.handler(args(), s.ctx(alice));
+        },
+      ]),
+      [
+        'start refused limit_exceeded',
+        {},
+        (s) => {
+          s.executor.answer = { ok: false, reason: 'limit_exceeded', limit: 'records_per_day' };
+          return s.tool.handler(args(), s.ctx(alice));
+        },
+      ],
+    ];
+    for (const [name, options, run] of named) {
+      const result = plain(await run(await setup(options)));
+      expect(result.isError, name).toBe(true);
+      expect(result.structuredContent, name).toEqual({ changesetId: ID });
+    }
+    const unnamed: [string, Parameters<typeof setup>[0], Run][] = [
+      ['unknown', {}, (s) => s.tool.handler(args(UNKNOWN), s.ctx(alice))],
+      ['foreign', {}, (s) => s.tool.handler(args(), s.ctx(bob))],
+      ['policy denial', {}, (s) => s.tool.handler(args(), s.ctx(alice, { snapshot: NARROWED }))],
+      [
+        'start refused not_found',
+        {},
+        (s) => {
+          s.executor.answer = { ok: false, reason: 'not_found' };
+          return s.tool.handler(args(), s.ctx(alice));
+        },
+      ],
+    ];
+    for (const [name, options, run] of unnamed) {
+      const result = plain(await run(await setup(options)));
+      expect(result.isError, name).toBe(true);
+      expect(result, name).not.toHaveProperty('structuredContent');
+    }
+  });
+
   it('MCP-8 the description names approval', async () => {
     const { tool } = await setup();
     expect(tool.description).toBe(

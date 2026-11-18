@@ -4,7 +4,6 @@ import {
   ExecutorUnavailable,
   READ_RESULT_TEXT,
   changesetTransitionEvent,
-  decodeCursor,
   encodeCursor,
   isExpiryDue,
   type Caller,
@@ -15,6 +14,7 @@ import {
   type ExecutionProgress,
   type ItemStatus,
 } from '@aiops/core';
+import { decodeCursor } from '../approvals/page-query.js';
 import { executionSummaryText } from '../changesets/results.js';
 import type { BuiltinTool } from './tool-catalog.js';
 
@@ -58,6 +58,10 @@ const PROGRESS_STATUSES: readonly ChangeSetStatus[] = ['executing', 'completed',
 function hasProgress(record: ChangeSetRecord): boolean {
   return PROGRESS_STATUSES.includes(record.status) || ((record.status === 'failed' || record.status === 'cancelled') && record.preparedAt !== undefined);
 }
+
+/** Execution is summarised once it completed, or failed after preparation (UI-4, MCP-4). */
+export const isSummarised = (record: ChangeSetRecord): boolean =>
+  record.status === 'completed' || record.status === 'completed_with_errors' || (record.status === 'failed' && record.preparedAt !== undefined);
 
 /** Live execution progress when the status has any; `undefined` when the executor is down. */
 export async function progressOf(deps: ChangesetToolDeps, record: ChangeSetRecord): Promise<ExecutionProgress | undefined> {
@@ -113,6 +117,7 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
     name: 'get_changeset',
     description: 'Show a change-set you prepared: its status, counts and one page of items.',
     inputSchema: GET_SCHEMA,
+    widget: 'changeset',
     validate: compile(GET_SCHEMA),
     async handler(args, { caller, correlationId }) {
       // `validate` guarantees the shape.
@@ -136,8 +141,10 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
       const nextCursor = rows.length > limit && last !== undefined ? encodeCursor(last.targetId) : undefined;
       const excluded = Object.values(record.stats.excluded).reduce((sum, n) => sum + n, 0);
       const progress = await progressOf(deps, record);
-      const summarised = record.status === 'completed' || record.status === 'completed_with_errors' || (record.status === 'failed' && record.preparedAt !== undefined);
-      const summary = summarised ? ` ${executionSummaryText(record.status, record.stats, (await deps.repository.errorCounts(id)).drift ?? 0)}` : '';
+      const summarised = isSummarised(record);
+      // Read once: the text and `execution.drift` carry the same number.
+      const drift = summarised ? ((await deps.repository.errorCounts(id)).drift ?? 0) : undefined;
+      const summary = drift === undefined ? '' : ` ${executionSummaryText(record.status, record.stats, drift)}`;
       const approval = await approvalView(deps, record);
       const structured: Record<string, unknown> = {
         changeset: {
@@ -155,6 +162,10 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
         ...(approval === undefined ? {} : { approval }),
         items,
         ...(nextCursor === undefined ? {} : { nextCursor }),
+        ...(record.derivedFrom === undefined ? {} : { derivedFrom: record.derivedFrom }),
+        // Rollback is not offered yet (UI-4); the widget shows no rollback control.
+        rollback: { available: false },
+        ...(drift === undefined ? {} : { execution: { drift } }),
       };
       const text =
         `Change-set ${record.id} (${record.operation}) is ${record.status}: ${String(record.stats.included)} change(s), ` +

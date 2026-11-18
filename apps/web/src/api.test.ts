@@ -54,4 +54,53 @@ describe('web api client', () => {
     expect(calls[0]?.url).toBe(`/api/v1/changesets/${ID}/items?after=abc&status=failed`);
     expect(calls[1]?.url).toBe(`/api/v1/changesets/${ID}/items`);
   });
+
+  it('UI-3 submit posts the hash with the CSRF token and maps 200 and 409', async () => {
+    const url = `https://ops.example.test/app/changesets/${ID}`;
+    const { calls, api } = fake(200, { status: 'pending_approval', approval: { step: 1, steps: ['content_lead'], url } });
+    expect(await api.submit('tok', ID, HASH)).toEqual({ ok: true, status: 'pending_approval', approvalUrl: url });
+    const call = calls[0];
+    expect(call?.url).toBe(`/api/v1/changesets/${ID}/submit`);
+    expect(call?.init?.method).toBe('POST');
+    const headers = call?.init?.headers as Record<string, string>;
+    expect(headers['x-csrf-token']).toBe('tok');
+    expect(headers['content-type']).toBe('application/json');
+    expect(JSON.parse(call?.init?.body as string)).toEqual({ hash: HASH });
+    expect(await fake(200, { status: 'executing' }).api.submit('tok', ID, HASH)).toEqual({ ok: true, status: 'executing' });
+    expect(await fake(409, { error: 'hash_mismatch' }).api.submit('tok', ID, HASH)).toEqual({ ok: false, error: 'hash_mismatch' });
+    await expect(fake(401, {}).api.submit('tok', ID, HASH)).rejects.toBeInstanceOf(Unauthenticated);
+  });
+
+  it('CS-5 exclude posts hash and lists, returns the new id and hash on 201, error and count on 409', async () => {
+    const NEW = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
+    const NEW_HASH = `sha256:${'b'.repeat(64)}`;
+    const { calls, api } = fake(201, { id: NEW, hash: NEW_HASH, stats: {}, derivedFrom: ID });
+    expect(await api.exclude('tok', ID, { hash: HASH, exclude: ['sku-1'], include: [] })).toEqual({ ok: true, id: NEW, hash: NEW_HASH });
+    const call = calls[0];
+    expect(call?.url).toBe(`/api/v1/changesets/${ID}/exclusions`);
+    expect(call?.init?.method).toBe('POST');
+    const headers = call?.init?.headers as Record<string, string>;
+    expect(headers['x-csrf-token']).toBe('tok');
+    expect(headers['content-type']).toBe('application/json');
+    expect(JSON.parse(call?.init?.body as string)).toEqual({ hash: HASH, exclude: ['sku-1'] });
+    const both = fake(201, { id: NEW, hash: NEW_HASH });
+    await both.api.exclude('tok', ID, { hash: HASH, exclude: [], include: ['sku-2'] });
+    expect(JSON.parse(both.calls[0]?.init?.body as string)).toEqual({ hash: HASH, include: ['sku-2'] });
+    expect(await fake(409, { error: 'unknown_items', count: 2 }).api.exclude('tok', ID, { hash: HASH, exclude: ['x', 'y'], include: [] })).toEqual({
+      ok: false,
+      error: 'unknown_items',
+      count: 2,
+    });
+    expect(await fake(409, { error: 'nothing_left' }).api.exclude('tok', ID, { hash: HASH, exclude: ['x'], include: [] })).toEqual({
+      ok: false,
+      error: 'nothing_left',
+    });
+    await expect(fake(401, {}).api.exclude('tok', ID, { hash: HASH, exclude: ['x'], include: [] })).rejects.toBeInstanceOf(Unauthenticated);
+  });
+
+  it('CS-8 exportUrl encodes the id and names the format', () => {
+    const { api } = fake(200, {});
+    expect(api.exportUrl(ID, 'csv')).toBe(`/api/v1/changesets/${ID}/export?format=csv`);
+    expect(api.exportUrl('a/b c', 'xlsx')).toBe('/api/v1/changesets/a%2Fb%20c/export?format=xlsx');
+  });
 });

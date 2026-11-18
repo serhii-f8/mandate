@@ -1,0 +1,13 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Change-set 0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e is being prepared. Call get_changeset with this ID to see the result."
+    }
+  ],
+  "structuredContent": {
+    "changesetId": "0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e",
+    "status": "preparing",
+    "pageUrl": "https://aiops.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e"
+  }
+}

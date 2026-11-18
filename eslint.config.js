@@ -24,12 +24,17 @@ export default tseslint.config(
   },
   {
     // The web bundle runs in the browser.
-    files: ['apps/web/**/*.ts', 'apps/web/**/*.tsx'],
+    files: ['apps/web/**/*.ts', 'apps/web/**/*.tsx', 'packages/widgets/src/**/*.ts', 'packages/widgets/src/**/*.tsx'],
     languageOptions: { globals: globals.browser },
   },
   {
     files: ['**/*.js', '**/*.mjs'],
     languageOptions: { globals: globals.node },
+  },
+  {
+    // The reference host page runs in a browser; Playwright callbacks reference `document`.
+    files: ['tooling/acceptance/widget-host/**/*.js', 'tooling/acceptance/widget-host/**/*.mjs', 'tooling/acceptance/widget-host.mjs'],
+    languageOptions: { globals: { ...globals.browser, ...globals.node } },
   },
   ...boundaryRules,
 );

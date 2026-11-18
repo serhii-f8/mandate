@@ -63,6 +63,9 @@ export interface ViewerBlock {
   fresh: boolean;
   stepUpSatisfied: boolean;
   canStart: boolean;
+  /** The requester of an unexpired prepared change-set may submit it and derive exclusions (UI-3). */
+  canSubmit: boolean;
+  canExclude: boolean;
 }
 export interface StepDecision {
   approver: string;
@@ -76,6 +79,8 @@ export interface ChangeSetDetail {
   id: string;
   status: string;
   hash?: string;
+  /** The change-set this one was derived from by an exclusion (CS-5). */
+  derivedFrom?: string;
   operation: { id: string; title?: string; description?: string; risk?: string };
   connection: string;
   request: { args: Record<string, unknown>; requester: string; clientId?: string; createdAt: string; submittedAt?: string };
@@ -90,6 +95,9 @@ export interface ChangeSetDetail {
     awaitingRole?: string;
     stepUp?: { maxAgeSeconds: number };
   };
+  /** Present once execution is summarised (UI-4). */
+  drift?: number;
+  rollback: { available: boolean };
   viewer: ViewerBlock;
 }
 export interface ItemRow {
@@ -115,6 +123,12 @@ export interface DecideBody {
   comment?: string;
 }
 export type DecideOutcome = { ok: true; status: string; start?: string } | { ok: false; error: string };
+export type SubmitOutcome = { ok: true; status: string; approvalUrl?: string } | { ok: false; error: string };
+export type ExcludeOutcome = { ok: true; id: string; hash: string } | { ok: false; error: string; count?: number };
+
+/** The refusal code of a failed POST, or its HTTP status. */
+const errorOf = (answer: { error?: unknown }, response: Response): string =>
+  typeof answer.error === 'string' ? answer.error : `HTTP ${String(response.status)}`;
 
 async function json(response: Response): Promise<unknown> {
   if (response.status === 401) throw new Unauthenticated();
@@ -129,7 +143,8 @@ export function createApi(fetcher: typeof fetch = (input, init) => fetch(input, 
     if (!response.ok && response.status !== 401 && response.status !== 404) throw new Error(`${label}: HTTP ${String(response.status)}`);
     return (await json(response)) as T;
   };
-  const post = async (url: string, csrfToken: string, body?: unknown): Promise<DecideOutcome> => {
+  // A mutation: the CSRF token always, a JSON body when given (SEC-8); 401 throws, any answer body is read leniently.
+  const send = async (url: string, csrfToken: string, body?: unknown): Promise<{ response: Response; answer: Record<string, unknown> }> => {
     const response = await fetcher(url, {
       method: 'POST',
       credentials: 'same-origin',
@@ -137,10 +152,15 @@ export function createApi(fetcher: typeof fetch = (input, init) => fetch(input, 
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     if (response.status === 401) throw new Unauthenticated();
-    const answer = (await response.json().catch(() => ({}))) as { status?: unknown; start?: unknown; error?: unknown };
-    if (response.ok) return { ok: true, status: String(answer.status), ...(typeof answer.start === 'string' ? { start: answer.start } : {}) };
-    return { ok: false, error: typeof answer.error === 'string' ? answer.error : `HTTP ${String(response.status)}` };
+    const answer: unknown = await response.json().catch(() => ({}));
+    return { response, answer: typeof answer === 'object' && answer !== null ? (answer as Record<string, unknown>) : {} };
   };
+  const post = async (url: string, csrfToken: string, body?: unknown): Promise<DecideOutcome> => {
+    const { response, answer } = await send(url, csrfToken, body);
+    if (response.ok) return { ok: true, status: String(answer.status), ...(typeof answer.start === 'string' ? { start: answer.start } : {}) };
+    return { ok: false, error: errorOf(answer, response) };
+  };
+  const changesetUrl = (id: string): string => `/api/v1/changesets/${encodeURIComponent(id)}`;
   return {
     approvals: (after?: string): Promise<ApprovalQueue> =>
       get('approvals', `/api/v1/approvals${after === undefined ? '' : `?after=${encodeURIComponent(after)}`}`),
@@ -157,6 +177,28 @@ export function createApi(fetcher: typeof fetch = (input, init) => fetch(input, 
     decide: (csrfToken: string, id: string, body: DecideBody): Promise<DecideOutcome> =>
       post(`/api/v1/changesets/${encodeURIComponent(id)}/decision`, csrfToken, body),
     start: (csrfToken: string, id: string): Promise<DecideOutcome> => post(`/api/v1/changesets/${encodeURIComponent(id)}/start`, csrfToken),
+    /** Submits a prepared change-set by the hash the requester saw (UI-3). */
+    async submit(csrfToken: string, id: string, hash: string): Promise<SubmitOutcome> {
+      const { response, answer } = await send(`${changesetUrl(id)}/submit`, csrfToken, { hash });
+      if (!response.ok) return { ok: false, error: errorOf(answer, response) };
+      const approval = answer.approval;
+      const url = typeof approval === 'object' && approval !== null ? (approval as { url?: unknown }).url : undefined;
+      return { ok: true, status: String(answer.status), ...(typeof url === 'string' ? { approvalUrl: url } : {}) };
+    },
+    /** Derives a new change-set with the edit; the source stays unchanged (CS-5). Empty lists are left out. */
+    async exclude(csrfToken: string, id: string, edit: { hash: string; exclude: string[]; include: string[] }): Promise<ExcludeOutcome> {
+      const body = {
+        hash: edit.hash,
+        ...(edit.exclude.length === 0 ? {} : { exclude: edit.exclude }),
+        ...(edit.include.length === 0 ? {} : { include: edit.include }),
+      };
+      const { response, answer } = await send(`${changesetUrl(id)}/exclusions`, csrfToken, body);
+      if (response.ok && typeof answer.id === 'string' && typeof answer.hash === 'string') return { ok: true, id: answer.id, hash: answer.hash };
+      if (response.ok) return { ok: false, error: 'invalid_answer' };
+      return { ok: false, error: errorOf(answer, response), ...(typeof answer.count === 'number' ? { count: answer.count } : {}) };
+    },
+    /** The download address of the items (CS-8); the browser navigates to it with the session cookie. */
+    exportUrl: (id: string, format: 'csv' | 'xlsx'): string => `${changesetUrl(id)}/export?format=${format}`,
     async session(): Promise<Session> {
       const response = await fetcher('/api/v1/session', { credentials: 'same-origin' });
       if (!response.ok && response.status !== 401) throw new Error(`session: HTTP ${String(response.status)}`);

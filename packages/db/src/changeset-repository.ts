@@ -38,6 +38,18 @@ const OUTCOMES_REFUSED = 'item outcomes rejected: change-set is not executing';
 const BATCH_REFUSED = 'batch outcomes rejected: change-set is not executing';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** CTEs `ex` and `inc` of distinct target IDs, passed as one jsonb parameter each (never a text array). */
+function targetLists(exclude: readonly string[], include: readonly string[]): SQL {
+  return sql`ex AS (SELECT DISTINCT x.t FROM jsonb_array_elements_text(${JSON.stringify(exclude)}::jsonb) AS x(t)),
+        inc AS (SELECT DISTINCT x.t FROM jsonb_array_elements_text(${JSON.stringify(include)}::jsonb) AS x(t))`;
+}
+
+/** CS-5 copy rules over `ci`: exclude applies to pending items only, include to requester exclusions only; exclude wins. */
+const excludes = sql`(ci.status = 'pending' AND ci.target_id IN (SELECT t FROM ex))`;
+const includes = sql`(ci.status = 'excluded' AND ci.reason = 'requester'
+  AND ci.target_id IN (SELECT t FROM inc) AND ci.target_id NOT IN (SELECT t FROM ex))`;
+const derivedStatus = sql`(CASE WHEN ${excludes} THEN 'excluded' WHEN ${includes} THEN 'pending' ELSE ci.status END)`;
+
 export interface PostgresChangeSetRepositoryOptions {
   /** Audit log bound to the transaction of a state change. Tests wrap it to inject failures. */
   readonly auditFor?: (tx: DbExecutor) => AuditLog;
@@ -80,6 +92,7 @@ function toRecord(row: ChangeSetRow): ChangeSetRecord {
     ...(row.submission === null ? {} : { submission: fromStoredSubmission(row.submission) }),
     ...(row.approvalPlan === null ? {} : { approvalPlan: row.approvalPlan }),
     ...(row.awaitingRole === null ? {} : { awaitingRole: row.awaitingRole }),
+    ...(row.derivedFrom === null ? {} : { derivedFrom: row.derivedFrom }),
     ...(row.executionActor === null ||
     row.executionGroups === null ||
     row.executionCorrelationId === null ||
@@ -213,6 +226,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
             correlationId: cs.correlationId,
             createdAt: cs.createdAt,
             expiresAt: cs.expiresAt,
+            derivedFrom: cs.derivedFrom ?? null,
           })
           .returning();
         if (row === undefined) throw new Error('change-set insert returned no row');
@@ -344,6 +358,64 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
         .limit(size),
     );
     return rows.map(toItem);
+  }
+
+  async deriveCheck(
+    sourceId: string,
+    exclude: readonly string[],
+    include: readonly string[],
+  ): Promise<{ unknown: number; includedAfter: number }> {
+    if (!UUID.test(sourceId)) return { unknown: new Set([...exclude, ...include]).size, includedAfter: 0 };
+    const result = await guarded('derive check', () =>
+      this.db.execute<{ unknown: number; included_after: number }>(sql`
+        WITH ${targetLists(exclude, include)},
+        named AS (
+          SELECT n.t, n.t IN (SELECT t FROM ex) AS e, n.t IN (SELECT t FROM inc) AS c
+          FROM (SELECT t FROM ex UNION SELECT t FROM inc) AS n
+        )
+        SELECT
+          (SELECT count(*)::int FROM named n
+            LEFT JOIN change_item ci ON ci.changeset_id = ${sourceId}::uuid AND ci.target_id = n.t
+            WHERE (n.e AND n.c)
+               OR (n.e AND ci.status IS DISTINCT FROM 'pending')
+               OR (n.c AND NOT COALESCE(ci.status = 'excluded' AND ci.reason = 'requester', false))) AS unknown,
+          (SELECT count(*)::int FROM change_item ci
+            WHERE ci.changeset_id = ${sourceId}::uuid AND ${derivedStatus} <> 'excluded') AS included_after`),
+    );
+    const row = result.rows[0];
+    return { unknown: row?.unknown ?? 0, includedAfter: row?.included_after ?? 0 };
+  }
+
+  async copyItems(newId: string, sourceId: string, exclude: readonly string[], include: readonly string[]): Promise<number> {
+    if (!UUID.test(newId)) throw new Error('unknown change-set');
+    return guarded('change items copy', () =>
+      this.db.transaction(async (tx) => {
+        const [parent] = await tx
+          .select({ status: changeSet.status })
+          .from(changeSet)
+          .where(eq(changeSet.id, newId))
+          .for('update');
+        if (parent === undefined) throw new Error('unknown change-set');
+        if (parent.status !== 'preparing') throw new Error('change-set is not preparing');
+        const [existing] = await tx
+          .select({ one: sql<number>`1` })
+          .from(changeItem)
+          .where(eq(changeItem.changesetId, newId))
+          .limit(1);
+        if (existing !== undefined) throw new Error('change-set already has items');
+        if (!UUID.test(sourceId)) return 0;
+        // NFR-7: the items are copied inside PostgreSQL; none passes through this process.
+        const result = await tx.execute(sql`
+          WITH ${targetLists(exclude, include)}
+          INSERT INTO change_item (changeset_id, target_id, status, reason, before, after)
+          SELECT ${newId}::uuid, ci.target_id, ${derivedStatus},
+            CASE WHEN ${excludes} THEN 'requester' WHEN ${includes} THEN NULL ELSE ci.reason END,
+            ci.before, ci.after
+          FROM change_item ci
+          WHERE ci.changeset_id = ${sourceId}::uuid`);
+        return result.rowCount ?? 0;
+      }),
+    );
   }
 
   async completePreparation(

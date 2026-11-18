@@ -33,10 +33,14 @@ import { createLogger, PinoNestLogger } from './logger.js';
 import { ApprovalService } from './approvals/approval-service.js';
 import { ApprovalsController } from './approvals/approvals.controller.js';
 import { ChangeSetPagesController } from './approvals/changeset-pages.controller.js';
+import { ChangeSetActionsController } from './changesets/changeset-actions.controller.js';
+import { SubmitService } from './changesets/submit-service.js';
+import { ChangeSetExportController } from './export/export.controller.js';
 import { createBuiltinTools } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
 import { createServerFactory } from './mcp/mcp-server-factory.js';
 import { snapshotOf, type PipelineDeps } from './mcp/tool-pipeline.js';
+import { resolveWidgetDir, WidgetBundles } from './mcp/widget-bundles.js';
 import {
   API_ENV,
   APPROVAL_SERVICE,
@@ -53,7 +57,10 @@ import {
   OIDC_CLIENT,
   PAGE_CHECKS,
   PAGE_SESSIONS,
+  SUBMIT_SERVICE,
   TEMPORAL,
+  WIDGET_BUNDLES,
+  WORKFLOW_STARTER,
 } from './tokens.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
 import { operationInvokers, type OperationInvokersBase } from './upstream/operation-router.js';
@@ -160,7 +167,7 @@ class AppModule {
     const pageChecks: PageChecks = { publicOrigin: env.publicUrl.origin, freshAuthSeconds: env.freshAuthSeconds };
     return {
       module: AppModule,
-      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, ApprovalsController, ChangeSetPagesController, WebAppController],
+      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, ApprovalsController, ChangeSetPagesController, ChangeSetExportController, ChangeSetActionsController, WebAppController],
       providers: [
         { provide: API_ENV, useValue: env },
         { provide: LOGGER, useValue: logger },
@@ -214,20 +221,42 @@ class AppModule {
             new ApprovalService({ repository, executor, audit, newId: randomUUID, now: () => new Date() }),
         },
         {
+          // One submit service for `submit_for_approval` and the page's submit route (MCP-8).
+          provide: SUBMIT_SERVICE,
+          inject: [CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, AUDIT_LOG, APPROVAL_SERVICE],
+          useFactory: (repository: ChangeSetRepository, executor: ChangeSetExecutor, audit: AuditLog, approvals: ApprovalService) =>
+            new SubmitService({ repository, executor, audit, approvals, newId: randomUUID, now: () => new Date() }),
+        },
+        {
+          // One starter for the write path's preparations and derived change-sets (EXE-1).
+          provide: WORKFLOW_STARTER,
+          inject: [TEMPORAL],
+          useFactory: (temporal: TemporalHandle | null): WorkflowStarter =>
+            overrides.starter ?? new TemporalWorkflowStarter({ client: temporalOf(temporal).client, taskQueue: env.taskQueue }),
+        },
+        {
+          // Read once at start; a missing or empty bundle is warned about and left out (MCP-5, MCP-6).
+          provide: WIDGET_BUNDLES,
+          useFactory: (): Promise<WidgetBundles> =>
+            WidgetBundles.load(resolveWidgetDir(env.widgetDir), (m, d) => {
+              logger.warn(d, m);
+            }),
+        },
+        {
           provide: MCP_HANDLER,
-          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, TEMPORAL, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE],
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE, WORKFLOW_STARTER, WIDGET_BUNDLES],
           useFactory: (
             audit: AuditLog,
             vault: CredentialVault,
             database: Database,
-            temporal: TemporalHandle | null,
             changesets: ChangeSetRepository,
             executor: ChangeSetExecutor,
             approvals: ApprovalService,
+            starter: WorkflowStarter,
+            widgets: WidgetBundles,
           ) => {
             // One task store for the write path that creates tasks and the handlers that read them.
             const tasks = overrides.tasks ?? new PostgresTaskRepository(database.db);
-            const starter = overrides.starter ?? new TemporalWorkflowStarter({ client: temporalOf(temporal).client, taskQueue: env.taskQueue });
             const io: UpstreamIo = {
               vault,
               adapter,
@@ -240,24 +269,35 @@ class AppModule {
               createServerFactory(
                 {
                   snapshot: () => snapshotOf(configuration.current),
-                  builtins: createBuiltinTools({
-                    repository: changesets,
-                    newId: randomUUID,
-                    now: () => new Date(),
-                    executor,
-                    tasks,
-                    audit,
-                    approvals,
-                    publicUrl: env.publicUrl,
-                  }),
+                  builtins: createBuiltinTools(
+                    {
+                      repository: changesets,
+                      newId: randomUUID,
+                      now: () => new Date(),
+                      executor,
+                      tasks,
+                      audit,
+                      approvals,
+                      publicUrl: env.publicUrl,
+                    },
+                    {
+                      starter,
+                      // The derived change-set stays prepared; submitting it starts the workflow anyway (signalWithStart).
+                      onStartFailure: (id, e) => {
+                        logger.warn({ changesetId: id, err: e instanceof Error ? e.name : 'unknown' }, 'workflow start after derivation failed');
+                      },
+                    },
+                  ),
                   invokerFor: invokerFactory(overrides.invoker, io, { tasks, starter, prepareWaitMs: env.prepareWaitMs }),
                   audit,
                   newId: randomUUID,
                   now: () => performance.now(),
                   rateCounter: overrides.rateCounter ?? new PostgresRateCounter(database.db),
                   wallClock: () => new Date(),
+                  widgets,
+                  publicUrl: env.publicUrl,
                 },
-                { tasks, repository: changesets, executor, audit, newId: randomUUID },
+                { tasks, repository: changesets, executor, audit, newId: randomUUID, publicUrl: env.publicUrl },
               ),
               {
                 legacy: 'stateless',

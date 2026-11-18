@@ -2,7 +2,7 @@ import type { InvocationResult } from '../operation-invoker.js';
 import { READ_RESULT_TEXT, readErrorResult } from '../read-result.js';
 import type { ChangeItemRecord, ChangeSetRecord, ExclusionReason } from './model.js';
 
-const EXCLUSION_ORDER: readonly ExclusionReason[] = ['not_found', 'out_of_scope', 'missing_data', 'no_change'];
+const EXCLUSION_ORDER: readonly ExclusionReason[] = ['not_found', 'out_of_scope', 'missing_data', 'no_change', 'requester'];
 
 /** Fixed change-set result wording (design §6.1), kept in one place so tests compare the same strings. */
 export const CHANGESET_TEXT = {

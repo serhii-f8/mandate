@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import type { ApprovalPlan, ApprovalRecord, ChangeSetRecord, OperationDefinition } from '@aiops/core';
-import { changesetDetail, checkPageStart, toApprover, viewerBlock, type PageViewer } from './detail.js';
+import {
+  approvalRequirement,
+  type ApprovalPlan,
+  type ApprovalRecord,
+  type ChangeItemRecord,
+  type ChangeSetRecord,
+  type OperationDefinition,
+  type RiskClass,
+  type RoleApprovalRule,
+} from '@aiops/core';
+import {
+  changesetDetail,
+  changesetDetailWith,
+  checkPageStart,
+  itemRow,
+  toApprover,
+  viewerBlock,
+  widgetViewerBlock,
+  type PageViewer,
+} from './detail.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const HASH = `sha256:${'a'.repeat(64)}`;
@@ -184,9 +202,35 @@ describe('changesetDetail', () => {
   });
 });
 
+describe('detail additions', () => {
+  it('CS-5 the detail carries derivedFrom of a derived change-set', () => {
+    const src = '22222222-2222-4222-8222-222222222222';
+    expect(changesetDetail({ changeset: { ...prepared(), derivedFrom: src }, approvals: [], viewer: alice, now: NOW }).derivedFrom).toBe(src);
+    expect('derivedFrom' in changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW })).toBe(false);
+  });
+
+  it('UI-4 drift is present once execution summarised; rollback is never available in this phase', () => {
+    const without = changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW });
+    expect('drift' in without).toBe(false);
+    expect(without.rollback).toStrictEqual({ available: false });
+    const withDrift = changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, drift: 0 });
+    expect(withDrift.drift).toBe(0);
+    expect(changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, drift: 2 }).drift).toBe(2);
+    expect(withDrift.rollback).toStrictEqual({ available: false });
+  });
+});
+
 describe('viewerBlock', () => {
+  it('UI-3 viewer.canSubmit and canExclude only for the requester of a prepared, unexpired change-set', () => {
+    expect(viewerBlock(prepared(), [], alice, NOW)).toMatchObject({ canSubmit: true, canExclude: true });
+    expect(viewerBlock(prepared(), [], dave, NOW)).toMatchObject({ canSubmit: false, canExclude: false });
+    expect(viewerBlock(pending(), [], alice, NOW)).toMatchObject({ canSubmit: false, canExclude: false });
+    const late = new Date(EXPIRES.getTime() + 1);
+    expect(viewerBlock(prepared(), [], alice, late)).toMatchObject({ canSubmit: false, canExclude: false });
+  });
+
   it('UI-7 viewer.canDecide only for the awaiting role', () => {
-    expect(viewerBlock(pending(), [], dave, NOW)).toStrictEqual({ canDecide: true, reason: null, fresh: true, stepUpSatisfied: true, canStart: false });
+    expect(viewerBlock(pending(), [], dave, NOW)).toStrictEqual({ canDecide: true, reason: null, fresh: true, stepUpSatisfied: true, canStart: false, canSubmit: false, canExclude: false });
     const e = viewerBlock(pending(), [], erin, NOW);
     expect(e.canDecide).toBe(false);
     expect(e.reason).toBe('not_approver');
@@ -252,5 +296,113 @@ describe('toApprover', () => {
   it('AUTH-6 maps the page viewer to the approver identity', () => {
     expect(toApprover(dave)).toStrictEqual({ subject: 'dave-sub', name: 'dave', roles: ['content_lead'], clientId: 'aiops-pages', authTime: dave.authTime });
     expect(toApprover(alice)).toStrictEqual({ subject: 'alice', roles: ['content_manager'], clientId: 'aiops-pages', authTime: alice.authTime });
+  });
+});
+
+/** The plan submission would freeze for this risk and rule (POL-5), so `widget` is the real one. */
+function planOf(risk: RiskClass, rule: Omit<RoleApprovalRule, 'steps'>): ApprovalPlan {
+  const r = approvalRequirement({ risk, rule: { steps: ['content_lead', 'brand_owner'], ...rule }, included: 3 });
+  if (!r.required || r.unroutable === true) throw new Error('expected a routable plan');
+  const { required: _required, unroutable: _unroutable, ...plan } = r; // eslint-disable-line @typescript-eslint/no-unused-vars -- not part of the plan
+  return plan;
+}
+const WIDGET_PLAN = planOf('write', { required: 'always', allowWidget: true });
+
+describe('APR-8 widget channel', () => {
+  it('APR-8 allow_widget true, the awaited role: canDecide true, reason null', () => {
+    expect(WIDGET_PLAN.widget).toBe(true);
+    expect(widgetViewerBlock(pending({ approvalPlan: WIDGET_PLAN }), [], toApprover(dave), NOW)).toStrictEqual({
+      canDecide: true,
+      reason: null,
+      fresh: true,
+      stepUpSatisfied: true,
+      canStart: false,
+      canSubmit: false,
+      canExclude: false,
+    });
+  });
+
+  it('APR-8 allow_widget false: canDecide false, reason widget_not_allowed', () => {
+    const plan = planOf('write', { required: 'always', allowWidget: false });
+    expect(plan.widget).toBe(false);
+    expect(widgetViewerBlock(pending({ approvalPlan: plan }), [], toApprover(dave), NOW)).toMatchObject({ canDecide: false, reason: 'widget_not_allowed' });
+  });
+
+  it('APR-8 a destructive change-set: widget_not_allowed', () => {
+    const plan = planOf('destructive', { required: 'always', allowWidget: true });
+    expect(plan.widget).toBe(false);
+    expect(widgetViewerBlock(pending({ approvalPlan: plan }), [], toApprover(dave), NOW)).toMatchObject({ canDecide: false, reason: 'widget_not_allowed' });
+  });
+
+  it('APR-8 AUTH-6 a step-up plan: widget_not_allowed even right after a fresh login', () => {
+    const plan = planOf('write', { required: 'always', allowWidget: true, stepUpMaxAgeSeconds: 120 });
+    expect(plan.stepUp).toStrictEqual({ maxAgeSeconds: 120 });
+    const justLoggedIn = toApprover(viewer('dave-sub', ['content_lead'], { name: 'dave', authTime: NOW }));
+    expect(widgetViewerBlock(pending({ approvalPlan: plan }), [], justLoggedIn, NOW)).toMatchObject({ canDecide: false, reason: 'widget_not_allowed' });
+  });
+
+  it('APR-2 the requester and the step-1 approver at step 2: separation_of_duties', () => {
+    const cs = pending({ approvalPlan: WIDGET_PLAN });
+    // The requester also holds the awaited role, so APR-2 is the check that refuses (F10).
+    const requester = toApprover(viewer('alice', ['content_manager', 'content_lead']));
+    expect(widgetViewerBlock(cs, [], requester, NOW)).toMatchObject({ canDecide: false, reason: 'separation_of_duties' });
+    const step2 = pending({ approvalPlan: WIDGET_PLAN, awaitingRole: 'brand_owner' });
+    const daveBoth = toApprover(viewer('dave-sub', ['content_lead', 'brand_owner'], { name: 'dave' }));
+    expect(widgetViewerBlock(step2, [daveApproved], daveBoth, NOW)).toMatchObject({ canDecide: false, reason: 'separation_of_duties' });
+    expect(widgetViewerBlock(step2, [daveApproved], toApprover(erin), NOW)).toMatchObject({ canDecide: true, reason: null });
+  });
+
+  it('APR-1 APR-8 a requester without the awaited role: not_approver', () => {
+    expect(widgetViewerBlock(pending({ approvalPlan: WIDGET_PLAN }), [], toApprover(alice), NOW)).toMatchObject({ canDecide: false, reason: 'not_approver' });
+  });
+
+  it('CS-6 APR-8 expired: reason expired; decided by someone else: not_pending', () => {
+    const late = new Date(EXPIRES.getTime() + 1);
+    expect(widgetViewerBlock(pending({ approvalPlan: WIDGET_PLAN }), [], toApprover(dave), late)).toMatchObject({ canDecide: false, reason: 'expired' });
+    expect(widgetViewerBlock(pending({ approvalPlan: WIDGET_PLAN, status: 'expired' }), [], toApprover(dave), NOW)).toMatchObject({ canDecide: false, reason: 'expired' });
+    // Another content lead approved the only step: the change-set is no longer pending.
+    const single = planOf('write', { required: 'always', allowWidget: true });
+    const decided = pending({ approvalPlan: { ...single, steps: ['content_lead'] }, status: 'approved' });
+    const other = toApprover(viewer('frank-sub', ['content_lead'], { name: 'frank' }));
+    expect(widgetViewerBlock(decided, [daveApproved], other, NOW)).toMatchObject({ canDecide: false, reason: 'not_pending' });
+  });
+
+  it('APR-8 the widget block has fresh true, stepUpSatisfied true, canStart false', () => {
+    // An approved change-set and the last step's role: the page would offer start; the widget never does.
+    const approved = pending({ approvalPlan: WIDGET_PLAN, status: 'approved' });
+    const noAuthTime = { subject: 'erin-sub', roles: ['brand_owner'] };
+    expect(widgetViewerBlock(approved, [daveApproved], noAuthTime, NOW)).toStrictEqual({
+      canDecide: false,
+      reason: 'not_pending',
+      fresh: true,
+      stepUpSatisfied: true,
+      canStart: false,
+      canSubmit: false,
+      canExclude: false,
+    });
+    // The requester of a prepared change-set gets no requester actions in the widget (F2).
+    expect(widgetViewerBlock(prepared(), [], toApprover(alice), NOW)).toMatchObject({ canSubmit: false, canExclude: false, canStart: false });
+  });
+
+  it('APR-5 changesetDetailWith(page block) equals changesetDetail; itemRow keeps the page item shape', () => {
+    for (const drift of [undefined, 0, 2]) {
+      const extra = drift === undefined ? {} : { drift };
+      const page = changesetDetail({ changeset: atStep2, approvals: [daveApproved], operation: OPERATION, viewer: erin, now: NOW, ...extra });
+      const viewerOf = viewerBlock(atStep2, [daveApproved], erin, NOW);
+      expect(changesetDetailWith({ changeset: atStep2, approvals: [daveApproved], operation: OPERATION, viewer: viewerOf, ...extra })).toStrictEqual(page);
+    }
+    const progress = { status: 'executing', total: 3, done: 1, failed: 0, skipped: 0 } as const;
+    const executing = pending({ status: 'executing', errorCode: 'drift' });
+    expect(changesetDetailWith({ changeset: executing, approvals: [], progress, viewer: viewerBlock(executing, [], alice, NOW) })).toStrictEqual(
+      changesetDetail({ changeset: executing, approvals: [], progress, viewer: alice, now: NOW }),
+    );
+    const widget = widgetViewerBlock(atStep2, [daveApproved], toApprover(erin), NOW);
+    expect(changesetDetailWith({ changeset: atStep2, approvals: [daveApproved], viewer: widget }).viewer).toBe(widget);
+
+    const plain: ChangeItemRecord = { targetId: 'ACME-1', status: 'pending', before: { name: 'a' }, after: { name: 'b' } };
+    expect(itemRow(plain)).toStrictEqual({ targetId: 'ACME-1', status: 'pending', before: { name: 'a' }, after: { name: 'b' } });
+    const full: ChangeItemRecord = { targetId: 'ACME-2', status: 'failed', reason: 'no_change', before: null, after: { name: 'b' }, error: 'upstream_rejected' };
+    expect(itemRow(full)).toStrictEqual({ targetId: 'ACME-2', status: 'failed', reason: 'no_change', before: null, after: { name: 'b' }, error: 'upstream_rejected' });
+    expect(Object.keys(itemRow(full))).toStrictEqual(['targetId', 'status', 'reason', 'before', 'after', 'error']);
   });
 });

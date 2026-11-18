@@ -12,11 +12,13 @@ import {
   type ApprovalReason,
   type ApprovalRecord,
   type Approver,
+  type ChangeItemRecord,
   type ChangeSetRecord,
   type ChangeSetStats,
   type ChangeSetStatus,
   type DecisionRefusal,
   type ExecutionProgress,
+  type ItemStatus,
   type OperationDefinition,
   type RiskClass,
 } from '@aiops/core';
@@ -39,6 +41,29 @@ export interface ViewerBlock {
   fresh: boolean;
   stepUpSatisfied: boolean;
   canStart: boolean;
+  canSubmit: boolean;
+  canExclude: boolean;
+}
+
+/** One change item as the pages and widgets show it. */
+export interface ItemRow {
+  targetId: string;
+  status: ItemStatus;
+  reason?: string;
+  before: unknown;
+  after: unknown;
+  error?: string;
+}
+
+export function itemRow(i: ChangeItemRecord): ItemRow {
+  return {
+    targetId: i.targetId,
+    status: i.status,
+    ...(i.reason === undefined ? {} : { reason: i.reason }),
+    before: i.before,
+    after: i.after,
+    ...(i.error === undefined ? {} : { error: i.error }),
+  };
 }
 
 export interface StepDecision {
@@ -60,6 +85,7 @@ export interface ChangeSetDetail {
   id: string;
   status: ChangeSetStatus;
   hash?: string;
+  derivedFrom?: string;
   operation: { id: string; title?: string; description?: string; risk?: RiskClass };
   connection: string;
   request: {
@@ -80,6 +106,10 @@ export interface ChangeSetDetail {
     awaitingRole?: string;
     stepUp?: { maxAgeSeconds: number };
   };
+  /** Present once execution is summarised (UI-4). */
+  drift?: number;
+  /** Rollback is not offered in this phase (UI-4). */
+  rollback: { available: false };
   viewer: ViewerBlock;
 }
 
@@ -115,6 +145,8 @@ export function viewerBlock(cs: ChangeSetRecord, approvals: readonly ApprovalRec
     now,
   });
   // A missing step-up is solved by logging in again, so the panel still shows (design §5).
+  // Submitting and excluding belong to the requester of an unexpired prepared change-set (UI-3).
+  const own = viewer.subject === cs.requester && cs.status === 'prepared' && !isExpiryDue(cs, now);
   const reason = r === 'step_up_required' ? null : (r ?? null);
   return {
     canDecide: reason === null,
@@ -122,7 +154,29 @@ export function viewerBlock(cs: ChangeSetRecord, approvals: readonly ApprovalRec
     fresh: viewer.fresh,
     stepUpSatisfied: cs.approvalPlan?.stepUp === undefined || r !== 'step_up_required',
     canStart: checkPageStart(cs, approvals, viewer, now) === undefined,
+    canSubmit: own,
+    canExclude: own,
   };
+}
+
+/**
+ * The viewer block for channel `widget` (APR-8): exactly what `decide_changeset` would answer for
+ * an approve. The widget never starts, submits or excludes, and has no step-up path, so those
+ * fields are fixed and fail closed.
+ */
+export function widgetViewerBlock(cs: ChangeSetRecord, approvals: readonly ApprovalRecord[], approver: Approver, now: Date): ViewerBlock {
+  const r = checkDecision({
+    changeset: cs,
+    approvals,
+    approver,
+    channel: 'widget',
+    decision: 'approve',
+    hash: cs.hash ?? '',
+    count: cs.stats.included,
+    now,
+  });
+  const reason = r ?? null;
+  return { canDecide: reason === null, reason, fresh: true, stepUpSatisfied: true, canStart: false, canSubmit: false, canExclude: false };
 }
 
 function stepDecision(a: ApprovalRecord): StepDecision {
@@ -157,6 +211,7 @@ function operationOf(id: string, op: OperationDefinition | undefined): ChangeSet
   return { id: op.id, title: op.title ?? op.id, description: op.description, risk: op.risk };
 }
 
+/** The page detail: the shared builder with the page viewer block (APR-5). */
 export function changesetDetail(input: {
   changeset: ChangeSetRecord;
   approvals: readonly ApprovalRecord[];
@@ -164,6 +219,20 @@ export function changesetDetail(input: {
   progress?: ExecutionProgress;
   viewer: PageViewer;
   now: Date;
+  drift?: number;
+}): ChangeSetDetail {
+  const { viewer, now, ...rest } = input;
+  return changesetDetailWith({ ...rest, viewer: viewerBlock(input.changeset, input.approvals, viewer, now) });
+}
+
+/** The change-set detail with a given viewer block, so pages and widgets build it alike (APR-5). */
+export function changesetDetailWith(input: {
+  changeset: ChangeSetRecord;
+  approvals: readonly ApprovalRecord[];
+  operation?: OperationDefinition;
+  progress?: ExecutionProgress;
+  viewer: ViewerBlock;
+  drift?: number;
 }): ChangeSetDetail {
   const { changeset: cs, approvals, progress } = input;
   const submission = cs.submission;
@@ -173,6 +242,7 @@ export function changesetDetail(input: {
     id: cs.id,
     status: cs.status,
     ...(cs.hash === undefined ? {} : { hash: cs.hash }),
+    ...(cs.derivedFrom === undefined ? {} : { derivedFrom: cs.derivedFrom }),
     operation: operationOf(cs.operation, input.operation),
     connection: cs.connection,
     request: {
@@ -206,6 +276,8 @@ export function changesetDetail(input: {
       : { progress: { total: progress.total, done: progress.done, failed: progress.failed, skipped: progress.skipped } }),
     ...(cs.errorCode === undefined ? {} : { errorCode: cs.errorCode }),
     ...(approval === undefined ? {} : { approval }),
-    viewer: viewerBlock(cs, approvals, input.viewer, input.now),
+    ...(input.drift === undefined ? {} : { drift: input.drift }),
+    rollback: { available: false },
+    viewer: input.viewer,
   };
 }

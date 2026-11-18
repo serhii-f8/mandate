@@ -3,32 +3,22 @@
  * change-set with the caller's current identity and configuration (POL-6). A prepared one starts
  * when the allowing role needs no approval (POL-5), with that role's limits (POL-4), or moves to
  * `pending_approval` for the role's approval steps; an approved one starts with the identity it was
- * submitted under. Answers carry counts and IDs only (SEC-5).
+ * submitted under. The steps live in `SubmitService`; this tool maps its outcome to texts, tasks and
+ * `tool.call` details. Answers carry counts and IDs only (SEC-5).
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
-import { createSchemaCompiler, executionLimits } from '@aiops/config';
-import {
-  allowingRole,
-  approvalRequestedEvent,
-  approvalRequestNotifications,
-  approvalRequirement,
-  changesetTransitionEvent,
-  ExecutorUnavailable,
-  TASK_TTL_MS,
-  type ApprovalPlan,
-  type ChangeSetRecord,
-  type RoleNotifyTargets,
-  type StartOutcome,
-  type Submission,
-} from '@aiops/core';
+import { createSchemaCompiler } from '@aiops/config';
+import { TASK_TTL_MS, type ApprovalPlan, type ChangeSetRecord, type StartOutcome } from '@aiops/core';
+import { pageLink } from '../changesets/links.js';
+import { SUBMIT_TOOL, SubmitService, type SubmitOutcome } from '../changesets/submit-service.js';
 import { AUDIT_UNAVAILABLE } from './audited-tool.js';
 import type { BuiltinToolDeps } from './builtin-tools.js';
-import { load, notFound } from './changeset-tools.js';
-import { deniedResult, recordDecision } from './policy-answers.js';
+import { notFound } from './changeset-tools.js';
+import { deniedResult } from './policy-answers.js';
 import { createTaskResult, type ToolAnswer } from './tasks/task-result.js';
 import type { BuiltinContext, BuiltinTool } from './tool-catalog.js';
 
-export const SUBMIT_TOOL = 'submit_for_approval';
+export { SUBMIT_TOOL };
 
 const SUBMIT_SCHEMA = {
   type: 'object',
@@ -42,9 +32,13 @@ const SUBMIT_SCHEMA = {
 
 const HASH_MISMATCH_TEXT = 'The change-set changed; review it again.';
 
-const error = (text: string): CallToolResult => ({ isError: true, content: [{ type: 'text', text }] });
-const wrongStatus = (id: string, status: string): CallToolResult => error(`Change-set ${id} cannot be submitted in status ${status}.`);
-const unavailable = (id: string): CallToolResult => error(`Change-set ${id} could not be started: the execution service is unavailable.`);
+/**
+ * A refusal for the caller's own change-set: it names the change-set, so the pipeline adds its page
+ * link (MCP-6). `not_found` and policy denials do not use it.
+ */
+const refusedFor = (id: string, text: string): CallToolResult => ({ isError: true, content: [{ type: 'text', text }], structuredContent: { changesetId: id } });
+const wrongStatus = (id: string, status: string): CallToolResult => refusedFor(id, `Change-set ${id} cannot be submitted in status ${status}.`);
+const unavailable = (id: string): CallToolResult => refusedFor(id, `Change-set ${id} could not be started: the execution service is unavailable.`);
 
 /** Fixed texts for the executor's refusals; the error code is the refusal reason. */
 function refusalText(id: string, role: string, refusal: Exclude<StartOutcome, { ok: true }>): string {
@@ -67,6 +61,8 @@ function refusalText(id: string, role: string, refusal: Exclude<StartOutcome, { 
 type Call = Omit<BuiltinContext, 'snapshot'>;
 
 export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
+  const service = new SubmitService(deps);
+
   /** Started: a task for a declaring client (MCP-7), otherwise the plain answer (MCP-1). */
   async function started(call: Call, record: ChangeSetRecord): Promise<ToolAnswer> {
     const { caller } = call;
@@ -95,66 +91,12 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
     };
   }
 
-  /** Required approval (POL-5): one transaction to `pending_approval`; no task, since it waits for people (APR-1). */
-  async function sendForApproval(
-    call: Call,
-    record: ChangeSetRecord,
-    hash: string,
-    submission: Submission,
-    plan: ApprovalPlan,
-    notify: RoleNotifyTargets,
-  ): Promise<ToolAnswer> {
-    const { caller, correlationId } = call;
+  /** Required approval (POL-5): no task, since it waits for people (APR-1). */
+  function pendingApproval(record: ChangeSetRecord, plan: ApprovalPlan): ToolAnswer {
     const id = record.id;
-    const first = plan.steps[0];
-    // A required plan always has steps; the unroutable case was answered before.
-    if (first === undefined) throw new Error('approval plan has no steps');
-    const clientId = caller.clientId === undefined ? {} : { clientId: caller.clientId };
-    const round = record.approvalRound + 1;
-    const outcome = await deps.repository.submitForApproval({
-      changesetId: id,
-      expectedHash: hash,
-      submission,
-      plan,
-      audit: {
-        transition: changesetTransitionEvent({
-          id: deps.newId(),
-          actor: caller.subject,
-          ...clientId,
-          changeset: record,
-          from: 'prepared',
-          to: 'pending_approval',
-          correlationId,
-        }),
-        requested: approvalRequestedEvent({
-          id: deps.newId(),
-          actor: caller.subject,
-          ...clientId,
-          changeset: record,
-          round,
-          step: 1,
-          role: first,
-          correlationId,
-        }),
-      },
-      // NTF-1: the step-1 role is asked to decide, not the requester's role.
-      notifications: approvalRequestNotifications(notify, { role: first, round, step: 1 }),
-    });
-    if (!outcome.ok) {
-      call.report({ errorCode: outcome.reason });
-      switch (outcome.reason) {
-        case 'not_found':
-          return notFound(id);
-        case 'hash_mismatch':
-          return error(HASH_MISMATCH_TEXT);
-        case 'expired':
-          return error(`Change-set ${id} has expired.`);
-        case 'not_prepared':
-          // Someone else moved it first: name the status it has now.
-          return wrongStatus(id, (await deps.repository.get(id))?.status ?? record.status);
-      }
-    }
-    const url = new URL(`/app/changesets/${id}`, deps.publicUrl).href;
+    // A required plan always has steps (SubmitService checks it before the transaction).
+    const first = plan.steps[0] ?? '';
+    const url = pageLink(deps.publicUrl, id);
     const total = record.stats.included;
     return {
       content: [
@@ -167,10 +109,56 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
     };
   }
 
+  /** Today's text and `errorCode` for every outcome; no code for an unknown ID, a wrong status or a failed audit write. */
+  function answer(call: Call, id: string, outcome: SubmitOutcome): Promise<ToolAnswer> | ToolAnswer {
+    switch (outcome.kind) {
+      case 'started':
+        return started(call, outcome.changeset);
+      case 'pending_approval':
+        return pendingApproval(outcome.changeset, outcome.plan);
+      case 'refused':
+        break;
+    }
+    switch (outcome.reason) {
+      case 'not_found':
+        // Unknown and foreign IDs are not reported; the lost race is (ruling F2).
+        if ('raced' in outcome) call.report({ errorCode: 'not_found' });
+        return notFound(id);
+      case 'wrong_status':
+        return wrongStatus(id, outcome.status);
+      case 'audit_unavailable':
+        return AUDIT_UNAVAILABLE;
+      case 'policy_denied':
+        call.report({ errorCode: 'policy_denied' });
+        return deniedResult(outcome.decision);
+      case 'hash_mismatch':
+        call.report({ errorCode: 'hash_mismatch' });
+        return refusedFor(id, HASH_MISMATCH_TEXT);
+      case 'expired':
+        call.report({ errorCode: 'expired' });
+        return refusedFor(id, `Change-set ${id} has expired.`);
+      case 'not_prepared':
+        call.report({ errorCode: 'not_prepared' });
+        return wrongStatus(id, outcome.status);
+      case 'approval_unroutable':
+        call.report({ errorCode: 'approval_unroutable' });
+        return refusedFor(id, `Change-set ${id} needs approval, but its role has no approval steps configured.`);
+      case 'executor_unavailable':
+        call.report({ errorCode: 'executor_unavailable' });
+        return unavailable(id);
+      case 'start_refused':
+        call.report({ errorCode: outcome.refusal.reason });
+        // The executor's not_found names nothing, like any not_found answer.
+        if (outcome.refusal.reason === 'not_found') return { isError: true, content: [{ type: 'text', text: refusalText(id, outcome.role, outcome.refusal) }] };
+        return refusedFor(id, refusalText(id, outcome.role, outcome.refusal));
+    }
+  }
+
   return {
     name: SUBMIT_TOOL,
     description: 'Submit a change-set you prepared, by its ID and hash: it is executed, or sent for approval when your role requires it.',
     inputSchema: SUBMIT_SCHEMA,
+    widget: 'changeset',
     readOnlyHint: false,
     validate: createSchemaCompiler()(SUBMIT_SCHEMA),
     async handler(args, { caller, snapshot, correlationId, tasks, report }) {
@@ -178,94 +166,7 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
       const id = args.changeset_id as string;
       const hash = args.hash as string;
       const call: Call = { caller, correlationId, tasks, report };
-
-      // 1. Requester only; unknown and foreign IDs look the same (expires lazily, CS-6).
-      const record = await load(deps, caller, correlationId, id);
-      if (record === undefined) return notFound(id);
-
-      // 2. Only prepared and approved change-sets can be submitted; a second submit finds it pending or executing.
-      if (record.status !== 'prepared' && record.status !== 'approved') return wrongStatus(id, record.status);
-
-      // 3. SEC-9: the hash the caller reviewed, on every path and before anything changes.
-      if (record.hash !== hash) {
-        report({ errorCode: 'hash_mismatch' });
-        return error(HASH_MISMATCH_TEXT);
-      }
-
-      // 4. POL-6: the stored arguments against the caller's current identity and configuration, audited (POL-8).
-      const decision = snapshot.engine.evaluate({ caller, operationId: record.operation, args: record.args });
-      const recorded = await recordDecision(deps, { caller, correlationId }, SUBMIT_TOOL, decision, { operation: record.operation, changesetId: id });
-      if (decision.effect === 'deny') {
-        report({ errorCode: 'policy_denied' });
-        return deniedResult(decision);
-      }
-      if (!recorded) return AUDIT_UNAVAILABLE;
-
-      // 5. Approved: start with the identity and role it was submitted under (POL-6, design §6).
-      if (record.status === 'approved') {
-        const outcome = await deps.approvals.startApproved({
-          changesetId: id,
-          actor: caller.subject,
-          ...(caller.clientId === undefined ? {} : { clientId: caller.clientId }),
-          correlationId,
-          snapshot: snapshot.configuration,
-        });
-        if (!outcome.ok) {
-          report({ errorCode: outcome.reason });
-          if (outcome.reason === 'executor_unavailable') return unavailable(id);
-          return error(refusalText(id, record.submission?.role ?? '', outcome));
-        }
-        return started(call, record);
-      }
-
-      // 6. Prepared: the allowing rule's role decides approval (POL-5), as it decides limits (ADR 0027).
-      const role = allowingRole(decision.rule);
-      const rule = role === undefined ? undefined : snapshot.configuration.approval.get(role);
-      // An operation the engine allowed is in the snapshot; the strictest risk stands in otherwise.
-      const risk = snapshot.configuration.policy.operations.find((op) => op.id === record.operation)?.risk ?? 'destructive';
-      const requirement = approvalRequirement({ risk, ...(rule === undefined ? {} : { rule }), included: record.stats.included });
-      if (role === undefined || (requirement.required && requirement.unroutable === true)) {
-        report({ errorCode: 'approval_unroutable' });
-        return error(`Change-set ${id} needs approval, but its role has no approval steps configured.`);
-      }
-      const submission: Submission = {
-        actor: caller.subject,
-        groups: caller.groups,
-        ...(caller.clientId === undefined ? {} : { clientId: caller.clientId }),
-        correlationId,
-        at: deps.now(),
-        role,
-        rule: decision.rule,
-      };
-      if (requirement.required) {
-        const { required: _required, unroutable: _unroutable, ...plan } = requirement; // eslint-disable-line @typescript-eslint/no-unused-vars -- not part of the plan
-        return sendForApproval(call, record, hash, submission, plan, snapshot.configuration.notify);
-      }
-
-      // 7. No approval: start with the role's limits (POL-4); a limit refusal's deny row is written by the start itself.
-      const limits = executionLimits(snapshot.configuration, role);
-      let outcome: StartOutcome;
-      try {
-        outcome = await deps.executor.start({
-          changesetId: id,
-          expectedHash: hash,
-          actor: caller.subject,
-          correlationId,
-          groups: caller.groups,
-          ...(limits === undefined ? {} : { limits }),
-          ...(caller.clientId === undefined ? {} : { clientId: caller.clientId }),
-          submission,
-        });
-      } catch (e) {
-        if (!(e instanceof ExecutorUnavailable)) throw e;
-        report({ errorCode: 'executor_unavailable' });
-        return unavailable(id);
-      }
-      if (!outcome.ok) {
-        report({ errorCode: outcome.reason });
-        return error(refusalText(id, role, outcome));
-      }
-      return started(call, record);
+      return answer(call, id, await service.submit({ caller, correlationId, changesetId: id, hash, snapshot }));
     },
   };
 }

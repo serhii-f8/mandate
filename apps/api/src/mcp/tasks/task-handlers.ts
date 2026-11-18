@@ -25,6 +25,7 @@ import {
   preparedAnswer,
   toCallToolResult,
 } from '../../changesets/results.js';
+import { withPageLink } from '../../changesets/links.js';
 import { missingTasksCapability, taskNotFound } from './extension.js';
 import { TASK_POLL_INTERVAL_MS } from './task-result.js';
 import { deriveTaskState, type TaskState } from './task-state.js';
@@ -35,6 +36,8 @@ export interface TaskHandlerDeps {
   readonly executor: ChangeSetExecutor;
   readonly audit: AuditLog;
   readonly newId: () => string;
+  /** `AIOPS_PUBLIC_URL`, the base of the change-set page link in final results (MCP-6). */
+  readonly publicUrl: URL;
 }
 
 export interface TaskRequestContext {
@@ -122,7 +125,8 @@ export function createTaskHandlers(deps: TaskHandlerDeps): TaskHandlers {
         ttlMs: task.ttlMs,
         pollIntervalMs: TASK_POLL_INTERVAL_MS,
         // The SDK stamps `resultType` on the top-level result only; the nested one is ours.
-        ...(answer === undefined ? {} : { result: { ...toCallToolResult(answer), resultType: 'complete' as const } }),
+        // MCP-6: the final result links the change-set page, like the tool answer it stands for.
+        ...(answer === undefined ? {} : { result: { ...withPageLink(toCallToolResult(answer), deps.publicUrl), resultType: 'complete' as const } }),
       };
     },
 

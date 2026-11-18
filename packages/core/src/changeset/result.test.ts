@@ -50,6 +50,11 @@ describe('MCP-4 SEC-5 prepared result', () => {
     expect(many.text).toContain('10 excluded (not_found 1, out_of_scope 4, missing_data 3, no_change 2).');
   });
 
+  it('CS-5 the prepared text lists requester exclusions after no_change', () => {
+    const r = preparedResult({ ...record, stats: { ...record.stats, excluded: { no_change: 1, requester: 2 } } }, []);
+    expect(r.text).toContain('3 excluded (no_change 1, requester 2).');
+  });
+
   it('MCP-4 structured content carries the change-set summary, at most 20 items and the cursor; dataText repeats it', () => {
     const r = preparedResult(record, items, 'cursor-1');
     const s = r.structured as { changeset: Record<string, unknown>; items: unknown[]; nextCursor?: string };
