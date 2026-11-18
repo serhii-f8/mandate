@@ -4,7 +4,6 @@ import {
   ExecutorUnavailable,
   READ_RESULT_TEXT,
   changesetTransitionEvent,
-  decodeCursor,
   encodeCursor,
   isExpiryDue,
   type Caller,
@@ -15,6 +14,7 @@ import {
   type ExecutionProgress,
   type ItemStatus,
 } from '@aiops/core';
+import { decodeCursor } from '../approvals/page-query.js';
 import { executionSummaryText } from '../changesets/results.js';
 import type { BuiltinTool } from './tool-catalog.js';
 

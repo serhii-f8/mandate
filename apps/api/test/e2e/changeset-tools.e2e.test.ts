@@ -166,6 +166,14 @@ describe('MCP-8 built-in change-set tools', () => {
     expect(text(result)).toBe('Input validation error: Invalid arguments for tool get_changeset: cursor is not valid');
   });
 
+  it('MCP-4 get_changeset cursor with NUL is an input error, not a database failure', async () => {
+    const id = await prepare();
+    const cursor = Buffer.from('\u0000', 'utf8').toString('base64url');
+    const { result } = await call(alice, 'get_changeset', { changeset_id: id, cursor });
+    expect(result.isError).toBe(true);
+    expect(text(result)).toBe('Input validation error: Invalid arguments for tool get_changeset: cursor is not valid');
+  });
+
   it('MCP-8 SEC-1 another user and an unknown ID get the same not-found answer', async () => {
     const id = await prepare();
     for (const [token, target] of [[bob, id], [alice, UNKNOWN_ID]] as const) {

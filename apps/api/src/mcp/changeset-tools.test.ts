@@ -151,6 +151,16 @@ describe('MCP-8 CS-6 built-in change-set tools', () => {
     expect(result).toEqual({ isError: true, content: [{ type: 'text', text: 'Input validation error: Invalid arguments for tool get_changeset: cursor is not valid' }] });
   });
 
+  it('MCP-4 get_changeset cursor with NUL is an input error', async () => {
+    const { get, ctx } = await setup();
+    // Canonical base64url of control characters: PostgreSQL would refuse NUL as a text parameter.
+    for (const raw of ['\u0000', 'a\u001fb', '\u007f']) {
+      const cursor = Buffer.from(raw, 'utf8').toString('base64url');
+      const result = plain(await get.handler({ changeset_id: ID, cursor }, ctx(alice)));
+      expect(result, JSON.stringify(raw)).toEqual({ isError: true, content: [{ type: 'text', text: 'Input validation error: Invalid arguments for tool get_changeset: cursor is not valid' }] });
+    }
+  });
+
   it('MCP-8 a foreign change-set looks like an unknown one', async () => {
     const { get, cancel, ctx } = await setup();
     for (const tool of [get, cancel]) {

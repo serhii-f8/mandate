@@ -8,9 +8,9 @@
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { createSchemaCompiler, type LoadedConfiguration } from '@aiops/config';
-import { canView, currentStep, decodeCursor, encodeCursor, resolveRoles, type ApprovalRecord, type Approver, type Caller, type ChangeSetRecord, type ItemStatus } from '@aiops/core';
+import { canView, currentStep, encodeCursor, resolveRoles, type ApprovalRecord, type Approver, type Caller, type ChangeSetRecord, type ItemStatus } from '@aiops/core';
 import { changesetDetailWith, itemRow, widgetViewerBlock, type ViewerBlock } from '../approvals/detail.js';
-import { newSeed } from '../approvals/page-query.js';
+import { decodeCursor, newSeed } from '../approvals/page-query.js';
 import { DECISION_REFUSAL_TEXT } from '../approvals/texts.js';
 import type { BuiltinToolDeps } from './builtin-tools.js';
 import { isSummarised, notFound, progressOf } from './changeset-tools.js';
@@ -76,9 +76,6 @@ export function reviewChangesetTool(deps: BuiltinToolDeps): BuiltinTool {
       let after: string | undefined;
       if (typeof args.cursor === 'string') {
         after = decodeCursor(args.cursor);
-        // Control characters (NUL included) would fail later as a PostgreSQL text parameter (500).
-        // eslint-disable-next-line no-control-regex -- rejecting control characters is the point
-        if (after !== undefined && /[\u0000-\u001f\u007f]/.test(after)) after = undefined;
         if (after === undefined) return inputError(`Input validation error: Invalid arguments for tool ${REVIEW_TOOL}: cursor is not valid`);
       }
       const configuration = snapshot.configuration;
