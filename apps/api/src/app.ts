@@ -54,6 +54,7 @@ import {
   PAGE_CHECKS,
   PAGE_SESSIONS,
   TEMPORAL,
+  WORKFLOW_STARTER,
 } from './tokens.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
 import { operationInvokers, type OperationInvokersBase } from './upstream/operation-router.js';
@@ -214,20 +215,26 @@ class AppModule {
             new ApprovalService({ repository, executor, audit, newId: randomUUID, now: () => new Date() }),
         },
         {
+          // One starter for the write path's preparations and derived change-sets (EXE-1).
+          provide: WORKFLOW_STARTER,
+          inject: [TEMPORAL],
+          useFactory: (temporal: TemporalHandle | null): WorkflowStarter =>
+            overrides.starter ?? new TemporalWorkflowStarter({ client: temporalOf(temporal).client, taskQueue: env.taskQueue }),
+        },
+        {
           provide: MCP_HANDLER,
-          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, TEMPORAL, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE],
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE, WORKFLOW_STARTER],
           useFactory: (
             audit: AuditLog,
             vault: CredentialVault,
             database: Database,
-            temporal: TemporalHandle | null,
             changesets: ChangeSetRepository,
             executor: ChangeSetExecutor,
             approvals: ApprovalService,
+            starter: WorkflowStarter,
           ) => {
             // One task store for the write path that creates tasks and the handlers that read them.
             const tasks = overrides.tasks ?? new PostgresTaskRepository(database.db);
-            const starter = overrides.starter ?? new TemporalWorkflowStarter({ client: temporalOf(temporal).client, taskQueue: env.taskQueue });
             const io: UpstreamIo = {
               vault,
               adapter,
@@ -240,16 +247,25 @@ class AppModule {
               createServerFactory(
                 {
                   snapshot: () => snapshotOf(configuration.current),
-                  builtins: createBuiltinTools({
-                    repository: changesets,
-                    newId: randomUUID,
-                    now: () => new Date(),
-                    executor,
-                    tasks,
-                    audit,
-                    approvals,
-                    publicUrl: env.publicUrl,
-                  }),
+                  builtins: createBuiltinTools(
+                    {
+                      repository: changesets,
+                      newId: randomUUID,
+                      now: () => new Date(),
+                      executor,
+                      tasks,
+                      audit,
+                      approvals,
+                      publicUrl: env.publicUrl,
+                    },
+                    {
+                      starter,
+                      // The derived change-set stays prepared; submitting it starts the workflow anyway (signalWithStart).
+                      onStartFailure: (id, e) => {
+                        logger.warn({ changesetId: id, err: e instanceof Error ? e.name : 'unknown' }, 'workflow start after derivation failed');
+                      },
+                    },
+                  ),
                   invokerFor: invokerFactory(overrides.invoker, io, { tasks, starter, prepareWaitMs: env.prepareWaitMs }),
                   audit,
                   newId: randomUUID,

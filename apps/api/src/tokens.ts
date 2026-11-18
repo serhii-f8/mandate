@@ -15,3 +15,4 @@ export const OIDC_CLIENT = Symbol('OidcClient');
 export const PAGE_CHECKS = Symbol('PageChecks');
 export const PAGE_SESSIONS = Symbol('SessionService');
 export const TEMPORAL = Symbol('Temporal');
+export const WORKFLOW_STARTER = Symbol('WorkflowStarter');

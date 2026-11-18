@@ -11,7 +11,7 @@ import { createLogger } from '../../src/logger.js';
 import { auditRows, connectClient, modernRequest, rawPost, startApi, startDatabase, tokenFor, vaultOf, type RunningApi } from './helpers.js';
 
 /** Built-in tools every authenticated user sees (MCP-8). */
-const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset', 'submit_for_approval'];
+const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset', 'submit_for_approval', 'exclude_changeset_items'];
 const READ_CONFIG = fileURLToPath(new URL('./fixtures/read-config', import.meta.url));
 /** Obviously fake; the tests prove it never leaves the adapter (SEC-3). */
 const UPSTREAM_TOKEN = 'e2e-only-upstream-token-0123456789';

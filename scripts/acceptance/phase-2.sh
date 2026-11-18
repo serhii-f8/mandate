@@ -64,8 +64,8 @@ ALICE="$(login alice 2>&1)" || { fail login-alice "$ALICE"; ALICE=""; }
 BOB="$(login bob 2>&1)" || { fail login-bob "$BOB"; BOB=""; }
 A_TOOLS="$(json "$(mcp --token "$ALICE" --list 2>&1 || true)" '.tools')"
 B_TOOLS="$(json "$(mcp --token "$BOB" --list 2>&1 || true)" '.tools')"
-if [[ "$A_TOOLS" == '["ping","list_my_operations","get_changeset","cancel_changeset","submit_for_approval","catalog.search_products","catalog.update_content"]' \
-   && "$B_TOOLS" == '["ping","list_my_operations","get_changeset","cancel_changeset","submit_for_approval","support.lookup_order"]' ]]; then
+if [[ "$A_TOOLS" == '["ping","list_my_operations","get_changeset","cancel_changeset","submit_for_approval","exclude_changeset_items","catalog.search_products","catalog.update_content"]' \
+   && "$B_TOOLS" == '["ping","list_my_operations","get_changeset","cancel_changeset","submit_for_approval","exclude_changeset_items","support.lookup_order"]' ]]; then
   pass different-tool-lists "alice (content): $A_TOOLS; bob (support): $B_TOOLS"
 else
   fail different-tool-lists "alice: $A_TOOLS; bob: $B_TOOLS"
