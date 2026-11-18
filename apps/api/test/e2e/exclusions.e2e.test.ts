@@ -117,13 +117,21 @@ describe('CS-5 MCP-8 exclude_changeset_items end to end', () => {
   it('CS-5 refusals: stale hash, nothing left, unknown items, foreign change-set as not found', async () => {
     const source = await seed();
     const stale = await exclude(alice, { id: source.id, hash: `sha256:${'0'.repeat(64)}` }, { exclude: ['SKU-0001'] });
-    expect(stale.result).toMatchObject({ isError: true, content: [{ type: 'text', text: 'The change-set changed; review it again.' }] });
+    // MCP-6: refusals for alice's own change-set name it and link its page.
+    const page = `${api.url}/app/changesets/${source.id}`;
+    const named = { changesetId: source.id, pageUrl: page };
+    expect(stale.result).toMatchObject({ isError: true, content: [{ type: 'text', text: `The change-set changed; review it again. Open: ${page}` }], structuredContent: named });
     const nothing = await exclude(alice, source, { exclude: ['SKU-0001', 'SKU-0002', 'SKU-0003'] });
-    expect(nothing.result).toMatchObject({ isError: true, content: [{ type: 'text', text: 'Excluding these items would leave nothing to change.' }] });
+    expect(nothing.result).toMatchObject({
+      isError: true,
+      content: [{ type: 'text', text: `Excluding these items would leave nothing to change. Open: ${page}` }],
+      structuredContent: named,
+    });
     const unknown = await exclude(alice, source, { exclude: ['SKU-0004', 'SKU-9999'] });
     expect(unknown.result).toMatchObject({
       isError: true,
-      content: [{ type: 'text', text: '2 of the named items cannot be changed: exclude only included items, include only items you excluded.' }],
+      content: [{ type: 'text', text: `2 of the named items cannot be changed: exclude only included items, include only items you excluded. Open: ${page}` }],
+      structuredContent: named,
     });
     const foreign = await exclude(bob, source, { exclude: ['SKU-0001'] });
     const missing = await exclude(bob, { id: UNKNOWN_ID, hash: source.hash }, { exclude: ['SKU-0001'] });

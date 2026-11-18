@@ -31,8 +31,12 @@ export function preparationErrorAnswer(record: ChangeSetRecord): InvocationResul
 }
 
 export function expiredDuringPreparationAnswer(record: ChangeSetRecord): InvocationResult {
+  // Named in the structured data, as a preparation error is, so the answer links its page (MCP-6).
+  const structured = { changeset: { id: record.id, status: 'expired', errorCode: 'expired' } };
   return {
     text: `${record.operation} could not prepare a change-set: it expired before preparation finished (change-set ${record.id}).`,
+    structured,
+    dataText: JSON.stringify(structured),
     isError: true,
   };
 }

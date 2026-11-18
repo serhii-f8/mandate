@@ -137,7 +137,8 @@ describe('MCP-8 built-in change-set tools', () => {
     const first = await call(alice, 'get_changeset', { changeset_id: id, page_size: 3 });
     expect(first.result.isError).toBeUndefined();
     expect(text(first.result)).toBe(
-      `Change-set ${id} (shop.update_content) is prepared: 5 change(s), 0 excluded. Showing 3 item(s); more with cursor. ${READ_RESULT_TEXT.dataNote}`,
+      `Change-set ${id} (shop.update_content) is prepared: 5 change(s), 0 excluded. Showing 3 item(s); more with cursor. ${READ_RESULT_TEXT.dataNote} ` +
+        `Open: ${api.url}/app/changesets/${id}`,
     );
     const s1 = first.result.structuredContent as { changeset: { status: string; hash: string }; items: { targetId: string }[]; nextCursor?: string };
     expect(s1.changeset).toMatchObject({ id, status: 'prepared', operation: 'shop.update_content' });

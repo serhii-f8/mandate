@@ -297,7 +297,7 @@ class AppModule {
                   widgets,
                   publicUrl: env.publicUrl,
                 },
-                { tasks, repository: changesets, executor, audit, newId: randomUUID },
+                { tasks, repository: changesets, executor, audit, newId: randomUUID, publicUrl: env.publicUrl },
               ),
               {
                 legacy: 'stateless',

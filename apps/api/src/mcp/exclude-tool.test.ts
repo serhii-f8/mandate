@@ -178,10 +178,20 @@ describe('MCP-8 CS-5 exclude_changeset_items', () => {
       const { tool, ctx, reportedAll, started } = await setup(c.setup);
       expect(tool.validate(c.args)).toEqual({ ok: true });
       const result = plain(await tool.handler(c.args, ctx(c.caller ?? alice)));
-      expect(result).toEqual({ isError: true, content: [{ type: 'text', text: c.text }] });
+      // MCP-6: a refusal for the caller's own change-set names it, so the pipeline links its page.
+      const named = c.code === 'not_found' ? {} : { structuredContent: { changesetId: SOURCE } };
+      expect(result).toEqual({ isError: true, content: [{ type: 'text', text: c.text }], ...named });
       expect(reportedAll()).toEqual({ errorCode: c.code });
       expect(started).toEqual([]);
     });
+  });
+
+  it('MCP-6 a refusal after the requester check names the source change-set; not_found names none', async () => {
+    const { tool, ctx } = await setup();
+    const stale = plain(await tool.handler({ changeset_id: SOURCE, hash: `sha256:${'b'.repeat(64)}`, exclude: ['SECRET-T1'] }, ctx(alice)));
+    expect(stale.structuredContent).toEqual({ changesetId: SOURCE });
+    const foreign = plain(await tool.handler({ changeset_id: SOURCE, hash: HASH, exclude: ['SECRET-T1'] }, ctx(bob)));
+    expect(foreign).not.toHaveProperty('structuredContent');
   });
 
   it('AUD-1 SEC-3 the reported details carry counts and ids, never target ids', async () => {

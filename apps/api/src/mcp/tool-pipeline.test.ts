@@ -1,6 +1,6 @@
 import { ProtocolError, type CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import type { AuditEventInput, Caller, OperationDefinition, RateCounter, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
+import type { AuditEventInput, Caller, OperationDefinition, PolicyDecision, RateCounter, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
 import {
   FakeInvoker,
@@ -693,5 +693,50 @@ describe('MCP-5 tools link their widget', () => {
     const { deps, req } = widgetSetup();
     const tools = await listTools({ ...deps, widgets: catalog() }, req(dave));
     expect(tools.find((t) => t.name === DECIDE_TOOL)?._meta).toEqual({ ui: { visibility: ['app'] } });
+  });
+});
+
+describe('MCP-6 change-set results link the page', () => {
+  const ID = '11111111-1111-4111-8111-111111111111';
+  const PAGE = `https://aiops.example.test/app/changesets/${ID}`;
+  const answering = (name: string, widget?: WidgetKind): BuiltinTool => ({
+    ...widgetTool(name, widget),
+    handler: () => Promise.resolve({ content: [{ type: 'text', text: `${name} done.` }], structuredContent: { changesetId: ID } }),
+  });
+
+  it('MCP-6 linked results get the link; ping, cancel_changeset and read operations do not', async () => {
+    const write = operation('shop.update', 'write', true);
+    const read = operation('shop.get', 'read', false);
+    const { deps, req, audit } = setup();
+    const configuration = { ...LOADED, validators: new Map([write, read].map((op) => [op.id, () => ({ ok: true as const })])) } as LoadedConfiguration;
+    const engine = {
+      grantedOperations: () => [write, read],
+      evaluate: (): PolicyDecision => ({ effect: 'allow', rule: 'test', roles: [] }),
+    } as unknown as ReturnType<typeof snapshotOf>['engine'];
+    const snapshot = { configuration, engine };
+    const invoker: OperationInvoker = {
+      invoke: (r: InvocationRequest): Promise<InvocationResult> => Promise.resolve({ text: `${r.operation.id} done.`, structured: { changesetId: ID } }),
+    };
+    const linkDeps: PipelineDeps = {
+      ...deps,
+      // A missing bundle does not remove the fallback link (MCP-6).
+      widgets: catalog('changeset'),
+      builtins: [answering('ping'), answering('cancel_changeset'), answering('get_changeset', 'changeset')],
+      snapshot: () => snapshot,
+      invokerFor: () => invoker,
+    };
+    const request: PipelineRequest = { ...req(alice), snapshot };
+    for (const name of ['get_changeset', 'shop.update']) {
+      const result = plain(await callTool(linkDeps, request, name, {}));
+      expect(text(result), name).toBe(`${name} done. Open: ${PAGE}`);
+      expect(result.structuredContent, name).toEqual({ changesetId: ID, pageUrl: PAGE });
+    }
+    for (const name of ['ping', 'cancel_changeset', 'shop.get']) {
+      const result = plain(await callTool(linkDeps, request, name, {}));
+      expect(text(result), name).toBe(`${name} done.`);
+      expect(result.structuredContent, name).toEqual({ changesetId: ID });
+    }
+    // The audit row is written before the link is added and never holds the URL.
+    expect(JSON.stringify(audit.events)).not.toContain('/app/changesets/');
   });
 });

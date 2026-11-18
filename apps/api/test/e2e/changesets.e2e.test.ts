@@ -170,7 +170,8 @@ describe('CS-1 CS-2 CS-4 write calls prepare change-sets', () => {
     expect(row?.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(result.content[0]?.text).toBe(
       `shop.update_content prepared change-set ${id}: 2 change(s) to apply, 1 excluded (not_found 1). ${CHANGESET_TEXT.nothingWritten} ` +
-        `Hash ${row?.hash ?? ''}; expires ${row?.expires_at.toISOString() ?? ''}. ${CHANGESET_TEXT.seeAll} ${READ_RESULT_TEXT.dataNote}`,
+        `Hash ${row?.hash ?? ''}; expires ${row?.expires_at.toISOString() ?? ''}. ${CHANGESET_TEXT.seeAll} ${READ_RESULT_TEXT.dataNote} ` +
+        `Open: ${api.url}/app/changesets/${id}`,
     );
     expect(JSON.parse(result.content[1]?.text ?? '')).toEqual(result.structuredContent);
     expect(result.structuredContent).toMatchObject({ changeset: { id, operation: 'shop.update_content', status: 'prepared', hash: row?.hash } });
@@ -260,8 +261,8 @@ describe('CS-1 CS-2 CS-4 write calls prepare change-sets', () => {
     expect(result.isError).toBe(true);
     const text = result.content[0]?.text ?? '';
     const id = UUID.exec(text)?.[0] ?? '';
-    expect(text).toBe(`shop.update_content failed: the upstream system answered HTTP 404 (change-set ${id}).`);
-    expect(result.structuredContent).toEqual({ changeset: { id, status: 'failed', errorCode: 'http_status' } });
+    expect(text).toBe(`shop.update_content failed: the upstream system answered HTTP 404 (change-set ${id}). Open: ${api.url}/app/changesets/${id}`);
+    expect(result.structuredContent).toEqual({ changeset: { id, status: 'failed', errorCode: 'http_status' }, pageUrl: `${api.url}/app/changesets/${id}` });
     expect(JSON.stringify(result)).not.toContain('exploded');
     const row = await changeSet(id);
     expect(row?.status).toBe('failed');

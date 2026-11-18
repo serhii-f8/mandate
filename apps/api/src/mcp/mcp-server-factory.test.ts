@@ -100,6 +100,7 @@ function handler(builtins: PipelineDeps['builtins'] = [], tasks = new InMemoryTa
     executor: unusedExecutor,
     audit,
     newId: () => '00000000-0000-4000-8000-000000000002',
+    publicUrl: new URL('https://aiops.example.test'),
   };
   const mcp = createMcpHandler(createServerFactory(deps, taskDeps), { legacy: 'stateless', responseMode: 'json' });
   const authInfo = authInfoFor({ caller: { subject: 'alice', groups: [] }, correlationId: 'corr-1' }, undefined);

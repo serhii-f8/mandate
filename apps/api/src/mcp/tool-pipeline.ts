@@ -19,6 +19,7 @@ import {
   type PolicyEngine,
   type RateCounter,
 } from '@aiops/core';
+import { withPageLink } from '../changesets/links.js';
 import { toCallToolResult } from '../changesets/results.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
@@ -240,7 +241,7 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
   if (!recorded) return AUDIT_UNAVAILABLE;
 
   // 4. Run (SEC-1: only after an allow decision of this request is on record).
-  return auditedRun(
+  const answer = await auditedRun(
     name,
     async (report) => {
       if (builtin !== undefined) {
@@ -267,4 +268,8 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
     },
     runDeps,
   );
+  // MCP-6: the tools linked to a widget answer with the page link too, bundle or not; added after
+  // the tool.call row is written, so the audit never holds the URL.
+  const linked = builtin !== undefined ? builtin.widget !== undefined : operation !== undefined && linksChangeset(operation);
+  return linked ? withPageLink(answer, deps.publicUrl) : answer;
 }

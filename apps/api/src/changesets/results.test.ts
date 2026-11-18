@@ -62,8 +62,18 @@ describe('change-set answers', () => {
   it('MCP-7 preparation errors and expiry', () => {
     expect(preparationErrorAnswer(record('failed', { errorCode: 'targets_missing' })).isError).toBe(true);
     expect(preparationErrorAnswer(record('cancelled')).structured).toMatchObject({ changeset: { status: 'cancelled', errorCode: 'cancelled' } });
+    expect(expiredDuringPreparationAnswer(record('expired'))).toMatchObject({
+      text: 'magento.update could not prepare a change-set: it expired before preparation finished (change-set cs-1).',
+      isError: true,
+    });
+  });
+
+  it('MCP-6 expired during preparation names the change-set in structured data', () => {
+    const structured = { changeset: { id: 'cs-1', status: 'expired', errorCode: 'expired' } };
     expect(expiredDuringPreparationAnswer(record('expired'))).toEqual({
       text: 'magento.update could not prepare a change-set: it expired before preparation finished (change-set cs-1).',
+      structured,
+      dataText: JSON.stringify(structured),
       isError: true,
     });
   });

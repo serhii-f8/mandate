@@ -9,6 +9,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { createSchemaCompiler } from '@aiops/config';
 import { TASK_TTL_MS, type ApprovalPlan, type ChangeSetRecord, type StartOutcome } from '@aiops/core';
+import { pageLink } from '../changesets/links.js';
 import { SUBMIT_TOOL, SubmitService, type SubmitOutcome } from '../changesets/submit-service.js';
 import { AUDIT_UNAVAILABLE } from './audited-tool.js';
 import type { BuiltinToolDeps } from './builtin-tools.js';
@@ -31,9 +32,13 @@ const SUBMIT_SCHEMA = {
 
 const HASH_MISMATCH_TEXT = 'The change-set changed; review it again.';
 
-const error = (text: string): CallToolResult => ({ isError: true, content: [{ type: 'text', text }] });
-const wrongStatus = (id: string, status: string): CallToolResult => error(`Change-set ${id} cannot be submitted in status ${status}.`);
-const unavailable = (id: string): CallToolResult => error(`Change-set ${id} could not be started: the execution service is unavailable.`);
+/**
+ * A refusal for the caller's own change-set: it names the change-set, so the pipeline adds its page
+ * link (MCP-6). `not_found` and policy denials do not use it.
+ */
+const refusedFor = (id: string, text: string): CallToolResult => ({ isError: true, content: [{ type: 'text', text }], structuredContent: { changesetId: id } });
+const wrongStatus = (id: string, status: string): CallToolResult => refusedFor(id, `Change-set ${id} cannot be submitted in status ${status}.`);
+const unavailable = (id: string): CallToolResult => refusedFor(id, `Change-set ${id} could not be started: the execution service is unavailable.`);
 
 /** Fixed texts for the executor's refusals; the error code is the refusal reason. */
 function refusalText(id: string, role: string, refusal: Exclude<StartOutcome, { ok: true }>): string {
@@ -91,7 +96,7 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
     const id = record.id;
     // A required plan always has steps (SubmitService checks it before the transaction).
     const first = plan.steps[0] ?? '';
-    const url = new URL(`/app/changesets/${id}`, deps.publicUrl).href;
+    const url = pageLink(deps.publicUrl, id);
     const total = record.stats.included;
     return {
       content: [
@@ -128,22 +133,24 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
         return deniedResult(outcome.decision);
       case 'hash_mismatch':
         call.report({ errorCode: 'hash_mismatch' });
-        return error(HASH_MISMATCH_TEXT);
+        return refusedFor(id, HASH_MISMATCH_TEXT);
       case 'expired':
         call.report({ errorCode: 'expired' });
-        return error(`Change-set ${id} has expired.`);
+        return refusedFor(id, `Change-set ${id} has expired.`);
       case 'not_prepared':
         call.report({ errorCode: 'not_prepared' });
         return wrongStatus(id, outcome.status);
       case 'approval_unroutable':
         call.report({ errorCode: 'approval_unroutable' });
-        return error(`Change-set ${id} needs approval, but its role has no approval steps configured.`);
+        return refusedFor(id, `Change-set ${id} needs approval, but its role has no approval steps configured.`);
       case 'executor_unavailable':
         call.report({ errorCode: 'executor_unavailable' });
         return unavailable(id);
       case 'start_refused':
         call.report({ errorCode: outcome.refusal.reason });
-        return error(refusalText(id, outcome.role, outcome.refusal));
+        // The executor's not_found names nothing, like any not_found answer.
+        if (outcome.refusal.reason === 'not_found') return { isError: true, content: [{ type: 'text', text: refusalText(id, outcome.role, outcome.refusal) }] };
+        return refusedFor(id, refusalText(id, outcome.role, outcome.refusal));
     }
   }
 

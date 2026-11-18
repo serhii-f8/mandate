@@ -18,6 +18,8 @@ const CS = '11111111-1111-4111-8111-111111111111';
 const TASK = '22222222-2222-4222-8222-222222222222';
 const UNKNOWN = '33333333-3333-4333-8333-333333333333';
 const NOW = new Date('2026-01-01T12:00:00Z');
+const PUBLIC = new URL('https://aiops.example.test');
+const PAGE = `https://aiops.example.test/app/changesets/${CS}`;
 const STATS = { total: 25, included: 25, excluded: {}, written: 0, failed: 0, skipped: 0 };
 
 type CancelAnswer = Awaited<ReturnType<ChangeSetExecutor['cancel']>>;
@@ -78,7 +80,7 @@ async function setup(kind: TaskKind, stage: Stage) {
   const createdAt = new Date('2026-01-01T12:00:01.000Z');
   await tasks.create({ taskId: TASK, owner: 'alice', changesetId: CS, kind, tool: 'shop.update_content', createdAt, ttlMs: TASK_TTL_MS });
   let n = 0;
-  const handlers = createTaskHandlers({ tasks, repository, executor, audit, newId: () => `audit-${String(++n)}` });
+  const handlers = createTaskHandlers({ tasks, repository, executor, audit, newId: () => `audit-${String(++n)}`, publicUrl: PUBLIC });
   const ctx = (caller: Caller, declared = true): TaskRequestContext => ({ caller, correlationId: 'corr-7', declared });
   return { repository, tasks, audit, executor, handlers, ctx, createdAt };
 }
@@ -186,7 +188,39 @@ describe('MCP-7 SEC-1 AUD-1 task handlers', () => {
     expect(answer.result?.resultType).toBe('complete');
     const summary = text(answer.result);
     expect(summary.startsWith('completed: ')).toBe(true);
-    expect(summary.endsWith('(1 changed upstream since preparation).')).toBe(true);
+    expect(summary.endsWith(`(1 changed upstream since preparation). Open: ${PAGE}`)).toBe(true);
+  });
+
+  it('MCP-6 MCP-7 a completed execute task result carries the page link and pageUrl', async () => {
+    const { handlers, ctx } = await setup('execute', 'completed');
+    const answer = await handlers.get({ taskId: TASK }, ctx(alice));
+    expect(answer.result).toEqual({
+      resultType: 'complete',
+      content: [{ type: 'text', text: `completed: 1 written, 0 failed, 1 skipped (1 changed upstream since preparation). Open: ${PAGE}` }],
+      structuredContent: { changesetId: CS, status: 'completed', stats: { written: 1, failed: 0, skipped: 1, drift: 1 }, pageUrl: PAGE },
+    });
+  });
+
+  it('MCP-6 MCP-7 a completed prepare task result links the page in the summary, the JSON block and pageUrl', async () => {
+    const { handlers, ctx } = await setup('prepare', 'prepared');
+    const result = (await handlers.get({ taskId: TASK }, ctx(alice))).result;
+    const [summary, data] = (result?.content ?? []) as { text: string }[];
+    expect(summary?.text.endsWith(` Open: ${PAGE}`)).toBe(true);
+    expect(result?.structuredContent).toHaveProperty('pageUrl', PAGE);
+    expect(JSON.parse(data?.text ?? '')).toEqual(result?.structuredContent);
+  });
+
+  it('MCP-7 a working task has no result to link', async () => {
+    const working = await setup('execute', 'executing');
+    expect(await working.handlers.get({ taskId: TASK }, working.ctx(alice))).not.toHaveProperty('result');
+    // A cancelled prepare task has no result either, so nothing is linked.
+    const cancelled = await setup('prepare', 'preparing');
+    const event = { id: 'x1', actor: 'alice', action: 'changeset.transition' as const, outcome: 'ok' as const, correlationId: 'c0', details: {} };
+    expect(await cancelled.repository.transition(CS, ['preparing'], 'cancelled', event)).toBeDefined();
+    const answer = await cancelled.handlers.get({ taskId: TASK }, cancelled.ctx(alice));
+    expect(answer.status).toBe('cancelled');
+    expect(answer).not.toHaveProperty('result');
+    expect(JSON.stringify(answer)).not.toContain('/app/changesets/');
   });
 
   it('MCP-7 AUD-1 tasks/cancel calls executor.cancel as the caller and audits task.cancel', async () => {

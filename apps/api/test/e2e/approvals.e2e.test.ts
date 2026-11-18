@@ -139,6 +139,7 @@ describe('MCP-8 APR-1 APR-8 approvals end to end', () => {
       status: 'pending_approval',
       total: 2,
       approval: { step: 1, steps: ['content_lead'], url: `${api.url}/app/changesets/${prepared.id}` },
+      pageUrl: `${api.url}/app/changesets/${prepared.id}`,
     });
     expect(await statusOf(alice, prepared.id)).toBe('pending_approval');
   });
@@ -147,7 +148,7 @@ describe('MCP-8 APR-1 APR-8 approvals end to end', () => {
     const prepared = await prepare(alice, ['acme-1']);
     const result = await submit(alice, prepared);
     expect(result.isError).toBeUndefined();
-    expect(text(result)).toBe('Execution of 1 changes started. Call get_changeset with this ID to follow it.');
+    expect(text(result)).toBe(`Execution of 1 changes started. Call get_changeset with this ID to follow it. Open: ${api.url}/app/changesets/${prepared.id}`);
     expect(await waitForStatus(alice, prepared.id, 'completed')).toBe('completed');
   });
 

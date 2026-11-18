@@ -27,10 +27,11 @@ const EXCLUDE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-const error = (text: string): CallToolResult => ({ isError: true, content: [{ type: 'text', text }] });
-
 /** The fixed answer and audit code of a refusal; an already expired source reads as expired (as `decide`). */
 function refusal(id: string, r: DeriveRefusal): { code: string; result: CallToolResult } {
+  // Every refusal but not_found comes after the requester check, so it names the caller's own
+  // change-set and gets its page link (MCP-6).
+  const error = (text: string): CallToolResult => ({ isError: true, content: [{ type: 'text', text }], structuredContent: { changesetId: id } });
   switch (r.reason) {
     case 'not_found':
       return { code: r.reason, result: notFound(id) };
