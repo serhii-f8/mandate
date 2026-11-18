@@ -16,6 +16,8 @@ export type AuditAction =
   | 'approval.decision'
   | 'changeset.start'
   | 'changeset.export'
+  | 'changeset.submit'
+  | 'changeset.exclude'
   | 'notification.sent'
   | 'notification.failed';
 

@@ -1,23 +1,13 @@
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { WorkflowStarter } from '@aiops/core';
 import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
 import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@aiops/testing';
 import { seedPrepared, type Seeded } from './approval-seed.js';
 import { auditRows, connectClient, startApi, startDatabase, tokenFor, type RunningApi } from './helpers.js';
+import { RecordingStarter } from './recording-starter.js';
 
 const CONFIG = fileURLToPath(new URL('./fixtures/approvals-pages-config', import.meta.url));
 const UNKNOWN_ID = '99999999-9999-4999-8999-999999999999';
-
-/** Records the IDs it is asked to start (ruling F9): derived change-sets are already prepared. */
-class RecordingStarter implements WorkflowStarter {
-  readonly started: string[] = [];
-
-  start(changesetId: string): Promise<void> {
-    this.started.push(changesetId);
-    return Promise.resolve();
-  }
-}
 
 interface ToolResult {
   isError?: boolean;

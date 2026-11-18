@@ -4,10 +4,12 @@ import {
   decisionBodySchema,
   encodeItemCursor,
   encodeQueueCursor,
+  exclusionBodySchema,
   newSeed,
   parseItemsQuery,
   parseQueueQuery,
   parseSampleQuery,
+  submitBodySchema,
 } from './page-query.js';
 
 const b64 = (s: string): string => Buffer.from(s, 'utf8').toString('base64url');
@@ -113,5 +115,29 @@ describe('SEC-8 decision body', () => {
     expect(decisionBodySchema.safeParse({ ...ok, comment: 'x'.repeat(10_001) }).success).toBe(
       false,
     );
+  });
+});
+
+describe('SEC-8 submit and exclusion bodies', () => {
+  const hash = `sha256:${'b'.repeat(64)}`;
+
+  it('SEC-8 submit and exclusion bodies are strict', () => {
+    expect(submitBodySchema.safeParse({ hash }).success).toBe(true);
+    expect(exclusionBodySchema.safeParse({ hash }).success).toBe(true);
+    expect(exclusionBodySchema.safeParse({ hash, exclude: ['SKU-1'], include: [] }).success).toBe(true);
+    expect(exclusionBodySchema.safeParse({ hash, exclude: Array.from({ length: 1000 }, (_, i) => `t-${String(i)}`) }).success).toBe(true);
+    for (const schema of [submitBodySchema, exclusionBodySchema]) {
+      expect(schema.safeParse({}).success).toBe(false);
+      expect(schema.safeParse({ hash, extra: 1 }).success).toBe(false);
+      expect(schema.safeParse({ hash: 'sha256:abc' }).success).toBe(false);
+      expect(schema.safeParse({ hash: `SHA256:${'b'.repeat(64)}` }).success).toBe(false);
+    }
+    expect(submitBodySchema.safeParse({ hash, exclude: [] }).success).toBe(false);
+    for (const key of ['exclude', 'include'] as const) {
+      expect(exclusionBodySchema.safeParse({ hash, [key]: Array.from({ length: 1001 }, (_, i) => `t-${String(i)}`) }).success).toBe(false);
+      expect(exclusionBodySchema.safeParse({ hash, [key]: 'SKU-1' }).success).toBe(false);
+      expect(exclusionBodySchema.safeParse({ hash, [key]: [1] }).success).toBe(false);
+      expect(exclusionBodySchema.safeParse({ hash, [key]: ['x'.repeat(513)] }).success).toBe(false);
+    }
   });
 });

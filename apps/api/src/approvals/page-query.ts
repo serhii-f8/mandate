@@ -9,6 +9,9 @@ import type { DecisionRequest, ItemStatus } from '@aiops/core';
 
 export const CHANGESET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** A change-set hash as the server writes it (CS-4). */
+export const HASH = /^sha256:[0-9a-f]{64}$/;
+
 export type Parsed<T> = { ok: true; value: T } | { ok: false };
 
 const MAX_CURSOR_LENGTH = 1024;
@@ -130,4 +133,19 @@ export const decisionBodySchema: z.ZodType<{
   hash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
   count: z.number().int().min(0).max(100_000_000),
   comment: z.string().max(10_000).optional(),
+});
+
+/** `POST /api/v1/changesets/:id/submit` (UI-3): the hash the requester reviewed (SEC-9). */
+export const submitBodySchema: z.ZodType<{ hash: string }> = z.strictObject({
+  hash: z.string().regex(HASH),
+});
+
+/** Target IDs of one list; their content (lengths, control characters, the total) is the core's to check (CS-5). */
+const targets = z.array(z.string().max(512)).max(1000).optional();
+
+/** `POST /api/v1/changesets/:id/exclusions` (CS-5). */
+export const exclusionBodySchema: z.ZodType<{ hash: string; exclude?: string[] | undefined; include?: string[] | undefined }> = z.strictObject({
+  hash: z.string().regex(HASH),
+  exclude: targets,
+  include: targets,
 });

@@ -33,6 +33,8 @@ import { createLogger, PinoNestLogger } from './logger.js';
 import { ApprovalService } from './approvals/approval-service.js';
 import { ApprovalsController } from './approvals/approvals.controller.js';
 import { ChangeSetPagesController } from './approvals/changeset-pages.controller.js';
+import { ChangeSetActionsController } from './changesets/changeset-actions.controller.js';
+import { SubmitService } from './changesets/submit-service.js';
 import { ChangeSetExportController } from './export/export.controller.js';
 import { createBuiltinTools } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
@@ -54,6 +56,7 @@ import {
   OIDC_CLIENT,
   PAGE_CHECKS,
   PAGE_SESSIONS,
+  SUBMIT_SERVICE,
   TEMPORAL,
   WORKFLOW_STARTER,
 } from './tokens.js';
@@ -162,7 +165,7 @@ class AppModule {
     const pageChecks: PageChecks = { publicOrigin: env.publicUrl.origin, freshAuthSeconds: env.freshAuthSeconds };
     return {
       module: AppModule,
-      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, ApprovalsController, ChangeSetPagesController, ChangeSetExportController, WebAppController],
+      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, ApprovalsController, ChangeSetPagesController, ChangeSetExportController, ChangeSetActionsController, WebAppController],
       providers: [
         { provide: API_ENV, useValue: env },
         { provide: LOGGER, useValue: logger },
@@ -214,6 +217,13 @@ class AppModule {
           inject: [CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, AUDIT_LOG],
           useFactory: (repository: ChangeSetRepository, executor: ChangeSetExecutor, audit: AuditLog) =>
             new ApprovalService({ repository, executor, audit, newId: randomUUID, now: () => new Date() }),
+        },
+        {
+          // One submit service for `submit_for_approval` and the page's submit route (MCP-8).
+          provide: SUBMIT_SERVICE,
+          inject: [CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, AUDIT_LOG, APPROVAL_SERVICE],
+          useFactory: (repository: ChangeSetRepository, executor: ChangeSetExecutor, audit: AuditLog, approvals: ApprovalService) =>
+            new SubmitService({ repository, executor, audit, approvals, newId: randomUUID, now: () => new Date() }),
         },
         {
           // One starter for the write path's preparations and derived change-sets (EXE-1).

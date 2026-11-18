@@ -79,7 +79,24 @@ describe('AUD-1 refusal answers', () => {
       invalid_query: 400,
       comment_required: 400,
       comment_invalid: 400,
+      not_prepared: 409,
+      approval_unroutable: 409,
+      empty_request: 409,
+      unknown_items: 409,
+      nothing_left: 409,
+      policy_denied: 403,
     });
+  });
+
+  it('AUD-1 refuse adds extra fields to the answer', async () => {
+    const log = new InMemoryAuditLog();
+    const calls: string[] = [];
+    await refuse(fakeRes(calls), 'unknown_items', { log, event: EVENT }, { count: 2 });
+    expect(log.events).toEqual([EVENT]);
+    expect(calls).toEqual(['status:409', 'json:{"error":"unknown_items","count":2}']);
+    const plain: string[] = [];
+    await refuse(fakeRes(plain), 'limit_exceeded', undefined, { limit: 'records_per_day' });
+    expect(plain).toEqual(['status:409', 'json:{"error":"limit_exceeded","limit":"records_per_day"}']);
   });
 });
 
