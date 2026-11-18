@@ -1,12 +1,14 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ChangeSetDetail, ItemRow, ItemsPage, Sample } from '../api.js';
+import type { ChangeSetDetail, DecideOutcome, ItemRow, ItemsPage, Sample } from '../api.js';
 import { ChangeSetView, type ChangeSetViewProps } from './ChangeSetView.js';
 
 afterEach(cleanup);
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const HOSTILE = '<img src=x onerror=alert(1)>';
+const HASH = `sha256:${'a'.repeat(64)}`;
+const FRESH = `/auth/login?return_to=%2Fapp%2Fchangesets%2F${ID}&fresh=1`;
 
 const detail = (over: Partial<ChangeSetDetail> = {}): ChangeSetDetail => ({
   id: ID,
@@ -122,5 +124,95 @@ describe('ChangeSetView', () => {
     });
     expect(container.querySelector('img')).toBeNull();
     expect(screen.getAllByText(/<img src=x onerror=alert\(1\)>/).length).toBeGreaterThanOrEqual(3);
+  });
+
+  const deciding = (over: Partial<ChangeSetDetail['viewer']> = {}) =>
+    detail({ hash: HASH, viewer: { canDecide: true, reason: null, fresh: true, stepUpSatisfied: true, canStart: false, ...over } });
+  const decision = () => within(screen.getByRole('region', { name: 'Decision' }));
+
+  it('APR-6 the approve button states the count and sends hash and count', async () => {
+    const onDecide = vi.fn(() => Promise.resolve<DecideOutcome>({ ok: true, status: 'approved' }));
+    setup({ detail: deciding(), onDecide });
+    fireEvent.click(decision().getByRole('button', { name: 'Approve 3 changes' }));
+    await waitFor(() => {
+      expect(onDecide).toHaveBeenCalledWith({ decision: 'approve', hash: HASH, count: 3 });
+    });
+  });
+
+  it('APR-6 one included change reads "Approve 1 change"', () => {
+    const d = deciding();
+    setup({ detail: { ...d, stats: { ...d.stats, included: 1 } } });
+    expect(decision().getByRole('button', { name: 'Approve 1 change' })).toBeTruthy();
+  });
+
+  it('APR-4 return needs a comment; reject sends the comment', async () => {
+    const onDecide = vi.fn(() => Promise.resolve<DecideOutcome>({ ok: true, status: 'returned' }));
+    setup({ detail: deciding(), onDecide });
+    const panel = decision();
+    const ret = panel.getByRole<HTMLButtonElement>('button', { name: 'Return with comment' });
+    expect(ret.disabled).toBe(true);
+    fireEvent.change(panel.getByLabelText('Comment'), { target: { value: '   ' } });
+    expect(ret.disabled).toBe(true);
+    fireEvent.change(panel.getByLabelText('Comment'), { target: { value: 'fix sku-2' } });
+    expect(ret.disabled).toBe(false);
+    fireEvent.click(ret);
+    await waitFor(() => {
+      expect(onDecide).toHaveBeenLastCalledWith({ decision: 'return', hash: HASH, count: 3, comment: 'fix sku-2' });
+    });
+    fireEvent.click(panel.getByRole('button', { name: 'Reject' }));
+    await waitFor(() => {
+      expect(onDecide).toHaveBeenLastCalledWith({ decision: 'reject', hash: HASH, count: 3, comment: 'fix sku-2' });
+    });
+  });
+
+  it('APR-6 a refused decision shows "Not decided: <error>"', async () => {
+    setup({ detail: deciding(), onDecide: () => Promise.resolve<DecideOutcome>({ ok: false, error: 'hash_mismatch' }) });
+    fireEvent.click(decision().getByRole('button', { name: 'Approve 3 changes' }));
+    expect((await decision().findByRole('alert')).textContent).toBe('Not decided: hash_mismatch');
+  });
+
+  it('SEC-8 a stale session shows "Log in again to decide" linking to the fresh login and no decision buttons', () => {
+    setup({ detail: deciding({ fresh: false }), freshLoginUrl: FRESH });
+    expect(decision().getByRole('link', { name: 'Log in again to decide' }).getAttribute('href')).toBe(FRESH);
+    expect(decision().queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('AUTH-6 an unsatisfied step-up shows the same re-login link', () => {
+    setup({ detail: deciding({ stepUpSatisfied: false }), freshLoginUrl: FRESH });
+    expect(decision().getByRole('link', { name: 'Log in again to decide' }).getAttribute('href')).toBe(FRESH);
+    expect(decision().queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('APR-2 the requester sees why they cannot decide', () => {
+    setup({ detail: deciding({ canDecide: false, reason: 'separation_of_duties' }) });
+    expect(decision().getByText('You cannot decide this step: you requested this change-set or decided an earlier step.')).toBeTruthy();
+    expect(decision().queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('APR-2 each refusal reason has its fixed text, shown only while pending_approval', () => {
+    const cases: [string, string][] = [
+      ['not_approver', 'This step awaits another role.'],
+      ['not_pending', 'This change-set is not awaiting a decision.'],
+      ['expired', 'This change-set has expired.'],
+      ['widget_not_allowed', 'You cannot decide this change-set.'],
+    ];
+    for (const [reason, text] of cases) {
+      setup({ detail: deciding({ canDecide: false, reason }) });
+      expect(decision().getByText(text)).toBeTruthy();
+      cleanup();
+    }
+    setup({ detail: { ...deciding({ canDecide: false, reason: 'not_pending' }), status: 'completed' } });
+    expect(decision().queryByText('This change-set is not awaiting a decision.')).toBeNull();
+  });
+
+  it('APR-7 Start execution shows only when viewer.canStart and calls onStart', async () => {
+    setup({ detail: { ...deciding({ canDecide: false, reason: 'not_pending' }), status: 'approved' } });
+    expect(decision().queryByRole('button', { name: 'Start execution' })).toBeNull();
+    cleanup();
+    const onStart = vi.fn(() => Promise.resolve<DecideOutcome>({ ok: false, error: 'executor_unavailable' }));
+    setup({ detail: { ...deciding({ canDecide: false, reason: 'not_pending', canStart: true }), status: 'approved' }, onStart });
+    fireEvent.click(decision().getByRole('button', { name: 'Start execution' }));
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect((await decision().findByRole('alert')).textContent).toBe('Not started: executor_unavailable');
   });
 });

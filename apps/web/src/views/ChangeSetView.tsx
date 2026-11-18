@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import type { ChangeSetDetail, DecideBody, DecideOutcome, ItemRow, ItemsPage, Sample } from '../api.js';
 
 export interface ChangeSetViewProps {
@@ -56,7 +56,97 @@ function ItemTable(props: { rows: ItemRow[] }): ReactElement {
   );
 }
 
-/** Read part of the change-set page, sections in design order (UI-2, APR-5, APR-3, NFR-8). */
+const REASON_TEXT: Readonly<Record<string, string>> = {
+  separation_of_duties: 'You cannot decide this step: you requested this change-set or decided an earlier step.',
+  not_approver: 'This step awaits another role.',
+  not_pending: 'This change-set is not awaiting a decision.',
+  expired: 'This change-set has expired.',
+};
+const reasonText = (reason: string | null): string => (reason === null ? undefined : REASON_TEXT[reason]) ?? 'You cannot decide this change-set.';
+
+const failure = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/**
+ * Decision part of the page (APR-4, APR-6, APR-7, SEC-8, AUTH-6). The server's `viewer` block decides what shows;
+ * the approve button names the count it sends, and the hash is the one shown in the summary.
+ */
+function DecisionPanel(props: Pick<ChangeSetViewProps, 'detail' | 'freshLoginUrl' | 'onDecide' | 'onStart'>): ReactElement {
+  const { detail, onDecide, onStart } = props;
+  const { viewer } = detail;
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [alert, setAlert] = useState<string | undefined>(undefined);
+  const n = detail.stats.included;
+
+  async function run(prefix: string, call: () => Promise<DecideOutcome>): Promise<void> {
+    setBusy(true);
+    setAlert(undefined);
+    try {
+      const outcome = await call();
+      if (!outcome.ok) setAlert(`${prefix}: ${outcome.error}`);
+    } catch (error) {
+      setAlert(`${prefix}: ${failure(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const decide = (decision: DecideBody['decision']): void => {
+    const text = comment.trim();
+    void run('Not decided', () => onDecide({ decision, hash: detail.hash ?? '', count: n, ...(text === '' ? {} : { comment: text }) }));
+  };
+
+  let body: ReactElement | null = null;
+  if (viewer.canDecide && (!viewer.fresh || !viewer.stepUpSatisfied)) {
+    body = <a href={props.freshLoginUrl}>Log in again to decide</a>;
+  } else if (viewer.canDecide) {
+    body = (
+      <>
+        <label>
+          Comment
+          <textarea
+            value={comment}
+            onChange={(e) => {
+              setComment(e.target.value);
+            }}
+          />
+        </label>
+        <button type="button" disabled={busy} onClick={() => {
+            decide('approve');
+          }}>
+          {n === 1 ? 'Approve 1 change' : `Approve ${String(n)} changes`}
+        </button>
+        <button type="button" disabled={busy} onClick={() => {
+            decide('reject');
+          }}>
+          Reject
+        </button>
+        <button type="button" disabled={busy || comment.trim() === ''} onClick={() => {
+            decide('return');
+          }}>
+          Return with comment
+        </button>
+      </>
+    );
+  } else if (detail.status === 'pending_approval') {
+    body = <p>{reasonText(viewer.reason)}</p>;
+  }
+  return (
+    <section aria-label="Decision">
+      <h2>Decision</h2>
+      {body}
+      {viewer.canStart ? (
+        <button type="button" disabled={busy} onClick={() => {
+            void run('Not started', onStart);
+          }}>
+          Start execution
+        </button>
+      ) : null}
+      {alert === undefined ? null : <p role="alert">{alert}</p>}
+    </section>
+  );
+}
+
+/** The change-set page, sections in design order (UI-2, APR-5, APR-3, NFR-8). */
 export function ChangeSetView(props: ChangeSetViewProps): ReactElement {
   const { detail, items, sample } = props;
   const { request, policy, stats, approval } = detail;
@@ -159,7 +249,7 @@ export function ChangeSetView(props: ChangeSetViewProps): ReactElement {
           </ol>
         )}
       </section>
-      <section aria-label="Decision" />
+      <DecisionPanel detail={detail} freshLoginUrl={props.freshLoginUrl} onDecide={props.onDecide} onStart={props.onStart} />
     </main>
   );
 }
