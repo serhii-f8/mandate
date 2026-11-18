@@ -10,13 +10,18 @@
 //   page-api.mjs <api-base-url> approvals [after] | changeset <id> | items <id> [after]
 //   page-api.mjs <api-base-url> decide <id> <approve|reject|return> <hash> <count> [comment] | start <id>
 //                                                         → {"status":<n>,"body":<json>} (APR-7)
+//   page-api.mjs <api-base-url> export <id> <csv|xlsx> <outfile>
+//                                                         → {"status":200,"contentType":…,"disposition":…,"bytes":<n>}, body in <outfile> (CS-8);
+//                                                           any other status → {"status":<n>,"body":<json>}
 // Prints one JSON line; the response body is printed for every command except put-credential; none of them
 // carries a secret. Exit 0 whenever a response arrived (the caller checks the status).
+
+import { writeFile } from 'node:fs/promises';
 
 const [base, command, ...args] = process.argv.slice(2);
 const cookie = process.env.AIOPS_PAGE_COOKIE;
 const USAGE =
-  'usage: page-api.mjs <api-base-url> session | put-credential <ref> | test <connection-id> | approvals [after] | changeset <id> | items <id> [after] | decide <id> <approve|reject|return> <hash> <count> [comment] | start <id>';
+  'usage: page-api.mjs <api-base-url> session | put-credential <ref> | test <connection-id> | approvals [after] | changeset <id> | items <id> [after] | decide <id> <approve|reject|return> <hash> <count> [comment] | start <id> | export <id> <csv|xlsx> <outfile>';
 // Required and optional argument counts per subcommand.
 const ARITY = {
   session: [0, 0],
@@ -27,6 +32,7 @@ const ARITY = {
   items: [1, 2],
   decide: [4, 5],
   start: [1, 1],
+  export: [3, 3],
 };
 const arity = Object.hasOwn(ARITY, command ?? '') ? ARITY[command] : undefined;
 const count = args[3] === undefined ? Number.NaN : Number(args[3]);
@@ -35,6 +41,7 @@ if (
   arity === undefined ||
   args.length < arity[0] ||
   args.length > arity[1] ||
+  (command === 'export' && !['csv', 'xlsx'].includes(args[1])) ||
   (command === 'decide' && (!['approve', 'reject', 'return'].includes(args[1]) || !Number.isInteger(count) || count < 0))
 ) {
   console.error(USAGE);
@@ -100,6 +107,22 @@ if (command === 'put-credential') {
     body: JSON.stringify({ decision, hash, count, ...(comment === undefined ? {} : { comment }) }),
   });
   await printResponse(response);
+} else if (command === 'export') {
+  const response = await fetch(new URL(`/api/v1/changesets/${id}/export?format=${args[1]}`, api), { headers: { cookie } });
+  if (response.status === 200) {
+    const bytes = Buffer.from(await response.arrayBuffer());
+    await writeFile(args[2], bytes);
+    console.log(
+      JSON.stringify({
+        status: 200,
+        contentType: response.headers.get('content-type'),
+        disposition: response.headers.get('content-disposition'),
+        bytes: bytes.length,
+      }),
+    );
+  } else {
+    await printResponse(response);
+  }
 } else {
   await printResponse(await fetch(new URL(`/api/v1/changesets/${id}/start`, api), { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: '{}' }));
 }
