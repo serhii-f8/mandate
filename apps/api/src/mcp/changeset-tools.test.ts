@@ -1,6 +1,6 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import { CANCELLABLE, encodeCursor, ExecutorUnavailable, type Caller, type ChangeSetExecutor, type ChangeSetStatus, type ExecutionProgress } from '@aiops/core';
+import { CANCELLABLE, READ_RESULT_TEXT, encodeCursor, ExecutorUnavailable, type Caller, type ChangeSetExecutor, type ChangeSetStatus, type ExecutionProgress } from '@aiops/core';
 import { InMemoryChangeSetRepository } from '@aiops/testing';
 import { createChangesetTools } from './changeset-tools.js';
 import { isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
@@ -203,6 +203,49 @@ describe('MCP-8 CS-6 built-in change-set tools', () => {
     const first = result.content[0]?.type === 'text' ? result.content[0].text : '';
     expect(first).toContain('completed_with_errors: 2 written, 0 failed, 1 skipped (1 changed upstream since preparation).');
     expect((result.structuredContent as { progress?: unknown }).progress).toEqual({ total: 3, done: 2, failed: 0, skipped: 1 });
+  });
+
+  it('UI-4 get_changeset carries execution.drift once execution summarised, and rollback.available false always', async () => {
+    const { get, ctx, executor, advance } = await setup();
+    executor.progressAnswer = { status: 'prepared', total: 3, done: 0, failed: 0, skipped: 0 };
+    const before = plain(await get.handler({ changeset_id: ID }, ctx(alice))).structuredContent as Record<string, unknown>;
+    expect(before.execution).toBeUndefined();
+    expect(before.rollback).toEqual({ available: false });
+    executor.progressAnswer = { status: 'completed', total: 3, done: 3, failed: 0, skipped: 0 };
+    await advance('completed', [
+      { targetId: 'a', status: 'skipped', error: 'drift' },
+      { targetId: 'b', status: 'skipped', error: 'drift' },
+      { targetId: 'c', status: 'written' },
+    ]);
+    const after = plain(await get.handler({ changeset_id: ID }, ctx(alice))).structuredContent as Record<string, unknown>;
+    expect(after.execution).toEqual({ drift: 2 });
+    expect(after.rollback).toEqual({ available: false });
+  });
+
+  it('CS-5 get_changeset of a derived change-set names derivedFrom', async () => {
+    const { get, ctx, repository } = await setup();
+    const derivedId = '22222222-2222-4222-8222-222222222222';
+    await repository.create(
+      { id: derivedId, operation: 'shop.update_content', connection: 'shop', requester: 'alice', args: {}, configHash: 'h', correlationId: 'c0', createdAt: NOW, expiresAt: new Date('2026-01-02T12:00:00Z'), derivedFrom: ID },
+      { id: 'ad', actor: 'alice', action: 'changeset.transition', outcome: 'ok', correlationId: 'c0', details: {} },
+    );
+    const derived = plain(await get.handler({ changeset_id: derivedId }, ctx(alice))).structuredContent as Record<string, unknown>;
+    expect(derived.derivedFrom).toBe(ID);
+    const source = plain(await get.handler({ changeset_id: ID }, ctx(alice))).structuredContent as Record<string, unknown>;
+    expect('derivedFrom' in source).toBe(false);
+  });
+
+  it('MCP-4 the text and the existing fields are unchanged', async () => {
+    const { get, ctx, executor } = await setup();
+    executor.progressAnswer = { status: 'prepared', total: 3, done: 0, failed: 0, skipped: 0 };
+    const result = plain(await get.handler({ changeset_id: ID }, ctx(alice)));
+    const { rollback, ...rest } = result.structuredContent as Record<string, unknown>;
+    expect(rollback).toEqual({ available: false });
+    expect(Object.keys(rest).sort()).toEqual(['changeset', 'items']);
+    expect(result.content[0]).toEqual({
+      type: 'text',
+      text: `Change-set ${ID} (shop.update_content) is prepared: 3 change(s), 0 excluded. Showing 3 item(s). ${READ_RESULT_TEXT.dataNote}`,
+    });
   });
 
   it('MCP-8 get_changeset shows no progress for a prepared change-set', async () => {

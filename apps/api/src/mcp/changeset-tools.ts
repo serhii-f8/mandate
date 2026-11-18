@@ -142,7 +142,9 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
       const excluded = Object.values(record.stats.excluded).reduce((sum, n) => sum + n, 0);
       const progress = await progressOf(deps, record);
       const summarised = isSummarised(record);
-      const summary = summarised ? ` ${executionSummaryText(record.status, record.stats, (await deps.repository.errorCounts(id)).drift ?? 0)}` : '';
+      // Read once: the text and `execution.drift` carry the same number.
+      const drift = summarised ? ((await deps.repository.errorCounts(id)).drift ?? 0) : undefined;
+      const summary = drift === undefined ? '' : ` ${executionSummaryText(record.status, record.stats, drift)}`;
       const approval = await approvalView(deps, record);
       const structured: Record<string, unknown> = {
         changeset: {
@@ -160,6 +162,10 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
         ...(approval === undefined ? {} : { approval }),
         items,
         ...(nextCursor === undefined ? {} : { nextCursor }),
+        ...(record.derivedFrom === undefined ? {} : { derivedFrom: record.derivedFrom }),
+        // Rollback is not offered yet (UI-4); the widget shows no rollback control.
+        rollback: { available: false },
+        ...(drift === undefined ? {} : { execution: { drift } }),
       };
       const text =
         `Change-set ${record.id} (${record.operation}) is ${record.status}: ${String(record.stats.included)} change(s), ` +
