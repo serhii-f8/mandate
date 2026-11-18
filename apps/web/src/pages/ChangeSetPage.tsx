@@ -215,7 +215,9 @@ export function ChangeSetPage(props: { id: string }): ReactElement {
           }}
         />
       ) : (
+        // Keyed by status like ChangeSetView: a new status mounts a fresh view with the reloaded items (ruling F4).
         <ApprovalView
+          key={shown.model.status}
           data={shown.model}
           actions={actions.approver}
           onData={(model) => {

@@ -109,6 +109,39 @@ describe('ChangeSetPage', () => {
     expect(assign).not.toHaveBeenCalled();
   });
 
+  it('UI-2 APR-5 an approver whose change-set changes status sees the fresh items', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let answer: ChangeSetDetail = detail;
+      let itemsAnswer: unknown = { items: [] };
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((input: RequestInfo | URL) => {
+          const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          const path = url.split('?')[0] ?? '';
+          const body =
+            path === '/api/v1/session'
+              ? session
+              : path === `/api/v1/changesets/${ID}`
+                ? answer
+                : path === `/api/v1/changesets/${ID}/items`
+                  ? itemsAnswer
+                  : { seed: 'b'.repeat(32), items: [] };
+          return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } }));
+        }),
+      );
+      render(<ChangeSetPage id={ID} />);
+      expect(await screen.findByRole('button', { name: 'Approve 2 changes' })).toBeTruthy();
+      expect(screen.queryByText('TS-9')).toBeNull();
+      answer = { ...detail, status: 'approved', viewer: { ...detail.viewer, canDecide: false, reason: 'not_pending' } };
+      itemsAnswer = { items: [{ targetId: 'TS-9', status: 'pending', before: { price: '1.00' }, after: { price: '2.00' } }] };
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(await screen.findByText('TS-9')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   describe('requester', () => {
     const NEW_ID = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
     const NEW_HASH = `sha256:${'c'.repeat(64)}`;
