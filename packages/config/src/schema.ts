@@ -86,15 +86,27 @@ const role = z.strictObject({
   approval: approval.optional(),
   /** Credential references the role may set and test on the trusted page; `*` for all. */
   manage_credentials: z.array(z.union([z.literal('*'), credentialRef])).optional(),
+  /** NTF-1: notification IDs told when an approval step of this role becomes current, and of results. */
+  notify: z.strictObject({ approval_requests: z.array(id).default([]), results: z.array(id).default([]) }).optional(),
 });
 
 const roleMapping = z.strictObject({ group: z.string().min(1).max(255), roles: z.array(id).min(1) });
 
 const preset = z.strictObject({ id, package: z.string().min(1).max(214), version: z.string().min(1).max(64).optional() });
 
+/** A lower-case host name or IPv4 address, without port (CONN-5). */
+const HOST = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
+
 const notification = z.discriminatedUnion('kind', [
   z.strictObject({ id, kind: z.literal('email'), to: z.array(z.email()).min(1) }),
-  z.strictObject({ id, kind: z.literal('webhook'), url_credential_ref: credentialRef }),
+  z.strictObject({
+    id,
+    kind: z.literal('webhook'),
+    url_credential_ref: credentialRef,
+    /** CONN-5: hosts the webhook URL may point to; the loader requires at least one. */
+    allowed_hosts: z.array(z.string().max(253).regex(HOST)).optional(),
+    allow_private_network: z.boolean().default(false),
+  }),
 ]);
 
 export const configDocumentSchema = z.strictObject({

@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { ConnectionSettings, CredentialScheme, SpecIssue, UpstreamResolver } from '@aiops/connector-sdk';
-import type { DisabledOperation, GrantDefinition, PolicyConfiguration, RoleApprovalRule, RoleDefinition } from '@aiops/core';
+import type { DisabledOperation, GrantDefinition, PolicyConfiguration, RoleApprovalRule, RoleDefinition, RoleNotifyTargets } from '@aiops/core';
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN } from './manifest.js';
@@ -54,6 +54,8 @@ export interface LoadedConfiguration {
   readonly notifications: readonly NotificationConfig[];
   readonly limits: ReadonlyMap<string, RoleLimits>;
   readonly approval: ReadonlyMap<string, RoleApprovalRule>;
+  /** NTF-1: notification targets per role; an entry only for roles that set `notify`. */
+  readonly notify: RoleNotifyTargets;
   /** Upstream binding per enabled operation ID; absent while its spec was not resolved. */
   readonly bindings: ReadonlyMap<string, OperationBinding>;
   /** Catalog entries nothing enables, and operations disabled by an override (CONN-2, OPS-1). */
@@ -61,8 +63,11 @@ export interface LoadedConfiguration {
   readonly connectionSettings: ReadonlyMap<string, ConnectionSettings>;
   /** CONN-7: the read operation and arguments that test a connection. */
   readonly connectionTests: ReadonlyMap<string, { readonly operation: string; readonly args: Readonly<Record<string, unknown>> }>;
-  /** Credential reference → its scheme and the connections that use it (SEC-2). */
-  readonly credentialRefs: ReadonlyMap<string, { readonly scheme: CredentialScheme; readonly connections: readonly string[] }>;
+  /** Credential reference → its scheme and the connections and webhook notifications that use it (SEC-2). */
+  readonly credentialRefs: ReadonlyMap<
+    string,
+    { readonly scheme: CredentialScheme; readonly connections: readonly string[]; readonly notifications: readonly string[] }
+  >;
   /** Role → credential references it may manage (`*` for all). */
   readonly credentialManagers: ReadonlyMap<string, readonly string[]>;
   /** True when presets were declared but not loaded because no preset directories were given. */
@@ -191,7 +196,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   const connectionById = indexById(connections);
   const roleById = indexById(roles);
   const presetById = indexById(presets);
-  indexById(notifications);
+  const notificationById = indexById(notifications);
 
   // Presets (CONN-8 first cut): resolve every declared preset, bind each to at most one connection.
   // Without preset directories (the static CLI) presets are not loaded, and the result says so.
@@ -337,18 +342,34 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   }
 
   // Credential references (SEC-2): one scheme per reference.
-  const credentialRefs = new Map<string, { scheme: CredentialScheme; connections: string[] }>();
+  const credentialRefs = new Map<string, { scheme: CredentialScheme; connections: string[]; notifications: string[] }>();
   for (const { located, auth } of states.values()) {
     const { value: c, source, path } = located;
     if (c.credential_ref === undefined || auth === undefined) continue;
     const known = credentialRefs.get(c.credential_ref);
-    if (known === undefined) credentialRefs.set(c.credential_ref, { scheme: auth.scheme, connections: [c.id] });
+    if (known === undefined) credentialRefs.set(c.credential_ref, { scheme: auth.scheme, connections: [c.id], notifications: [] });
     else if (known.scheme !== auth.scheme) {
       at(source, [...path, 'credential_ref'], `is used with another auth scheme by connection ${known.connections[0] ?? ''}`);
     } else known.connections.push(c.id);
   }
-  // Until notifications land (Phase 6) the credential page manages connection credentials only.
-  const connectionRefs = new Set<string>(connections.flatMap(({ value }) => (value.credential_ref === undefined ? [] : [value.credential_ref])));
+  // Webhook URLs are vault credentials of scheme webhook_url, registered after connection refs.
+  for (const { value: n, source, path } of notificationById.values()) {
+    if (n.kind !== 'webhook') continue;
+    if (n.allowed_hosts === undefined || n.allowed_hosts.length === 0) {
+      at(source, [...path, 'allowed_hosts'], 'is required for a webhook notification (CONN-5)');
+    }
+    const known = credentialRefs.get(n.url_credential_ref);
+    if (known === undefined) credentialRefs.set(n.url_credential_ref, { scheme: 'webhook_url', connections: [], notifications: [n.id] });
+    else if (known.scheme !== 'webhook_url') {
+      at(source, [...path, 'url_credential_ref'], `is used with another scheme by connection ${known.connections[0] ?? ''}`);
+    } else known.notifications.push(n.id);
+  }
+  // Declared refs: those of connections and of webhook notifications. A connection whose auth
+  // could not be resolved still declares its ref, so manage_credentials does not report it twice.
+  const declaredRefs = new Set<string>([
+    ...connections.flatMap(({ value }) => (value.credential_ref === undefined ? [] : [value.credential_ref])),
+    ...credentialRefs.keys(),
+  ]);
 
   const credentialManagers = new Map<string, readonly string[]>();
   for (const { value: role, source, path } of roles) {
@@ -413,11 +434,18 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     }
     if (role.manage_credentials !== undefined) {
       role.manage_credentials.forEach((ref, index) => {
-        if (ref !== '*' && !connectionRefs.has(ref)) {
-          at(source, [...path, 'manage_credentials', index], 'names a credential that no connection uses');
+        if (ref !== '*' && !declaredRefs.has(ref)) {
+          at(source, [...path, 'manage_credentials', index], 'names a credential that no connection or notification uses');
         }
       });
       credentialManagers.set(role.id, [...role.manage_credentials]);
+    }
+    if (role.notify !== undefined) {
+      for (const list of ['approval_requests', 'results'] as const) {
+        role.notify[list].forEach((target, index) => {
+          if (!notificationById.has(target)) at(source, [...path, 'notify', list, index], 'names a notification that is not defined');
+        });
+      }
     }
   }
 
@@ -450,6 +478,11 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       notifications: notifications.map((n) => n.value),
       limits: new Map(roles.flatMap(({ value }) => (value.limits === undefined ? [] : [[value.id, value.limits] as const]))),
       approval: new Map(roles.flatMap(({ value }) => (value.approval === undefined ? [] : [[value.id, toApprovalRule(value.approval)] as const]))),
+      notify: new Map(
+        roles.flatMap(({ value: { id, notify } }) =>
+          notify === undefined ? [] : [[id, { approvalRequests: [...notify.approval_requests], results: [...notify.results] }] as const],
+        ),
+      ),
       bindings: registry.bindings,
       disabled: registry.disabled,
       connectionSettings: new Map([...states].map(([id, s]) => [id, s.settings] as const)),

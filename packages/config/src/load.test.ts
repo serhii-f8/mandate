@@ -205,7 +205,7 @@ describe('CFG-5 secrets never appear in configuration', () => {
   it('accepts credential references and argument names inside input schemas', async () => {
     const result = await load({
       'operations.yaml': OPERATIONS.replace('fields: { type: array', 'page_token: { type: string }, fields: { type: array'),
-      'notify.yaml': 'version: 1\nnotifications:\n  - { id: chat, kind: webhook, url_credential_ref: chat-hook }\n',
+      'notify.yaml': 'version: 1\nnotifications:\n  - { id: chat, kind: webhook, url_credential_ref: chat-hook, allowed_hosts: [hooks.example.test] }\n',
     });
     expect(result.ok).toBe(true);
   });
