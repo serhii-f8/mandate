@@ -24,7 +24,7 @@ export default tseslint.config(
   },
   {
     // The web bundle runs in the browser.
-    files: ['apps/web/**/*.ts', 'apps/web/**/*.tsx'],
+    files: ['apps/web/**/*.ts', 'apps/web/**/*.tsx', 'packages/widgets/src/**/*.ts', 'packages/widgets/src/**/*.tsx'],
     languageOptions: { globals: globals.browser },
   },
   {
