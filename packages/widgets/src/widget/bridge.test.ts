@@ -132,6 +132,40 @@ describe('widget bridge', () => {
     expect(resampled).toEqual({ ok: true, value: shown.sample });
   });
 
+  it('MCP-8 a committed submit, cancel or decision stays a success when the refresh after it fails', async () => {
+    const refreshDown: CallToolResult = { isError: true, content: [{ type: 'text', text: 'unavailable' }] };
+    const submitted = fakeApp({ updateModelContext: {} }, { get_changeset: refreshDown });
+    const s = await changeSetActions(submitted.app, changeSetModel).submit?.(HASH_A);
+    expect(s?.ok && s.value).toMatchObject({ id: A, status: 'pending_approval', permissions: { canExclude: false, canSubmit: false, canCancel: false } });
+    expect(submitted.updateModelContext).toHaveBeenCalledWith({ content: [{ type: 'text', text: `Change-set ${A} is now pending_approval.` }] });
+
+    const cancelled = fakeApp(undefined, { get_changeset: refreshDown });
+    const c = await changeSetActions(cancelled.app, changeSetModel).cancel?.();
+    expect(c?.ok && c.value).toMatchObject({ id: A, status: 'cancelled', permissions: { canExclude: false, canSubmit: false, canCancel: false } });
+
+    const decided = fakeApp(undefined, { review_changeset: refreshDown });
+    const d = await approvalActions(decided.app, approvalModel).decide?.({ decision: 'approve', hash: HASH_A, count: 2 });
+    expect(d?.ok && d.value).toMatchObject({ id: A, status: 'pending_approval', viewer: { canDecide: false, canStart: false } });
+    // A thrown refresh and an answer without a status keep the shown status.
+    const odd = fakeApp();
+    odd.callServerTool.mockResolvedValueOnce({ content: [{ type: 'text', text: 'ok' }] }).mockRejectedValueOnce(new Error('gone'));
+    const o = await approvalActions(odd.app, approvalModel).decide?.({ decision: 'approve', hash: HASH_A, count: 2 });
+    expect(o?.ok && o.value.status).toBe('pending_approval');
+  });
+
+  it('CS-8 the page address is read when the action runs, so a derived change-set opens its own page', async () => {
+    const { app, openLink } = fakeApp();
+    let shown = changeSetModel();
+    const actions = changeSetActions(app, () => shown);
+    const derived = fromGetChangeset(exclude.structuredContent);
+    if (derived === undefined) throw new Error('fixture does not parse');
+    shown = derived;
+    await actions.openPage?.();
+    await actions.export?.('xlsx');
+    const pageB = `https://aiops.example.test/app/changesets/${B}`;
+    expect(openLink.mock.calls).toEqual([[{ url: pageB }], [{ url: pageB }]]);
+  });
+
   it('UI-1 a refused openLink shows the address as text', async () => {
     const refused = fakeApp();
     refused.openLink.mockResolvedValue({ isError: true });

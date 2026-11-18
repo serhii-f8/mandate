@@ -115,6 +115,21 @@ describe('widget adapters', () => {
     expect(fromGetChangeset({ changeset: { id: A }, items: [] })).toBeUndefined();
   });
 
+  it('SEC-5 a view needs a UUID change-set ID and a http(s) page address', () => {
+    const sc = getPrepared.structuredContent;
+    expect(fromGetChangeset({ ...sc, changeset: { ...sc.changeset, id: 'not-a-uuid' } })).toBeUndefined();
+    for (const bad of ['javascript:alert(1)', 'data:text/html,x', '/app/changesets/x', 'https//no', '']) {
+      const model = fromGetChangeset({ ...sc, pageUrl: bad });
+      expect(model, bad).toBeDefined();
+      expect(model, bad).not.toHaveProperty('pageUrl');
+      expect(fromReviewChangeset({ ...review.structuredContent, pageUrl: bad }), bad).not.toHaveProperty('pageUrl');
+      expect(parseChangeSetTrigger({ content: [{ type: 'text', text: 't' }], structuredContent: { pageUrl: bad } }), bad).toEqual({ kind: 'text', text: 't' });
+      expect(parseChangeSetTrigger({ content: [], structuredContent: { changesetId: A, pageUrl: bad } }), bad).toEqual({ kind: 'load', id: A });
+    }
+    expect(fromGetChangeset({ ...sc, pageUrl: 'http://localhost:8080/app/changesets/x' })?.pageUrl).toBe('http://localhost:8080/app/changesets/x');
+    expect(fromReviewChangeset({ ...review.structuredContent, detail: { ...review.structuredContent.detail, id: 'x' } })).toBeUndefined();
+  });
+
   it('APR-5 the pending answer maps decisions to steps and the awaiting role', () => {
     const model = fromGetChangeset(pending.structuredContent);
     expect(model?.approval).toEqual({

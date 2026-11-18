@@ -5,7 +5,7 @@
  */
 import type { CallToolResult } from '@modelcontextprotocol/client';
 import type { ApprovalStateModel, ApprovalViewModel, ChangeSetViewModel, ItemFilter, ItemRowModel, ItemsPageModel } from '../model.js';
-import { changeSetAnswerSchema, reviewAnswerSchema, uuidSchema, type ChangeSetAnswer, type ItemAnswer, type ReviewAnswer } from './schemas.js';
+import { changeSetAnswerSchema, isPageUrl, reviewAnswerSchema, uuidSchema, type ChangeSetAnswer, type ItemAnswer, type ReviewAnswer } from './schemas.js';
 
 export type ChangeSetTrigger =
   | { kind: 'view'; model: ChangeSetViewModel }
@@ -165,7 +165,7 @@ export function fromReviewChangeset(structured: unknown, filter?: ItemFilter): A
     items: toItemsPage(items, nextCursor),
     ...(filter === undefined ? {} : { itemFilter: filter }),
     viewer: { channel: 'widget', canDecide: detail.viewer.canDecide, reason: detail.viewer.reason, needsFreshLogin: false, canStart: false },
-    pageUrl,
+    ...(pageUrl === undefined ? {} : { pageUrl }),
   };
 }
 
@@ -175,7 +175,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function pageUrlOf(structured: Record<string, unknown> | undefined): { pageUrl?: string } {
   const url = structured?.pageUrl;
-  return typeof url === 'string' ? { pageUrl: url } : {};
+  return isPageUrl(url) ? { pageUrl: url } : {};
 }
 
 /** The change-set ID a result names, as `changesetId` or `changeset.id`, when it is a UUID. */

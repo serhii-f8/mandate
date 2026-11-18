@@ -43,6 +43,10 @@ export async function openPage(app: WidgetApp, url: string): Promise<ActionResul
   }
 }
 
+function toPage(app: WidgetApp, url: string | undefined): Promise<ActionResult> {
+  return url === undefined ? Promise.resolve({ ok: false, message: 'This change-set has no page address.' }) : openPage(app, url);
+}
+
 /** Tells the model what changed, when the host accepts context updates; never fails the action. */
 export async function tellModel(app: WidgetApp, text: string): Promise<void> {
   if (app.getHostCapabilities()?.updateModelContext === undefined) return;
@@ -51,6 +55,29 @@ export async function tellModel(app: WidgetApp, text: string): Promise<void> {
   } catch {
     // The context update is a courtesy to the model; the action itself succeeded.
   }
+}
+
+/** The status a mutating answer reports, as `status` or `changeset.status`. */
+function statusOf(result: CallToolResult): string | undefined {
+  const sc = asRecord(result.structuredContent);
+  for (const candidate of [sc?.status, asRecord(sc?.changeset)?.status]) if (typeof candidate === 'string') return candidate;
+  return undefined;
+}
+
+function asRecord(v: unknown): Record<string, unknown> | undefined {
+  // A plain object read field by field; every field is checked before use.
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+}
+
+/**
+ * The shown change-set after a committed action whose follow-up read failed: the action's status,
+ * nothing more offered until the next successful read (the server committed it; MCP-8).
+ */
+function committed(shown: ChangeSetViewModel, result: CallToolResult): { ok: true; value: ChangeSetViewModel } {
+  return {
+    ok: true,
+    value: { ...shown, status: statusOf(result) ?? shown.status, permissions: { canExclude: false, canSubmit: false, canCancel: false } },
+  };
 }
 
 /** A successful call whose answer does not map is a failure with its text. */
@@ -94,24 +121,27 @@ export function changeSetActions(app: WidgetApp, current: () => ChangeSetViewMod
       return { ok: true, value: model };
     },
     async submit(hash) {
-      const id = current().id;
-      const r = await callTool(app, 'submit_for_approval', { changeset_id: id, hash });
+      const shown = current();
+      const r = await callTool(app, 'submit_for_approval', { changeset_id: shown.id, hash });
       if (!r.ok) return r;
-      const next = await refresh();
-      if (next.ok) await tellModel(app, `Change-set ${id} is now ${next.value.status}.`);
+      const refreshed = await refresh();
+      const next = refreshed.ok ? refreshed : committed(shown, r.value);
+      await tellModel(app, `Change-set ${shown.id} is now ${next.value.status}.`);
       return next;
     },
     async cancel() {
-      const r = await callTool(app, 'cancel_changeset', { changeset_id: current().id });
+      const shown = current();
+      const r = await callTool(app, 'cancel_changeset', { changeset_id: shown.id });
       if (!r.ok) return r;
-      return refresh();
+      const refreshed = await refresh();
+      return refreshed.ok ? refreshed : committed(shown, r.value);
     },
   };
-  // Export happens on the trusted page (ADR 0035); both are offered only with its address.
-  const url = current().pageUrl;
-  if (url !== undefined) {
-    actions.export = () => openPage(app, url);
-    actions.openPage = () => openPage(app, url);
+  // Export happens on the trusted page (ADR 0035); both are offered only with its address, which is
+  // read when the action runs, so a derived change-set opens its own page.
+  if (current().pageUrl !== undefined) {
+    actions.export = () => toPage(app, current().pageUrl);
+    actions.openPage = () => toPage(app, current().pageUrl);
   }
   return actions;
 }
@@ -146,18 +176,22 @@ export function approvalActions(app: WidgetApp, current: () => ApprovalViewModel
       return model === undefined ? unreadable(r.value) : { ok: true, value: model.sample };
     },
     async decide(input) {
+      const shown = current();
       const r = await callTool(app, 'decide_changeset', {
-        changeset_id: current().id,
+        changeset_id: shown.id,
         decision: input.decision,
         hash: input.hash,
         count: input.count,
         ...(input.comment === undefined ? {} : { comment: input.comment }),
       });
       if (!r.ok) return r;
-      return reviewed();
+      const refreshed = await reviewed();
+      if (refreshed.ok) return refreshed;
+      // The decision is recorded; show its status and no further decision until the next read (MCP-8).
+      const viewer = { ...shown.viewer, canDecide: false, reason: null, needsFreshLogin: false, canStart: false };
+      return { ok: true, value: { ...shown, status: statusOf(r.value) ?? shown.status, viewer } };
     },
   };
-  const url = current().pageUrl;
-  if (url !== undefined) actions.openPage = () => openPage(app, url);
+  if (current().pageUrl !== undefined) actions.openPage = () => toPage(app, current().pageUrl);
   return actions;
 }

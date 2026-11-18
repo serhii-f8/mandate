@@ -7,6 +7,14 @@ import { z } from 'zod';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const uuidSchema = z.string().regex(UUID);
 
+/** Only an absolute http(s) address is a page link; anything else counts as absent (SEC-5). */
+export function isPageUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || !URL.canParse(value)) return false;
+  const { protocol } = new URL(value);
+  return protocol === 'https:' || protocol === 'http:';
+}
+const pageUrlSchema = z.unknown().transform((v) => (isPageUrl(v) ? v : undefined));
+
 export const itemSchema = z.object({
   targetId: z.string(),
   status: z.string(),
@@ -35,7 +43,7 @@ const operationSchema = z
 /** `get_changeset`, the prepared result and `exclude_changeset_items` (changeset-tools.ts, result.ts, exclude-tool.ts). */
 export const changeSetAnswerSchema = z.object({
   changeset: z.object({
-    id: z.string(),
+    id: uuidSchema,
     operation: operationSchema,
     status: z.string(),
     hash: z.string().optional(),
@@ -66,12 +74,12 @@ export const changeSetAnswerSchema = z.object({
   derivedFrom: z.string().optional(),
   rollback: z.object({ available: z.boolean() }).optional(),
   execution: z.object({ drift: z.number() }).optional(),
-  pageUrl: z.string().optional(),
+  pageUrl: pageUrlSchema,
 });
 
 /** The page detail block inside the `review_changeset` answer (apps/api/src/approvals/detail.ts). */
 const detailSchema = z.object({
-  id: z.string(),
+  id: uuidSchema,
   status: z.string(),
   hash: z.string().optional(),
   operation: z.object({ id: z.string(), title: z.string().optional(), description: z.string().optional(), risk: z.string().optional() }),
@@ -122,7 +130,7 @@ export const reviewAnswerSchema = z.object({
   items: z.array(itemSchema),
   nextCursor: z.string().optional(),
   sample: z.object({ seed: z.string(), items: z.array(itemSchema) }),
-  pageUrl: z.string(),
+  pageUrl: pageUrlSchema,
 });
 
 export type ChangeSetAnswer = z.infer<typeof changeSetAnswerSchema>;
