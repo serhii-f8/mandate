@@ -123,3 +123,4 @@ export {
   preparedResult,
 } from './changeset/result.js';
 export * from './approval/index.js';
+export * from './notification/index.js';
