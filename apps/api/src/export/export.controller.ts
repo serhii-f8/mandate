@@ -7,11 +7,12 @@ import { randomUUID } from 'node:crypto';
 import type { Writable } from 'node:stream';
 import { Controller, Get, Inject, Param, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
+import type { Logger } from 'pino';
 import { canView, type AuditLog, type ChangeSetRepository } from '@aiops/core';
 import { pageAnswer, pageViewer } from '../approvals/changeset-pages.controller.js';
 import { CHANGESET_ID } from '../approvals/page-query.js';
 import { pageRefuser } from '../approvals/refusals.js';
-import { AUDIT_LOG, CHANGESET_REPOSITORY, PAGE_CHECKS } from '../tokens.js';
+import { AUDIT_LOG, CHANGESET_REPOSITORY, LOGGER, PAGE_CHECKS } from '../tokens.js';
 import { pageCorrelation } from '../web/correlation.js';
 import { PageAccess, type PageChecks, type PageRequest } from '../web/access.js';
 import { collectFields, itemPages } from './columns.js';
@@ -43,9 +44,14 @@ function writable(res: Writable): Promise<boolean> {
 /**
  * Writes every chunk, honouring back-pressure, then ends `res`. An error from the chunks destroys
  * `res` instead, so the client never sees a clean end of a cut file; it is not rethrown, as the
- * headers are already sent. A response closed by the client stops the iteration.
+ * headers are already sent; `onError` gets it after the destroy. A response closed by the client
+ * stops the iteration.
  */
-export async function streamTo(res: Writable, chunks: AsyncIterable<string | Uint8Array>): Promise<void> {
+export async function streamTo(
+  res: Writable,
+  chunks: AsyncIterable<string | Uint8Array>,
+  onError?: (error: unknown) => void,
+): Promise<void> {
   try {
     for await (const chunk of chunks) {
       if (res.destroyed) return;
@@ -54,7 +60,21 @@ export async function streamTo(res: Writable, chunks: AsyncIterable<string | Uin
     res.end();
   } catch (error) {
     res.destroy(error instanceof Error ? error : new Error(String(error)));
+    onError?.(error);
   }
+}
+
+/**
+ * Logs a failed export stream: the IDs and the error's name only. The message and stack may hold
+ * item values or target IDs, so they are never logged (SEC-3).
+ */
+export function exportFailureLogger(
+  logger: Pick<Logger, 'error'>,
+  context: { readonly correlationId: string; readonly changesetId: string; readonly format: ExportFormat },
+): (error: unknown) => void {
+  return (error) => {
+    logger.error({ ...context, error: error instanceof Error ? error.name : typeof error }, 'change-set export failed');
+  };
 }
 
 /** The `format` query value: exactly one of the two strings; a repeated or unknown value is refused. */
@@ -69,6 +89,7 @@ export class ChangeSetExportController {
     @Inject(CHANGESET_REPOSITORY) private readonly repository: ChangeSetRepository,
     @Inject(PAGE_CHECKS) private readonly checks: PageChecks,
     @Inject(AUDIT_LOG) private readonly audit: AuditLog,
+    @Inject(LOGGER) private readonly logger: Logger,
   ) {}
 
   /** Check order: ID shape and visibility (404) → `format` (400) → audit → headers → stream. */
@@ -109,6 +130,10 @@ export class ChangeSetExportController {
     res.setHeader('content-disposition', `attachment; filename="changeset-${changeset.id}.${format}"`);
     res.setHeader('x-content-type-options', 'nosniff');
     const pages = itemPages(this.repository, changeset.id);
-    await streamTo(res, format === 'csv' ? csvChunks(fields, pages) : xlsxChunks(fields, pages));
+    await streamTo(
+      res,
+      format === 'csv' ? csvChunks(fields, pages) : xlsxChunks(fields, pages),
+      exportFailureLogger(this.logger, { correlationId, changesetId: changeset.id, format }),
+    );
   }
 }

@@ -1,6 +1,7 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import { streamTo } from './export.controller.js';
+import type { Logger } from 'pino';
+import { exportFailureLogger, streamTo } from './export.controller.js';
 
 async function* chunks(...values: (string | Error)[]): AsyncGenerator<string> {
   for (const value of values) {
@@ -16,7 +17,7 @@ async function collect(stream: PassThrough): Promise<string> {
   return text;
 }
 
-describe('streamTo', () => {
+describe('CS-8 NFR-7 streamTo', () => {
   it('CS-8 streamTo ends the response after the last chunk', async () => {
     const res = new PassThrough();
     const errors: unknown[] = [];
@@ -80,5 +81,35 @@ describe('streamTo', () => {
     await done;
     expect(produced).toBe(1);
     expect(closed).toBe(true);
+  });
+
+  it('CS-8 a stream error is handed to onError once, after the response is destroyed', async () => {
+    const res = new PassThrough();
+    res.on('error', () => undefined);
+    res.resume();
+    const seen: unknown[] = [];
+    const failure = new Error('page read failed');
+    await streamTo(res, chunks('first', failure), (e) => seen.push(e));
+    expect(seen).toEqual([failure]);
+    expect(res.destroyed).toBe(true);
+  });
+});
+
+describe('CS-8 SEC-3 export failure log', () => {
+  it('SEC-3 an export stream error is logged with the correlation and change-set IDs, the error name only', () => {
+    const calls: unknown[][] = [];
+    const logger = { error: (...args: unknown[]) => calls.push(args) } as unknown as Logger;
+    const failure = new TypeError('value =SUM(A1) of SKU-9999 is broken');
+    exportFailureLogger(logger, { correlationId: 'c1', changesetId: 'cs-1', format: 'csv' })(failure);
+    expect(calls).toEqual([[{ correlationId: 'c1', changesetId: 'cs-1', format: 'csv', error: 'TypeError' }, 'change-set export failed']]);
+    expect(JSON.stringify(calls)).not.toMatch(/SUM|SKU-9999|broken/);
+  });
+
+  it('SEC-3 a thrown non-Error is logged by its type, not its value', () => {
+    const calls: unknown[][] = [];
+    const logger = { error: (...args: unknown[]) => calls.push(args) } as unknown as Logger;
+    exportFailureLogger(logger, { correlationId: 'c1', changesetId: 'cs-1', format: 'xlsx' })('SKU-9999');
+    expect(JSON.stringify(calls)).not.toContain('SKU-9999');
+    expect(calls[0]?.[0]).toMatchObject({ error: 'string' });
   });
 });
