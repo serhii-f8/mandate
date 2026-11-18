@@ -121,11 +121,30 @@ class RacingRepository extends InMemoryChangeSetRepository {
   }
 }
 
+/** The row changed between the checks and the transaction: the transaction refuses with this reason. */
+class RefusingRepository extends InMemoryChangeSetRepository {
+  constructor(
+    audit: InMemoryAuditLog,
+    private readonly reason: 'hash_mismatch' | 'expired',
+  ) {
+    super(audit);
+  }
+
+  override submitForApproval(): ReturnType<InMemoryChangeSetRepository['submitForApproval']> {
+    return Promise.resolve({ ok: false, reason: this.reason });
+  }
+}
+
 type Stage = 'prepared' | 'pending_approval' | 'approved';
 
-async function setup(options: { stage?: Stage; racing?: boolean } = {}) {
+async function setup(options: { stage?: Stage; racing?: boolean; refusing?: 'hash_mismatch' | 'expired' } = {}) {
   const audit = new InMemoryAuditLog();
-  const repository = options.racing === true ? new RacingRepository(audit) : new InMemoryChangeSetRepository(audit);
+  const repository =
+    options.racing === true
+      ? new RacingRepository(audit)
+      : options.refusing === undefined
+        ? new InMemoryChangeSetRepository(audit)
+        : new RefusingRepository(audit, options.refusing);
   const executor = new StubExecutor();
   const event = { id: 'a0', actor: 'alice', action: 'changeset.transition' as const, outcome: 'ok' as const, correlationId: 'c0', details: {} };
   await repository.create(
@@ -273,5 +292,14 @@ describe('MCP-8 SubmitService', () => {
 
     const raced = await setup({ racing: true });
     expect(await raced.submit(aliceAlways)).toEqual({ kind: 'refused', reason: 'not_prepared', status: 'pending_approval' });
+  });
+
+  it('MCP-8 SEC-9 a transaction that refuses hash_mismatch or expired after the checks passed answers raced', async () => {
+    const hash = await setup({ refusing: 'hash_mismatch' });
+    expect(await hash.submit(aliceAlways)).toEqual({ kind: 'refused', reason: 'hash_mismatch', raced: true });
+    expect(hash.executor.starts).toEqual([]);
+
+    const expired = await setup({ refusing: 'expired' });
+    expect(await expired.submit(aliceAlways)).toEqual({ kind: 'refused', reason: 'expired', raced: true });
   });
 });
