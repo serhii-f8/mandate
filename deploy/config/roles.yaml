@@ -11,8 +11,7 @@ roles:
         id: own-brands-content
         scope: { brand: [acme, globex, umbrella] }
         deny_fields: [cost]
-    # Phase 6 plan 2 switches this to above_threshold (ADR 0030).
-    approval: { required: never }
+    approval: { required: above_threshold, record_threshold: 25, steps: [{ role: content_lead }] }
   - id: support_agent
     grants:
       - operation: support.lookup_order
@@ -20,6 +19,9 @@ roles:
     description: Enters and rotates upstream credentials on the trusted credential page (SEC-1, UI-5).
     grants: []
     manage_credentials: [magento-integration]
+  - id: content_lead
+    description: Approves content changes (APR-1).
+    grants: []
 role_mapping:
   - group: content
     roles: [content_manager]
@@ -27,3 +29,5 @@ role_mapping:
     roles: [support_agent]
   - group: admins
     roles: [integration_admin]
+  - group: content-leads
+    roles: [content_lead]

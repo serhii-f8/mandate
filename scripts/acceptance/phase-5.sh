@@ -109,6 +109,9 @@ cp deploy/config/*.yaml "$AIOPS_ACCEPT_CONFIG_DIR/"
 sed -i 's#^\(    base_url: \).*#\1http://magento-sandbox/rest/all#' "$AIOPS_ACCEPT_CONFIG_DIR/connections.yaml"
 grep -q '^    base_url: http://magento-sandbox/rest/all$' "$AIOPS_ACCEPT_CONFIG_DIR/connections.yaml" || { fail acceptance-config "base_url not replaced"; exit 1; }
 grep -q '^    allow_private_network: true$' "$AIOPS_ACCEPT_CONFIG_DIR/connections.yaml" || { fail acceptance-config "allow_private_network missing"; exit 1; }
+# Phase 6 gives content_manager threshold approval; this run submits 3000 items with no approver (ADR 0030).
+sed -i 's/^    approval: { required: above_threshold, record_threshold: 25, steps: \[{ role: content_lead }\] }$/    approval: { required: never }/' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml"
+grep -q '^    approval: { required: never }$' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml" || { fail acceptance-config "approval override missing"; exit 1; }
 
 # 2. One command from a fresh clone; two workers.
 if compose up -d --build --wait >"$WORK/up.log" 2>&1; then
