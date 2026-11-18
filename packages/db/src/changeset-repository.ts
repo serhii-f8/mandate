@@ -19,12 +19,14 @@ import type {
   ItemOutcome,
   ItemsPageQuery,
   NewChangeSet,
+  NewNotification,
   Submission,
 } from '@aiops/core';
 import { changesetTransitionEvent, EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
 import { DrizzleAuditLog } from './audit-log.js';
 import { guarded, isUniqueViolation } from './errors.js';
 import type { Db, DbExecutor } from './client.js';
+import { insertNotifications } from './notification-outbox.js';
 import { approval, changeBatch, changeItem, changeSet, type StoredSubmission } from './schema.js';
 
 const MAX_PAGE = 500;
@@ -370,7 +372,12 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     from: readonly ChangeSetStatus[],
     to: ChangeSetStatus,
     audit: AuditEventInput,
-    extra?: { errorCode?: string; expiredBefore?: Date; unlessBatches?: boolean },
+    extra?: {
+      errorCode?: string;
+      expiredBefore?: Date;
+      unlessBatches?: boolean;
+      notifications?: readonly NewNotification[];
+    },
   ): Promise<ChangeSetRecord | undefined> {
     if (!UUID.test(changesetId) || from.length === 0) return undefined;
     const set: PgUpdateSetSource<typeof changeSet> = {
@@ -378,7 +385,15 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
       ...(extra?.errorCode === undefined ? {} : { errorCode: extra.errorCode }),
       updatedAt: sql`now()`,
     };
-    return this.compareAndSet(changesetId, from, set, audit, extra?.expiredBefore, extra?.unlessBatches === true);
+    return this.compareAndSet(
+      changesetId,
+      from,
+      set,
+      audit,
+      extra?.expiredBefore,
+      extra?.unlessBatches === true,
+      extra?.notifications ?? [],
+    );
   }
 
   async submitForApproval(req: SubmitRequest): Promise<SubmitResult> {
@@ -426,7 +441,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
         const audit = this.auditFor(tx);
         await audit.append(req.audit.transition);
         await audit.append(req.audit.requested);
-        // `req.notifications` go to the outbox once it exists (Phase 6 notifications plan); passed as [] until then.
+        await insertNotifications(tx, req.changesetId, req.notifications, req.submission.at);
         return { ok: true, changeset: toRecord(updated) };
       }),
     );
@@ -499,7 +514,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           if (updated === undefined) throw new Error('approval decision update returned no row');
           const audit = this.auditFor(tx);
           for (const event of req.audit) await audit.append(event);
-          // `req.notifications` go to the outbox once it exists (Phase 6 notifications plan); passed as [] until then.
+          await insertNotifications(tx, req.changesetId, req.notifications, req.record.ts);
           return { ok: true, changeset: toRecord(updated) };
         });
       } catch (error) {
@@ -617,6 +632,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
             .returning();
           if (updated === undefined) return { ok: false, reason: 'not_executable' };
           await this.auditFor(tx).append(req.event({ kind: 'executing', from: record.status }, record));
+          await insertNotifications(tx, req.changesetId, req.notifications ?? [], req.now);
           return { ok: true, changeset: toRecord(updated) };
         },
         { isolationLevel: 'read committed' },
@@ -825,6 +841,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     audit: AuditEventInput,
     expiredBefore?: Date,
     unlessBatches = false,
+    notifications: readonly NewNotification[] = [],
   ): Promise<ChangeSetRecord | undefined> {
     return guarded('change-set update', () =>
       this.db.transaction(async (tx) => {
@@ -848,6 +865,8 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           .returning();
         if (row === undefined) return undefined;
         await this.auditFor(tx).append(audit);
+        // The transition's own clock: the request carries none (NTF-1).
+        await insertNotifications(tx, changesetId, notifications, new Date());
         return toRecord(row);
       }),
     );

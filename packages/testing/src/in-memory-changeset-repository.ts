@@ -22,6 +22,7 @@ import type {
 import { changesetTransitionEvent, compareTargetIds, EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
 import { createHash, randomUUID } from 'node:crypto';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
+import { InMemoryNotificationOutbox } from './in-memory-notification-outbox.js';
 
 const MAX_PAGE = 500;
 const MAX_BATCH = 1000;
@@ -63,6 +64,8 @@ function copyItem(i: ChangeItemRecord): ChangeItemRecord {
 /** In-memory ChangeSetRepository for unit tests. Hands out copies, never internal objects. */
 export class InMemoryChangeSetRepository implements ChangeSetRepository {
   readonly audit: InMemoryAuditLog;
+  /** Outbox rows stored with the state change they announce (NTF-1, NTF-3). */
+  readonly outbox: InMemoryNotificationOutbox;
   /** Largest `appendItems` batch seen (NFR-7 tests). */
   largestAppend = 0;
   /** Largest `itemsPage` limit seen (NFR-7 tests). */
@@ -72,8 +75,9 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
   /** Highest batch number per change-set, tracked as batches are created. */
   private readonly highestBatch = new Map<string, number>();
 
-  constructor(audit: InMemoryAuditLog = new InMemoryAuditLog()) {
+  constructor(audit: InMemoryAuditLog = new InMemoryAuditLog(), outbox = new InMemoryNotificationOutbox(audit)) {
     this.audit = audit;
+    this.outbox = outbox;
   }
 
   async create(cs: NewChangeSet, audit: AuditEventInput): Promise<ChangeSetRecord> {
@@ -256,6 +260,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       ...(extra?.errorCode === undefined ? {} : { errorCode: extra.errorCode }),
     };
     await this.commit(entry, next, audit);
+    this.outbox.enqueue(changesetId, extra?.notifications ?? [], new Date());
     return copyRecord(next);
   }
 
@@ -300,6 +305,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       updatedAt: new Date(),
     };
     await this.commit(entry, next, req.audit.transition, req.audit.requested);
+    this.outbox.enqueue(req.changesetId, req.notifications, req.submission.at);
     return { ok: true, changeset: copyRecord(next) };
   }
 
@@ -347,6 +353,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       entry.approvals = previousApprovals;
       throw error;
     }
+    this.outbox.enqueue(req.changesetId, req.notifications, req.record.ts);
     return { ok: true, changeset: copyRecord(next) };
   }
 
@@ -410,6 +417,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       executionRequest: { ...structuredClone(req.request), startedAt: copyDate(req.now) },
     };
     await this.commit(entry, executing, req.event({ kind: 'executing', from: record.status }, copyRecord(record)));
+    this.outbox.enqueue(req.changesetId, req.notifications ?? [], req.now);
     return { ok: true, changeset: copyRecord(executing) };
   }
 

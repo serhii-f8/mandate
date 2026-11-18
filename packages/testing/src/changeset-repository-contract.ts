@@ -12,6 +12,8 @@ import type {
   ExecutionLimits,
   ItemOutcome,
   NewChangeSet,
+  NewNotification,
+  NotificationRow,
 } from '@aiops/core';
 
 /**
@@ -25,6 +27,8 @@ export interface ChangeSetRepositoryHarness {
   readonly auditEvents: () => Promise<readonly AuditEventInput[]>;
   /** Makes the audit append of the next state-changing call fail. */
   readonly failNextAudit: () => void;
+  /** Outbox rows of one change-set (NTF-1, NTF-3), ordered by created_at, kind, step, target. */
+  readonly notifications: (changesetId: string) => Promise<readonly NotificationRow[]>;
   readonly close?: () => Promise<void>;
 }
 
@@ -1153,5 +1157,110 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         expect(await c.repository.sampleItems(randomUUID(), SEED, 5)).toEqual([]);
         expect(await c.repository.sampleItems('x', SEED, 5)).toEqual([]);
       }));
+
+    describe('NTF-1 outbox rows commit with the event they announce', () => {
+      const ask = (target: string, step = 1): NewNotification => ({ kind: 'approval_requested', round: 1, step, target });
+
+      async function preparedRecord(c: Ctx, id = c.id): Promise<ChangeSetRecord> {
+        await preparedSet(c, id, 1);
+        const record = await c.repository.get(id);
+        if (record === undefined) throw new Error('missing change-set');
+        return record;
+      }
+
+      it('NTF-1 submitForApproval stores its notifications in the same transaction', async () =>
+        withRepo(async (c) => {
+          await submitChangeSet(c.repository, await preparedRecord(c), { at: NOW, notifications: [ask('mail'), ask('chat')] });
+          const rows = await c.notifications(c.id);
+          expect(rows.map((r) => r.target).sort()).toEqual(['chat', 'mail']);
+          for (const r of rows) {
+            expect(r).toMatchObject({ kind: 'approval_requested', changesetId: c.id, round: 1, step: 1, state: 'pending', attempts: 0 });
+            expect(r.lastError).toBeUndefined();
+            expect(r.sentAt).toBeUndefined();
+          }
+
+          const other = randomUUID();
+          const otherRecord = await preparedRecord(c, other);
+          c.failNextAudit();
+          await expect(submitChangeSet(c.repository, otherRecord, { at: NOW, notifications: [ask('mail')] })).rejects.toThrow();
+          expect(await c.notifications(other)).toEqual([]);
+          expect((await c.repository.get(other))?.status).toBe('prepared');
+        }));
+
+      it('NTF-1 submitForApproval stores no notifications when refused', async () =>
+        withRepo(async (c) => {
+          const record = await preparedRecord(c);
+          await expect(
+            submitChangeSet(c.repository, { ...record, hash: 'other' }, { at: NOW, notifications: [ask('mail')] }),
+          ).rejects.toThrow(/hash_mismatch/);
+          expect(await c.notifications(c.id)).toEqual([]);
+        }));
+
+      it('NTF-1 recordDecision stores its notifications; a losing concurrent decision stores none', async () =>
+        withRepo(async (c) => {
+          const submitted = await submitChangeSet(c.repository, await preparedRecord(c), { steps: ['lead', 'brand'], at: NOW });
+          const decided = (target: string): NewNotification => ({ kind: 'approval_decided', round: 1, step: 1, target });
+          const results = await Promise.allSettled([
+            recordApproval(c.repository, submitted, { approver: 'bob', decision: 'rejected', notifications: [decided('from-bob')] }),
+            recordApproval(c.repository, submitted, { approver: 'carol', decision: 'rejected', notifications: [decided('from-carol')] }),
+          ]);
+          expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+          const [winner] = await c.repository.approvals(c.id);
+          const rows = await c.notifications(c.id);
+          expect(rows.map((r) => [r.kind, r.round, r.step, r.target])).toEqual([
+            ['approval_decided', 1, 1, winner?.approver === 'bob' ? 'from-bob' : 'from-carol'],
+          ]);
+        }));
+
+      it('NTF-1 recordDecision stores no notifications when its audit append fails', async () =>
+        withRepo(async (c) => {
+          const submitted = await submitChangeSet(c.repository, await preparedRecord(c), { steps: ['lead', 'brand'], at: NOW });
+          c.failNextAudit();
+          await expect(
+            recordApproval(c.repository, submitted, { approver: 'bob', notifications: [ask('brand-mail', 2)] }),
+          ).rejects.toThrow();
+          expect(await c.notifications(c.id)).toEqual([]);
+          await recordApproval(c.repository, submitted, { approver: 'bob', notifications: [ask('brand-mail', 2)] });
+          expect((await c.notifications(c.id)).map((r) => [r.step, r.target])).toEqual([[2, 'brand-mail']]);
+        }));
+
+      it('NTF-1 transition stores its notifications only when the compare-and-set succeeds', async () =>
+        withRepo(async (c) => {
+          await preparedRecord(c);
+          const done: NewNotification = { kind: 'execution_finished', round: 0, step: 0, target: 'chat' };
+          expect(
+            await c.repository.transition(c.id, ['executing'], 'completed', auditEvent(c.id), { notifications: [done] }),
+          ).toBeUndefined();
+          expect(await c.notifications(c.id)).toHaveLength(0);
+          c.failNextAudit();
+          await expect(
+            c.repository.transition(c.id, ['prepared'], 'executing', auditEvent(c.id), { notifications: [done] }),
+          ).rejects.toThrow();
+          expect(await c.notifications(c.id)).toHaveLength(0);
+          expect(
+            await c.repository.transition(c.id, ['prepared'], 'executing', auditEvent(c.id), { notifications: [done] }),
+          ).toBeDefined();
+          expect((await c.notifications(c.id)).map((r) => [r.kind, r.step, r.target])).toEqual([['execution_finished', 0, 'chat']]);
+        }));
+
+      it('NTF-1 startExecution stores its notifications only when it starts', async () =>
+        withRepo(async (c) => {
+          await preparedRecord(c);
+          const row: NewNotification = { kind: 'execution_finished', round: 0, step: 0, target: 'chat' };
+          const run = (expectedHash: string): ReturnType<ChangeSetRepository['startExecution']> =>
+            c.repository.startExecution({
+              changesetId: c.id,
+              expectedHash,
+              request: { ...REQUEST, groups: [...REQUEST.groups] },
+              notifications: [row],
+              now: NOW,
+              event: startEventFactory({ newId: randomUUID, ...REQUEST }),
+            });
+          expect(await run('wrong')).toEqual({ ok: false, reason: 'hash_mismatch' });
+          expect(await c.notifications(c.id)).toEqual([]);
+          expect((await run('h')).ok).toBe(true);
+          expect((await c.notifications(c.id)).map((r) => r.target)).toEqual(['chat']);
+        }));
+    });
   });
 }

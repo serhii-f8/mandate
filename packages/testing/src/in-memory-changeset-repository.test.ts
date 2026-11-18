@@ -12,6 +12,7 @@ function setup(): Promise<ChangeSetRepositoryHarness> {
     failNextAudit: () => {
       audit.failNext = new Error('audit down');
     },
+    notifications: (changesetId) => repository.outbox.listFor(changesetId),
   });
 }
 
