@@ -65,20 +65,23 @@ export class InMemoryExecutor implements ChangeSetExecutor {
   }
 
   async start(req: StartRequest): Promise<StartOutcome> {
-    const groups = req.groups ?? [];
-    const clientId = req.clientId === undefined ? {} : { clientId: req.clientId };
+    // The requester's identity is the execution's request; the actor only starts it (POL-6).
+    const identity = req.requester ?? { subject: req.actor, groups: req.groups ?? [], ...(req.clientId === undefined ? {} : { clientId: req.clientId }) };
+    const clientId = identity.clientId === undefined ? {} : { clientId: identity.clientId };
     const started = await this.repository.startExecution({
       changesetId: req.changesetId,
       expectedHash: req.expectedHash,
-      request: { actor: req.actor, groups, ...clientId, correlationId: req.correlationId },
+      request: { actor: identity.subject, groups: identity.groups, ...clientId, correlationId: req.correlationId },
       ...(req.limits === undefined ? {} : { limits: req.limits }),
+      ...(req.submission === undefined ? {} : { submission: req.submission }),
       now: this.now(),
       event: startEventFactory({
         newId: this.newId,
         actor: req.actor,
-        ...clientId,
-        groups,
+        ...(req.clientId === undefined ? {} : { clientId: req.clientId }),
+        groups: req.groups ?? [],
         correlationId: req.correlationId,
+        ...(req.requester === undefined ? {} : { requester: req.requester }),
       }),
     });
     if (!started.ok) return started;
@@ -217,6 +220,11 @@ export class InMemoryExecutor implements ChangeSetExecutor {
       }),
     );
     return cancelled === undefined ? { ok: false, reason: 'not_cancellable' } : { ok: true, status: 'cancelled' };
+  }
+
+  /** Runs are in-process and never wait for a signal: nothing to wake. */
+  wake(): Promise<void> {
+    return Promise.resolve();
   }
 
   async progress(changesetId: string): Promise<ExecutionProgress | undefined> {

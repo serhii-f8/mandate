@@ -1,13 +1,17 @@
 /**
  * A loaded configuration for worker tests: one connection, the read operation
  * `catalog.get_products`, the write operation `catalog.update_content` with a manifest
- * (batch size 2), and the role `editor` granted to the group `editors`.
+ * (batch size 2), the role `editor` granted to the group `editors` (no approval), the role
+ * `approving_editor` granted to `approving-editors` (approval always, one `reviewer` step) and
+ * the role `reviewer` granted to `reviewers` (no grants).
  */
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
 
 export const WRITE_OPERATION = 'catalog.update_content';
 export const READ_OPERATION = 'catalog.get_products';
 export const EDITOR_GROUP = 'editors';
+export const APPROVING_GROUP = 'approving-editors';
+export const REVIEWER_GROUP = 'reviewers';
 
 const SOURCES: Readonly<Record<string, string>> = {
   'connections.yaml': `version: 1
@@ -58,9 +62,21 @@ roles:
     grants:
       - operation: catalog.update_content
         scope: { brand: [acme] }
+    approval: { required: never }
+  - id: approving_editor
+    grants:
+      - operation: catalog.update_content
+        scope: { brand: [acme] }
+    approval: { required: always, steps: [{ role: reviewer }] }
+  - id: reviewer
+    grants: []
 role_mapping:
   - group: editors
     roles: [editor]
+  - group: approving-editors
+    roles: [approving_editor]
+  - group: reviewers
+    roles: [reviewer]
 `,
 };
 

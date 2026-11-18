@@ -1,0 +1,24 @@
+# Approval pages e2e: a two-step plan above two records, and an always-approve role with step-up (APR-2, AUTH-6).
+version: 1
+roles:
+  - id: content_manager
+    grants:
+      - { operation: shop.update_content, id: own-brands, scope: { brand: [acme, globex] } }
+    approval: { required: above_threshold, record_threshold: 2, steps: [{ role: content_lead }, { role: brand_owner }] }
+  - id: catalog_editor
+    grants:
+      - { operation: shop.update_content, id: editor, scope: { brand: [acme, globex] } }
+    approval: { required: always, steps: [{ role: content_lead }], step_up_max_age_seconds: 120 }
+  - id: content_lead
+    grants: []
+  - id: brand_owner
+    grants: []
+  - id: support_agent
+    grants:
+      - { operation: shop.get_products, id: support-read }
+role_mapping:
+  - { group: content, roles: [content_manager] }
+  - { group: editors, roles: [catalog_editor] }
+  - { group: leads, roles: [content_lead] }
+  - { group: brand, roles: [brand_owner] }
+  - { group: support, roles: [support_agent] }

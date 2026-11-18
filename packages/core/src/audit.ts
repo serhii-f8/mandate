@@ -11,7 +11,12 @@ export type AuditAction =
   | 'connection.test'
   | 'changeset.transition'
   | 'changeset.batch'
-  | 'task.cancel';
+  | 'task.cancel'
+  | 'approval.requested'
+  | 'approval.decision'
+  | 'changeset.start'
+  | 'notification.sent'
+  | 'notification.failed';
 
 export type AuditOutcome = 'ok' | 'error' | 'denied';
 

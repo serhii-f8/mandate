@@ -1,6 +1,6 @@
 /**
  * Which path an allowed call takes, by risk class (SPEC section 2, design §4.1): reads run
- * directly, writes with a manifest create a change-set and start its workflow, everything else
+ * directly, writes and destructive operations with a manifest create a change-set and start its workflow, everything else
  * is refused until a later phase supports it. Nothing writes upstream from here (CS-1).
  */
 import type { LoadedConfiguration } from '@aiops/config';
@@ -19,7 +19,7 @@ export class OperationRouter implements OperationInvoker {
   invoke(request: InvocationRequest): Promise<InvocationResult> {
     const { operation } = request;
     if (operation.risk === 'read') return this.paths.read.invoke(request);
-    if (operation.risk === 'write' && operation.manifest !== undefined) return this.paths.changeset.invoke(request);
+    if ((operation.risk === 'write' || operation.risk === 'destructive') && operation.manifest !== undefined) return this.paths.changeset.invoke(request);
     return Promise.resolve(riskNotSupportedResult(operation));
   }
 }

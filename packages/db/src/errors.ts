@@ -9,6 +9,15 @@ function pgCode(error: unknown): string | undefined {
   return undefined;
 }
 
+/** True when `error` (or its cause) is a unique violation (23505) of exactly `constraint`. */
+export function isUniqueViolation(error: unknown, constraint: string): boolean {
+  for (let e: unknown = error; typeof e === 'object' && e !== null; e = (e as { cause?: unknown }).cause) {
+    const { code, constraint: name } = e as { code?: unknown; constraint?: unknown };
+    if (typeof code === 'string') return code === '23505' && name === constraint;
+  }
+  return false;
+}
+
 /**
  * A database error leaves as a fixed message carrying only its code, without `cause`:
  * drizzle's error quotes the statement and its parameters (target IDs, outcome texts,

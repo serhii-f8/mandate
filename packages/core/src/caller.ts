@@ -6,6 +6,8 @@ export interface Caller {
   readonly clientId?: string;
   /** Identity-provider groups, mapped to roles by configuration (AUTH-3). */
   readonly groups: readonly string[];
+  /** When the user last authenticated (the token's `auth_time`), when the token says so (AUTH-6, APR-8). */
+  readonly authTime?: Date;
 }
 
 /** The caller of every request until authentication exists (ADR 0013). */

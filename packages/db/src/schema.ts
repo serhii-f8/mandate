@@ -11,9 +11,31 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uuid,
 } from 'drizzle-orm/pg-core';
-import type { ChangeSetStats, ChangeSetStatus, ExclusionReason, ItemStatus, PlanEntry, TaskKind } from '@aiops/core';
+import type {
+  ApprovalChannel,
+  ApprovalDecision,
+  ApprovalPlan,
+  ChangeSetStats,
+  ChangeSetStatus,
+  ExclusionReason,
+  ItemStatus,
+  PlanEntry,
+  TaskKind,
+} from '@aiops/core';
+
+/** `Submission` as stored: `at` is an ISO 8601 string in JSON, revived to a `Date` on read. */
+export interface StoredSubmission {
+  readonly actor: string;
+  readonly groups: readonly string[];
+  readonly clientId?: string;
+  readonly correlationId: string;
+  readonly at: string;
+  readonly role: string;
+  readonly rule: string;
+}
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => 'bytea',
@@ -128,9 +150,16 @@ export const changeSet = pgTable(
     cancelRequestedBy: text('cancel_requested_by'),
     cancelCorrelationId: text('cancel_correlation_id'),
     cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
+    // Approval (APR-1, POL-5): round, submission and plan are written only by the submission out of
+    // `prepared`; `awaiting_role` only while awaiting approval (migration `0009_approvals`).
+    approvalRound: integer('approval_round').notNull().default(0),
+    submission: jsonb('submission').$type<StoredSubmission>(),
+    approvalPlan: jsonb('approval_plan').$type<ApprovalPlan>(),
+    awaitingRole: text('awaiting_role'),
   },
   (t) => [
     index('change_set_requester_created_at_idx').on(t.requester, t.createdAt),
+    index('change_set_status_awaiting_role_idx').on(t.status, t.awaitingRole),
     index('change_set_requester_status_idx').on(t.requester, t.status),
     index('change_set_requester_execution_started_at_idx').on(t.requester, t.executionStartedAt),
     check(
@@ -192,6 +221,40 @@ export const changeBatch = pgTable(
   (t) => [
     primaryKey({ columns: [t.changesetId, t.batchNo] }),
     check('change_batch_state_check', sql`${t.state} IN ('open', 'done')`),
+  ],
+);
+
+/**
+ * Approval decisions (APR-1, APR-3, APR-4). Append-only by the triggers of migration
+ * `0009_approvals` (AUD-3). One row per decided step of a round; `hash` is the hash the approver saw.
+ */
+export const approval = pgTable(
+  'approval',
+  {
+    id: uuid('id').primaryKey(),
+    changesetId: uuid('changeset_id')
+      .notNull()
+      .references(() => changeSet.id),
+    round: integer('round').notNull(),
+    step: integer('step').notNull(),
+    role: text('role').notNull(),
+    approver: text('approver').notNull(),
+    approverName: text('approver_name'),
+    decision: text('decision').$type<ApprovalDecision>().notNull(),
+    comment: text('comment'),
+    hash: text('hash').notNull(),
+    itemCount: integer('item_count').notNull(),
+    channel: text('channel').$type<ApprovalChannel>().notNull(),
+    authTime: timestamp('auth_time', { withTimezone: true }),
+    clientId: text('client_id'),
+    correlationId: text('correlation_id').notNull(),
+    ts: timestamp('ts', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    unique('approval_changeset_round_step_key').on(t.changesetId, t.round, t.step),
+    check('approval_decision_check', sql`${t.decision} IN ('approved', 'rejected', 'returned')`),
+    check('approval_channel_check', sql`${t.channel} IN ('page', 'widget')`),
+    check('approval_comment_length_check', sql`char_length(${t.comment}) <= 2000`),
   ],
 );
 

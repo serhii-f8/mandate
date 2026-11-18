@@ -11,7 +11,7 @@ roles:
         id: own-brands-content
         scope: { brand: [acme, globex, umbrella] }
         deny_fields: [cost]
-    # Phase 5: execution without approval until Phase 6 (ADR 0027)
+    # Phase 6 plan 2 switches this to above_threshold (ADR 0030).
     approval: { required: never }
   - id: support_agent
     grants:

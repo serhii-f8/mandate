@@ -124,7 +124,7 @@ export async function createChangeSet(
       configHash: req.configHash,
       correlationId,
       createdAt,
-      expiresAt: new Date(createdAt.getTime() + req.expireAfterHours * HOUR_MS),
+      expiresAt: new Date(createdAt.getTime() + Math.round(req.expireAfterHours * HOUR_MS)),
     },
     changesetTransitionEvent({
       id: deps.newId(),

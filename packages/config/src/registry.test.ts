@@ -546,6 +546,28 @@ describe('POL-3 field rules and projection use the same argument', () => {
   });
 });
 
+describe('OPS-6 bulk bindings', () => {
+  it('OPS-6 a bulk binding is allowed on a destructive operation', async () => {
+    const BULK = `version: 1
+operations:
+  - id: shop.retire_items
+    connection: shop
+    risk: destructive
+    description: Retire items.
+    upstream:
+      method: POST
+      path: /async/bulk/items
+      bulk:
+        body: { wrap: item }
+        batch_id: bulk_uuid
+        status: { method: GET, path: '/bulk/{batch_id}/status', items: ops, index: id, state: status, states: { ok: [1], retriable: [2], failed: [3], open: [4] } }
+    input_schema: { type: object, properties: { skus: { type: array, items: { type: string } } } }
+`;
+    const result = await sources({ 'retire.yaml': BULK });
+    expect(result.ok, JSON.stringify(result.ok ? [] : result.issues)).toBe(true);
+  });
+});
+
 describe('MCP-4 read operations use GET; writes need change-sets', () => {
   const MESSAGE = 'read operations must use GET; writes need change-sets';
 

@@ -102,6 +102,7 @@ function changesetFor(operation: string): ChangeSetRecord {
     correlationId: 'corr-cs-1',
     createdAt: new Date(0),
     expiresAt: new Date(86_400_000),
+    approvalRound: 0,
   };
 }
 
@@ -153,6 +154,14 @@ describe('EXE-4 OPS-6 worker writerFor', () => {
       { targetId: 'B', status: 'failed', error: 'write_mode_unsupported' },
     ]);
     expect(up.requests).toEqual([]);
+  });
+
+  it('POL-5 a destructive operation with a manifest and bulk binding gets a ManifestBatchWriter', () => {
+    const operations = configuration.policy.operations.map((o) =>
+      o.id === 'catalog.update_content' ? { ...o, risk: 'destructive' as const } : o,
+    );
+    const destructive = { ...configuration, policy: { ...configuration.policy, operations } };
+    expect(writerFor()(destructive, 'catalog.update_content')).toBeInstanceOf(ManifestBatchWriter);
   });
 
   it('EXE-4 CS-7 writerFor writes a batch against the fake catalog: carry status kept, drift skipped, record before poll', async () => {

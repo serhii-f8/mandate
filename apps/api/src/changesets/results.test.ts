@@ -17,6 +17,7 @@ function record(status: ChangeSetRecord['status'], extra: Partial<ChangeSetRecor
     correlationId: 'corr',
     createdAt: new Date(0),
     expiresAt: new Date(1),
+    approvalRound: 0,
     ...extra,
   };
 }

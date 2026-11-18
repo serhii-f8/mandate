@@ -72,10 +72,16 @@ describe('MCP-4 CS-1 operation routing by risk', () => {
     expect(read.seen).toEqual([]);
   });
 
+  it('POL-5 a destructive operation with a manifest takes the change-set path', async () => {
+    const { router, read, changeset } = setup();
+    expect((await router.invoke({ operation: operation('destructive', MANIFEST), args: {}, caller })).text).toBe('changeset');
+    expect(changeset.seen).toEqual(['shop.destructive']);
+    expect(read.seen).toEqual([]);
+  });
+
   it.each([
     ['write_opaque', undefined],
     ['destructive', undefined],
-    ['destructive', MANIFEST],
   ] as const)('MCP-4 refuses %s operations (manifest %s) with a fixed text and runs nothing', async (risk, manifest) => {
     const { router, read, changeset } = setup();
     const result = await router.invoke({ operation: operation(risk, manifest), args: {}, caller });

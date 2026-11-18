@@ -1,3 +1,4 @@
+import type { ApprovalPlan, ApprovalRecord, NewNotification, Submission } from '../approval/model.js';
 import type { AuditEventInput } from '../audit.js';
 import type { BatchCounts } from './execution.js';
 import type {
@@ -45,6 +46,22 @@ export interface ChangeSetRepository {
   get(changesetId: string): Promise<ChangeSetRecord | undefined>;
   /** Ordered by compareTargetIds, limit 1..500. */
   itemsPage(changesetId: string, query: ItemsPageQuery): Promise<readonly ChangeItemRecord[]>;
+  /**
+   * Change-sets awaiting approval (UI-7): status `pending_approval`, `awaitingRole` in `roles`, requester
+   * not `excludeRequester`; newest `submission.at` first, then `id` descending. `after` is exclusive;
+   * limit 1..500; an empty `roles` list gives `[]`.
+   */
+  pendingApprovals(q: {
+    roles: readonly string[];
+    excludeRequester: string;
+    after?: { submittedAt: Date; id: string };
+    limit: number;
+  }): Promise<readonly ChangeSetRecord[]>;
+  /**
+   * At most `size` included items (status not `excluded`) ordered by `md5(seed || targetId)` then
+   * `targetId` (APR-5); size 1..500; unknown and non-UUID IDs give `[]`.
+   */
+  sampleItems(changesetId: string, seed: string, size: number): Promise<readonly ChangeItemRecord[]>;
   /** Compare-and-set from preparing. */
   completePreparation(
     changesetId: string,
@@ -64,15 +81,52 @@ export interface ChangeSetRepository {
     from: readonly ChangeSetStatus[],
     to: ChangeSetStatus,
     audit: AuditEventInput,
-    extra?: { errorCode?: string; expiredBefore?: Date; unlessBatches?: boolean },
+    extra?: {
+      errorCode?: string;
+      expiredBefore?: Date;
+      unlessBatches?: boolean;
+      notifications?: readonly NewNotification[];
+    },
   ): Promise<ChangeSetRecord | undefined>;
+  /**
+   * One transaction (APR-1): `prepared` to `pending_approval` with round + 1, the submission, the plan
+   * and `awaitingRole = plan.steps[0]`, the two audit events and the outbox rows. Refuses `not_found`,
+   * `expired` (CAS to `expired`, judged at `submission.at`), `hash_mismatch` and `not_prepared`.
+   */
+  submitForApproval(req: {
+    changesetId: string;
+    expectedHash: string;
+    submission: Submission;
+    plan: ApprovalPlan;
+    audit: { transition: AuditEventInput; requested: AuditEventInput };
+    notifications: readonly NewNotification[];
+  }): Promise<
+    { ok: true; changeset: ChangeSetRecord } | { ok: false; reason: 'not_found' | 'hash_mismatch' | 'not_prepared' | 'expired' }
+  >;
+  /** Approval rows ordered by round, then step; all rounds unless `round` is given. */
+  approvals(changesetId: string, round?: number): Promise<readonly ApprovalRecord[]>;
+  /**
+   * One transaction (APR-3, APR-4): only while `pending_approval` in `round` with `step` the next
+   * undecided step (`not_pending` otherwise, nothing stored). Stores the record, applies `next`
+   * (a return goes to `prepared` and keeps the round), appends `audit` and the outbox rows.
+   */
+  recordDecision(req: {
+    changesetId: string;
+    round: number;
+    step: number;
+    record: ApprovalRecord;
+    next: { kind: 'rejected' | 'returned' | 'approved' } | { kind: 'next_step'; awaitingRole: string };
+    audit: readonly AuditEventInput[];
+    notifications: readonly NewNotification[];
+  }): Promise<{ ok: true; changeset: ChangeSetRecord } | { ok: false; reason: 'not_pending' }>;
   /** Number of items per non-null error code (CS-7: the drift number of the execution summary). */
   errorCounts(changesetId: string): Promise<Readonly<Record<string, number>>>;
   /** Only items with status pending; stats recomputed. */
   recordItemOutcomes(changesetId: string, outcomes: readonly ItemOutcome[]): Promise<void>;
   /**
    * One transaction (EXE-11, POL-4, POL-6): not found, expiry (CAS to `expired`, event `expired`),
-   * no hash, hash mismatch, status not `prepared|approved`; then the limits under a per-requester
+   * no hash, hash mismatch, status not `prepared|approved`; from `approved` the current round's
+   * approvals must cover every plan step for `expectedHash` (SEC-9, `not_approved`); then the limits under a per-requester
    * lock (refusal appends `limit_denied` and leaves the status); then CAS to `executing` with the
    * event `executing`, the execution request and `startedAt = now`.
    */
@@ -81,6 +135,9 @@ export interface ChangeSetRepository {
     expectedHash: string;
     request: Omit<ExecutionRequest, 'startedAt'>;
     limits?: ExecutionLimits;
+    /** Stored when starting from `prepared` without approval (POL-6). */
+    submission?: Submission;
+    notifications?: readonly NewNotification[];
     now: Date;
     event: (e: StartEvent, changeset: ChangeSetRecord) => AuditEventInput;
   }): Promise<{ ok: true; changeset: ChangeSetRecord } | Exclude<StartOutcome, { ok: true }>>;
@@ -216,6 +273,13 @@ export interface StartRequest {
   groups?: readonly string[];
   limits?: ExecutionLimits;
   clientId?: string;
+  /**
+   * Whose request the execution is when `actor` is the approver who starts it (POL-6): stored as the
+   * execution request, and the identity limits are charged to and audited for.
+   */
+  requester?: { subject: string; groups: readonly string[]; clientId?: string };
+  /** Stored when starting from `prepared` without approval (POL-6). */
+  submission?: Submission;
 }
 
 export interface WorkflowStarter {
@@ -239,12 +303,13 @@ export type FinishOutcome =
   | 'writer_error'
   | 'hash_mismatch'
   | 'policy_denied'
-  | 'executor_error';
+  | 'executor_error'
+  | 'approval_missing';
 
 export interface ExecutionGuard {
   check(
     changeset: ChangeSetRecord,
-  ): Promise<{ ok: true } | { ok: false; outcome: 'hash_mismatch' | 'policy_denied' }>;
+  ): Promise<{ ok: true } | { ok: false; outcome: 'hash_mismatch' | 'policy_denied' | 'approval_missing' }>;
 }
 
 export class ExecutorUnavailable extends Error {
@@ -269,7 +334,7 @@ export interface ExecutionProgress {
 /** Alias of the progress shape for the workflow query result. */
 export type WorkflowProgress = ExecutionProgress;
 
-export type StartRefusal = 'not_found' | 'hash_mismatch' | 'expired' | 'not_executable' | 'limit_exceeded';
+export type StartRefusal = 'not_found' | 'hash_mismatch' | 'expired' | 'not_executable' | 'limit_exceeded' | 'not_approved';
 
 /** Executor port (EXE-11). `cancel` may answer `{ ok: true, status: 'executing' }` while a run winds down. */
 export interface ChangeSetExecutor {
@@ -280,4 +345,6 @@ export interface ChangeSetExecutor {
     correlationId: string;
   }): Promise<{ ok: true; status: ChangeSetStatus } | { ok: false; reason: 'not_found' | 'not_cancellable' }>;
   progress(changesetId: string): Promise<ExecutionProgress | undefined>;
+  /** Nudges the change-set's run to re-read its status (an approval, a cancel). Best effort; resolves for an unknown change-set. */
+  wake(changesetId: string): Promise<void>;
 }

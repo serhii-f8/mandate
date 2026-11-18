@@ -17,6 +17,7 @@ const record: ChangeSetRecord = {
   createdAt: new Date('2026-11-17T10:00:00.000Z'),
   preparedAt: new Date('2026-11-17T10:00:01.000Z'),
   expiresAt: new Date('2026-11-20T10:00:00.000Z'),
+  approvalRound: 0,
 };
 
 const items: ChangeItemRecord[] = Array.from({ length: 25 }, (_, i) => ({

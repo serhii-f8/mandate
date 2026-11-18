@@ -168,7 +168,7 @@ export function buildRegistry(input: RegistryInput): Registry {
       at(source, [...path, 'risk'], 'read operations must use GET; writes need change-sets');
     }
     if (u.bulk !== undefined) {
-      if (op.risk !== 'write') upstreamAt(['bulk'], 'is allowed on write operations only');
+      if (op.risk !== 'write' && op.risk !== 'destructive') upstreamAt(['bulk'], 'is allowed on write and destructive operations only');
       if (method !== undefined && method !== 'POST' && method !== 'PUT') {
         upstreamAt([u.method === undefined ? 'operation' : 'method'], 'must be POST or PUT for a bulk binding');
       }

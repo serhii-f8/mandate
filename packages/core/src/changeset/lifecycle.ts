@@ -4,7 +4,7 @@ import type { ChangeSetRecord, ChangeSetStatus } from './model.js';
 export const TRANSITIONS: Readonly<Record<ChangeSetStatus, readonly ChangeSetStatus[]>> = {
   preparing: ['prepared', 'failed', 'expired', 'cancelled'],
   prepared: ['pending_approval', 'executing', 'rejected', 'expired', 'cancelled'],
-  pending_approval: ['approved', 'rejected', 'expired', 'cancelled'],
+  pending_approval: ['approved', 'rejected', 'expired', 'cancelled', 'prepared'],
   approved: ['executing', 'expired', 'cancelled'],
   executing: ['completed', 'completed_with_errors', 'failed', 'cancelled'],
   completed: ['rolling_back'],

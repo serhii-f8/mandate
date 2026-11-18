@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { allowingRole } from './allowing-role.js';
 
-describe('POL-4 allowingRole', () => {
+describe('POL-4 allowing role', () => {
   it('names the role of a grant rule', () => {
     expect(allowingRole('role:content_manager/grant:own-brands')).toBe('content_manager');
   });

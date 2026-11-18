@@ -161,11 +161,6 @@ describe('CFG-2 invalid configuration is rejected as a whole', () => {
     expect(found).toContainEqual(expect.objectContaining({ path: 'operations[0].fields_arg' }));
   });
 
-  it('rejects an approver role that does not exist', async () => {
-    const found = issues(await load({ 'roles.yaml': ROLES.replace('    grants:', '    approval: { approver_role: nobody }\n    grants:') }));
-    expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.approver_role' }));
-  });
-
   it('rejects an input schema whose root is not an object', async () => {
     const found = issues(await load({ 'operations.yaml': OPERATIONS.replace('      type: object\n      properties', '      type: array\n      properties') }));
     expect(found).toContainEqual(expect.objectContaining({ path: 'operations[0].input_schema' }));
@@ -241,5 +236,52 @@ describe('EXE-5 EXE-9 changesets in the loaded configuration', () => {
     expect(set.configuration.changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.25, itemsPerWorkflowRun: 300 });
     const twice = issues(await load({ 'cs.yaml': 'version: 1\nchangesets: { failure_threshold: 0.25 }\n', 'cs2.yaml': 'version: 1\nchangesets: { items_per_workflow_run: 300 }\n' }));
     expect(twice).toEqual([expect.objectContaining({ path: 'changesets' })]);
+  });
+});
+
+describe('CFG-2 APR-3 POL-5 approval configuration', () => {
+  const withApproval = (approval: string, roles = ROLES) => roles.replace('    grants:', `    approval: ${approval}\n    grants:`);
+  const SUPPORT = `
+  - id: support_agent
+    grants: []`;
+  const rolesWith = (approval: string) => withApproval(approval).replace('role_mapping:', `${SUPPORT.slice(1)}\nrole_mapping:`);
+
+  it('maps steps, step-up and widget onto the core rule', async () => {
+    const result = await load({
+      'roles.yaml': rolesWith('{ required: above_threshold, record_threshold: 25, steps: [{ role: support_agent }], step_up_max_age_seconds: 300, allow_widget: true }'),
+    });
+    if (!result.ok) throw new Error(JSON.stringify(result.issues));
+    expect(result.configuration.approval.get('content_manager')).toEqual({
+      required: 'above_threshold',
+      recordThreshold: 25,
+      steps: ['support_agent'],
+      stepUpMaxAgeSeconds: 300,
+      allowWidget: true,
+    });
+  });
+
+  it('APR-3 a step role that is not defined', async () => {
+    const found = issues(await load({ 'roles.yaml': withApproval('{ steps: [{ role: nobody }] }') }));
+    expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.steps[0].role', message: 'names a role that is not defined' }));
+  });
+
+  it('above_threshold without record_threshold', async () => {
+    const found = issues(await load({ 'roles.yaml': withApproval('{ required: above_threshold }') }));
+    expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.record_threshold', message: 'is required with required: above_threshold' }));
+  });
+
+  it('record_threshold with another mode', async () => {
+    const found = issues(await load({ 'roles.yaml': withApproval('{ required: always, record_threshold: 5, steps: [{ role: content_manager }] }') }));
+    expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.record_threshold', message: 'is allowed only with required: above_threshold' }));
+  });
+
+  it('a step naming the role itself is allowed', async () => {
+    const result = await load({ 'roles.yaml': withApproval('{ steps: [{ role: content_manager }] }') });
+    expect(result.ok, JSON.stringify(result.ok ? [] : result.issues)).toBe(true);
+  });
+
+  it('approver_role is no longer accepted', async () => {
+    const found = issues(await load({ 'roles.yaml': withApproval('{ approver_role: content_manager }') }));
+    expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval' }));
   });
 });

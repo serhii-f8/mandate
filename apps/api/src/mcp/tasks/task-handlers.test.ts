@@ -38,6 +38,10 @@ class StubExecutor implements ChangeSetExecutor {
     return this.failure === undefined ? Promise.resolve(this.cancelAnswer) : Promise.reject(this.failure);
   }
 
+  wake(): Promise<void> {
+    return Promise.resolve();
+  }
+
   progress(): Promise<ExecutionProgress | undefined> {
     return this.failure === undefined ? Promise.resolve(this.progressAnswer) : Promise.reject(this.failure);
   }

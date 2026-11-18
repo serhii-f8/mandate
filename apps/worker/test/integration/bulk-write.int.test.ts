@@ -26,6 +26,7 @@ roles:
     grants:
       - operation: catalog.update_content
         scope: { brand: [acme] }
+    approval: { required: never }
 role_mapping:
   - group: editors
     roles: [editor]

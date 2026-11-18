@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { ConnectionSettings, CredentialScheme, SpecIssue, UpstreamResolver } from '@aiops/connector-sdk';
-import type { DisabledOperation, GrantDefinition, PolicyConfiguration, RoleDefinition } from '@aiops/core';
+import type { DisabledOperation, GrantDefinition, PolicyConfiguration, RoleApprovalRule, RoleDefinition } from '@aiops/core';
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN } from './manifest.js';
@@ -53,7 +53,7 @@ export interface LoadedConfiguration {
   readonly presets: readonly PresetConfig[];
   readonly notifications: readonly NotificationConfig[];
   readonly limits: ReadonlyMap<string, RoleLimits>;
-  readonly approval: ReadonlyMap<string, RoleApproval>;
+  readonly approval: ReadonlyMap<string, RoleApprovalRule>;
   /** Upstream binding per enabled operation ID; absent while its spec was not resolved. */
   readonly bindings: ReadonlyMap<string, OperationBinding>;
   /** Catalog entries nothing enables, and operations disabled by an override (CONN-2, OPS-1). */
@@ -387,8 +387,30 @@ export async function loadConfigurationSources(sources: readonly { file: string;
         if (grant.allow_fields !== undefined) at(source, [...gPath, 'allow_fields'], `operation ${definition.id} declares no fields_arg`);
       }
     });
-    const approver = role.approval?.approver_role;
-    if (approver !== undefined && !roleById.has(approver)) at(source, [...path, 'approval', 'approver_role'], 'names a role that is not defined');
+    const approval = role.approval;
+    if (approval !== undefined) {
+      approval.steps?.forEach((step, index) => {
+        if (!roleById.has(step.role)) at(source, [...path, 'approval', 'steps', index, 'role'], 'names a role that is not defined');
+      });
+      if (approval.required === 'above_threshold' && approval.record_threshold === undefined) {
+        at(source, [...path, 'approval', 'record_threshold'], 'is required with required: above_threshold');
+      }
+      if (approval.required !== 'above_threshold' && approval.record_threshold !== undefined) {
+        at(source, [...path, 'approval', 'record_threshold'], 'is allowed only with required: above_threshold');
+      }
+    }
+    // POL-5: a grant whose approval can be required needs someone to approve it.
+    const risks = role.grants.flatMap((grant) => {
+      const risk = registry.all.get(grant.operation)?.definition.risk;
+      return risk === undefined ? [] : [risk];
+    });
+    const destructive = risks.includes('destructive');
+    const writes = destructive || risks.includes('write');
+    const stepless = (approval?.steps ?? []).length === 0;
+    if (writes && stepless && (destructive || approval?.required !== 'never')) {
+      const message = 'needs at least one step: a write or destructive grant requires approval by default (set steps, or required: never for write operations)';
+      at(source, approval === undefined ? [...path, 'approval'] : [...path, 'approval', 'steps'], message);
+    }
     if (role.manage_credentials !== undefined) {
       role.manage_credentials.forEach((ref, index) => {
         if (ref !== '*' && !connectionRefs.has(ref)) {
@@ -427,7 +449,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       presets: presets.map((p) => p.value),
       notifications: notifications.map((n) => n.value),
       limits: new Map(roles.flatMap(({ value }) => (value.limits === undefined ? [] : [[value.id, value.limits] as const]))),
-      approval: new Map(roles.flatMap(({ value }) => (value.approval === undefined ? [] : [[value.id, value.approval] as const]))),
+      approval: new Map(roles.flatMap(({ value }) => (value.approval === undefined ? [] : [[value.id, toApprovalRule(value.approval)] as const]))),
       bindings: registry.bindings,
       disabled: registry.disabled,
       connectionSettings: new Map([...states].map(([id, s]) => [id, s.settings] as const)),
@@ -462,6 +484,16 @@ function locateSpecIssue(state: ConnectionState, issue: SpecIssue, at: (source: 
   at(located.source, [...located.path, ...relative], issue.message);
 }
 
+
+function toApprovalRule(approval: RoleApproval): RoleApprovalRule {
+  return {
+    ...(approval.required === undefined ? {} : { required: approval.required }),
+    ...(approval.record_threshold === undefined ? {} : { recordThreshold: approval.record_threshold }),
+    steps: (approval.steps ?? []).map((step) => step.role),
+    ...(approval.step_up_max_age_seconds === undefined ? {} : { stepUpMaxAgeSeconds: approval.step_up_max_age_seconds }),
+    allowWidget: approval.allow_widget,
+  };
+}
 
 function toRole(role: RoleConfig): RoleDefinition {
   return {

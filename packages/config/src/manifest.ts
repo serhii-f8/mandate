@@ -55,7 +55,7 @@ export const DEFAULT_FAILURE_THRESHOLD = 0.5;
 export const DEFAULT_ITEMS_PER_WORKFLOW_RUN = 2000;
 
 export const changesetsSchema = z.strictObject({
-  expire_after_hours: z.number().int().min(1).max(2160).default(72),
+  expire_after_hours: z.number().min(1 / 60).max(2160).default(72),
   failure_threshold: z.number().gt(0).max(1).default(DEFAULT_FAILURE_THRESHOLD),
   items_per_workflow_run: z.number().int().min(100).max(1_000_000).default(DEFAULT_ITEMS_PER_WORKFLOW_RUN),
 });

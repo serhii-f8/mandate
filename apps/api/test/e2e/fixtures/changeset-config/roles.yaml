@@ -5,6 +5,8 @@ roles:
       - operation: shop.update_content
         id: own-brands
         scope: { brand: [acme, globex] }
+    # Execution without approval for the Phase 4/5 suites; approval cases use approval-config.
+    approval: { required: never }
 role_mapping:
   - group: content
     roles: [content_manager]

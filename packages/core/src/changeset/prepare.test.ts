@@ -26,6 +26,7 @@ class FakeRepository implements PreparationRepository {
     const record: ChangeSetRecord = {
       ...cs,
       status: 'preparing',
+      approvalRound: 0,
       stats: { total: 0, included: 0, excluded: {}, written: 0, failed: 0, skipped: 0 },
     };
     this.sets.set(cs.id, record);
@@ -645,6 +646,13 @@ describe('EXE-1 preparation split', () => {
       correlationId: 'corr-1',
     };
   }
+
+  it('CS-6 a one-minute expiry is exactly 60000 ms after creation', async () => {
+    const { deps } = setup(new ScriptedReader({ A: product('A') }));
+    const out = await createChangeSet(deps, { ...request({ ...explicitArgs, skus: ['A'] }), expireAfterHours: 1 / 60 });
+    if (!out.ok) throw new Error(`expected created, got ${out.code}`);
+    expect(out.changeset.expiresAt.getTime() - out.changeset.createdAt.getTime()).toBe(60000);
+  });
 
   it('EXE-1 createChangeSet stores a preparing row with its audit and reads nothing', async () => {
     const reader = new ScriptedReader({ A: product('A'), B: product('B') });

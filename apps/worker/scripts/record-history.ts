@@ -8,25 +8,31 @@
  * fixtures are not regenerated to make a replay pass (`--force` only when a patch is removed).
  * smokeWorkflow's plaintext fixture predates the codec and is never re-recorded.
  */
-import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   BatchFenced,
-  createChangeSet,
-  type ChangeSetRecord,
   type ExecutionGuard,
   type ItemOutcome,
   type ReadPage,
   type UpstreamReader,
 } from '@aiops/core';
 import { CHANGESET_WORKFLOW, PROGRESS_QUERY, WAKE_SIGNAL, type WorkflowProgress } from '@aiops/temporal';
-import { ScriptedWriter } from '@aiops/testing';
+import { recordApproval, ScriptedWriter } from '@aiops/testing';
 import type { WorkflowHandle, WorkflowHandleWithSignaledRunId } from '@temporalio/client';
 import { historyToJSON } from '@temporalio/common/lib/proto-utils';
 import type { changesetWorkflow } from '../src/workflows/changeset.js';
 import { createPrepared } from '../test/support/changesets.js';
-import { EDITOR_GROUP, WRITE_OPERATION } from '../test/support/configuration.js';
+import { APPROVING_GROUP, EDITOR_GROUP, REVIEWER_GROUP } from '../test/support/configuration.js';
+import {
+  created,
+  preparedByWorkflow,
+  SHORT_EXPIRY_MS,
+  statusOf,
+  submitted,
+  waitFor,
+  waitForWorkflowStatus,
+} from '../test/support/prepared-by-workflow.js';
 import { startInfrastructure, startTestWorker, type Infra, type TestWorker, type TestWorkerOptions } from '../test/support/harness.js';
 
 type History = Awaited<ReturnType<WorkflowHandle['fetchHistory']>>;
@@ -75,36 +81,6 @@ function signalWithStart(infra: Infra, worker: TestWorker, changesetId: string):
   });
 }
 
-/** Creates a change-set in `preparing` as the api does, under the current configuration's hash. */
-async function created(infra: Infra, skus: readonly string[]): Promise<ChangeSetRecord> {
-  const operation = infra.configuration.policy.operations.find((o) => o.id === WRITE_OPERATION);
-  const manifest = operation?.manifest;
-  if (operation === undefined || manifest === undefined) throw new Error('test operation missing');
-  const result = await createChangeSet(
-    { repository: infra.repository, newId: randomUUID, now: () => new Date() },
-    {
-      operation: { ...operation, manifest },
-      args: { brand: 'acme', skus, changes: { name: 'new' } },
-      caller: { subject: 'alice', groups: [EDITOR_GROUP] },
-      correlationId: 'corr-create',
-      configHash: infra.configuration.hash,
-      expireAfterHours: 1,
-    },
-  );
-  if (!result.ok) throw new Error(`change-set not created: ${result.code}`);
-  return result.changeset;
-}
-
-async function waitFor(what: string, check: () => Promise<boolean>, timeoutMs = 30_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await check())) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
-
-const statusOf = async (infra: Infra, id: string): Promise<string | undefined> => (await infra.repository.get(id))?.status;
-
 async function expectResult(handle: WorkflowHandle<typeof changesetWorkflow>, status: string): Promise<void> {
   const result = await handle.result();
   if (result.status !== status) throw new Error(`expected ${status}, got ${result.status}`);
@@ -118,16 +94,6 @@ async function executeToEnd(infra: Infra, opts: TestWorkerOptions, items: number
     await expectResult(handle, status);
     return handle.fetchHistory();
   });
-}
-
-/** Starts the workflow of a created change-set and waits until it has prepared it and parks. */
-async function preparedByWorkflow(infra: Infra, worker: TestWorker, skus: readonly string[]): Promise<ChangeSetRecord> {
-  const cs = await created(infra, skus);
-  await worker.starter.start(cs.id);
-  await waitFor('prepared', async () => (await statusOf(infra, cs.id)) === 'prepared');
-  const handle = infra.client.workflow.getHandle(cs.id);
-  await waitFor('workflow parked in prepared', async () => (await handle.query<WorkflowProgress>(PROGRESS_QUERY)).status === 'prepared');
-  return cs;
 }
 
 const SCENARIOS: Readonly<Record<string, Scenario>> = {
@@ -281,6 +247,98 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
         return { 'expire-retry-parked': parked };
       });
     },
+  },
+
+  /**
+   * Submitted for approval and woken: parked at the wake condition in `pending_approval` (history
+   * fetched while it waits), then cancelled for cleanup (EXE-1, APR-1).
+   */
+  'parked-pending-approval': {
+    files: ['parked-pending-approval'],
+    run: (infra) =>
+      withWorker(infra, { reader: catalogReader }, async (worker) => {
+        const cs = await preparedByWorkflow(infra, worker, ['t-0001', 't-0002']);
+        await submitted(infra, worker, cs);
+        await waitForWorkflowStatus(infra, cs.id, 'pending_approval');
+        const history = await infra.client.workflow.getHandle(cs.id).fetchHistory();
+        await worker.executor.cancel({ changesetId: cs.id, actor: 'alice', correlationId: 'corr-cleanup' });
+        await worker.executor.settled(cs.id);
+        return { 'parked-pending-approval': history };
+      }),
+  },
+
+  /** Prepared, submitted, approved, started by the approver for the requester (POL-6): completed. */
+  'approved-executed': {
+    files: ['approved-executed'],
+    run: (infra) =>
+      withWorker(infra, { reader: catalogReader }, async (worker) => {
+        const cs = await preparedByWorkflow(infra, worker, ['t-0001', 't-0002', 't-0003']);
+        const pending = await submitted(infra, worker, cs);
+        await waitForWorkflowStatus(infra, cs.id, 'pending_approval');
+        const approved = await recordApproval(infra.repository, pending, { approver: 'rita' });
+        if (approved.status !== 'approved' || approved.hash === undefined) throw new Error(`not approved: ${approved.status}`);
+        const started = await worker.executor.start({
+          changesetId: cs.id,
+          expectedHash: approved.hash,
+          actor: 'rita',
+          groups: [REVIEWER_GROUP],
+          correlationId: 'corr-exec',
+          requester: { subject: 'alice', groups: [APPROVING_GROUP] },
+        });
+        if (!started.ok) throw new Error(`start refused: ${started.reason}`);
+        const handle = infra.client.workflow.getHandle<typeof changesetWorkflow>(cs.id);
+        await expectResult(handle, 'completed');
+        return { 'approved-executed': await handle.fetchHistory() };
+      }),
+  },
+
+  /** Rejected while it waits in `pending_approval`: the wake ends the run (APR-4). */
+  'rejected-while-pending': {
+    files: ['rejected-while-pending'],
+    run: (infra) =>
+      withWorker(infra, { reader: catalogReader }, async (worker) => {
+        const cs = await preparedByWorkflow(infra, worker, ['t-0001']);
+        const pending = await submitted(infra, worker, cs);
+        await waitForWorkflowStatus(infra, cs.id, 'pending_approval');
+        await recordApproval(infra.repository, pending, { approver: 'rita', decision: 'rejected' });
+        await worker.executor.wake(cs.id);
+        const handle = infra.client.workflow.getHandle<typeof changesetWorkflow>(cs.id);
+        await expectResult(handle, 'rejected');
+        return { 'rejected-while-pending': await handle.fetchHistory() };
+      }),
+  },
+
+  /** Returned (round 1), resubmitted (round 2), then left to expire at expiresAt (APR-4, CS-6). */
+  'returned-resubmitted-expired': {
+    files: ['returned-resubmitted-expired'],
+    run: (infra) =>
+      withWorker(infra, { reader: catalogReader }, async (worker) => {
+        const cs = await preparedByWorkflow(infra, worker, ['t-0001'], { expiresAt: new Date(Date.now() + SHORT_EXPIRY_MS) });
+        const pending = await submitted(infra, worker, cs);
+        await waitForWorkflowStatus(infra, cs.id, 'pending_approval');
+        const returned = await recordApproval(infra.repository, pending, { approver: 'rita', decision: 'returned', comment: 'fix the name' });
+        await worker.executor.wake(cs.id);
+        await waitForWorkflowStatus(infra, cs.id, 'prepared');
+        const round2 = await submitted(infra, worker, returned);
+        if (round2.approvalRound !== 2) throw new Error(`expected round 2, got ${round2.approvalRound}`);
+        const handle = infra.client.workflow.getHandle<typeof changesetWorkflow>(cs.id);
+        await expectResult(handle, 'expired');
+        return { 'returned-resubmitted-expired': await handle.fetchHistory() };
+      }),
+  },
+
+  /** Waits in `pending_approval` until expiresAt, then expires by the workflow timer (CS-6). */
+  'expired-pending-approval': {
+    files: ['expired-pending-approval'],
+    run: (infra) =>
+      withWorker(infra, { reader: catalogReader }, async (worker) => {
+        const cs = await preparedByWorkflow(infra, worker, ['t-0001'], { expiresAt: new Date(Date.now() + SHORT_EXPIRY_MS) });
+        await submitted(infra, worker, cs);
+        await waitForWorkflowStatus(infra, cs.id, 'pending_approval');
+        const handle = infra.client.workflow.getHandle<typeof changesetWorkflow>(cs.id);
+        await expectResult(handle, 'expired');
+        return { 'expired-pending-approval': await handle.fetchHistory() };
+      }),
   },
 
   /** The upstream read answers a domain failure: preparation ends failed (no retry). */

@@ -405,6 +405,28 @@ describe('MCP-7 MCP-1 EXE-1 asynchronous write call', () => {
     expect(result.structured).toEqual({ changesetId: ID, status: 'preparing' });
   });
 
+  it('POL-5 CS-1 a destructive operation with a manifest takes the change-set path', async () => {
+    const { invoker, starter, repository, prepareInline } = setup();
+    starter.onStart = prepareInline;
+    const result = await invoker.invoke({
+      operation: { ...op('catalog.update_content'), risk: 'destructive' },
+      args: WRITE_ARGS,
+      caller,
+    });
+    expect(result.isError).toBeUndefined();
+    expect(result.auditDetails).toMatchObject({ changesetId: ID });
+    expect((await repository.get(ID))?.status).toBe('prepared');
+  });
+
+  it('CS-1 a destructive operation without a manifest stays refused', async () => {
+    const { invoker, starter } = setup();
+    const bare: OperationDefinition = { ...op('catalog.update_content'), risk: 'destructive' };
+    delete (bare as { manifest?: unknown }).manifest;
+    const result = await invoker.invoke({ operation: bare, args: WRITE_ARGS, caller });
+    expect(result.auditDetails).toMatchObject({ errorCode: 'risk_not_supported' });
+    expect(starter.started).toEqual([]);
+  });
+
   it('CS-1 operations without a manifest are still refused by risk, without reading or starting anything', async () => {
     const { invoker, starter, reader } = setup();
     const result = await invoker.invoke({ operation: op('catalog.update_product'), args: { sku: 'a' }, caller, asTask: true });

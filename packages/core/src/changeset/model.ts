@@ -1,3 +1,5 @@
+import type { ApprovalPlan, Submission } from '../approval/model.js';
+
 export type ChangeSetStatus =
   | 'preparing'
   | 'prepared'
@@ -62,6 +64,12 @@ export interface ChangeSetRecord {
   readonly expiresAt: Date;
   readonly executionRequest?: ExecutionRequest;
   readonly cancelRequest?: CancelRequest;
+  /** Approval round: 0 until first submitted for approval; a return starts the next round (APR-4). */
+  readonly approvalRound: number;
+  readonly submission?: Submission;
+  readonly approvalPlan?: ApprovalPlan;
+  /** Role of the step awaiting a decision while `pending_approval`. */
+  readonly awaitingRole?: string;
 }
 
 export interface ChangeItemRecord {

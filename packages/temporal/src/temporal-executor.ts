@@ -51,20 +51,23 @@ export class TemporalExecutor implements ChangeSetExecutor {
   }
 
   async start(req: StartRequest): Promise<StartOutcome> {
-    const groups = req.groups ?? [];
-    const clientId = req.clientId === undefined ? {} : { clientId: req.clientId };
+    // The requester's identity is the execution's request; the actor only starts it (POL-6).
+    const identity = req.requester ?? { subject: req.actor, groups: req.groups ?? [], ...(req.clientId === undefined ? {} : { clientId: req.clientId }) };
+    const clientId = identity.clientId === undefined ? {} : { clientId: identity.clientId };
     const started = await this.repository.startExecution({
       changesetId: req.changesetId,
       expectedHash: req.expectedHash,
-      request: { actor: req.actor, groups, ...clientId, correlationId: req.correlationId },
+      request: { actor: identity.subject, groups: identity.groups, ...clientId, correlationId: req.correlationId },
       ...(req.limits === undefined ? {} : { limits: req.limits }),
+      ...(req.submission === undefined ? {} : { submission: req.submission }),
       now: this.now(),
       event: startEventFactory({
         newId: this.newId,
         actor: req.actor,
-        ...clientId,
-        groups,
+        ...(req.clientId === undefined ? {} : { clientId: req.clientId }),
+        groups: req.groups ?? [],
         correlationId: req.correlationId,
+        ...(req.requester === undefined ? {} : { requester: req.requester }),
       }),
     });
     if (!started.ok) return started;
@@ -195,7 +198,7 @@ export class TemporalExecutor implements ChangeSetExecutor {
   }
 
   /** Best effort: the workflow also re-reads the status at its next turn or at expiry. */
-  private async wake(changesetId: string): Promise<void> {
+  async wake(changesetId: string): Promise<void> {
     try {
       await this.client.workflow.getHandle(changesetId).signal(WAKE_SIGNAL);
     } catch {
