@@ -5,6 +5,8 @@ export interface CredentialRow {
   ref: string;
   scheme: string;
   connections: string[];
+  /** IDs of the webhook notifications that deliver to this credential's URL. */
+  notifications: string[];
   set: boolean;
   updatedAt?: string;
   updatedBy?: string;
@@ -153,12 +155,26 @@ function CredentialCard({ row, props }: { row: CredentialRow; props: Credentials
         </button>
       </form>
       {message === undefined ? null : message.kind === 'saved' ? <p role="status">{message.text}</p> : <p role="alert">{message.text}</p>}
-      <h3>Connections</h3>
-      <ul>
-        {row.connections.map((connection) => (
-          <ConnectionTest key={connection} connection={connection} onTest={props.onTest} />
-        ))}
-      </ul>
+      {row.connections.length === 0 ? null : (
+        <>
+          <h3>Connections</h3>
+          <ul>
+            {row.connections.map((connection) => (
+              <ConnectionTest key={connection} connection={connection} onTest={props.onTest} />
+            ))}
+          </ul>
+        </>
+      )}
+      {row.notifications.length === 0 ? null : (
+        <>
+          <h3>Notifications</h3>
+          <ul>
+            {row.notifications.map((id) => (
+              <li key={id}>{id}</li>
+            ))}
+          </ul>
+        </>
+      )}
     </section>
   );
 }

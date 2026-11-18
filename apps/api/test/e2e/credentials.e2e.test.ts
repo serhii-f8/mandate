@@ -16,7 +16,8 @@ const SHOP_SECRET = 'e2e-only-page-entered-shop-token-0123456789';
 const REJECTED_SECRET = 'e2e-only-rejected-secret-value-abcdefghij';
 const DENIED_SECRET = 'e2e-only-denied-secret-value-klmnopqrstu';
 const MALFORMED_SECRET = 'SUPERSECRET123e2eOnlyMalformedBody';
-const SECRETS = [SHOP_SECRET, REJECTED_SECRET, DENIED_SECRET, MALFORMED_SECRET];
+const WEBHOOK_SECRET = 'secret-part';
+const SECRETS = [WEBHOOK_SECRET, SHOP_SECRET, REJECTED_SECRET, DENIED_SECRET, MALFORMED_SECRET];
 
 const CAROL: TestLoginUser = { sub: 'carol-id', username: 'carol', groups: ['admins'] };
 const DAVE: TestLoginUser = { sub: 'dave-id', username: 'dave', groups: ['platform'] };
@@ -110,9 +111,12 @@ const rowsOf = (action: string, correlationId: string) => auditRows(databaseUrl,
 describe('UI-5 credentials are entered only on the trusted page', () => {
   it('UI-5 UI-7 GET lists only the refs the role manages, with the form fields, and set:false before entry', async () => {
     const carol = await login(CAROL);
-    expect(await list(carol)).toEqual([{ ref: 'shop-token', scheme: 'bearer', connections: ['shop'], fields: ['token'], set: false }]);
+    expect(await list(carol)).toEqual([
+      { ref: 'ops-chat-webhook', scheme: 'webhook_url', connections: [], notifications: ['ops-chat'], fields: ['url'], set: false },
+      { ref: 'shop-token', scheme: 'bearer', connections: ['shop'], notifications: [], fields: ['token'], set: false },
+    ]);
     const dave = await login(DAVE);
-    expect((await list(dave)).map((r) => r.ref)).toEqual(['erp-key', 'shop-token']);
+    expect((await list(dave)).map((r) => r.ref)).toEqual(['erp-key', 'ops-chat-webhook', 'shop-token']);
     expect((await list(dave)).find((r) => r.ref === 'erp-key')).toMatchObject({ scheme: 'api_key', fields: ['key'], connections: ['erp'] });
     const bob = await login(BOB);
     expect(await list(bob)).toEqual([]);
@@ -125,11 +129,12 @@ describe('UI-5 credentials are entered only on the trusted page', () => {
     expect(await rowsOf('credential.set', answer.correlationId)).toEqual([
       expect.objectContaining({ actor: 'carol-id', client_id: 'aiops-web', outcome: 'ok', details: { ref: 'shop-token', scheme: 'bearer', keyVersion: 1 } }),
     ]);
-    const [entry] = await list(carol);
+    const entry = (await list(carol)).find((r) => r.ref === 'shop-token');
     expect(entry).toEqual({
       ref: 'shop-token',
       scheme: 'bearer',
       connections: ['shop'],
+      notifications: [],
       fields: ['token'],
       set: true,
       updatedAt: expect.any(String) as unknown,
@@ -156,6 +161,28 @@ describe('UI-5 credentials are entered only on the trusted page', () => {
     const answer = await putSecret(dave, 'no-such-ref', { token: DENIED_SECRET });
     expect(answer.status).toBe(403);
     expect(answer.body).toEqual({ error: 'forbidden' });
+  });
+});
+
+describe('UI-5 SEC-2 webhook URL credentials', () => {
+  it('UI-5 SEC-2 a webhook URL credential is listed, stored and never echoed', async () => {
+    const carol = await login(CAROL);
+    const entry = { ref: 'ops-chat-webhook', scheme: 'webhook_url', connections: [], notifications: ['ops-chat'], fields: ['url'], set: false };
+    expect((await list(carol)).find((r) => r.ref === 'ops-chat-webhook')).toEqual(entry);
+    const stored = await putSecret(carol, 'ops-chat-webhook', { url: `https://hooks.example.test/T/B/${WEBHOOK_SECRET}` });
+    expect(stored.status).toBe(204);
+    expect((await list(carol)).find((r) => r.ref === 'ops-chat-webhook')).toMatchObject({ set: true });
+    const wrong = await putSecret(carol, 'ops-chat-webhook', { token: 'x' });
+    expect(wrong).toMatchObject({ status: 400, body: { error: 'invalid_secret', fields: ['url'] } });
+    const client = new pg.Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      const audit = (await client.query<{ row: string }>('select row_to_json(audit_event)::text as row from audit_event')).rows.map((r) => r.row).join('\n');
+      expect(audit).not.toContain(WEBHOOK_SECRET);
+    } finally {
+      await client.end();
+    }
+    expect(logLines.join('\n')).not.toContain(WEBHOOK_SECRET);
   });
 });
 

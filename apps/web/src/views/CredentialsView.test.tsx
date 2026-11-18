@@ -4,10 +4,10 @@ import { CredentialsView, type ConnectionTestReport, type CredentialRow, type Sa
 
 afterEach(cleanup);
 
-const FIELDS: Record<string, readonly string[]> = { basic: ['username', 'password'], bearer: ['token'] };
+const FIELDS: Record<string, readonly string[]> = { basic: ['username', 'password'], bearer: ['token'], webhook_url: ['url'] };
 const fields = (scheme: string): readonly string[] => FIELDS[scheme] ?? [];
 
-const row = (over: Partial<CredentialRow> = {}): CredentialRow => ({ ref: 'shop-token', scheme: 'bearer', connections: ['shop'], set: false, ...over });
+const row = (over: Partial<CredentialRow> = {}): CredentialRow => ({ ref: 'shop-token', scheme: 'bearer', connections: ['shop'], notifications: [], set: false, ...over });
 
 const FRESH_LOGIN = '/auth/login?return_to=/app/credentials&fresh=1';
 
@@ -42,6 +42,14 @@ describe('SEC-8 UI-5 the page asks for a fresh login before a secret is typed', 
 });
 
 describe('UI-5 credential entry view', () => {
+  it('UI-5 SEC-2 a webhook credential lists its notifications and offers no connection test', () => {
+    setup([row({ ref: 'ops-chat-webhook', scheme: 'webhook_url', connections: [], notifications: ['ops-chat'] })]);
+    expect(screen.getByLabelText<HTMLInputElement>('url').type).toBe('password');
+    expect(screen.getByText('ops-chat')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^test /i })).toBeNull();
+    expect(screen.queryByText('Connections')).toBeNull();
+  });
+
   it('UI-5 renders refs with their status and never a secret value', () => {
     setup([row({ set: true, updatedAt: '2026-01-02T03:04:05.000Z', updatedBy: 'carol', keyVersion: 1 }), row({ ref: 'erp', scheme: 'basic', connections: ['erp'] })]);
     expect(screen.getByText('shop-token')).toBeTruthy();

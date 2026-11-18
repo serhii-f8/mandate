@@ -1,8 +1,10 @@
 version: 1
+notifications:
+  - { id: ops-chat, kind: webhook, url_credential_ref: ops-chat-webhook, allowed_hosts: [hooks.example.test] }
 roles:
   - id: integration_admin
     grants: []
-    manage_credentials: [shop-token]
+    manage_credentials: [shop-token, ops-chat-webhook]
   - id: platform_admin
     grants: []
     manage_credentials: ['*']

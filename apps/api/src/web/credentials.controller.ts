@@ -37,6 +37,7 @@ export class CredentialsController {
           ref,
           scheme: declared.scheme,
           connections: [...declared.connections],
+          notifications: [...declared.notifications],
           fields: [...secretFieldNames(declared.scheme)],
           set: status?.set ?? false,
           ...(status?.updatedAt === undefined ? {} : { updatedAt: status.updatedAt.toISOString() }),
