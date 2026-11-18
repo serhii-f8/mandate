@@ -116,6 +116,16 @@ export {
 } from './changeset/prepare.js';
 export { hashStoredItems } from './changeset/verify.js';
 export {
+  deriveChangeSet,
+  isValidTargetId,
+  MAX_DERIVE_TARGETS,
+  type DeriveDeps,
+  type DeriveOutcome,
+  type DeriveRefusal,
+  type DeriveRepository,
+  type DeriveRequest,
+} from './changeset/derive.js';
+export {
   CHANGESET_TEXT,
   decodeCursor,
   encodeCursor,
