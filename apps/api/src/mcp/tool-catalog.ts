@@ -3,6 +3,7 @@ import type { Caller } from '@aiops/core';
 import type { AuditDetails } from './audited-tool.js';
 import type { ToolAnswer } from './tasks/task-result.js';
 import type { Snapshot } from './tool-pipeline.js';
+import type { WidgetKind } from './widget-bundles.js';
 
 /** What a built-in handler receives besides its arguments (design 6.2). */
 export interface BuiltinContext {
@@ -29,6 +30,8 @@ export interface BuiltinTool {
   readonly readOnlyHint?: boolean;
   /** Published as the tool's `_meta` in `tools/list` (for example MCP Apps `ui.visibility`). */
   readonly meta?: Readonly<Record<string, unknown>>;
+  /** The widget whose `ui://` resource `tools/list` links from this tool's `_meta` (MCP-5); not linked when its bundle is absent (MCP-6). */
+  readonly widget?: WidgetKind;
   /**
    * Whether this caller sees the tool under this configuration. Absent means everyone. A caller it
    * is not visible to gets the unknown-tool answer on a call (MCP-2).

@@ -61,6 +61,7 @@ export function excludeChangesetItemsTool(deps: ExclusionDeps): BuiltinTool {
     description:
       'Remove items from a change-set you prepared (or put back items you removed) before submitting it: this creates a new change-set with its own ID and hash; the original stays unchanged.',
     inputSchema: EXCLUDE_SCHEMA,
+    widget: 'changeset',
     // It creates a change-set, so clients must not treat it as a pure read.
     readOnlyHint: false,
     validate: createSchemaCompiler()(EXCLUDE_SCHEMA),

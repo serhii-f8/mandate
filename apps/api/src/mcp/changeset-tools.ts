@@ -117,6 +117,7 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
     name: 'get_changeset',
     description: 'Show a change-set you prepared: its status, counts and one page of items.',
     inputSchema: GET_SCHEMA,
+    widget: 'changeset',
     validate: compile(GET_SCHEMA),
     async handler(args, { caller, correlationId }) {
       // `validate` guarantees the shape.

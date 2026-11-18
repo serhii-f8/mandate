@@ -151,6 +151,7 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
     name: SUBMIT_TOOL,
     description: 'Submit a change-set you prepared, by its ID and hash: it is executed, or sent for approval when your role requires it.',
     inputSchema: SUBMIT_SCHEMA,
+    widget: 'changeset',
     readOnlyHint: false,
     validate: createSchemaCompiler()(SUBMIT_SCHEMA),
     async handler(args, { caller, snapshot, correlationId, tasks, report }) {

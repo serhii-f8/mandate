@@ -244,10 +244,12 @@ describe('MCP-5 UI resources', () => {
 
   it('AUD-1 resource reads write no audit row', async () => {
     const h = handler();
-    await h.call(modernRequest('resources/list'));
-    await h.call(modernRequest('resources/read', { uri: CHANGESET.uri }));
+    const listed = await h.call(modernRequest('resources/list'));
+    const read = await h.call(modernRequest('resources/read', { uri: CHANGESET.uri }));
     await h.call(modernRequest('resources/read', { uri: 'ui://aiops/nope.html' }));
     await h.call(modernRequest('resources/templates/list'));
+    expect((listed.json.result as { resources: unknown[] }).resources).toHaveLength(2);
+    expect((read.json.result as { contents: unknown[] }).contents).toHaveLength(1);
     expect(h.audit.events).toEqual([]);
   });
 });

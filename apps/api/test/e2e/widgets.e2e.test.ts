@@ -64,6 +64,18 @@ describe('MCP-5 UI resources over HTTP', () => {
     }
   });
 
+  it('MCP-5 a legacy-era client lists and reads the resources too', async () => {
+    const client = await connectClient({ era: 'legacy', baseUrls: [api.url], token: alice });
+    try {
+      const { resources } = await client.listResources();
+      expect(resources.map((r) => r.uri)).toEqual(['ui://aiops/changeset.html', 'ui://aiops/approval.html']);
+      const { contents } = await client.readResource({ uri: 'ui://aiops/changeset.html' });
+      expect(contents).toEqual([{ uri: 'ui://aiops/changeset.html', mimeType: MIME, text: await readFile(join(WIDGET_DIR, 'changeset.html'), 'utf8'), _meta: UI_META }]);
+    } finally {
+      await client.close();
+    }
+  });
+
   it('MCP-5 an unknown URI rejects with code -32602 and data.uri', async () => {
     const client = await connectClient({ era: 'modern', baseUrls: [api.url], token: alice });
     try {
@@ -78,5 +90,23 @@ describe('MCP-5 UI resources over HTTP', () => {
     const response = await rawPost(api.url, body, headers);
     expect(response.status).toBe(401);
     expect(response.headers.get('www-authenticate')).not.toBeNull();
+  });
+});
+
+describe('MCP-5 tool linkage over HTTP', () => {
+  it('MCP-5 tools/list links shop.update_content, shop.retire_content and get_changeset to the change-set widget; ping and cancel_changeset link nothing', async () => {
+    const client = await connectClient({ era: 'modern', baseUrls: [api.url], token: alice });
+    try {
+      const { tools } = await client.listTools();
+      const meta = (name: string) => tools.find((t) => t.name === name)?._meta;
+      const linked = { ui: { resourceUri: 'ui://aiops/changeset.html' }, 'ui/resourceUri': 'ui://aiops/changeset.html' };
+      for (const name of ['shop.update_content', 'shop.retire_content', 'get_changeset']) expect(meta(name), name).toEqual(linked);
+      for (const name of ['ping', 'cancel_changeset']) {
+        expect(tools.some((t) => t.name === name), name).toBe(true);
+        expect(meta(name), name).toBeUndefined();
+      }
+    } finally {
+      await client.close();
+    }
   });
 });
