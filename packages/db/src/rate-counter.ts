@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm';
+import { lt, sql } from 'drizzle-orm';
 import type { RateCounter } from '@aiops/core';
 import { guarded } from './errors.js';
 import type { Db } from './client.js';
@@ -25,5 +25,11 @@ export class PostgresRateCounter implements RateCounter {
     );
     if (row === undefined) throw new Error('rate counter upsert returned no row');
     return row.count;
+  }
+
+  /** Deletes every bucket whose window started before `before` (AUD-7 retention job); the number deleted. */
+  async prune(before: Date): Promise<number> {
+    const result = await guarded('rate counter prune', () => this.db.delete(rateBucket).where(lt(rateBucket.windowStart, before)));
+    return result.rowCount ?? 0;
   }
 }
