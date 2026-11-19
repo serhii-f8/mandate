@@ -74,6 +74,28 @@ describe('package boundaries (CLAUDE.md engineering conventions)', () => {
     expect(await restrictedImportErrors('packages/adapters/test/probe.ts', '@aiops/testing')).toBe(0);
   });
 
+  it('CONN-1 the MCP client is imported only under packages/adapters/src/mcp/', async () => {
+    const sdk = '@modelcontextprotocol/client';
+    for (const file of [
+      'packages/adapters/src/probe.ts',
+      'packages/adapters/src/http/probe.ts',
+      'packages/upstream/src/probe.ts',
+      'packages/config/src/probe.ts',
+      'packages/connector-sdk/src/probe.ts',
+    ]) {
+      expect(await restrictedImportErrors(file, sdk), file).toBe(1);
+    }
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', sdk)).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/test/integration/probe.ts', sdk)).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', '@aiops/core')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', '@aiops/testing')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', '@opentelemetry/api')).toBe(1);
+    // Ruling F19: MCP adapter tests keep the shared fakes, and the SDK.
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', '@aiops/testing')).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', sdk)).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', '@aiops/core')).toBe(1);
+  });
+
   it('presets use only the connector SDK and the configuration schema', async () => {
     expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@aiops/core')).toBe(1);
     expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@aiops/config')).toBe(0);

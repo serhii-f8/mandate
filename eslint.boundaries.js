@@ -39,6 +39,9 @@ const nodeIo = ['node:http', 'node:https', 'node:net', 'node:dgram', 'node:child
 /** Adapters (and their tests) never import OpenTelemetry; the hook is the connector SDK's `RequestInstrumentation`. */
 const noTelemetryInAdapters = { group: ['@opentelemetry/*'], message: 'Adapters reach telemetry only through RequestInstrumentation (connector-sdk).' };
 
+/** Only the MCP adapter talks to the MCP SDK; every other production package never imports it. */
+const noMcpOutsideAdapter = { group: mcpSdk, message: 'Only packages/adapters/src/mcp/ talks to the MCP SDK (ADR 0050).' };
+
 /** @type {import('eslint').Linter.Config[]} */
 export const boundaryRules = [
   {
@@ -62,6 +65,18 @@ export const boundaryRules = [
   },
   {
     files: ['packages/adapters/**/*.ts'],
+    ignores: ['packages/adapters/src/mcp/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [workspaceExcept(['connector-sdk'], 'Adapters depend on @aiops/connector-sdk only.'), noTelemetryInAdapters, noMcpOutsideAdapter] },
+      ],
+    },
+  },
+  {
+    // The MCP adapter: the same rules without the MCP SDK ban. It sits before the test entry (ruling F19),
+    // so that entry's options win for src/mcp/*.test.ts and those tests keep the shared fakes.
+    files: ['packages/adapters/src/mcp/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -89,7 +104,12 @@ export const boundaryRules = [
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [workspaceExcept(['core', 'config', 'connector-sdk'], 'packages/upstream depends on @aiops/core, @aiops/config and @aiops/connector-sdk only.')] },
+        {
+          patterns: [
+            workspaceExcept(['core', 'config', 'connector-sdk'], 'packages/upstream depends on @aiops/core, @aiops/config and @aiops/connector-sdk only.'),
+            noMcpOutsideAdapter,
+          ],
+        },
       ],
     },
   },
@@ -98,7 +118,7 @@ export const boundaryRules = [
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [workspaceExcept(['core', 'config', 'connector-sdk', 'testing'], 'packages/upstream tests may also use @aiops/testing.')] },
+        { patterns: [workspaceExcept(['core', 'config', 'connector-sdk', 'testing'], 'packages/upstream tests may also use @aiops/testing.'), noMcpOutsideAdapter] },
       ],
     },
   },
@@ -139,7 +159,13 @@ export const boundaryRules = [
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [apps, { group: ['@aiops/db', '@aiops/db/*', '@aiops/adapters', '@aiops/adapters/*'], message: 'Public interfaces stay independent of implementations.' }] },
+        {
+          patterns: [
+            apps,
+            { group: ['@aiops/db', '@aiops/db/*', '@aiops/adapters', '@aiops/adapters/*'], message: 'Public interfaces stay independent of implementations.' },
+            noMcpOutsideAdapter,
+          ],
+        },
       ],
     },
   },
