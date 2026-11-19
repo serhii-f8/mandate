@@ -6,6 +6,7 @@ import { isTaskId } from '../task.js';
 import { changesetTransitionEvent } from './audit.js';
 import { executionStarted, ROLLBACK_FROM } from './lifecycle.js';
 import type { ChangeSetRecord, RollbackCounts, RollbackRequest } from './model.js';
+import type { ItemOutcome, RollbackItemOutcome } from './ports.js';
 
 /** EXE-8: a request inside this margin before `rollbackUntil` is refused, so it cannot race the workflow's last look. */
 export const ROLLBACK_REQUEST_MARGIN_MS = 60_000;
@@ -104,6 +105,12 @@ export function rollbackWindowEnd(input: {
   if (!(input.hours > 0) || input.rollbackable <= 0) return undefined;
   if (!rollbackFromFinished(cs) || cs.rollbackRequest !== undefined || !strategyAllows(input.operation)) return undefined;
   return new Date(input.now.getTime() + Math.round(input.hours * HOUR_MS));
+}
+
+/** EXE-8: a writer's outcome going back: a write restored the item (its error kept, e.g. `already_restored`). */
+export function rollbackOutcome(o: ItemOutcome): RollbackItemOutcome {
+  const status = o.status === 'written' ? 'restored' : o.status;
+  return { targetId: o.targetId, status, ...(o.error === undefined ? {} : { error: o.error }) };
 }
 
 export type RollbackOutcome = 'done' | 'writer_error' | 'executor_error' | 'hash_mismatch';

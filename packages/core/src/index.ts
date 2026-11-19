@@ -60,6 +60,7 @@ export {
   ROLLBACK_REQUEST_MARGIN_MS,
   rollbackEligibility,
   rollbackFromFinished,
+  rollbackOutcome,
   rollbackRequestEvents,
   rollbackTerminal,
   rollbackWindowEnd,

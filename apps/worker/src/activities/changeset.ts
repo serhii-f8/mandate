@@ -18,6 +18,7 @@ import {
   PRE_EXECUTION,
   resultNotifications,
   RetryableWriteError,
+  rollbackOutcome,
   rollbackTerminal,
   rollbackWindowEnd,
   runPreparation,
@@ -30,7 +31,6 @@ import {
   type ExecutionGuard,
   type ItemOutcome,
   type RollbackCounts,
-  type RollbackItemOutcome,
   type UpstreamReader,
 } from '@aiops/core';
 import {
@@ -70,12 +70,6 @@ function remaining(stats: ChangeSetStats): number {
 /** EXE-4: a rollback's audit rows and transition run under the rollback request's correlation ID. */
 function rollbackCorrelation(cs: ChangeSetRecord): string {
   return cs.rollbackRequest?.correlationId ?? cs.executionRequest?.correlationId ?? cs.correlationId;
-}
-
-/** A writer's outcome going back: a write restored the item (its error kept, e.g. `already_restored`). */
-function rollbackOutcome(o: ItemOutcome): RollbackItemOutcome {
-  const status = o.status === 'written' ? 'restored' : o.status;
-  return { targetId: o.targetId, status, ...(o.error === undefined ? {} : { error: o.error }) };
 }
 
 /** The same write failure handling for execution and rollback batches (NFR-2, SEC-3). */

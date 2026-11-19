@@ -9,6 +9,7 @@ import {
   executionTerminal,
   failureThresholdExceeded,
   ROLLBACK_REQUEST_MARGIN_MS,
+  rollbackOutcome,
   rollbackRequestEvents,
   rollbackTerminal,
   startEventFactory,
@@ -22,7 +23,6 @@ import {
   type ExecutionProgress,
   type FinishOutcome,
   type ItemOutcome,
-  type RollbackItemOutcome,
   type RollbackOutcome,
   type RollbackRequestInput,
   type RollbackRequestOutcome,
@@ -354,12 +354,6 @@ export class InMemoryExecutor implements ChangeSetExecutor {
       skipped: record.stats.skipped,
     };
   }
-}
-
-/** A writer's outcome going back: a write restored the item (its error kept), as the worker's rollback batch maps it. */
-function rollbackOutcome(o: ItemOutcome): RollbackItemOutcome {
-  const status = o.status === 'written' ? 'restored' : o.status;
-  return { targetId: o.targetId, status, ...(o.error === undefined ? {} : { error: o.error }) };
 }
 
 type ScriptedStatus = 'written' | 'failed' | 'skipped';

@@ -10,7 +10,7 @@ import { createServer } from 'node:net';
 import { EMPTY_STATS, ExecutorUnavailable, type AuditEventInput, type ChangeSetRecord } from '@aiops/core';
 import { clientDataConverter, parseTemporalKeys, TemporalExecutor } from '@aiops/temporal';
 import { allowAllGuard, describeExecutorContract, EXECUTOR_CONTRACT_HASH, ScriptedWriter } from '@aiops/testing';
-import { Client, Connection } from '@temporalio/client';
+import { Client, Connection, ServiceError, type WorkflowClientInterceptor } from '@temporalio/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPrepared, targetIds } from '../support/changesets.js';
 import { startInfrastructure, startTestWorker, TEST_SETTINGS, type Infra, type TestWorker } from '../support/harness.js';
@@ -146,6 +146,17 @@ describe('EXE-8 TemporalExecutor rollback request', () => {
     return cs;
   }
 
+  /** An executor on the infrastructure's connection whose client runs `interceptor`. */
+  function intercepted(worker: TestWorker, interceptor: WorkflowClientInterceptor): TemporalExecutor {
+    const client = new Client({
+      connection: infra.env.connection,
+      namespace: 'default',
+      dataConverter: clientDataConverter(parseTemporalKeys(TEST_TEMPORAL_KEYS)),
+      interceptors: { workflow: [interceptor] },
+    });
+    return new TemporalExecutor({ client, taskQueue: worker.taskQueue, repository: infra.repository, newId: randomUUID, now: () => new Date() });
+  }
+
   /** A port nothing listens on. */
   async function closedPort(): Promise<number> {
     const server = createServer();
@@ -219,23 +230,13 @@ describe('EXE-8 TemporalExecutor rollback request', () => {
     // The run closes between describe and signal: the client's describe answers the real RUNNING description,
     // then terminates the run before the executor goes on.
     const worker = await startTestWorker(infra, { guard: allowAllGuard, settings: WINDOW });
-    const racing = new Client({
-      connection: infra.env.connection,
-      namespace: 'default',
-      dataConverter: clientDataConverter(parseTemporalKeys(TEST_TEMPORAL_KEYS)),
-      interceptors: {
-        workflow: [
-          {
-            async describe(input, next) {
-              const raw = await next(input);
-              await infra.client.workflow.getHandle(input.workflowExecution.workflowId).terminate('test: closes before the wake');
-              return raw;
-            },
-          },
-        ],
+    const executor = intercepted(worker, {
+      async describe(input, next) {
+        const raw = await next(input);
+        await infra.client.workflow.getHandle(input.workflowExecution.workflowId).terminate('test: closes before the wake');
+        return raw;
       },
     });
-    const executor = new TemporalExecutor({ client: racing, taskQueue: worker.taskQueue, repository: infra.repository, newId: randomUUID, now: () => new Date() });
     try {
       const cs = await executed(worker, 2, true);
       expect(await request(executor, cs.id, 2)).toEqual({ ok: true, status: 'failed' });
@@ -252,6 +253,36 @@ describe('EXE-8 TemporalExecutor rollback request', () => {
         ['alice', 'completed', 'rolling_back', undefined],
         ['system', 'rolling_back', 'failed', 'rollback_workflow_closed'],
       ]);
+    } finally {
+      await worker.stop();
+    }
+  });
+
+  it('EXE-8 an error describe does not name as Temporal unreachable is rethrown, not ExecutorUnavailable, and changes nothing', async () => {
+    const worker = await startTestWorker(infra, { guard: allowAllGuard, settings: WINDOW });
+    const bug = new TypeError('unrelated');
+    const executor = intercepted(worker, { describe: () => Promise.reject(bug) });
+    try {
+      const cs = await executed(worker, 2, true);
+      const before = await auditOf(cs.id);
+      await expect(request(executor, cs.id, 2)).rejects.toBe(bug);
+      const record = await infra.repository.get(cs.id);
+      expect([record?.status, record?.rollbackRequest]).toEqual(['completed', undefined]);
+      expect(await auditOf(cs.id)).toHaveLength(before.length);
+    } finally {
+      await worker.stop();
+    }
+  });
+
+  it('EXE-8 a wake lost to an unreachable Temporal keeps the stored request and answers rolling_back', async () => {
+    const worker = await startTestWorker(infra, { guard: allowAllGuard, settings: WINDOW });
+    const executor = intercepted(worker, { signal: () => Promise.reject(new ServiceError('Failed to signal Workflow')) });
+    try {
+      const cs = await executed(worker, 2, true);
+      expect(await request(executor, cs.id, 2)).toEqual({ ok: true, status: 'rolling_back' });
+      const record = await infra.repository.get(cs.id);
+      expect(record?.status).toBe('rolling_back');
+      expect(record?.rollbackRequest?.correlationId).toBe('corr-rollback');
     } finally {
       await worker.stop();
     }

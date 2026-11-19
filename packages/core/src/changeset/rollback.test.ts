@@ -9,6 +9,7 @@ import {
   rollbackEligibility,
   type RollbackEligibilityDeps,
   rollbackFromFinished,
+  rollbackOutcome,
   rollbackWindowOpen,
   type RollbackReads,
   rollbackRequestEvents,
@@ -346,5 +347,18 @@ describe('EXE-8 shared rollback predicates', () => {
     expect(rollbackWindowOpen(new Date(Number.NaN), new Date(0), m)).toBe(false);
     expect(rollbackWindowOpen(UNTIL, new Date(Number.NaN), m)).toBe(false);
     expect(rollbackWindowOpen(UNTIL, new Date(0), Number.NaN)).toBe(false);
+  });
+});
+
+describe('EXE-8 rollbackOutcome', () => {
+  it('EXE-8 a written outcome is restored with its error kept; skipped and failed stay', () => {
+    expect(rollbackOutcome({ targetId: 'a', status: 'written' })).toEqual({ targetId: 'a', status: 'restored' });
+    expect(rollbackOutcome({ targetId: 'b', status: 'written', error: 'already_restored' })).toEqual({
+      targetId: 'b',
+      status: 'restored',
+      error: 'already_restored',
+    });
+    expect(rollbackOutcome({ targetId: 'c', status: 'skipped', error: 'drift' })).toEqual({ targetId: 'c', status: 'skipped', error: 'drift' });
+    expect(rollbackOutcome({ targetId: 'd', status: 'failed' })).toEqual({ targetId: 'd', status: 'failed' });
   });
 });

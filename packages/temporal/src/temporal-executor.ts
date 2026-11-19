@@ -15,7 +15,13 @@ import {
   type StartOutcome,
   type StartRequest,
 } from '@aiops/core';
-import { WorkflowExecutionAlreadyStartedError, WorkflowNotFoundError, type Client } from '@temporalio/client';
+import {
+  NamespaceNotFoundError,
+  ServiceError,
+  WorkflowExecutionAlreadyStartedError,
+  WorkflowNotFoundError,
+  type Client,
+} from '@temporalio/client';
 import {
   CHANGESET_WORKFLOW,
   PROGRESS_QUERY,
@@ -192,9 +198,11 @@ export class TemporalExecutor implements ChangeSetExecutor {
       const description = await handle.describe();
       if (description.status.name !== 'RUNNING') return { ok: false, reason: 'not_rollbackable', detail: 'window_closed' };
     } catch (error) {
-      // NOT_FOUND from the server: no run was ever started for this change-set.
+      // NOT_FOUND from the server: no run was ever started, or a closed run was deleted after retention.
       if (error instanceof WorkflowNotFoundError) return { ok: false, reason: 'not_rollbackable', detail: 'window_closed' };
-      throw new ExecutorUnavailable();
+      // The client's answers for an unreachable or misconfigured Temporal (rethrowGrpcError, client 1.25).
+      if (error instanceof ServiceError || error instanceof NamespaceNotFoundError) throw new ExecutorUnavailable();
+      throw error;
     }
     const request = {
       actor: req.actor,
@@ -214,9 +222,10 @@ export class TemporalExecutor implements ChangeSetExecutor {
     try {
       await handle.signal(WAKE_SIGNAL);
     } catch (error) {
-      // Any other failure (Temporal unreachable now): the stored request stands, and the run's next look
-      // after its window timer finds it.
-      if (!(error instanceof WorkflowNotFoundError)) return { ok: true, status: 'rolling_back' };
+      // Temporal unreachable now: the stored request stands, and the run's next look after its window
+      // timer finds it.
+      if (error instanceof ServiceError) return { ok: true, status: 'rolling_back' };
+      if (!(error instanceof WorkflowNotFoundError)) throw error;
       const errorCode = 'rollback_workflow_closed';
       const failed = await this.repository.transition(
         record.id,
@@ -233,8 +242,10 @@ export class TemporalExecutor implements ChangeSetExecutor {
         }),
         { errorCode },
       );
-      // A lost compare-and-set means a run did take the request on before it closed.
-      return { ok: true, status: failed === undefined ? 'rolling_back' : 'failed' };
+      if (failed !== undefined) return { ok: true, status: 'failed' };
+      // A lost compare-and-set: the run took the request on and finished the rollback itself before it closed.
+      const current = await this.repository.get(record.id);
+      return { ok: true, status: current?.status === 'failed' ? 'failed' : 'rolling_back' };
     }
     return { ok: true, status: 'rolling_back' };
   }
