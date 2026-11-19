@@ -7,6 +7,10 @@
  * test/workflow-histories/changesetWorkflow/<name>.json. Existing files are never overwritten:
  * fixtures are not regenerated to make a replay pass (`--force` only when a patch is removed).
  * smokeWorkflow's plaintext fixture predates the codec and is never re-recorded.
+ *
+ * `--traced` records as production runs (NFR-11): a registered tracer provider, the OpenTelemetry
+ * client interceptor on the starting client and the worker's tracing plugin, so the history carries
+ * the `_tracer-data` headers and the interceptors' SDK flags. Its files are `<name>-traced.json`.
  */
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -22,8 +26,13 @@ import {
 } from '@aiops/core';
 import { CHANGESET_WORKFLOW, PROGRESS_QUERY, WAKE_SIGNAL, type WorkflowProgress } from '@aiops/temporal';
 import { recordApproval, ScriptedWriter } from '@aiops/testing';
+import { trace } from '@opentelemetry/api';
+import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import type { WorkflowHandle, WorkflowHandleWithSignaledRunId } from '@temporalio/client';
+import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors-opentelemetry';
 import { historyToJSON } from '@temporalio/common/lib/proto-utils';
+import { createTracingPlugin } from '../src/telemetry/tracing.js';
 import type { changesetWorkflow } from '../src/workflows/changeset.js';
 import { createPrepared } from '../test/support/changesets.js';
 import { APPROVING_GROUP, EDITOR_GROUP, REVIEWER_GROUP } from '../test/support/configuration.js';
@@ -64,8 +73,15 @@ const catalogReader: UpstreamReader = {
  */
 const RECORDER_IDENTITY = 'aiops-recorder';
 
+const args = process.argv.slice(2);
+const force = args.includes('--force');
+/** Record with the production tracing plugin and client interceptor (NFR-11). */
+const traced = args.includes('--traced');
+const spans = new InMemorySpanExporter();
+
 async function withWorker<T>(infra: Infra, opts: TestWorkerOptions, fn: (worker: TestWorker) => Promise<T>): Promise<T> {
-  const worker = await startTestWorker(infra, { ...opts, identity: RECORDER_IDENTITY });
+  const plugins = traced ? { plugins: [createTracingPlugin({ spanProcessor: new SimpleSpanProcessor(spans), serviceName: 'aiops-worker' })] } : {};
+  const worker = await startTestWorker(infra, { ...opts, ...plugins, identity: RECORDER_IDENTITY });
   try {
     return await fn(worker);
   } finally {
@@ -583,32 +599,45 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
   },
 };
 
-const args = process.argv.slice(2);
-const force = args.includes('--force');
 const name = args.find((a) => !a.startsWith('--'));
 const scenario = name === undefined ? undefined : SCENARIOS[name];
 if (name === undefined || scenario === undefined) {
-  console.error(`usage: record-history <scenario> [--force]\nscenarios: ${Object.keys(SCENARIOS).join(' | ')}`);
+  console.error(`usage: record-history <scenario> [--traced] [--force]\nscenarios: ${Object.keys(SCENARIOS).join(' | ')}`);
   process.exit(2);
 }
 
-const targets = scenario.files.map((file) => `${outDir}${file}.json`);
+/** The committed file name of a scenario's fixture: traced recordings get their own files. */
+const fixtureName = (file: string): string => (traced ? `${file}-traced` : file);
+const targets = scenario.files.map((file) => `${outDir}${fixtureName(file)}.json`);
 const existing = targets.filter((t) => existsSync(t));
 if (existing.length > 0 && !force) {
   throw new Error(`${existing.join(', ')} exists; fixtures are not regenerated (pass --force only when a patch is removed)`);
 }
 
-const infra = await startInfrastructure({ identity: RECORDER_IDENTITY });
+// The activity and client interceptors use the global tracer and propagator, as in production.
+const provider = traced ? new NodeTracerProvider({ spanProcessors: [new SimpleSpanProcessor(spans)] }) : undefined;
+provider?.register();
+const infra = await startInfrastructure({
+  identity: RECORDER_IDENTITY,
+  ...(traced ? { clientInterceptors: { workflow: [new OpenTelemetryWorkflowClientInterceptor()] } } : {}),
+});
 try {
   const recorded = await scenario.run(infra);
   mkdirSync(outDir, { recursive: true });
   for (const file of scenario.files) {
     const history = recorded[file];
     if (history === undefined) throw new Error(`scenario ${name} recorded no ${file}`);
-    const target = `${outDir}${file}.json`;
+    const target = `${outDir}${fixtureName(file)}.json`;
     writeFileSync(target, `${historyToJSON(history)}\n`);
     console.log(`wrote ${target}`);
   }
 } finally {
-  await infra.close();
+  try {
+    await infra.close();
+  } finally {
+    if (provider !== undefined) {
+      await provider.shutdown();
+      trace.disable();
+    }
+  }
 }

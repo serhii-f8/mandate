@@ -7,7 +7,7 @@ import { Worker } from '@temporalio/worker';
 import { describe, expect, it } from 'vitest';
 import { createTracingPlugin } from '../../src/telemetry/tracing.js';
 import { workflowBundlerOptions, workflowsPath } from '../../src/worker.js';
-import { isSdkPlaintext, payloadEncodings, plain } from '../support/history.js';
+import { isSdkPlaintext, payloadEncodings, plain, TRACE_HEADER } from '../support/history.js';
 import { TEST_TEMPORAL_KEYS } from '../support/keys.js';
 
 const historiesDir = fileURLToPath(new URL('../workflow-histories/', import.meta.url));
@@ -76,6 +76,22 @@ const REQUIRED_CHANGESET_FIXTURES = [
   'rollback-continued-run3',
 ];
 
+/**
+ * Histories recorded as production runs (`record-history <scenario> --traced`, NFR-11): the
+ * `_tracer-data` headers and the OpenTelemetry interceptors' SDK flags. Parked at the wake condition,
+ * completed, one per continue-as-new run, rolled back. They replay with the plugin (production) and
+ * without it (tracing switched off, `WORKFLOW_TRACING` fallback).
+ */
+const REQUIRED_TRACED_FIXTURES = [
+  'parked-prepared-traced',
+  'completed-traced',
+  'completed-continued-run1-traced',
+  'completed-continued-run2-traced',
+  'rolled-back-traced',
+];
+
+const isTraced = (name: string): boolean => name.endsWith('-traced.json');
+
 describe('SEC-4 patch payload exemption', () => {
   it('SEC-4 accepts the SDK patch marker and change-version shapes only', () => {
     const genuine = { 'patch-data': { payloads: [plain('{"id":"a-b-20261118","deprecated":false}')] }, TemporalChangeVersion: plain('["a-b-20261118"]') };
@@ -125,9 +141,17 @@ describe('EXE-10 workflow replay gate', () => {
     expect(names).toEqual(expect.arrayContaining(REQUIRED_CHANGESET_FIXTURES));
   });
 
-  it('SEC-4 no changesetWorkflow fixture carries a json/plain payload', () => {
+  it('EXE-10 NFR-11 has the required traced changesetWorkflow fixtures, and only they carry trace headers', () => {
+    const changeset = fixtures.filter((f) => f.type === 'changesetWorkflow');
+    expect(changeset.filter((f) => isTraced(f.name)).map((f) => f.name.replace(/\.json$/, ''))).toEqual(expect.arrayContaining(REQUIRED_TRACED_FIXTURES));
+    for (const fixture of changeset) {
+      expect(readFileSync(fixture.path, 'utf8').includes(`"${TRACE_HEADER}"`), fixture.name).toBe(isTraced(fixture.name));
+    }
+  });
+
+  it('SEC-4 no untraced changesetWorkflow fixture carries a json/plain payload', () => {
     const encodings = new Set<string>();
-    for (const fixture of fixtures.filter((f) => f.type === 'changesetWorkflow')) {
+    for (const fixture of fixtures.filter((f) => f.type === 'changesetWorkflow' && !isTraced(f.name))) {
       for (const encoding of payloadEncodings(JSON.parse(readFileSync(fixture.path, 'utf8')))) encodings.add(encoding);
     }
     // Non-vacuous: the walk does find the encrypted payloads.
@@ -135,6 +159,19 @@ describe('EXE-10 workflow replay gate', () => {
     expect(encodings).not.toContain('json/plain');
   });
 
+  it('SEC-4 SEC-3 a traced fixture carries no json/plain payload apart from W3C trace headers (ADR 0047)', () => {
+    const encodings = new Set<string>();
+    for (const fixture of fixtures.filter((f) => f.type === 'changesetWorkflow' && isTraced(f.name))) {
+      const history: unknown = JSON.parse(readFileSync(fixture.path, 'utf8'));
+      // Non-vacuous: without the trace-header exemption the walk does find the headers.
+      expect(payloadEncodings(history), fixture.name).toContain('json/plain');
+      for (const encoding of payloadEncodings(history, isSdkPlaintext)) encodings.add(encoding);
+    }
+    expect(encodings).toContain('binary/encrypted');
+    expect(encodings).not.toContain('json/plain');
+  });
+
+  // For a traced fixture this is the tracing-off case: the history replays without the interceptors.
   it.each(fixtures)('EXE-10 replays $type/$name with the current workflow code', async ({ type, path, name }) => {
     const history: unknown = JSON.parse(readFileSync(path, 'utf8'));
     const dataConverter = converterFor(type);
