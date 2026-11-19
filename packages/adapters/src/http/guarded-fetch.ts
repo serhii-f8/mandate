@@ -22,10 +22,13 @@ export interface GuardedFailure {
 /** A guarded failure of one exchange; the message is scrubbed and carries no upstream text (SEC-3). */
 export class GuardedFetchError extends Error {
   readonly code: GuardedFailureCode;
-  constructor(code: GuardedFailureCode, message: string) {
+  /** The upstream status when a response arrived but was refused (a redirect): the request was sent. */
+  readonly status: number | undefined;
+  constructor(code: GuardedFailureCode, message: string, status?: number) {
     super(message);
     this.name = 'GuardedFetchError';
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -38,6 +41,11 @@ export interface GuardedFetch {
    * adapter uses it only when the SDK's error comes from the transport (ruling F8).
    */
   lastFailure(): GuardedFailure | undefined;
+  /**
+   * From now on a 401 is passed up without a token refresh and resend (EXE-4): called once a
+   * call that must be sent at most once is about to leave.
+   */
+  noResend(): void;
   readonly scrubber: Scrubber;
 }
 
@@ -89,7 +97,7 @@ function responseHeaders(raw: IncomingHttpHeaders, scrubber: Scrubber): Headers 
  */
 export function createGuardedFetch(settings: ConnectionSettings, auth: PreparedAuth, deps: GuardedFetchDeps = {}): GuardedFetch {
   const lookup = deps.lookup ?? createGuardedLookup(settings);
-  const refreshOn401 = deps.refreshOn401 ?? true;
+  let refreshOn401 = deps.refreshOn401 ?? true;
   const instrumentation = deps.instrumentation;
   let last: GuardedFailure | undefined;
 
@@ -97,7 +105,8 @@ export function createGuardedFetch(settings: ConnectionSettings, auth: PreparedA
     last = { code, ...(status === undefined ? {} : { status }), message: auth.scrubber.text(message) };
     return last;
   };
-  const failure = (code: GuardedFailureCode, message: string): GuardedFetchError => new GuardedFetchError(code, record(code, message).message);
+  const failure = (code: GuardedFailureCode, message: string, status?: number): GuardedFetchError =>
+    new GuardedFetchError(code, record(code, message, status).message, status);
 
   /** One exchange: resolves with a web Response or rejects with GuardedFetchError (or the abort reason). */
   function exchange(url: URL, method: 'POST' | 'DELETE', base: Readonly<Record<string, string>>, body: Buffer | undefined, signal: AbortSignal | undefined): Promise<Response> {
@@ -178,9 +187,9 @@ export function createGuardedFetch(settings: ConnectionSettings, auth: PreparedA
           // Already closed or cancelled by the reader.
         }
       };
-      const fail = (code: Exclude<GuardedFailureCode, 'http_status'>, message: string): void => {
-        if (phase === 'headers') rejectWith(failure(code, message), { errorCode: code });
-        else if (phase === 'body') errorBody(failure(code, message), { errorCode: code });
+      const fail = (code: Exclude<GuardedFailureCode, 'http_status'>, message: string, status?: number): void => {
+        if (phase === 'headers') rejectWith(failure(code, message, status), { errorCode: code });
+        else if (phase === 'body') errorBody(failure(code, message, status), { errorCode: code });
       };
       function onAbort(): void {
         if (!signal) return;
@@ -214,7 +223,7 @@ export function createGuardedFetch(settings: ConnectionSettings, auth: PreparedA
         const scrubber = auth.scrubber;
         if (status >= 300 && status < 400) {
           // Redirects are never followed, and their target is never contacted (CONN-5).
-          fail('egress_denied', `upstream redirected (status ${status}); redirects are not followed`);
+          fail('egress_denied', `upstream redirected (status ${status}); redirects are not followed`, status);
           return;
         }
         if (status < 200 || status > 599) {
@@ -384,6 +393,9 @@ export function createGuardedFetch(settings: ConnectionSettings, auth: PreparedA
   return {
     fetch: guardedFetch,
     lastFailure: () => (last === undefined ? undefined : { ...last }),
+    noResend: () => {
+      refreshOn401 = false;
+    },
     get scrubber() {
       return auth.scrubber;
     },

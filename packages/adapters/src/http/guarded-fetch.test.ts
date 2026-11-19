@@ -395,3 +395,34 @@ describe('CONN-5 CONN-6 SEC-3 guarded fetch', () => {
     for (const code of codes) expect(new GuardedFetchError(code, 'm').code).toBe(code);
   });
 });
+
+describe('EXE-4 guarded fetch for a call sent once', () => {
+  it('EXE-4 after noResend() a 401 is passed up without a token refresh or a second request', async () => {
+    let issued = 0;
+    up.route('POST', '/token', () => {
+      issued += 1;
+      return { status: 200, body: { access_token: `issued-${issued}`, token_type: 'Bearer', expires_in: 3600 } };
+    });
+    up.route('POST', '/mcp', () => ({ status: 401, body: {} }));
+    const o = settings({ auth: { scheme: 'oauth_client_credentials', tokenUrl: `${up.url}/token`, scopes: [] } });
+    const gf = createGuardedFetch(o, await prepared(o, cred('oauth_client_credentials', { client_id: 'cid', client_secret: 'cs' })), {});
+    gf.noResend();
+    expect((await gf.fetch(`${up.url}/mcp`, rpc())).status).toBe(401);
+    expect(up.requests.filter((r) => r.path === '/mcp')).toHaveLength(1);
+    expect(issued).toBe(1);
+    expect(gf.lastFailure()).toMatchObject({ code: 'http_status', status: 401 });
+  });
+
+  it('EXE-4 a refused redirect carries its status: the request reached the upstream', async () => {
+    up.route('POST', '/mcp', () => ({ status: 303, headers: { location: `${up.url}/elsewhere` } }));
+    const s = settings();
+    const gf = createGuardedFetch(s, await prepared(s), {});
+    const err = await guardedError(gf.fetch(`${up.url}/mcp`, rpc()));
+    expect({ code: err.code, status: err.status }).toEqual({ code: 'egress_denied', status: 303 });
+    expect(gf.lastFailure()).toMatchObject({ code: 'egress_denied', status: 303 });
+
+    // A refusal before any request carries no status.
+    const early = await guardedError(gf.fetch('file:///etc/passwd', rpc()));
+    expect(early.status).toBeUndefined();
+  });
+});

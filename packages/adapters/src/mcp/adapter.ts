@@ -15,6 +15,7 @@ import type { LookupFunction } from 'node:net';
 import {
   CONNECTOR_SDK_VERSION,
   mcpToolHash,
+  type CallOutcome,
   type ConnectionSettings,
   type CredentialSource,
   type McpListedTool,
@@ -24,14 +25,15 @@ import {
   type ReadOutcome,
   type RequestInstrumentation,
   type ToolListOutcome,
+  type WriteAdapter,
 } from '@aiops/connector-sdk';
 import { Client, ProtocolError, SdkError, SdkErrorCode, SdkHttpError, StreamableHTTPClientTransport, type PriorDiscovery, type Tool } from '@modelcontextprotocol/client';
 import { prepareAuth } from '../http/auth.js';
 import { createTransport, RETRYABLE_STATUS } from '../http/client.js';
 import { createGuardedLookup } from '../http/egress.js';
 import { createGuardedFetch, GuardedFetchError, type GuardedFetch } from '../http/guarded-fetch.js';
-import type { Scrubber } from '../http/scrub.js';
 import { semaphoreFor } from '../http/semaphore.js';
+import { outcomeAfterSend, outcomeOfResult } from './call-once.js';
 import { mapToolResult } from './result.js';
 
 export interface McpAdapterDeps {
@@ -131,7 +133,16 @@ interface EraEntry {
   at: number;
 }
 
-export function createMcpToolAdapter(deps: McpAdapterDeps = {}): McpToolAdapter {
+/** The MCP adapter: the SDK's tool adapter plus the opaque call path (ruling F5). */
+export type McpAdapter = McpToolAdapter & Pick<WriteAdapter, 'callOnce'>;
+
+/** An opaque call's settled exchange, told apart from a `Failure` by `outcome`. */
+interface CallSettled {
+  ok: boolean;
+  outcome: CallOutcome;
+}
+
+export function createMcpToolAdapter(deps: McpAdapterDeps = {}): McpAdapter {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? realSleep;
   const random = deps.random ?? Math.random;
@@ -158,7 +169,7 @@ export function createMcpToolAdapter(deps: McpAdapterDeps = {}): McpToolAdapter 
     credential: CredentialSource | undefined,
     kind: 'list' | 'call',
     start: number,
-    work: (client: Client, scrubber: Scrubber) => Promise<T | Failure>,
+    work: (client: Client, guarded: GuardedFetch) => Promise<T | Failure>,
   ): Promise<T | Failure> {
     const fail = (code: ReadErrorCode, status?: number): Failure => ({
       ok: false,
@@ -192,7 +203,7 @@ export function createMcpToolAdapter(deps: McpAdapterDeps = {}): McpToolAdapter 
       const prior = priorOf(connection);
       try {
         await client.connect(transport, prior === undefined ? { timeout: connection.timeoutMs } : { prior, timeout: connection.timeoutMs });
-        const result = await work(client, guarded.scrubber);
+        const result = await work(client, guarded);
         if (!result.ok) {
           eras.delete(eraKey(connection));
         } else if (prior === undefined) {
@@ -277,12 +288,54 @@ export function createMcpToolAdapter(deps: McpAdapterDeps = {}): McpToolAdapter 
     const { connection, tool, args, credential, retryable } = input;
     const start = now();
     return withRetries(connection, retryable, () =>
-      attempt<ReadOutcome>(connection, credential, 'call', start, async (client, scrubber) => {
+      attempt<ReadOutcome>(connection, credential, 'call', start, async (client, guarded) => {
         const result = await client.callTool({ name: tool, arguments: { ...args } }, { timeout: connection.timeoutMs });
-        return mapToolResult(result, scrubber, Math.max(0, now() - start));
+        return mapToolResult(result, guarded.scrubber, Math.max(0, now() - start));
       }),
     );
   }
 
-  return { listTools, callTool };
+  /**
+   * One opaque `tools/call` (EXE-4, NFR-2, ruling F7): connect (era negotiation; a legacy
+   * `initialize` is not the call), `beforeSend`, one `tools/call` without retry, then the session
+   * ended. A failure before the hook ran answers `not_sent` with its code; a throwing hook is
+   * rethrown with nothing sent. Once the hook ran nothing is resent: no attempt loop, no 401
+   * refresh, and the SDK's header-mismatch re-call is off because a tool definition is passed.
+   * No idempotency key is sent; the result's content is never read.
+   */
+  async function callOnce(input: Parameters<WriteAdapter['callOnce']>[0]): Promise<CallOutcome> {
+    const { connection, target, credential, beforeSend } = input;
+    if (target.kind !== 'mcp' || !MCP_TOOL_NAME.test(target.tool)) return { result: 'not_sent', code: 'mapping', durationMs: 0 };
+    const name = target.tool;
+    // Copied before the hook: a failing argument read records nothing.
+    const args = { ...input.args };
+    const start = now();
+    const elapsed = (): number => Math.max(0, now() - start);
+    let hookError: { error: unknown } | undefined;
+    const settled = await attempt<CallSettled>(connection, credential, 'call', start, async (client, guarded) => {
+      try {
+        await beforeSend();
+      } catch (error) {
+        hookError = { error };
+        throw error;
+      }
+      // Sent from here on: a guarded 401 is answered, never refreshed and resent.
+      guarded.noResend();
+      try {
+        // A definition without outputSchema or header declarations: the SDK neither validates the
+        // result (which is never read) nor re-calls the tool after a header mismatch.
+        const result = await client.callTool({ name, arguments: args }, { timeout: connection.timeoutMs, toolDefinition: { name, inputSchema: { type: 'object' } } });
+        const outcome = outcomeOfResult(result, elapsed());
+        return { ok: outcome.result === 'accepted', outcome };
+      } catch (error) {
+        return { ok: false, outcome: outcomeAfterSend(error, elapsed()) };
+      }
+    });
+    // A hook error the transport classifier happens to recognise is still the caller's error.
+    if (hookError !== undefined) throw hookError.error;
+    if ('outcome' in settled) return settled.outcome;
+    return { result: 'not_sent', code: settled.code, ...(settled.status === undefined ? {} : { status: settled.status }), durationMs: settled.durationMs };
+  }
+
+  return { listTools, callTool, callOnce };
 }
