@@ -3,7 +3,7 @@
  * Arguments are checked against the operation's input schema first, as on a real call
  * (MCP-3); an allowed write states the approval it would need (POL-5). Pure: no I/O.
  */
-import type { LoadedConfiguration } from '@aiops/config';
+import { createSchemaCompiler, pinStateOf, type LoadedConfiguration, type PinState } from '@aiops/config';
 import { allowingRole, approvalRequirement, createPolicyEngine, type ApprovalRequirement, type PolicyDecision } from '@aiops/core';
 
 export interface ExplainInput {
@@ -17,7 +17,20 @@ export interface ExplainInput {
 
 export type ExplainResult =
   | { readonly kind: 'invalid_arguments'; readonly message: string }
-  | { readonly kind: 'decision'; readonly decision: PolicyDecision; readonly approval?: ApprovalRequirement };
+  | {
+      readonly kind: 'decision';
+      readonly decision: PolicyDecision;
+      readonly approval?: ApprovalRequirement;
+      /** CONN-4: an MCP-backed operation's pin state against the revision's load-time tool list. */
+      readonly pin?: PinState;
+    };
+
+/** The pin state of an MCP-backed operation, as the load-time catalog seeds it; undefined for any other. */
+function pinOf(configuration: LoadedConfiguration, operationId: string): { readonly pin?: PinState } {
+  const binding = configuration.bindings.get(operationId);
+  if (binding?.kind !== 'mcp') return {};
+  return { pin: pinStateOf(binding, configuration.mcpCatalogs.get(binding.connection), createSchemaCompiler()).state };
+}
 
 export function explainCall(configuration: LoadedConfiguration, input: ExplainInput): ExplainResult {
   const { operationId, groups, args } = input;
@@ -29,15 +42,16 @@ export function explainCall(configuration: LoadedConfiguration, input: ExplainIn
   const operation = configuration.policy.operations.find((op) => op.id === operationId);
   // The engine denies an unknown ID as no_grant; the tool pipeline records it as unknown_tool, and so does explain.
   const decision: PolicyDecision = operation === undefined && evaluated.effect === 'deny' ? { ...evaluated, reason: 'unknown_tool' } : evaluated;
-  if (decision.effect !== 'allow') return { kind: 'decision', decision };
+  const pin = pinOf(configuration, operationId);
+  if (decision.effect !== 'allow') return { kind: 'decision', decision, ...pin };
   const risk = operation?.risk;
-  if (risk !== 'write' && risk !== 'destructive') return { kind: 'decision', decision };
+  if (risk !== 'write' && risk !== 'destructive') return { kind: 'decision', decision, ...pin };
 
   // The allowing rule's role decides approval, as on submission (ADR 0027).
   const role = allowingRole(decision.rule);
   const rule = role === undefined ? undefined : configuration.approval.get(role);
   const approval = approvalRequirement({ risk, ...(rule === undefined ? {} : { rule }), included: input.records });
-  return { kind: 'decision', decision, approval };
+  return { kind: 'decision', decision, approval, ...pin };
 }
 
 function approvalLine(approval: ApprovalRequirement): string {
@@ -48,13 +62,14 @@ function approvalLine(approval: ApprovalRequirement): string {
 
 export function formatExplain(result: ExplainResult): readonly string[] {
   if (result.kind === 'invalid_arguments') return ['effect: invalid_arguments', `message: ${result.message}`];
-  const { decision, approval } = result;
+  const { decision, approval, pin } = result;
   return [
     `effect: ${decision.effect}`,
     `rule: ${decision.rule}`,
     `roles: ${decision.roles.length === 0 ? '-' : decision.roles.join(',')}`,
     `reason: ${decision.reason ?? '-'}`,
     `detail: ${decision.detail ?? '-'}`,
+    ...(pin === undefined ? [] : [`pin: ${pin}`]),
     ...(approval === undefined ? [] : [approvalLine(approval)]),
   ];
 }

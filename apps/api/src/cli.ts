@@ -11,6 +11,8 @@
  *   aiops config apply <dir> [--preset-dir <dir>]... [--actor <n>]  stores <dir> as the new active revision (CFG-3, CFG-4)
  *   aiops config explain --operation <id> --groups <g,...> [--subject <s>] [--args <json>] [--records <n>]
  *                                                  dry policy evaluation against the active revision (POL-7)
+ *   aiops mcp tools <connection> [--show <tool>]   lists an mcp connection's tools live with hashes and pin states;
+ *                                                  --show prints one definition for review and a pinned skeleton (CONN-4, SEC-6)
  *
  * Exit codes: 0 success (explain: allow), 1 failed, invalid or denied, 2 usage or environment. Each command parses
  * only the environment it needs; errors name variables, never values (SEC-3).
@@ -51,6 +53,7 @@ import {
 } from '@aiops/db';
 import type pg from 'pg';
 import { explainCall, formatExplain, type ExplainInput } from './config/explain.js';
+import { MCP_TOOLS_USAGE, mcpConnectionOf, parseMcpToolsArgs, runMcpTools } from './mcp-tools-cli.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
 
 const USAGE = [
@@ -62,6 +65,7 @@ const USAGE = [
   '       aiops config diff <dir> [--preset-dir <dir>]...',
   '       aiops config apply <dir> [--preset-dir <dir>]... [--actor <name>]',
   '       aiops config explain --operation <id> --groups <g1,g2,...> [--subject <s>] [--args <json>] [--records <n>]',
+  MCP_TOOLS_USAGE,
 ].join('\n');
 
 /** The actor and client the CLI audits as. */
@@ -588,6 +592,28 @@ async function configExplain(args: readonly string[], out: (line: string) => voi
   });
 }
 
+/**
+ * `aiops mcp tools`: the active revision names the connection; the list is live, with the
+ * stored credential, which only the adapter opens (CONN-4, SEC-2, SEC-3).
+ */
+async function mcpTools(args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
+  const parsed = parseMcpToolsArgs(args);
+  if (parsed === undefined) {
+    out(USAGE);
+    return 2;
+  }
+  const env = parseEnv({ DATABASE_URL: postgresUrl, AIOPS_MASTER_KEYS: nonEmpty }, deps.env);
+  const adapter = deps.adapter ?? createAdapters();
+  const configuration = await withConfigStore(deps, env.DATABASE_URL, (store) => loadActiveChecked(store, activeLoadOptions({ ...deps, adapter })));
+  const connection = mcpConnectionOf(configuration, parsed.connection);
+  if (typeof connection === 'string') throw new CliError(connection, 2);
+  const listTools = adapter.listTools?.bind(adapter);
+  if (listTools === undefined) throw new CliError('the upstream adapter cannot list MCP tools', 2);
+  return withStore(deps, env, configuration.sensitiveFields, (store) =>
+    runMcpTools({ configuration, connection, vault: store.vault, listTools, ...(parsed.show === undefined ? {} : { show: parsed.show }) }, out),
+  );
+}
+
 export async function runApiCli(argv: readonly string[], out: (line: string) => void, deps: CliDeps = { env: process.env }): Promise<number> {
   const [command, ...rest] = argv;
   try {
@@ -597,6 +623,7 @@ export async function runApiCli(argv: readonly string[], out: (line: string) => 
     if (command === 'audit') return await audit(rest, out, deps);
     if (command === 'config' && (rest[0] === 'diff' || rest[0] === 'apply')) return await configChange(rest[0], rest.slice(1), out, deps);
     if (command === 'config' && rest[0] === 'explain') return await configExplain(rest.slice(1), out, deps);
+    if (command === 'mcp' && rest[0] === 'tools') return await mcpTools(rest.slice(1), out, deps);
     out(USAGE);
     return 2;
   } catch (error) {

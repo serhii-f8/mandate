@@ -1,6 +1,8 @@
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { loadConfigurationDirectory, type LoadedConfiguration } from '@aiops/config';
+import { loadConfigurationDirectory, loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
+import { mcpToolHash, type McpToolDefinition, type ToolListOutcome } from '@aiops/connector-sdk';
+import { FakeResolver } from '@aiops/testing';
 import { explainCall, formatExplain, type ExplainInput } from './explain.js';
 
 const DEV_CONFIG = fileURLToPath(new URL('../../../../deploy/config', import.meta.url));
@@ -85,5 +87,53 @@ describe('POL-7 explain', () => {
     expect(explainCall(configuration, { operationId: 'catalog.search_products', groups: ['content'], args: { brand: 'acme' }, records: 1 })).toMatchObject({
       kind: 'invalid_arguments',
     });
+  });
+});
+
+const LOOKUP: McpToolDefinition = { name: 'lookup', inputSchema: { type: 'object', properties: { key: { type: 'string' } } } };
+const MCP_SOURCES = [
+  {
+    file: 'config.yaml',
+    text: `version: 1
+connections:
+  - { id: tools, adapter: mcp, mcp_url: https://tools.example.test/mcp }
+operations:
+  - id: tools.lookup
+    connection: tools
+    risk: read
+    description: Look up a record by key.
+    upstream: { tool: lookup, pin: ${mcpToolHash(LOOKUP)} }
+roles:
+  - id: viewer
+    grants: [{ operation: tools.lookup }]
+role_mapping:
+  - { group: viewers, roles: [viewer] }
+`,
+  },
+];
+
+async function mcpConfiguration(list: ToolListOutcome): Promise<LoadedConfiguration> {
+  const result = await loadConfigurationSources(MCP_SOURCES, { resolver: new FakeResolver({}, {}, { tools: list }) });
+  if (!result.ok) throw new Error(JSON.stringify(result.issues));
+  return result.configuration;
+}
+
+const listedTools = (...tools: McpToolDefinition[]): ToolListOutcome => ({ ok: true, tools: tools.map((definition) => ({ definition, hash: mcpToolHash(definition) })), dropped: 0, durationMs: 1 });
+
+describe('CONN-4 explain of an MCP-backed operation', () => {
+  it('CONN-4 explain reports the pin state of an MCP-backed operation', async () => {
+    const input = { operationId: 'tools.lookup', groups: ['viewers'], args: { key: 'k1' } };
+    const ok = explain(input, await mcpConfiguration(listedTools(LOOKUP)));
+    expect(ok.slice(0, 1)).toEqual(['effect: allow']);
+    expect(ok.slice(4)).toEqual(['detail: -', 'pin: ok']);
+    const changed = explain(input, await mcpConfiguration(listedTools({ ...LOOKUP, description: 'changed' })));
+    expect(changed.at(-1)).toBe('pin: changed');
+    const missing = explain(input, await mcpConfiguration(listedTools()));
+    expect(missing.at(-1)).toBe('pin: missing');
+    const unverified = explain(input, await mcpConfiguration({ ok: false, code: 'network', durationMs: 1, message: 'down' }));
+    expect(unverified.at(-1)).toBe('pin: unverified');
+    // A denied call still states the pin; an HTTP-backed operation has no pin line.
+    expect(explain({ ...input, groups: [] }, await mcpConfiguration(listedTools(LOOKUP))).slice(-2)).toEqual(['detail: -', 'pin: ok']);
+    expect(explain({ operationId: 'catalog.search_products', groups: ['content'], args: SEARCH_ARGS }).some((l) => l.startsWith('pin:'))).toBe(false);
   });
 });
