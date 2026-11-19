@@ -11,7 +11,9 @@ export type ReadErrorCode =
   | 'credential_unusable'
   | 'network'
   | 'busy'
-  | 'mapping';
+  | 'mapping'
+  /** The upstream MCP tool reported an error (since 0.6.0, additive). */
+  | 'upstream_error';
 
 export type ReadOutcome =
   | {

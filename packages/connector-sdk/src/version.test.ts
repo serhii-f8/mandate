@@ -3,16 +3,19 @@ import {
   CONNECTOR_SDK_VERSION,
   CREDENTIAL_SCHEMES,
   type BulkMapping,
+  type ConnectionSettings,
   type ReadErrorCode,
+  type ToolListOutcome,
   type RequestAttempt,
   type RequestInstrumentation,
   type UpstreamMapping,
+  type UpstreamResolver,
   type WriteErrorCode,
 } from './index.js';
 
-describe('NFR-18 connector SDK 0.5.0 is additive', () => {
-  it('NFR-18 reports version 0.5.0', () => {
-    expect(CONNECTOR_SDK_VERSION).toBe('0.5.0');
+describe('NFR-18 connector SDK 0.6.0 is additive', () => {
+  it('NFR-18 reports version 0.6.0', () => {
+    expect(CONNECTOR_SDK_VERSION).toBe('0.6.0');
   });
   it('NFR-18 SEC-2 webhook_url is appended to the credential schemes, old order kept', () => {
     expect(CREDENTIAL_SCHEMES).toEqual(['bearer', 'api_key', 'basic', 'oauth_client_credentials', 'webhook_url']);
@@ -25,5 +28,13 @@ describe('NFR-18 connector SDK 0.5.0 is additive', () => {
   it('NFR-18 NFR-11 RequestInstrumentation is exported and optional in no existing type', () => {
     expectTypeOf<RequestInstrumentation['start']>().parameters.toEqualTypeOf<[RequestAttempt]>();
     expectTypeOf<RequestAttempt>().toEqualTypeOf<{ readonly connection: string; readonly method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; readonly host: string }>();
+  });
+  it('NFR-18 CONN-1 the MCP additions are optional on existing types', () => {
+    expectTypeOf<ConnectionSettings['kind']>().toEqualTypeOf<'openapi' | 'mcp' | undefined>();
+    expectTypeOf<undefined>().toExtend<UpstreamResolver['resolveTools']>();
+    expectTypeOf<UpstreamResolver['resolveTools']>().toEqualTypeOf<
+      ((input: { connection: ConnectionSettings }) => Promise<ToolListOutcome>) | undefined
+    >();
+    expectTypeOf<'upstream_error'>().toExtend<ReadErrorCode>();
   });
 });

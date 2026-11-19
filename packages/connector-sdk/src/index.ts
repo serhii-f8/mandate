@@ -6,4 +6,5 @@ export * from './connection.js';
 export * from './resolver.js';
 export * from './read.js';
 export * from './write.js';
+export * from './mcp.js';
 export * from './instrumentation.js';
