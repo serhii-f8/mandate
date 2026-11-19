@@ -310,8 +310,39 @@ describe('CFG-4 AUD-1 configuration from revisions', () => {
     const holder = await ConfigurationHolder.fromRevisions(options());
     expect(holder.state()).toMatchObject({ status: 'active' });
     expect(loads()).toEqual([]);
-    expect(logger.calls).toContainEqual(expect.objectContaining({ level: 'error', message: 'configuration load audit failed' }));
+    const state = holder.state();
+    if (state.status !== 'active') throw new Error('holder must be active');
+    expect(logger.calls).toContainEqual({ level: 'error', fields: { revision: state.revision, trigger: 'start', error: 'Error' }, message: 'configuration load audit failed' });
     expect(JSON.stringify(logger.calls)).not.toContain('audit down');
+  });
+
+  it('AUD-1 a revision whose files cannot be written locally is refused unavailable with its id and stored hash, and retried', async () => {
+    const holder = await ConfigurationHolder.fromRevisions(options());
+    const before = holder.current;
+    const next = await filesWith(EXTRA_ROLES);
+    if (next.hash === undefined) throw new Error('extra roles must load');
+    // A valid revision key whose single segment exceeds the 255-byte file name limit: writeFile throws ENAMETOOLONG.
+    const revision = await applyRevision({ ...next.files, [`${'n'.repeat(300)}.yaml`]: 'version: 1\n' }, next.hash);
+
+    const result = await holder.refresh('notify');
+    expect(result).toMatchObject({ outcome: 'refused', revision: revision.id, code: 'unavailable' });
+    expect(holder.current).toBe(before);
+    expect(loads().at(-1)).toMatchObject({
+      outcome: 'error',
+      details: { revision: revision.id, hash: next.hash, service: 'api', trigger: 'notify', code: 'unavailable' },
+    });
+    expect(await holder.refresh('poll')).toMatchObject({ outcome: 'refused', revision: revision.id, code: 'unavailable' });
+    expect(loads()).toHaveLength(3);
+  });
+
+  it('AUD-1 at start a revision whose files cannot be written locally leaves state none', async () => {
+    const own = await filesWith(undefined);
+    const revision = await applyRevision({ ...own.files, [`${'n'.repeat(300)}.yaml`]: 'version: 1\n' }, 'a'.repeat(64));
+    const holder = await ConfigurationHolder.fromRevisions(options());
+    expect(holder.state()).toEqual({ status: 'none' });
+    expect(() => holder.current).toThrow(ConfigurationUnavailableError);
+    expect(loads()).toHaveLength(1);
+    expect(loads()[0]).toMatchObject({ outcome: 'error', details: { revision: revision.id, hash: 'a'.repeat(64), trigger: 'start', code: 'unavailable' } });
   });
 
   it('CFG-4 changed files after bootstrap are ignored and logged as configuration_files_differ', async () => {

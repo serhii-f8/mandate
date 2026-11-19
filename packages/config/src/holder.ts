@@ -54,6 +54,7 @@ export interface RevisionHolderOptions {
 }
 
 const MISMATCH_ISSUE: ConfigIssue = { file: '.', path: '', message: 'computed configuration hash differs from the revision hash (configuration_mismatch)' };
+const LOCAL_UNAVAILABLE_ISSUE: ConfigIssue = { file: '.', path: '', message: 'revision files cannot be written to the temporary directory' };
 const UNAVAILABLE_ISSUE: ConfigIssue = { file: '.', path: '', message: 'configuration store unavailable' };
 
 type Source = { readonly kind: 'directory'; readonly dir: string } | { readonly kind: 'revisions'; readonly options: RevisionHolderOptions };
@@ -185,7 +186,16 @@ export class ConfigurationHolder implements ConfigurationStateSource {
   private async attempt(trigger: LoadTrigger, revision: ConfigRevision): Promise<RefreshResult> {
     const { options } = this.revisionSource();
     const base = { revision: revision.id, hash: revision.hash, service: options.service, trigger };
-    const result = await loadConfigurationFiles(revision.files, this.options);
+    let result: Awaited<ReturnType<typeof loadConfigurationFiles>>;
+    try {
+      result = await loadConfigurationFiles(revision.files, this.options);
+    } catch (error) {
+      // The revision could not be written to the local temporary directory (full or read-only
+      // tmpdir, a name over the file system limit). Not remembered: the next refresh retries it.
+      await this.audit(options, 'error', { ...base, code: 'unavailable' });
+      options.logger.warn({ revision: revision.id, trigger, code: 'unavailable', error: error instanceof Error ? error.name : 'unknown' }, 'configuration revision could not be loaded');
+      return { outcome: 'refused', revision: revision.id, code: 'unavailable', issues: [LOCAL_UNAVAILABLE_ISSUE] };
+    }
     if (!result.ok) {
       this.refuse(revision, 'invalid');
       await this.audit(options, 'error', { ...base, code: 'invalid' });
