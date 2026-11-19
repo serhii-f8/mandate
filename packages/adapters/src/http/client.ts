@@ -77,7 +77,7 @@ const HOOK_HEADERS: ReadonlySet<string> = new Set(['traceparent', 'tracestate'])
  * case), with a valid value, never the auth header or a header the request already carries
  * (SEC-3). Throws only if the hook's object does.
  */
-function hookHeaders(span: RequestSpan, taken: ReadonlySet<string>): Record<string, string> {
+export function hookHeaders(span: RequestSpan, taken: ReadonlySet<string>): Record<string, string> {
   const out: Record<string, string> = {};
   const raw: unknown = span.headers;
   // A string or array would yield index names ('0', '1', ...): only a plain object is read.
@@ -95,12 +95,19 @@ function endOf(r: RawResult): RequestAttemptEnd {
   return r.kind === 'error' ? { errorCode: r.code } : { status: r.status };
 }
 
-function isJsonContentType(value: string | undefined): boolean {
-  const ct = (value ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+/** The media type of a `content-type` value, lower-case, without parameters. */
+export function mediaType(value: string | undefined): string {
+  return (value ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+}
+
+/** True for `application/json` and `application/*+json` (any parameters). */
+export function isJsonContentType(value: string | undefined): boolean {
+  const ct = mediaType(value);
   return ct === 'application/json' || /^application\/[a-z0-9.!#$&^_-]+\+json$/.test(ct);
 }
 
-function networkMessage(err: unknown): string {
+/** A fixed network message naming only the error code (SEC-3). */
+export function networkMessage(err: unknown): string {
   const code = typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string' && /^[A-Z_]{2,40}$/.test(err.code) ? err.code : 'unknown';
   return `network error (${code})`;
 }

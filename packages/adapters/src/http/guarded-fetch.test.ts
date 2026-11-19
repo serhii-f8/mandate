@@ -347,6 +347,49 @@ describe('CONN-5 CONN-6 SEC-3 guarded fetch', () => {
     expect(gf.lastFailure()).toBeUndefined();
   });
 
+  it('CONN-6 sends nothing when the signal aborts during a token refresh', async () => {
+    up.route('POST', '/mcp', () => ({ status: 401, body: {} }));
+    const s = settings({ auth: { scheme: 'bearer' } });
+    const inner = await prepared(s, cred('bearer', { token: 'tok-1' }));
+    const controller = new AbortController();
+    const auth: PreparedAuth = {
+      header: () => inner.header(),
+      get scrubber() {
+        return inner.scrubber;
+      },
+      refreshAfter401: () => {
+        controller.abort();
+        return Promise.resolve({ ok: true });
+      },
+    };
+    const gf = createGuardedFetch(s, auth, {});
+    await expect(gf.fetch(`${up.url}/mcp`, { ...rpc(), signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(up.requests.filter((r) => r.path === '/mcp')).toHaveLength(1);
+  });
+
+  it('NFR-11 an aborted exchange ends its span as network; hook headers come only from a plain object', async () => {
+    up.route('POST', '/mcp', () => ({ status: 200, body: {}, delayMs: 30_000 }));
+    up.route('POST', '/ok', () => ({ status: 200, body: {} }));
+    const ended: RequestAttemptEnd[] = [];
+    class SpanHeaders {
+      traceparent = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
+    }
+    const instrumentation: RequestInstrumentation = {
+      // A class instance is not a plain object: its keys must be ignored like any odd hook value.
+      start: () => ({ headers: new SpanHeaders() as unknown as Record<string, string>, end: (r) => ended.push(r) }),
+    };
+    const s = settings();
+    const gf = createGuardedFetch(s, await prepared(s), { instrumentation });
+    await gf.fetch(`${up.url}/ok`, rpc());
+    expect(up.requests[0]?.headers.traceparent).toBeUndefined();
+    const controller = new AbortController();
+    const pending = gf.fetch(`${up.url}/mcp`, { ...rpc(), signal: controller.signal });
+    await expect.poll(() => up.requests.length).toBe(2);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(ended).toEqual([{ status: 200 }, { errorCode: 'network' }]);
+  });
+
   it('CONN-6 GuardedFetchError carries a fixed code', () => {
     const codes: GuardedFailureCode[] = ['timeout', 'network', 'egress_denied', 'invalid_response', 'http_status'];
     for (const code of codes) expect(new GuardedFetchError(code, 'm').code).toBe(code);

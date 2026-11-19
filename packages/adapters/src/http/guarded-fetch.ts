@@ -3,7 +3,7 @@ import { request as httpsRequest } from 'node:https';
 import type { LookupFunction } from 'node:net';
 import type { ConnectionSettings, RequestAttemptEnd, RequestInstrumentation, RequestSpan } from '@aiops/connector-sdk';
 import type { PreparedAuth } from './auth.js';
-import { MAX_RESPONSE_BYTES } from './client.js';
+import { hookHeaders, isJsonContentType, MAX_RESPONSE_BYTES, mediaType, networkMessage } from './client.js';
 import { assertEgressAllowed, createGuardedLookup, EgressDeniedError } from './egress.js';
 import { FORBIDDEN_HEADERS } from './headers.js';
 import type { Scrubber } from './scrub.js';
@@ -51,24 +51,6 @@ export interface GuardedFetchDeps {
 
 /** Response headers that describe the upstream framing, not the body handed on. */
 const DROPPED_RESPONSE_HEADERS: ReadonlySet<string> = new Set(['connection', 'keep-alive', 'transfer-encoding', 'content-length', 'content-encoding', 'set-cookie']);
-/** The only headers the request hook may add: W3C trace context (NFR-11). */
-const HOOK_HEADERS: ReadonlySet<string> = new Set(['traceparent', 'tracestate']);
-/** Same rule as the HTTP client: visible ASCII, internal spaces allowed, no controls. */
-const HOOK_VALUE = /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/;
-
-function mediaType(value: string | undefined): string {
-  return (value ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
-}
-
-function isJson(ct: string): boolean {
-  return ct === 'application/json' || /^application\/[a-z0-9.!#$&^_-]+\+json$/.test(ct);
-}
-
-function networkMessage(err: unknown): string {
-  const code = typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string' && /^[A-Z_]{2,40}$/.test(err.code) ? err.code : 'unknown';
-  return `network error (${code})`;
-}
-
 function abortReason(signal: AbortSignal): Error {
   // A plain abort() sets a DOMException named AbortError, as fetch rejects with.
   const reason: unknown = signal.reason;
@@ -82,19 +64,6 @@ function requestBody(body: RequestInit['body']): Buffer | undefined | 'unsupport
   if (ArrayBuffer.isView(body)) return Buffer.from(body.buffer, body.byteOffset, body.byteLength);
   // The SDK sends JSON strings; streams, forms and blobs are not needed and not supported.
   return 'unsupported';
-}
-
-function hookHeaders(span: RequestSpan, taken: ReadonlySet<string>): Record<string, string> {
-  const out: Record<string, string> = {};
-  const raw: unknown = span.headers;
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out;
-  for (const [rawName, value] of Object.entries(raw)) {
-    const name = rawName.toLowerCase();
-    if (!HOOK_HEADERS.has(name) || typeof value !== 'string' || !HOOK_VALUE.test(value)) continue;
-    if (taken.has(name) || Object.hasOwn(out, name)) continue;
-    out[name] = value;
-  }
-  return out;
 }
 
 function responseHeaders(raw: IncomingHttpHeaders, scrubber: Scrubber): Headers {
@@ -133,6 +102,11 @@ export function createGuardedFetch(settings: ConnectionSettings, auth: PreparedA
   /** One exchange: resolves with a web Response or rejects with GuardedFetchError (or the abort reason). */
   function exchange(url: URL, method: 'POST' | 'DELETE', base: Readonly<Record<string, string>>, body: Buffer | undefined, signal: AbortSignal | undefined): Promise<Response> {
     return new Promise<Response>((resolve, reject) => {
+      // The signal may have aborted since the caller's check (e.g. during a token refresh): nothing is sent.
+      if (signal?.aborted) {
+        reject(abortReason(signal));
+        return;
+      }
       const headers: Record<string, string> = { ...base };
       let span: RequestSpan | undefined;
       if (instrumentation) {
@@ -210,8 +184,8 @@ export function createGuardedFetch(settings: ConnectionSettings, auth: PreparedA
       };
       function onAbort(): void {
         if (!signal) return;
-        if (phase === 'headers') rejectWith(abortReason(signal), { errorCode: 'aborted' });
-        else errorBody(abortReason(signal), { errorCode: 'aborted' });
+        if (phase === 'headers') rejectWith(abortReason(signal), { errorCode: 'network' });
+        else errorBody(abortReason(signal), { errorCode: 'network' });
       }
 
       const send = url.protocol === 'https:' ? httpsRequest : httpRequest;
@@ -258,7 +232,7 @@ export function createGuardedFetch(settings: ConnectionSettings, auth: PreparedA
           resolveWith(new Response(null, { status, headers: responseHeaders(incoming.headers, scrubber) }), { status });
           return;
         }
-        if (!isJson(ct) && ct !== 'text/event-stream') {
+        if (!isJsonContentType(ct) && ct !== 'text/event-stream') {
           fail('invalid_response', 'upstream response is neither JSON nor an event stream');
           return;
         }
@@ -323,7 +297,7 @@ export function createGuardedFetch(settings: ConnectionSettings, auth: PreparedA
           incoming.destroy();
           resolveWith(new Response(null, { status, headers }), { status });
         };
-        if (!isJson(ct) || (Number.isFinite(declared) && declared > MAX_ERROR_BODY_BYTES)) {
+        if (!isJsonContentType(ct) || (Number.isFinite(declared) && declared > MAX_ERROR_BODY_BYTES)) {
           empty();
           return;
         }
