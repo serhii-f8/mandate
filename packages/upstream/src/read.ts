@@ -2,7 +2,14 @@
  * One upstream read under a configuration snapshot (design §4.2), shared by the api read
  * path and the worker: binding lookup, the GET check, the credential and the adapter call.
  */
-import { CREDENTIAL_SCHEMES, type CredentialScheme, type CredentialSource, type ReadAdapter, type ReadOutcome } from '@aiops/connector-sdk';
+import {
+  CREDENTIAL_SCHEMES,
+  type CredentialScheme,
+  type CredentialSource,
+  type McpToolAdapter,
+  type ReadAdapter,
+  type ReadOutcome,
+} from '@aiops/connector-sdk';
 import type { LoadedConfiguration } from '@aiops/config';
 import type { CredentialHandle, CredentialVault } from '@aiops/core';
 
@@ -11,7 +18,7 @@ export interface UpstreamCallLog {
   readonly correlationId: string;
   readonly operation: string;
   readonly connection: string;
-  /** HTTP method of the binding; always GET for reads (CS-1). */
+  /** HTTP method of the binding, always GET for reads (CS-1); `tools/call` for an MCP-backed read. */
   readonly method: string;
   readonly status?: number;
   readonly durationMs: number;
@@ -47,16 +54,17 @@ export interface ReadDeps {
   /** The request's configuration snapshot, the one its policy decision used (SEC-1). */
   readonly configuration: LoadedConfiguration;
   readonly vault: CredentialVault;
-  readonly adapter: ReadAdapter;
+  /** Reads HTTP bindings; calls MCP tools when it also implements `callTool` (the composite adapter does). */
+  readonly adapter: ReadAdapter & Partial<McpToolAdapter>;
   readonly correlationId?: string;
   readonly log?: (record: UpstreamCallLog) => void;
 }
 
 /**
  * One upstream read under the given configuration (design §4.2): binding lookup, the GET
- * check, the credential (opened only inside the adapter, SEC-2), the adapter call and one
- * log line with identifiers, method, status and timing only (SEC-3). No policy decision:
- * callers have made it.
+ * check, the credential (opened only inside the adapter, SEC-2), the adapter call (`read`, or
+ * `callTool` for an MCP-backed binding, CONN-1) and one log line with identifiers, method,
+ * status and timing only (SEC-3). No policy decision and no pin check: callers have made them.
  */
 export async function performRead(
   deps: ReadDeps,
@@ -68,8 +76,34 @@ export async function performRead(
   const binding = configuration.bindings.get(operationId);
   const connection = binding === undefined ? undefined : configuration.connectionSettings.get(binding.connection);
   if (binding === undefined || connection === undefined) return { ok: false, code: 'not_bound' };
-  // MCP-backed reads are not wired here yet (Phase 9 adapter plan, Task 9).
-  if (binding.kind !== 'http') return { ok: false, code: 'not_bound' };
+  const logCall = (method: string, outcome: ReadOutcome): void =>
+    deps.log?.({
+      correlationId: deps.correlationId ?? '',
+      operation: operationId,
+      connection: binding.connection,
+      method,
+      ...(outcome.status === undefined ? {} : { status: outcome.status }),
+      durationMs: outcome.durationMs,
+      ...(outcome.ok ? {} : { errorCode: outcome.code }),
+    });
+
+  if (binding.kind === 'mcp') {
+    // An adapter without tool calls cannot serve the binding. The pin is checked by the caller.
+    const { adapter } = deps;
+    if (adapter.callTool === undefined) return { ok: false, code: 'not_bound' };
+    const credential = await connectionCredential(deps.vault, connection.credentialRef);
+    if (credential === 'unusable') return { ok: false, code: 'credential_unusable', connection: binding.connection };
+    const outcome = await adapter.callTool({
+      connection,
+      tool: binding.tool,
+      args,
+      ...(credential === undefined ? {} : { credential }),
+      retryable: true,
+    });
+    logCall('tools/call', outcome);
+    return { ok: true, outcome, connection: binding.connection };
+  }
+
   // Configuration refuses a read that is not GET; checked again so nothing writes without a change-set (CS-1, MCP-4).
   if (binding.mapping.method !== 'GET') return { ok: false, code: 'not_get', connection: binding.connection };
   const credential = await connectionCredential(deps.vault, connection.credentialRef);
@@ -82,15 +116,6 @@ export async function performRead(
     ...(credential === undefined ? {} : { credential }),
     ...(options.exactValues === true ? { exactValues: true } : {}),
   });
-  deps.log?.({
-    correlationId: deps.correlationId ?? '',
-    operation: operationId,
-    connection: binding.connection,
-    method: binding.mapping.method,
-    ...(outcome.status === undefined ? {} : { status: outcome.status }),
-    durationMs: outcome.durationMs,
-    ...(outcome.ok ? {} : { errorCode: outcome.code }),
-  });
+  logCall(binding.mapping.method, outcome);
   return { ok: true, outcome, connection: binding.connection };
 }
-
