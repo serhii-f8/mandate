@@ -5,7 +5,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { context, trace, type Meter, type Tracer } from '@opentelemetry/api';
+import { context, diag, trace, type Meter, type Tracer } from '@opentelemetry/api';
 import { W3CTraceContextPropagator } from '@opentelemetry/core';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -69,6 +69,8 @@ export function startApiTelemetry(options: TelemetryOptions): ApiTelemetry {
     }
   };
 
+  let shuttingDown: Promise<void> | undefined;
+
   return {
     tracer: tracerProvider.getTracer(options.serviceName),
     meter: meterProvider.getMeter(options.serviceName),
@@ -94,9 +96,14 @@ export function startApiTelemetry(options: TelemetryOptions): ApiTelemetry {
           });
         });
       }),
-    shutdown: async () => {
-      await tracerProvider.shutdown();
-      await meterProvider.shutdown();
+    shutdown: () => {
+      // One attempt only: a failing export must not keep the meter provider from closing, nor reject.
+      shuttingDown ??= Promise.allSettled([tracerProvider.shutdown(), meterProvider.shutdown()]).then((results) => {
+        for (const result of results) {
+          if (result.status === 'rejected') diag.error('telemetry shutdown failed', result.reason);
+        }
+      });
+      return shuttingDown;
     },
   };
 }

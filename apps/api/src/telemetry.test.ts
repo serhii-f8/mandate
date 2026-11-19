@@ -59,6 +59,17 @@ describe('NFR-11 api tracing', () => {
     }
   });
 
+  it('NFR-11 shutdown resolves, once and again, when the collector is unreachable', async () => {
+    const dead = createServer();
+    await new Promise<void>((ok) => dead.listen(0, '127.0.0.1', ok));
+    const port = (dead.address() as AddressInfo).port;
+    await new Promise((ok) => dead.close(ok));
+    const telemetry = startApiTelemetry({ serviceName: 'aiops-api', otlpEndpoint: new URL(`http://127.0.0.1:${port}`), register: false });
+    telemetry.tracer.startSpan('probe').end();
+    await expect(telemetry.shutdown()).resolves.toBeUndefined();
+    await expect(telemetry.shutdown()).resolves.toBeUndefined();
+  });
+
   it('NFR-11 without an endpoint nothing is exported and spans still carry attributes', async () => {
     const telemetry = startApiTelemetry({ serviceName: 'aiops-api', register: false });
     try {
