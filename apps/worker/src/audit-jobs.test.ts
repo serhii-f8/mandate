@@ -110,6 +110,17 @@ describe('AUD-3 audit sealer job', () => {
     await second.stop();
   });
 
+  it('AUD-3 SEC-3 a failure logs the SQLSTATE beside the error name and never the message', async () => {
+    const make = (code: unknown): Error => Object.assign(new Error('row actor alice'), { code });
+    const queue = [make('40001'), make('not a code with spaces'), make(42)];
+    const jobs = createAuditJobs(deps({ seal: () => Promise.reject(queue.shift() ?? new Error('done')) })).start();
+    await vi.advanceTimersByTimeAsync(200);
+    const errors = lines.filter((l) => l.level === 'error').map((l) => l.obj);
+    expect(errors.slice(0, 3)).toEqual([{ error: 'Error', code: '40001' }, { error: 'Error' }, { error: 'Error' }]);
+    expect(JSON.stringify(lines)).not.toContain('alice');
+    await jobs.stop();
+  });
+
   it('AUD-3 stop waits for the running pass and starts no other', async () => {
     let open: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {

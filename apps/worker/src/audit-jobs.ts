@@ -19,9 +19,14 @@ export interface AuditJobsDeps {
 /** Most seal calls in one tick, so a stop is honoured within a bounded time under a long backlog. */
 export const AUDIT_SEAL_MAX_ROUNDS = 100;
 
-/** The thrown value's class name; the message may carry row content and is never logged (SEC-3). */
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : typeof error;
+/**
+ * The thrown value's class name, and the PostgreSQL SQLSTATE when it carries one; the message may
+ * carry row content and is never logged (SEC-3).
+ */
+function errorFields(error: unknown): { error: string; code?: string } {
+  const name = error instanceof Error ? error.name : typeof error;
+  const code: unknown = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code) ? { error: name, code } : { error: name };
 }
 
 /**
@@ -56,7 +61,7 @@ function repeat(intervalMs: number, pass: (stopping: () => boolean) => Promise<v
 /**
  * The worker's audit jobs beside the Temporal worker: the sealer (AUD-3) every `sealIntervalMs`
  * and retention (AUD-7) at start and every `retentionIntervalMs`. A failing pass is logged by its
- * error name only and the job keeps going; a refused retention is a warning with its reason, a
+ * error name and SQLSTATE only and the job keeps going; a refused retention is a warning with its reason, a
  * `locked` one (another worker holds the lock and audits its own run) is logged at info.
  */
 export function createAuditJobs(deps: AuditJobsDeps): { start(): { stop(): Promise<void> } } {
@@ -74,7 +79,7 @@ export function createAuditJobs(deps: AuditJobsDeps): { start(): { stop(): Promi
         if (result.sealed < batchSize || stopping()) return;
       }
     } catch (error) {
-      logger.error({ error: errorName(error) }, 'audit seal failed');
+      logger.error(errorFields(error), 'audit seal failed');
     }
   }
 
@@ -83,7 +88,7 @@ export function createAuditJobs(deps: AuditJobsDeps): { start(): { stop(): Promi
     try {
       report = await deps.retain();
     } catch (error) {
-      logger.error({ error: errorName(error) }, 'audit retention failed');
+      logger.error(errorFields(error), 'audit retention failed');
       return;
     }
     switch (report.kind) {
