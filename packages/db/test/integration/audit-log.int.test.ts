@@ -139,11 +139,15 @@ describe('AUD-4 audit details are redacted before insert', () => {
   it('AUD-4 reads the sensitive keys on every append, so a reload applies', async () => {
     let keys: ReadonlySet<string> = new Set();
     const log = new DrizzleAuditLog(database.db, { sensitiveKeys: () => keys });
-    const id = '00000000-0000-4000-8000-0000000000e3';
+    const before = '00000000-0000-4000-8000-0000000000e3';
+    const after = '00000000-0000-4000-8000-0000000000e5';
+    await log.append({ id: before, actor: 'alice', action: 'tool.call', outcome: 'ok', correlationId: 'corr-e3', details: { sku: 'A-1' } });
     keys = new Set(['sku']);
-    await log.append({ id, actor: 'alice', action: 'tool.call', outcome: 'ok', correlationId: 'corr-e3', details: { sku: 'A-1' } });
-    const [row] = await database.db.select().from(auditEvent).where(eq(auditEvent.id, id));
-    expect(row?.details).toEqual({ sku: '[redacted]' });
+    await log.append({ id: after, actor: 'alice', action: 'tool.call', outcome: 'ok', correlationId: 'corr-e5', details: { sku: 'A-1' } });
+    const [first] = await database.db.select().from(auditEvent).where(eq(auditEvent.id, before));
+    const [second] = await database.db.select().from(auditEvent).where(eq(auditEvent.id, after));
+    expect(first?.details).toEqual({ sku: 'A-1' });
+    expect(second?.details).toEqual({ sku: '[redacted]' });
   });
 
   it('AUD-4 details that cannot be redacted fail closed: AuditRedactionError and no row', async () => {

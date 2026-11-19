@@ -56,19 +56,21 @@ async function run(argv: string[], env: Record<string, string> = {}, stored = tr
   const lines: string[] = [];
   const vault = new MemoryVault();
   if (stored) await vault.put({ ref: 'shop-token', scheme: 'bearer', secret: { token: TOKEN }, actor: 'setup' });
-  const audit = new InMemoryAuditLog();
+  let audit = new InMemoryAuditLog();
   const storeInputs: StoreInput[] = [];
-  const store: CliStore = {
-    vault,
-    audit,
-    rotate: () => Promise.resolve({ rewrapped: 0, onOldVersions: 0, failed: [] }),
-    close: () => Promise.resolve(),
-  };
   const deps: CliDeps = {
     env: { AIOPS_CONFIG_DIR: configDir, DATABASE_URL: 'postgres://u:p@h/db', AIOPS_MASTER_KEYS: 'x', ...env },
     openStore: (input) => {
       storeInputs.push(input);
-      return Promise.resolve(store);
+      // Like openStoreDefault: the store's audit log redacts with the keys it is opened with.
+      const { sensitiveKeys } = input;
+      audit = new InMemoryAuditLog(sensitiveKeys === undefined ? {} : { sensitiveKeys: () => sensitiveKeys });
+      return Promise.resolve({
+        vault,
+        audit,
+        rotate: () => Promise.resolve({ rewrapped: 0, onOldVersions: 0, failed: [] }),
+        close: () => Promise.resolve(),
+      } satisfies CliStore);
     },
     newId: () => 'id-1',
     // Do not pick up the repository's presets directory in these tests.
@@ -170,14 +172,69 @@ describe('CFG-3 aiops validate and test-connection', () => {
 });
 
 describe('AUD-4 the CLI audit log gets the loaded configuration\'s sensitive keys', () => {
+  // A write operation whose manifest marks `description` sensitive, beside the fixture's reads.
+  const SENSITIVE_OPERATIONS = `version: 1
+operations:
+  - id: audit.get_by_sku
+    connection: shop
+    risk: read
+    description: Products by SKU.
+    upstream: { method: GET, path: /V1/products, query: { skus: { arg: skus, join: ',' }, brand: { arg: brand }, fields: { arg: fields, join: ',' } }, response: { items: items, fields_from_arg: fields } }
+    input_schema:
+      type: object
+      properties: { skus: { type: array, items: { type: string } }, brand: { type: string }, fields: { type: array, items: { type: string } } }
+      required: [skus, fields]
+    fields_arg: fields
+  - id: audit.search
+    connection: shop
+    risk: read
+    description: Search.
+    upstream: { method: GET, path: /V1/products/search, query: { brand: { arg: brand }, current_page: { arg: current_page }, page_size: { arg: page_size }, fields: { arg: fields, join: ',' } }, response: { items: items, fields_from_arg: fields } }
+    input_schema:
+      type: object
+      properties: { brand: { type: string }, current_page: { type: integer }, page_size: { type: integer }, fields: { type: array, items: { type: string } } }
+      required: [fields]
+    fields_arg: fields
+  - id: audit.update_content
+    connection: shop
+    risk: write
+    description: Update content.
+    upstream: { method: POST, path: /async/bulk/V1/products }
+    input_schema:
+      type: object
+      properties:
+        brand: { type: string }
+        skus: { type: array, items: { type: string } }
+        changes: { type: object, properties: { name: { type: string }, description: { type: string } }, additionalProperties: false }
+      required: [brand, changes]
+    manifest:
+      id_field: sku
+      ids_arg: skus
+      values_arg: changes
+      fields: [name, description]
+      scope_args: { brand: brand }
+      read_before: { operation: audit.get_by_sku, ids_arg: skus, args: { brand: { arg: brand } } }
+      selector: { operation: audit.search, args: { brand: { arg: brand } }, page_arg: current_page, page_size_arg: page_size }
+      sensitive_fields: [description]
+      rollback: { strategy: replay_previous_state }
+`;
+
   it('AUD-4 test-connection opens the store with the loaded configuration\'s sensitive fields', async () => {
-    const loaded = await loadConfigurationDirectory(configDir);
-    if (!loaded.ok) throw new Error('fixture configuration invalid');
-    const { code, storeInputs } = await run(['test-connection', 'shop']);
-    expect(code).toBe(0);
-    expect(storeInputs).toHaveLength(1);
-    expect(storeInputs[0]?.sensitiveKeys).toBeInstanceOf(Set);
-    expect([...(storeInputs[0]?.sensitiveKeys ?? [])]).toEqual([...loaded.configuration.sensitiveFields]);
+    const sensitiveDir = await mkdtemp(join(tmpdir(), 'aiops-cli-sensitive-'));
+    try {
+      await cp(configDir, sensitiveDir, { recursive: true });
+      await writeFile(join(sensitiveDir, 'sensitive.yaml'), SENSITIVE_OPERATIONS);
+      const { code, lines, storeInputs, audit } = await run(['test-connection', 'shop'], { AIOPS_CONFIG_DIR: sensitiveDir });
+      expect(lines[0]).toMatch(/^ok /);
+      expect(code).toBe(0);
+      expect(storeInputs).toHaveLength(1);
+      expect([...(storeInputs[0]?.sensitiveKeys ?? [])]).toEqual(['description']);
+      // The store's audit log redacts the manifest key; a probe event shows the set reached it.
+      await audit.append({ id: 'probe', actor: 'cli', action: 'connection.test', outcome: 'ok', correlationId: 'c', details: { description: 'copy', count: 1 } });
+      expect(audit.events.at(-1)?.details).toEqual({ description: '[redacted]', count: 1 });
+    } finally {
+      await rm(sensitiveDir, { recursive: true });
+    }
   });
 
   it('AUD-4 rotate loads no configuration and opens the store without sensitive keys', async () => {
