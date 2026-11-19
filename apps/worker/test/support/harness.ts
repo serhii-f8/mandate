@@ -17,10 +17,10 @@ import {
   type ChangesetActivities,
 } from '@aiops/temporal';
 import { ScriptedWriter } from '@aiops/testing';
-import { Client } from '@temporalio/client';
+import { Client, type ClientInterceptors } from '@temporalio/client';
 import type { Duration } from '@temporalio/common';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
-import { DefaultLogger, Runtime, type NativeConnection, type Worker } from '@temporalio/worker';
+import { DefaultLogger, Runtime, type NativeConnection, type Worker, type WorkerPlugin } from '@temporalio/worker';
 import { createActivities, createExecutionGuard, echo, type ActivityDeps, type ExecutionSettings } from '../../src/activities/index.js';
 import { createWorker } from '../../src/worker.js';
 import { testConfiguration } from './configuration.js';
@@ -50,6 +50,8 @@ export function quietTemporalLogs(): void {
 export interface InfraOptions {
   /** The client's Temporal identity. Default: the SDK's (`<pid>@<hostname>`). */
   readonly identity?: string;
+  /** The client's interceptors, e.g. the OpenTelemetry client interceptor (NFR-11). */
+  readonly clientInterceptors?: ClientInterceptors;
 }
 
 export async function startInfrastructure(opts: InfraOptions = {}): Promise<Infra> {
@@ -64,6 +66,7 @@ export async function startInfrastructure(opts: InfraOptions = {}): Promise<Infr
       namespace: 'default',
       dataConverter: clientDataConverter(parseTemporalKeys(TEST_TEMPORAL_KEYS)),
       ...(opts.identity === undefined ? {} : { identity: opts.identity }),
+      ...(opts.clientInterceptors === undefined ? {} : { interceptors: opts.clientInterceptors }),
     });
     return {
       env: started,
@@ -136,6 +139,8 @@ export interface TestWorkerOptions {
   readonly identity?: string;
   /** Called with the activity name before every activity invocation; the activity waits for a returned promise. */
   readonly spy?: (activity: string) => unknown;
+  /** Worker plugins, e.g. the tracing plugin (NFR-11). */
+  readonly plugins?: readonly WorkerPlugin[];
 }
 
 export interface TestWorker {
@@ -203,6 +208,7 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
     ...(opts.shutdownForceTime === undefined ? {} : { shutdownForceTime: opts.shutdownForceTime }),
     ...(opts.maxCachedWorkflows === undefined ? {} : { maxCachedWorkflows: opts.maxCachedWorkflows }),
     ...(opts.identity === undefined ? {} : { identity: opts.identity }),
+    ...(opts.plugins === undefined ? {} : { plugins: opts.plugins }),
   });
   const running = worker.run();
   // A failed run is reported by stop(); until then it must not count as an unhandled rejection.

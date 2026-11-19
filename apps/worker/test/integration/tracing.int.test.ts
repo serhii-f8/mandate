@@ -1,0 +1,168 @@
+/**
+ * Tracing through Temporal with the OpenTelemetry plugin and the encrypting codec on (NFR-11,
+ * SEC-4, ADR 0047): one trace runs from the caller through the workflow start, the workflow's
+ * activity schedules and the activity runs, and the only plaintext the trace adds to history is
+ * the W3C context in the `_tracer-data` header.
+ */
+import type { ReadPage, UpstreamReader } from '@aiops/core';
+import { trace, type Span } from '@opentelemetry/api';
+import { InMemorySpanExporter, SimpleSpanProcessor, type ReadableSpan } from '@opentelemetry/sdk-trace-base';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import { ScriptedWriter } from '@aiops/testing';
+import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors-opentelemetry';
+import { historyToJSON } from '@temporalio/common/lib/proto-utils';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTracingPlugin } from '../../src/telemetry/tracing.js';
+import type { changesetWorkflow } from '../../src/workflows/changeset.js';
+import { startExecutionOf } from '../support/changesets.js';
+import { startInfrastructure, startTestWorker, type Infra, type TestWorker } from '../support/harness.js';
+import { isSdkPlaintext, payloadEncodings, TRACE_HEADER, traceContextOf, traceIdOf } from '../support/history.js';
+import { preparedByWorkflow, statusOf } from '../support/prepared-by-workflow.js';
+
+const exporter = new InMemorySpanExporter();
+let provider: NodeTracerProvider;
+let infra: Infra;
+
+beforeAll(async () => {
+  provider = new NodeTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
+  provider.register();
+  infra = await startInfrastructure({ clientInterceptors: { workflow: [new OpenTelemetryWorkflowClientInterceptor()] } });
+});
+
+afterAll(async () => {
+  try {
+    await infra.close();
+  } finally {
+    await provider.shutdown();
+    trace.disable();
+  }
+});
+
+beforeEach(() => {
+  exporter.reset();
+});
+
+/** Reads answer every requested SKU with brand `acme`. */
+const catalogReader: UpstreamReader = {
+  read(_operationId, args): Promise<ReadPage> {
+    const skus = Array.isArray(args.skus) ? args.skus.filter((s): s is string => typeof s === 'string') : [];
+    return Promise.resolve({ ok: true, items: skus.map((sku) => ({ sku, brand: 'acme', name: `old ${sku}` })), truncated: false });
+  },
+};
+
+const handleOf = (id: string) => infra.client.workflow.getHandle<typeof changesetWorkflow>(id);
+
+async function withTracedWorker(run: (worker: TestWorker) => Promise<void>): Promise<void> {
+  const worker = await startTestWorker(infra, {
+    reader: catalogReader,
+    writer: new ScriptedWriter(),
+    plugins: [createTracingPlugin({ spanProcessor: new SimpleSpanProcessor(exporter), serviceName: 'aiops-worker' })],
+  });
+  try {
+    await run(worker);
+  } finally {
+    await worker.stop();
+  }
+}
+
+/** Runs `fn` under an active root span and ends it; returns the root's trace and span ID. */
+async function underRoot<T>(fn: () => Promise<T>): Promise<{ result: T; traceId: string; spanId: string }> {
+  return trace.getTracer('test').startActiveSpan('test.root', async (root: Span) => {
+    try {
+      const { traceId, spanId } = root.spanContext();
+      return { result: await fn(), traceId, spanId };
+    } finally {
+      root.end();
+    }
+  });
+}
+
+const finished = (): ReadableSpan[] => exporter.getFinishedSpans();
+
+/** The one finished span called `name`. */
+function spanNamed(name: string): ReadableSpan {
+  const spans = finished().filter((s) => s.name === name);
+  expect(spans.map((s) => s.name), `exactly one ${name}`).toEqual([name]);
+  const [span] = spans;
+  if (span === undefined) throw new Error(`no span ${name}`);
+  return span;
+}
+
+describe('NFR-11 tracing through Temporal', () => {
+  it("NFR-11 one trace links the caller, the workflow start, the workflow's activity schedules and the activity runs", async () => {
+    await withTracedWorker(async (worker) => {
+      const { result: prepared, traceId, spanId } = await underRoot(() => preparedByWorkflow(infra, worker, ['t-0001', 't-0002']));
+      await startExecutionOf(infra.repository, prepared);
+      await worker.executor.wake(prepared.id);
+      await vi.waitFor(
+        async () => {
+          expect(await statusOf(infra, prepared.id)).toBe('completed');
+          expect(finished().map((s) => s.name)).toContain('RunActivity:finishExecution');
+        },
+        { timeout: 30_000, interval: 100 },
+      );
+
+      const start = spanNamed('StartWorkflow:changesetWorkflow');
+      expect(start.spanContext().traceId).toBe(traceId);
+      expect(start.parentSpanId).toBe(spanId);
+
+      const schedule = spanNamed('StartActivity:prepare');
+      const run = spanNamed('RunActivity:prepare');
+      expect(schedule.spanContext().traceId).toBe(traceId);
+      expect(run.spanContext().traceId).toBe(traceId);
+      expect(run.parentSpanId).toBe(schedule.spanContext().spanId);
+
+      for (const name of ['RunActivity:executeBatch', 'RunActivity:finishExecution']) {
+        const spans = finished().filter((s) => s.name === name);
+        expect(spans.length, name).toBeGreaterThan(0);
+        for (const s of spans) expect(s.spanContext().traceId, name).toBe(traceId);
+      }
+    });
+  }, 60_000);
+
+  it('NFR-11 the workflow span is exported when the workflow closes', async () => {
+    await withTracedWorker(async (worker) => {
+      const { result: prepared, traceId } = await underRoot(() => preparedByWorkflow(infra, worker, ['t-0001']));
+      await worker.executor.cancel({ changesetId: prepared.id, actor: 'alice', correlationId: 'corr-cancel' });
+      await expect(handleOf(prepared.id).result()).resolves.toEqual({ status: 'cancelled' });
+      await vi.waitFor(
+        () => {
+          expect(finished().map((s) => s.name)).toContain('RunWorkflow:changesetWorkflow');
+        },
+        { timeout: 30_000, interval: 100 },
+      );
+
+      const start = spanNamed('StartWorkflow:changesetWorkflow');
+      const workflow = spanNamed('RunWorkflow:changesetWorkflow');
+      expect(workflow.spanContext().traceId).toBe(traceId);
+      expect(workflow.parentSpanId).toBe(start.spanContext().spanId);
+    });
+  }, 60_000);
+
+  it('SEC-4 SEC-3 the trace header carries only W3C trace context and every other payload is encrypted', async () => {
+    await withTracedWorker(async (worker) => {
+      const { result: prepared, traceId } = await underRoot(() => preparedByWorkflow(infra, worker, ['t-0001']));
+      const history: unknown = JSON.parse(historyToJSON(await handleOf(prepared.id).fetchHistory()));
+      const events = (history as { events?: Record<string, { header?: { fields?: Record<string, unknown> } }>[] }).events ?? [];
+
+      const headers = [
+        events[0]?.workflowExecutionStartedEventAttributes?.header?.fields?.[TRACE_HEADER],
+        ...events.flatMap((e) => (e.activityTaskScheduledEventAttributes === undefined ? [] : [e.activityTaskScheduledEventAttributes.header?.fields?.[TRACE_HEADER]])),
+      ];
+      // The start event and at least `inspect` and `prepare`.
+      expect(headers.length).toBeGreaterThanOrEqual(3);
+      for (const header of headers) {
+        const context = traceContextOf(header);
+        expect(context, 'only traceparent/tracestate').toBeDefined();
+        expect(traceIdOf(context)).toBe(traceId);
+      }
+
+      const encodings = payloadEncodings(history, isSdkPlaintext);
+      expect(encodings.length).toBeGreaterThan(0);
+      expect(new Set(encodings)).toEqual(new Set(['binary/encrypted']));
+
+      await worker.executor.cancel({ changesetId: prepared.id, actor: 'alice', correlationId: 'corr-cleanup' });
+      await expect(handleOf(prepared.id).result()).resolves.toEqual({ status: 'cancelled' });
+    });
+  }, 60_000);
+});

@@ -1,7 +1,7 @@
 import { extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DataConverter, Duration } from '@temporalio/common';
-import { Worker, type NativeConnection, type WorkerOptions } from '@temporalio/worker';
+import { Worker, type NativeConnection, type WorkerOptions, type WorkerPlugin } from '@temporalio/worker';
 import type { WorkerActivities } from './activities/index.js';
 
 const sourceExtension = extname(fileURLToPath(import.meta.url));
@@ -39,6 +39,8 @@ export interface CreateWorkerOptions {
   readonly maxCachedWorkflows?: number;
   /** Default: the SDK's (`<pid>@<hostname>`); the history recorder sets a fixed one. */
   readonly identity?: string;
+  /** Worker plugins, e.g. the tracing plugin (NFR-11); also applied to the workflow bundle. */
+  readonly plugins?: readonly WorkerPlugin[];
 }
 
 export function createWorker(options: CreateWorkerOptions): Promise<Worker> {
@@ -54,5 +56,7 @@ export function createWorker(options: CreateWorkerOptions): Promise<Worker> {
     ...(options.shutdownForceTime === undefined ? {} : { shutdownForceTime: options.shutdownForceTime }),
     ...(options.maxCachedWorkflows === undefined ? {} : { maxCachedWorkflows: options.maxCachedWorkflows }),
     ...(options.identity === undefined ? {} : { identity: options.identity }),
+    // The SDK's option is a mutable array.
+    ...(options.plugins === undefined ? {} : { plugins: [...options.plugins] }),
   });
 }

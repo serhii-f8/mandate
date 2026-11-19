@@ -2,9 +2,12 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseTemporalKeys, workerDataConverter } from '@aiops/temporal';
 import type { DataConverter } from '@temporalio/common';
+import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { Worker } from '@temporalio/worker';
 import { describe, expect, it } from 'vitest';
+import { createTracingPlugin } from '../../src/telemetry/tracing.js';
 import { workflowBundlerOptions, workflowsPath } from '../../src/worker.js';
+import { isSdkPlaintext, payloadEncodings, plain } from '../support/history.js';
 import { TEST_TEMPORAL_KEYS } from '../support/keys.js';
 
 const historiesDir = fileURLToPath(new URL('../workflow-histories/', import.meta.url));
@@ -73,67 +76,6 @@ const REQUIRED_CHANGESET_FIXTURES = [
   'rollback-continued-run3',
 ];
 
-/**
- * SDK-internal payloads that never pass the codec and carry only a patch id: the `core_patch`
- * marker's `patch-data` (`{ id, deprecated }`) and the `TemporalChangeVersion` search attribute
- * (`[id]`). The SEC-4 walk accepts them only when the decoded content has exactly that shape; any
- * other content under these keys is walked and reported like every other payload.
- */
-const PATCH_ID = /^[a-z0-9-]+-\d{8}$/;
-
-function isPatchData(value: unknown): boolean {
-  if (typeof value !== 'object' || value === null) return false;
-  const keys = Object.keys(value).sort();
-  const v = value as { id?: unknown; deprecated?: unknown };
-  return keys.join() === 'deprecated,id' && typeof v.id === 'string' && PATCH_ID.test(v.id) && typeof v.deprecated === 'boolean';
-}
-
-function isPatchIdList(value: unknown): boolean {
-  return Array.isArray(value) && value.every((id) => typeof id === 'string' && PATCH_ID.test(id));
-}
-
-/** A json/plain payload `{ metadata, data }` whose decoded data passes `check`. */
-function isPatchPayload(payload: unknown, check: (decoded: unknown) => boolean): boolean {
-  if (typeof payload !== 'object' || payload === null) return false;
-  const { metadata, data } = payload as { metadata?: { encoding?: unknown }; data?: unknown };
-  if (typeof metadata?.encoding !== 'string' || Buffer.from(metadata.encoding, 'base64').toString('utf8') !== 'json/plain') return false;
-  if (typeof data !== 'string') return false;
-  try {
-    return check(JSON.parse(Buffer.from(data, 'base64').toString('utf8')));
-  } catch {
-    return false;
-  }
-}
-
-/** True when `value` under `key` is a genuine SDK patch payload. */
-function isPatchMetadata(key: string, value: unknown): boolean {
-  if (key === 'TemporalChangeVersion') return isPatchPayload(value, isPatchIdList);
-  if (key !== 'patch-data' || typeof value !== 'object' || value === null) return false;
-  const payloads = (value as { payloads?: unknown }).payloads;
-  return Array.isArray(payloads) && payloads.length === 1 && isPatchPayload(payloads[0], isPatchData);
-}
-
-/** Every payload's `metadata.encoding` in a history JSON (base64 in the proto JSON form), decoded. */
-function payloadEncodings(node: unknown): string[] {
-  if (Array.isArray(node)) return node.flatMap(payloadEncodings);
-  if (node === null || typeof node !== 'object') return [];
-  const found: string[] = [];
-  for (const [key, value] of Object.entries(node) as [string, unknown][]) {
-    if (isPatchMetadata(key, value)) continue;
-    if (key === 'metadata' && value !== null && typeof value === 'object') {
-      const encoding: unknown = (value as { encoding?: unknown }).encoding;
-      if (typeof encoding === 'string') found.push(Buffer.from(encoding, 'base64').toString('utf8'));
-    }
-    found.push(...payloadEncodings(value));
-  }
-  return found;
-}
-
-const plain = (data: string): { metadata: { encoding: string }; data: string } => ({
-  metadata: { encoding: Buffer.from('json/plain').toString('base64') },
-  data: Buffer.from(data).toString('base64'),
-});
-
 describe('SEC-4 patch payload exemption', () => {
   it('SEC-4 accepts the SDK patch marker and change-version shapes only', () => {
     const genuine = { 'patch-data': { payloads: [plain('{"id":"a-b-20261118","deprecated":false}')] }, TemporalChangeVersion: plain('["a-b-20261118"]') };
@@ -144,6 +86,32 @@ describe('SEC-4 patch payload exemption', () => {
     expect(payloadEncodings({ 'patch-data': { payloads: [plain('{"id":"a-b-20261118","deprecated":false,"secret":"x"}')] } })).toEqual(['json/plain']);
     expect(payloadEncodings({ 'patch-data': { payloads: [plain('{"customer":"jane"}')] } })).toEqual(['json/plain']);
     expect(payloadEncodings({ TemporalChangeVersion: plain('["jane@example.com"]') })).toEqual(['json/plain']);
+  });
+});
+
+describe('SEC-4 trace header exemption (ADR 0047)', () => {
+  const traceparent = '00-0123456789abcdef0123456789abcdef-0123456789abcdef-01';
+
+  it('SEC-4 SEC-3 accepts a _tracer-data header carrying only W3C trace context', () => {
+    const headers = {
+      a: { '_tracer-data': plain(JSON.stringify({ traceparent })) },
+      b: { '_tracer-data': plain(JSON.stringify({ traceparent, tracestate: 'vendor=x' })) },
+      c: { '_tracer-data': plain('{}') },
+    };
+    expect(payloadEncodings(headers, isSdkPlaintext)).toEqual([]);
+  });
+
+  it('SEC-4 SEC-3 reports a _tracer-data header carrying anything else', () => {
+    expect(payloadEncodings({ '_tracer-data': plain(JSON.stringify({ traceparent, customer: 'jane' })) }, isSdkPlaintext)).toEqual(['json/plain']);
+    expect(payloadEncodings({ '_tracer-data': plain(JSON.stringify({ traceparent: 'jane@example.com' })) }, isSdkPlaintext)).toEqual(['json/plain']);
+    expect(payloadEncodings({ '_tracer-data': plain(JSON.stringify({ tracestate: 'vendor=x' })) }, isSdkPlaintext)).toEqual(['json/plain']);
+    expect(payloadEncodings({ '_tracer-data': plain('["00"]') }, isSdkPlaintext)).toEqual(['json/plain']);
+    // Under another key the same content is an ordinary payload.
+    expect(payloadEncodings({ other: plain(JSON.stringify({ traceparent })) }, isSdkPlaintext)).toEqual(['json/plain']);
+  });
+
+  it('SEC-4 the replay gate itself does not exempt trace headers', () => {
+    expect(payloadEncodings({ '_tracer-data': plain(JSON.stringify({ traceparent })) })).toEqual(['json/plain']);
   });
 });
 
@@ -177,5 +145,26 @@ describe('EXE-10 workflow replay gate', () => {
         name,
       ),
     ).resolves.toBeUndefined();
+  });
+
+  const exporter = new InMemorySpanExporter();
+
+  it.each(fixtures)('EXE-10 NFR-11 replays $type/$name with the OpenTelemetry plugin installed', async ({ type, path, name }) => {
+    const history: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    const dataConverter = converterFor(type);
+    const plugins = [createTracingPlugin({ spanProcessor: new SimpleSpanProcessor(exporter), serviceName: 'aiops-worker' })];
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath, bundlerOptions: workflowBundlerOptions(), plugins, ...(dataConverter === undefined ? {} : { dataConverter }) },
+        history,
+        name,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it('NFR-11 replay exports no workflow span', () => {
+    // Sinks are not called during replay, so the workflow's spans never reach the processor.
+    const names = exporter.getFinishedSpans().map((s) => s.name);
+    expect(names.filter((n) => n.startsWith('RunWorkflow:') || n.startsWith('StartActivity:'))).toEqual([]);
   });
 });
