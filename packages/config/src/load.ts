@@ -7,7 +7,7 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import type { ConnectionSettings, CredentialScheme, SpecIssue, UpstreamResolver } from '@aiops/connector-sdk';
+import type { ConnectionSettings, CredentialScheme, SpecIssue, ToolListOutcome, UpstreamResolver } from '@aiops/connector-sdk';
 import type { DisabledOperation, GrantDefinition, PolicyConfiguration, RoleApprovalRule, RoleDefinition, RoleNotifyTargets } from '@aiops/core';
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
 import { pathToString, type ConfigIssue } from './issues.js';
@@ -349,7 +349,14 @@ export async function loadConfigurationSources(sources: readonly { file: string;
         .filter((state) => state.located.value.adapter === 'mcp')
         .map(async ({ settings }): Promise<readonly [string, McpCatalogState]> => {
           if (resolveTools === undefined) return [settings.id, { status: 'skipped' }];
-          return [settings.id, toMcpCatalog(await resolveTools({ connection: settings }), now())];
+          let outcome: ToolListOutcome;
+          try {
+            outcome = await resolveTools({ connection: settings });
+          } catch {
+            // Adapters answer with outcomes; a rejection is a lister fault and must not fail the load (R1).
+            return [settings.id, { status: 'unlisted', code: 'network' }];
+          }
+          return [settings.id, toMcpCatalog(outcome, now())];
         }),
     ),
   );

@@ -224,6 +224,22 @@ describe('CONN-1 tool catalog at load', () => {
     expect(toMcpCatalog(listOf(...many.slice(0, 1000)), 7)).toMatchObject({ status: 'listed' });
   });
 
+  it('CONN-1 R1 a 20,000-level tool schema makes the list invalid_response instead of throwing', () => {
+    const deep = JSON.parse(`${'{"type":"object","properties":{"a":'.repeat(20_000)}{}${'}}'.repeat(20_000)}`) as Record<string, unknown>;
+    const hostile = { ok: true as const, tools: [{ definition: { name: 'deep', inputSchema: deep }, hash: 'sha256:x' }], dropped: 0, durationMs: 1 };
+    expect(toMcpCatalog(hostile, 7)).toEqual({ status: 'unlisted', code: 'invalid_response' });
+    const deepAnnotations = JSON.parse(`${'{"a":'.repeat(20_000)}1${'}'.repeat(20_000)}`) as Record<string, unknown>;
+    const viaAnnotations = { ...hostile, tools: [{ definition: { name: 'deep', inputSchema: { type: 'object' }, annotations: deepAnnotations }, hash: 'sha256:x' }] };
+    expect(toMcpCatalog(viaAnnotations, 7)).toEqual({ status: 'unlisted', code: 'invalid_response' });
+  });
+
+  it('CONN-1 R1 a resolveTools that rejects leaves that catalog unlisted and the load ok', async () => {
+    const resolver = { resolveSpec: () => Promise.resolve({ ok: true as const, catalog: [] }), resolveTools: () => Promise.reject(new Error('adapter bug')) };
+    const config = ok(await load({ resolver }));
+    expect(config.mcpCatalogs.get('tools')).toEqual({ status: 'unlisted', code: 'network' });
+    expect(config.bindings.get('tools.echo')).toMatchObject({ kind: 'mcp' });
+  });
+
   it('CONN-4 toMcpCatalog hashes the definition itself, not the hash the adapter reported', () => {
     const catalog = toMcpCatalog({ ok: true, tools: [{ definition: echo, hash: `sha256:${'0'.repeat(64)}` }], dropped: 0, durationMs: 1 }, 7);
     expect(catalog).toMatchObject({ status: 'listed', tools: [{ name: 'echo', hash: mcpToolHash(echo) }] });

@@ -19,6 +19,12 @@ export const PIN_PATTERN = /^sha256:[0-9a-f]{64}$/;
 export const MAX_MCP_TOOLS = 1000;
 /** Deepest schema nesting a derived schema may have (the root is level 1). */
 export const MAX_SCHEMA_DEPTH = 32;
+/**
+ * Deepest JSON nesting of a listed tool definition: a 32-level schema needs about 70 JSON
+ * levels (maps and arrays between schemas), so this leaves a wide margin while keeping the
+ * recursive `canonicalJson` of the hash far from the stack limit (R1).
+ */
+export const MAX_DEFINITION_DEPTH = 256;
 
 export const mcpUpstreamSchema = z.strictObject({
   tool: z.string().regex(MCP_TOOL_NAME),
@@ -143,7 +149,9 @@ function deriveSchema(schema: unknown, level: number): unknown {
  * The input schema offered for a tool (SEC-6, ADR 0051 item 3): only the JSON Schema
  * 2020-12 validation keywords survive, at every level, so no upstream prose or unknown
  * key reaches a client. `undefined` when the root is not `type: 'object'`, the nesting is
- * deeper than 32 levels, or a keyword has a value of the wrong shape.
+ * deeper than 32 levels, or a schema-valued keyword (`properties`, `items`, `anyOf`, ...) is
+ * not a schema, map or array of schemas. Data keywords (`type`, `enum`, `minimum`, ...) are
+ * copied as JSON; a bad value there is refused when `pinStateOf` compiles the schema.
  */
 export function deriveMcpInputSchema(schema: unknown): Readonly<Record<string, unknown>> | undefined {
   if (!isPlainObject(schema) || schema.type !== 'object') return undefined;
@@ -155,12 +163,24 @@ export function deriveMcpInputSchema(schema: unknown): Readonly<Record<string, u
   }
 }
 
+/** True when `value` nests deeper than `max` JSON levels. Iterative, so a hostile depth cannot overflow the stack. */
+function deeperThan(value: unknown, max: number): boolean {
+  const stack: [unknown, number][] = [[value, 1]];
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    const [node, depth] = next;
+    if (typeof node !== 'object' || node === null) continue;
+    if (depth > max) return true;
+    for (const child of Object.values(node)) stack.push([child, depth + 1]);
+  }
+  return false;
+}
+
 const UNLISTED_INVALID: McpCatalogState = Object.freeze({ status: 'unlisted', code: 'invalid_response' });
 
 /**
  * The catalog of one tool list (CONN-1, CONN-4). Tools with names outside `MCP_TOOL_NAME`
  * are dropped and counted; duplicate names or more than 1000 tools make the whole list
- * `invalid_response`. Each hash is recomputed from the definition, so a pin is checked
+ * `invalid_response`, as does a definition nested deeper than `MAX_DEFINITION_DEPTH`. Each hash is recomputed from the definition, so a pin is checked
  * against what was listed, not against what the adapter claims.
  */
 export function toMcpCatalog(outcome: ToolListOutcome, listedAt: number): McpCatalogState {
@@ -176,6 +196,8 @@ export function toMcpCatalog(outcome: ToolListOutcome, listedAt: number): McpCat
     }
     if (names.has(definition.name)) return UNLISTED_INVALID;
     names.add(definition.name);
+    // Before hashing: canonicalJson recurses, and the list must never make the load throw (R1).
+    if (deeperThan(definition, MAX_DEFINITION_DEPTH)) return UNLISTED_INVALID;
     let hash: string;
     try {
       hash = mcpToolHash(definition);
