@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { open, readFile, rename, rm, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 import { CanonicalJsonError, checkLink, GENESIS_HASH, type ChainBreak, type ChainHead, type SealedChainRow } from '@aiops/core';
 import type pg from 'pg';
 import { CHAIN_COLUMNS, toSealedChainRow } from './audit-chain.js';
@@ -32,7 +33,7 @@ export type ArchiveReport =
   | { readonly ok: true; readonly first: number; readonly last: number; readonly count: number }
   | {
       readonly ok: false;
-      readonly reason: 'manifest_unreadable' | 'sha256_mismatch' | 'count_mismatch' | 'range_mismatch' | 'no_anchor' | ChainBreak;
+      readonly reason: 'manifest_unreadable' | 'archive_unreadable' | 'sha256_mismatch' | 'count_mismatch' | 'range_mismatch' | 'no_anchor' | ChainBreak;
       readonly chainPos?: number;
     };
 
@@ -99,9 +100,16 @@ async function writeSynced(tmp: string, fill: (handle: FileHandle) => Promise<vo
  * `audit-<first>-<last>.jsonl` and its manifest each to `.<name>.tmp`, fsyncs and renames them.
  * The first break returns before any rename, and every `.tmp` file opened is removed on a break
  * or an error (ruling T8/F7). An existing archive of the same name is replaced (a rerun after a
- * crash between archive and delete). Errors carry no row content (SEC-3).
+ * crash between archive and delete). `options.now` stamps `createdAt` (default: the wall clock).
+ * Errors carry no row content (SEC-3).
  */
-export async function writeAuditArchive(pool: pg.Pool, dir: string, start: ChainHead, last: number): Promise<ArchiveWriteResult> {
+export async function writeAuditArchive(
+  pool: pg.Pool,
+  dir: string,
+  start: ChainHead,
+  last: number,
+  options?: { readonly now?: () => Date },
+): Promise<ArchiveWriteResult> {
   if (!Number.isSafeInteger(last) || last <= start.pos) throw new Error('archive range is empty');
   const first = start.pos + 1;
   const name = stem(first, last);
@@ -133,7 +141,7 @@ export async function writeAuditArchive(pool: pg.Pool, dir: string, start: Chain
       prevHash: start.hash,
       lastHash: previous.hash,
       sha256: `sha256:${digest.digest('hex')}`,
-      createdAt: new Date().toISOString(),
+      createdAt: (options?.now ?? (() => new Date()))().toISOString(),
     };
     await writeSynced(tmpManifest, async (handle) => {
       await handle.write(`${JSON.stringify(manifest, null, 2)}\n`, null, 'utf8');
@@ -151,8 +159,9 @@ export async function writeAuditArchive(pool: pg.Pool, dir: string, start: Chain
     return { ok: true, file, manifest };
   } finally {
     if (!renamed) {
-      await rm(tmpFile, { force: true });
-      await rm(tmpManifest, { force: true });
+      // Cleanup is best effort: its failure must not mask the error or break that got us here.
+      await rm(tmpFile, { force: true }).catch(() => undefined);
+      await rm(tmpManifest, { force: true }).catch(() => undefined);
     }
   }
 }
@@ -266,53 +275,97 @@ function parseLine(line: string): (SealedChainRow & { readonly prevHash: string;
 
 /**
  * `aiops audit verify --archive <file>` (design §3, AUD-5, AUD-7). Checks in order: the manifest
- * next to `file` parses; the file's SHA-256 is the manifest's; the line count is the manifest's;
+ * next to `file` parses; the archive opens (else `archive_unreadable`); the file's SHA-256 is the manifest's; the line count is the manifest's;
  * the first and last positions are the manifest's range; the chain inside links from the
  * manifest's `prevHash` and ends at its `lastHash`; and the database holds the anchors at both
  * ends: genesis or an anchor at `first − 1` with `prevHash`, and an anchor at `last` with
  * `lastHash` and the file's SHA-256 (else `no_anchor`, as for an orphan of a crashed run). The
- * report carries positions only, never row content (SEC-3).
+ * archive is read once as a stream, so memory stays bounded whatever its size. The report
+ * carries positions only, never row content (SEC-3).
  */
 export async function verifyAuditArchive(pool: pg.Pool, file: string): Promise<ArchiveReport> {
   let manifest: ArchiveManifest | undefined;
   try {
     manifest = parseManifest(await readFile(manifestPath(file), 'utf8'));
   } catch (error) {
-    if (!(isRecord(error) && typeof error.code === 'string')) throw error;
+    if (!isFsError(error)) throw error;
     manifest = undefined;
   }
   if (manifest === undefined) return { ok: false, reason: 'manifest_unreadable' };
-  const bytes = await readFile(file);
-  if (`sha256:${createHash('sha256').update(bytes).digest('hex')}` !== manifest.sha256) {
-    return { ok: false, reason: 'sha256_mismatch' };
+  let handle: FileHandle;
+  try {
+    handle = await open(file, 'r');
+  } catch (error) {
+    if (!isFsError(error)) throw error;
+    return { ok: false, reason: 'archive_unreadable' };
   }
-  const text = bytes.toString('utf8');
-  const lines = text.endsWith('\n') ? text.slice(0, -1).split('\n') : text.split('\n');
-  if (text === '' || lines.length !== manifest.count) return { ok: false, reason: 'count_mismatch' };
-  const rows = [];
-  for (const [index, line] of lines.entries()) {
-    const row = parseLine(line);
-    if (row === undefined) return { ok: false, reason: 'hash_mismatch', chainPos: manifest.first + index };
-    rows.push(row);
+  let scan: Scan;
+  try {
+    scan = await scanArchive(handle, manifest);
+  } finally {
+    await handle.close();
   }
-  const firstRow = rows[0];
-  const lastRow = rows[rows.length - 1];
-  if (
-    firstRow?.pos !== manifest.first ||
-    lastRow?.pos !== manifest.last ||
-    manifest.last - manifest.first + 1 !== manifest.count
-  ) {
+  if (scan.sha256 !== manifest.sha256) return { ok: false, reason: 'sha256_mismatch' };
+  if (scan.lines !== manifest.count) return { ok: false, reason: 'count_mismatch' };
+  if (scan.unparsable !== undefined) return { ok: false, reason: 'hash_mismatch', chainPos: scan.unparsable };
+  if (scan.firstPos !== manifest.first || scan.lastPos !== manifest.last || manifest.last - manifest.first + 1 !== manifest.count) {
     return { ok: false, reason: 'range_mismatch' };
   }
-  let previous: ChainHead = { pos: manifest.first - 1, hash: manifest.prevHash };
-  for (const row of rows) {
-    const reason = linkBreak(previous, row);
-    if (reason !== undefined) return { ok: false, reason, chainPos: row.pos };
-    previous = { pos: row.pos, hash: row.hash };
-  }
-  if (previous.hash !== manifest.lastHash) return { ok: false, reason: 'hash_mismatch', chainPos: manifest.last };
+  if (scan.broken !== undefined) return { ok: false, ...scan.broken };
+  if (scan.head.hash !== manifest.lastHash) return { ok: false, reason: 'hash_mismatch', chainPos: manifest.last };
   if (!(await anchored(pool, manifest))) return { ok: false, reason: 'no_anchor' };
   return { ok: true, first: manifest.first, last: manifest.last, count: manifest.count };
+}
+
+/** An error the file system raised (it carries a string `code`, such as ENOENT or EACCES). */
+function isFsError(error: unknown): boolean {
+  return isRecord(error) && typeof error.code === 'string';
+}
+
+/** What one pass over an archive found; each finding is the first of its kind. */
+interface Scan {
+  readonly sha256: string;
+  readonly lines: number;
+  /** Expected position of the first line that is not an archived row. */
+  readonly unparsable: number | undefined;
+  readonly firstPos: number | undefined;
+  readonly lastPos: number | undefined;
+  readonly broken: { readonly chainPos: number; readonly reason: ChainBreak } | undefined;
+  /** The last row whose link checked. */
+  readonly head: ChainHead;
+}
+
+/**
+ * Reads the archive once in bounded memory: hashes the bytes as they stream, and checks each line's
+ * link as it is read, keeping only the findings `verifyAuditArchive` ranks.
+ */
+async function scanArchive(handle: FileHandle, manifest: ArchiveManifest): Promise<Scan> {
+  const digest = createHash('sha256');
+  const input = handle.createReadStream({ autoClose: false });
+  input.on('data', (chunk) => digest.update(chunk));
+  const reader = createInterface({ input, crlfDelay: Infinity });
+  let lines = 0;
+  let unparsable: number | undefined;
+  let firstPos: number | undefined;
+  let lastPos: number | undefined;
+  let broken: Scan['broken'];
+  let head: ChainHead = { pos: manifest.first - 1, hash: manifest.prevHash };
+  for await (const line of reader) {
+    lines += 1;
+    if (unparsable !== undefined) continue;
+    const row = parseLine(line);
+    if (row === undefined) {
+      unparsable = manifest.first + lines - 1;
+      continue;
+    }
+    firstPos ??= row.pos;
+    lastPos = row.pos;
+    if (broken !== undefined) continue;
+    const reason = linkBreak(head, row);
+    if (reason === undefined) head = { pos: row.pos, hash: row.hash };
+    else broken = { chainPos: row.pos, reason };
+  }
+  return { sha256: `sha256:${digest.digest('hex')}`, lines, unparsable, firstPos, lastPos, broken, head };
 }
 
 /** True when the database's anchors fix both ends of the archive. */

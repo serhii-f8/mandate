@@ -315,6 +315,20 @@ describe('AUD-7 audit retention', () => {
     await writeFile(manifestFile, '{not json');
     expect(formatArchiveReport(await verifyAuditArchive(pool, file))).toBe('failed archive reason=manifest_unreadable');
     expect(await check(original)).toBe('ok archive count=30 first=1 last=30');
+    await rm(file);
+    expect(formatArchiveReport(await verifyAuditArchive(pool, file))).toBe('failed archive reason=archive_unreadable');
+  });
+
+  it('AUD-7 the manifest createdAt comes from the injected clock', async () => {
+    const database = await freshDatabase();
+    const dir = await freshDir();
+    await insertRows(database.pool, 3, 40);
+    // A day ahead: the wall clock cannot produce it, and the 40-day-old rows are still due.
+    const fixed = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await runAuditRetention(deps(database, { archiveDir: dir, now: () => fixed }));
+
+    expect((await readManifest(path.join(dir, 'audit-1-3.manifest.json'))).createdAt).toBe(fixed.toISOString());
   });
 
   it('AUD-7 only one retention run at a time', async () => {

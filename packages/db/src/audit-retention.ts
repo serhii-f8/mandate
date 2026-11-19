@@ -4,7 +4,7 @@ import path from 'node:path';
 import { GENESIS_HASH, type AuditLog, type ChainHead } from '@aiops/core';
 import type pg from 'pg';
 import { writeAuditArchive } from './audit-archive.js';
-import { SEAL_BATCH, sealAuditChain } from './audit-chain.js';
+import { safeInteger, SEAL_BATCH, sealAuditChain } from './audit-chain.js';
 import { guarded } from './errors.js';
 import { AUDIT_RETENTION_LOCK_KEY } from './locks.js';
 import type { PostgresRateCounter } from './rate-counter.js';
@@ -37,13 +37,6 @@ export interface RetentionDeps {
   readonly actor: string;
   readonly now: () => Date;
   readonly newId: () => string;
-}
-
-/** A bigint read as decimal text, as a safe JS number. */
-function position(value: string, what: string): number {
-  const pos = Number(value);
-  if (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(pos)) throw new Error(`${what} is not a safe chain position`);
-  return pos;
 }
 
 async function writable(dir: string): Promise<boolean> {
@@ -112,10 +105,10 @@ async function locked(deps: RetentionDeps, client: pg.PoolClient): Promise<Reten
     ),
   );
   const newest = anchor.rows[0];
-  const start: ChainHead = newest === undefined ? { pos: 0, hash: GENESIS_HASH } : { pos: position(newest.pos, 'anchor'), hash: newest.hash };
+  const start: ChainHead = newest === undefined ? { pos: 0, hash: GENESIS_HASH } : { pos: safeInteger(newest.pos, 'anchor'), hash: newest.hash };
   const p = due.rows[0]?.p;
   if (p === null || p === undefined) return { kind: 'nothing_due', rateBucketsDeleted };
-  const last = position(p, 'retention cutoff position');
+  const last = safeInteger(p, 'retention cutoff position');
   if (last <= start.pos) return { kind: 'nothing_due', rateBucketsDeleted };
 
   const dir = deps.archiveDir;
@@ -124,7 +117,7 @@ async function locked(deps: RetentionDeps, client: pg.PoolClient): Promise<Reten
     return { kind: 'refused', reason: 'archive_unavailable', rateBucketsDeleted };
   }
 
-  const written = await writeAuditArchive(deps.pool, dir, start, last);
+  const written = await writeAuditArchive(deps.pool, dir, start, last, { now: deps.now });
   if (!written.ok) {
     await audit(deps, 'error', { reason: 'chain_invalid', chainPos: written.chainPos });
     return { kind: 'refused', reason: 'chain_invalid', rateBucketsDeleted };
