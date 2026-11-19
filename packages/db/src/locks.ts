@@ -32,3 +32,11 @@ export const AUDIT_SEAL_LOCK_KEY = 0x6169_6f70_732d_6173n;
  * ASCII "aiops-ar".
  */
 export const AUDIT_RETENTION_LOCK_KEY = 0x6169_6f70_732d_6172n;
+
+/**
+ * Configuration revisions (CFG-4): transaction lock `pg_advisory_xact_lock`, the first statement of
+ * every `bootstrap` and `apply` transaction and released by its commit or rollback. Serialises them
+ * across instances so two bootstraps insert one row and two applies against one previous hash
+ * cannot both win (NFR-3). Nothing else may use it. ASCII "aiops-cf".
+ */
+export const CONFIG_LOCK_KEY = 0x6169_6f70_732d_6366n;

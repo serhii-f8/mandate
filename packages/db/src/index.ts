@@ -14,7 +14,8 @@ export {
 export { runAuditRetention, type RetentionDeps, type RetentionReport } from './audit-retention.js';
 export { PostgresAuditReader } from './audit-search.js';
 export { formatVerifyReport, VERIFY_PAGE, verifyAuditChain, type VerifyReport } from './audit-verify.js';
-export { AUDIT_RETENTION_LOCK_KEY, AUDIT_SEAL_LOCK_KEY, START_LOCK_NAMESPACE } from './locks.js';
+export { AUDIT_RETENTION_LOCK_KEY, AUDIT_SEAL_LOCK_KEY, CONFIG_LOCK_KEY, START_LOCK_NAMESPACE } from './locks.js';
+export { CONFIG_CHANNEL, PostgresConfigRevisionStore, type PostgresConfigRevisionStoreOptions } from './config-revision-store.js';
 export { PostgresChangeSetRepository, type PostgresChangeSetRepositoryOptions } from './changeset-repository.js';
 export { insertNotifications, PostgresNotificationOutbox } from './notification-outbox.js';
 export { PostgresCredentialVault } from './credential-vault.js';
