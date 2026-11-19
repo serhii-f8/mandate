@@ -1,5 +1,6 @@
 /**
- * The worker's writers per operation (design part 2 §4, OPS-6; EXE-8, OPS-3). Forward: a
+ * The worker's writers per operation (design part 2 §4, OPS-6; EXE-8, OPS-3). Forward: an
+ * `OpaqueCallWriter` for an opaque operation (one call sent at most once, design phase 9 §5), a
  * `ManifestBatchWriter` for a `write` or `destructive` operation with a manifest whose binding has a
  * `bulk` block, `UnsupportedWriter` for everything else. Rollback: the same writer in the reverse
  * direction, through the operation's own bulk binding (`replay_previous_state`) or the inverse
@@ -10,19 +11,34 @@
 import type { ReadAdapter, WriteAdapter } from '@aiops/connector-sdk';
 import type { LoadedConfiguration } from '@aiops/config';
 import {
+  isOpaque,
   ManifestBatchWriter,
+  OpaqueCallWriter,
   UnsupportedWriter,
   type ChangeSetRecord,
   type ChangeWriter,
   type Clock,
   type CredentialVault,
+  type OpaqueCaller,
   type WriteDirection,
 } from '@aiops/core';
-import { createBulkWriter, createUpstreamReader, type UpstreamCallLog } from '@aiops/upstream';
+import {
+  createBulkWriter,
+  createOpaqueCaller,
+  createUpstreamReader,
+  verifyPinNow,
+  type ToolLister,
+  type UpstreamCallLog,
+} from '@aiops/upstream';
 
 export interface WriterForDeps {
   readonly vault: CredentialVault;
   readonly adapter: ReadAdapter & WriteAdapter;
+  /**
+   * Lists an MCP connection's tools for the fresh pin check of an opaque MCP call (CONN-4, ruling
+   * F8). Absent, every opaque MCP call fails closed with `upstream_unavailable` and nothing is sent.
+   */
+  readonly toolLister?: ToolLister;
   /** Default: wall-clock time and a `setTimeout` sleep. */
   readonly clock?: Clock;
   readonly log?: (record: UpstreamCallLog) => void;
@@ -84,9 +100,32 @@ function manifestWriter(
   });
 }
 
+/** The caller of an opaque operation whose binding is gone from the snapshot: refused, nothing sent. */
+const unavailableCaller: OpaqueCaller = {
+  idempotent: false,
+  call: () => Promise.resolve({ kind: 'not_sent', code: 'upstream_rejected' }),
+};
+
+/**
+ * One call per change-set (EXE-4). The caller and its pin check are both bound to `configuration`,
+ * the snapshot the activity runs under, so the pin is verified against the configuration of this
+ * execution and never against an earlier one (ruling F8).
+ */
+function opaqueWriter(deps: WriterForDeps, configuration: LoadedConfiguration, operationId: string): OpaqueCallWriter {
+  const { vault, adapter, toolLister } = deps;
+  const log = deps.log === undefined ? {} : { log: deps.log };
+  const pinCheck = toolLister === undefined ? {} : { pinCheck: (id: string) => verifyPinNow(toolLister, configuration, id) };
+  return new OpaqueCallWriter({
+    callerFor: (cs) =>
+      createOpaqueCaller({ configuration, vault, adapter, operationId, correlationId: executionCorrelation(cs), ...pinCheck, ...log }) ??
+      unavailableCaller,
+  });
+}
+
 export function createWriterFor(deps: WriterForDeps): WriterFor {
   return (configuration, operationId) => {
     const operation = configuration.policy.operations.find((o) => o.id === operationId);
+    if (operation !== undefined && isOpaque(operation)) return opaqueWriter(deps, configuration, operationId);
     if (operation?.risk !== 'write' && operation?.risk !== 'destructive') return new UnsupportedWriter();
     return (
       manifestWriter(deps, configuration, { operationId, bulkOperationId: operationId, direction: 'forward', correlation: executionCorrelation }) ??

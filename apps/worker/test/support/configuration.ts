@@ -3,12 +3,15 @@
  * `catalog.get_products`, the write operation `catalog.update_content` with a manifest
  * (batch size 2), the role `editor` granted to the group `editors` (no approval), the role
  * `approving_editor` granted to `approving-editors` (approval always, one `reviewer` step) and
- * the role `reviewer` granted to `reviewers` (no grants).
+ * the role `reviewer` granted to `reviewers` (no grants). The opaque operation `catalog.notify_team`
+ * (`write_opaque`, one `POST /V1/notes`) is granted to `editor` and `approving_editor`.
  */
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
 
 export const WRITE_OPERATION = 'catalog.update_content';
 export const READ_OPERATION = 'catalog.get_products';
+/** A `write_opaque` operation: one call, no manifest (design phase 9 §2). */
+export const OPAQUE_OPERATION = 'catalog.notify_team';
 export const EDITOR_GROUP = 'editors';
 export const APPROVING_GROUP = 'approving-editors';
 export const REVIEWER_GROUP = 'reviewers';
@@ -55,6 +58,15 @@ operations:
         args: { brand: { arg: brand } }
       batch_size: 2
       rollback: { strategy: replay_previous_state }
+  - id: catalog.notify_team
+    connection: magento
+    risk: write_opaque
+    description: Send a note to the catalog team.
+    upstream: { method: POST, path: /V1/notes, body: { arg: note } }
+    input_schema:
+      type: object
+      properties: { note: { type: string } }
+      required: [note]
 `,
   'roles.yaml': `version: 1
 roles:
@@ -62,11 +74,13 @@ roles:
     grants:
       - operation: catalog.update_content
         scope: { brand: [acme] }
+      - operation: catalog.notify_team
     approval: { required: never }
   - id: approving_editor
     grants:
       - operation: catalog.update_content
         scope: { brand: [acme] }
+      - operation: catalog.notify_team
     approval: { required: always, steps: [{ role: reviewer }] }
   - id: reviewer
     grants: []

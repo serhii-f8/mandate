@@ -10,7 +10,7 @@ import { ScriptedWriter } from '@aiops/testing';
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPrepared } from '../support/changesets.js';
-import { EDITOR_GROUP, WRITE_OPERATION } from '../support/configuration.js';
+import { EDITOR_GROUP, OPAQUE_OPERATION, WRITE_OPERATION } from '../support/configuration.js';
 import { startInfrastructure, startTestWorker, type Infra, type TestWorker } from '../support/harness.js';
 import { TEST_TEMPORAL_KEYS } from '../support/keys.js';
 
@@ -63,7 +63,58 @@ async function created(skus: readonly string[]): Promise<ChangeSetRecord> {
 
 const statusOf = async (id: string) => (await infra.repository.get(id))?.status;
 
+/** Counts every read; an opaque preparation must make none (CS-1). */
+class SpyReader implements UpstreamReader {
+  reads = 0;
+  read(): Promise<ReadPage> {
+    this.reads += 1;
+    return Promise.reject(new Error('an opaque preparation reads nothing'));
+  }
+}
+
 describe('preparation and start on Temporal', () => {
+  it('CS-1 the prepare activity stores one call item for an opaque operation and reads nothing', async () => {
+    const operation = infra.configuration.policy.operations.find((o) => o.id === OPAQUE_OPERATION);
+    if (operation === undefined) throw new Error('test operation missing');
+    const result = await createChangeSet(
+      { repository: infra.repository, newId: randomUUID, now: () => new Date() },
+      {
+        operation,
+        args: { note: 'restock the blue mugs' },
+        caller: { subject: 'alice', groups: [EDITOR_GROUP] },
+        correlationId: 'corr-create-opaque',
+        configHash: infra.configuration.hash,
+        expireAfterHours: 1,
+      },
+    );
+    if (!result.ok) throw new Error(`test change-set not created: ${result.code}`);
+    const cs = result.changeset;
+    const reader = new SpyReader();
+    let readerFactoryCalls = 0;
+    await withWorker(
+      {
+        readerFor: () => {
+          readerFactoryCalls += 1;
+          return reader;
+        },
+      },
+      async (worker) => {
+        await worker.starter.start(cs.id);
+        await expect.poll(() => statusOf(cs.id), { timeout: 20_000 }).toBe('prepared');
+        await worker.executor.cancel({ changesetId: cs.id, actor: 'alice', correlationId: 'corr-cleanup' });
+        await worker.executor.settled(cs.id);
+      },
+    );
+    expect(reader.reads).toBe(0);
+    expect(readerFactoryCalls).toBe(0);
+    expect(await infra.repository.itemsPage(cs.id, { limit: 10 })).toEqual([
+      expect.objectContaining({ targetId: 'call', status: 'pending', before: null, after: { note: 'restock the blue mugs' } }),
+    ]);
+    const record = await infra.repository.get(cs.id);
+    expect(record?.stats).toMatchObject({ total: 1, included: 1 });
+    expect(record?.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
   it('EXE-1 a created change-set is prepared by its workflow, which then waits', async () => {
     const cs = await created(['t-0001', 't-0002', 't-0003']);
     await withWorker({ reader: new CatalogReader() }, async (worker) => {

@@ -34,6 +34,7 @@ import {
   connectionCredential,
   createUpstreamInstrumentation,
   createUpstreamReader,
+  vaultToolLister,
   type UpstreamCallLog,
 } from '@aiops/upstream';
 import type { McpToolAdapter } from '@aiops/connector-sdk';
@@ -85,9 +86,9 @@ interface RuntimeStores {
 /**
  * Activities registered on the worker: `echo` and the change-set activities bound to the stores,
  * the current configuration (it changes on SIGHUP) and the tuning from the environment. Writes
- * go through `createWriterFor` (a bulk binding writes, anything else fails every item with
- * `write_mode_unsupported`), rollbacks through `createRollbackWriterFor` (EXE-8, OPS-3); reads run
- * the shared upstream read path.
+ * go through `createWriterFor` (an opaque operation sends its one call, after a fresh pin check for
+ * an MCP tool; a bulk binding writes; anything else fails every item with `write_mode_unsupported`),
+ * rollbacks through `createRollbackWriterFor` (EXE-8, OPS-3); reads run the shared upstream read path.
  */
 function activitiesFor(stores: RuntimeStores): WorkerActivities {
   const { configuration, repository, vault, adapter, logger } = stores;
@@ -99,7 +100,8 @@ function activitiesFor(stores: RuntimeStores): WorkerActivities {
     ...createActivities({
       repository,
       configuration: () => configuration.current,
-      writerFor: createWriterFor({ vault, adapter, log }),
+      // The tool list behind the pin check opens the connection's credential only inside the adapter (SEC-2, CONN-4).
+      writerFor: createWriterFor({ vault, adapter, toolLister: vaultToolLister(adapter, vault), log }),
       rollbackWriterFor: createRollbackWriterFor({ vault, adapter, log }),
       readerFor: (current, correlationId) => createUpstreamReader({ configuration: current, vault, adapter, correlationId, log }),
       guardFor: createExecutionGuard({

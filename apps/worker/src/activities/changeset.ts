@@ -15,12 +15,14 @@ import {
   executionTerminal,
   failureThresholdExceeded,
   hashStoredItems,
+  isOpaque,
   PRE_EXECUTION,
   resultNotifications,
   RetryableWriteError,
   rollbackOutcome,
   rollbackTerminal,
   rollbackWindowEnd,
+  runOpaquePreparation,
   runPreparation,
   type BatchContext,
   type ChangeSetRecord,
@@ -168,6 +170,16 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
         return failPreparation(changeset, 'config_changed');
       }
       const operation = configuration.policy.operations.find((o) => o.id === changeset.operation);
+      const actor = {
+        actor: changeset.requester,
+        ...(changeset.clientId === undefined ? {} : { clientId: changeset.clientId }),
+        correlationId: changeset.correlationId,
+      };
+      // CS-1: an opaque change-set is its one stored call; nothing is read upstream (design phase 9 §3).
+      if (operation !== undefined && isOpaque(operation)) {
+        await runOpaquePreparation({ repository, newId: deps.newId, now: deps.now }, { changesetId, operation, ...actor });
+        return { status: (await load(changesetId)).status };
+      }
       const manifest = operation?.manifest;
       if (operation === undefined || manifest === undefined) return failPreparation(changeset, 'operation_unavailable');
 
@@ -187,9 +199,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
             changesetId,
             operation: { ...operation, manifest },
             readFieldsArg: (id) => configuration.policy.operations.find((o) => o.id === id)?.fieldsArg,
-            actor: changeset.requester,
-            ...(changeset.clientId === undefined ? {} : { clientId: changeset.clientId }),
-            correlationId: changeset.correlationId,
+            ...actor,
           },
         ),
       );

@@ -6,7 +6,8 @@ import { recordApproval, submitChangeSet } from '@aiops/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createExecutionGuard } from '../../src/activities/guard.js';
 import { createPrepared, startExecutionOf } from '../support/changesets.js';
-import { APPROVING_GROUP, testConfiguration } from '../support/configuration.js';
+import { APPROVING_GROUP, EDITOR_GROUP, testConfiguration } from '../support/configuration.js';
+import { createPreparedOpaque } from '../support/opaque.js';
 import { auditEventsOf, startTestPostgres, type TestPostgres } from '../support/postgres.js';
 
 let postgres: TestPostgres;
@@ -156,6 +157,16 @@ describe('execution guard approval re-check', () => {
     expect(returned2).toMatchObject({ status: 'prepared', approvalRound: 2 });
     const cs = await startExecutionOf(repository, returned2, requester);
     await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: false, outcome: 'approval_missing' });
+  });
+
+  it('POL-5 an opaque change-set whose role moved from never to above_threshold after submission is refused without approvals', async () => {
+    // Started by an editor while the role needed no approval: no approval rows exist.
+    const cs = await createPreparedOpaque(repository, { execute: { groups: [EDITOR_GROUP] } });
+    expect(cs.stats.included).toBe(1);
+    await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: true });
+    // A reload moves the role to above_threshold: one record is far below 25, but an opaque call has no count to compare.
+    const tightened = withApprovalRule('editor', (rule) => ({ ...rule, required: 'above_threshold', recordThreshold: 25, steps: ['reviewer'] }));
+    await expect(guardFor(tightened).check(cs)).resolves.toEqual({ ok: false, outcome: 'approval_missing' });
   });
 
   it('CS-4 a tampered item is hash_mismatch before the approval check', async () => {
