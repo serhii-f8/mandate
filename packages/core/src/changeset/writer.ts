@@ -14,7 +14,12 @@ export type WriteOutcomeCode =
   | 'upstream_failed'
   | 'upstream_retriable'
   | 'no_outcome'
-  | 'write_mode_unsupported';
+  | 'write_mode_unsupported'
+  | 'upstream_changed'
+  | 'upstream_unavailable'
+  | 'egress_denied'
+  | 'credential_missing'
+  | 'credential_unusable';
 
 export type WriteClassification =
   | { readonly action: 'write' }

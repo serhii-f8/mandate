@@ -1,0 +1,201 @@
+import { describe, expect, it } from 'vitest';
+import type { ChangeItemRecord, ChangeSetRecord } from './model.js';
+import { OpaqueCallWriter } from './opaque-writer.js';
+import {
+  BatchFenced,
+  type BatchContext,
+  type BatchSubmission,
+  type OpaqueCaller,
+  type OpaqueCallOutcome,
+  type OpaqueNotSentCode,
+} from './ports.js';
+
+// ---- Fakes: the caller and the batch write into one ordered `events` log. ----
+
+type CallInput = Parameters<OpaqueCaller['call']>[0];
+
+/** Honours the port contract: pre-flight (`not_sent` answers before `beforeSend`), then `beforeSend`, then one send. */
+class ScriptedCaller implements OpaqueCaller {
+  readonly calls: { args: Readonly<Record<string, unknown>>; idempotencyKey: string }[] = [];
+  constructor(
+    private readonly events: string[],
+    private readonly outcome: OpaqueCallOutcome,
+    readonly idempotent = false,
+  ) {}
+  async call(input: CallInput): Promise<OpaqueCallOutcome> {
+    this.calls.push({ args: input.args, idempotencyKey: input.idempotencyKey });
+    if (this.outcome.kind === 'not_sent') return this.outcome;
+    await input.beforeSend();
+    this.events.push('send');
+    return this.outcome;
+  }
+}
+
+class FakeBatch implements BatchContext {
+  readonly key = 'cs-1:1';
+  submission?: BatchSubmission;
+  readonly recorded: BatchSubmission[] = [];
+  constructor(
+    private readonly events: string[],
+    private readonly fenced = false,
+  ) {}
+  recordSubmission(s: BatchSubmission): Promise<void> {
+    this.events.push('record');
+    if (this.fenced) return Promise.reject(new BatchFenced());
+    this.recorded.push(s);
+    this.submission = s;
+    return Promise.resolve();
+  }
+  heartbeat(): void {
+    this.events.push('heartbeat');
+  }
+}
+
+const changeset: ChangeSetRecord = {
+  id: 'cs-1',
+  operation: 'shop.purge_cache',
+  connection: 'shop',
+  requester: 'alice',
+  args: { scope: 'all' },
+  hash: 'h-1',
+  status: 'executing',
+  stats: { total: 1, included: 1, excluded: {}, written: 0, failed: 0, skipped: 0 },
+  configHash: 'cfg-1',
+  correlationId: 'corr-1',
+  createdAt: new Date('2026-11-17T10:00:00.000Z'),
+  expiresAt: new Date('2026-11-20T10:00:00.000Z'),
+  approvalRound: 1,
+};
+
+const callItem: ChangeItemRecord = { targetId: 'call', status: 'pending', before: null, after: { scope: 'all' } };
+
+const RECORDED: BatchSubmission = { upstreamBatchId: 'opaque:cs-1:1', plan: [{ targetId: 'call', action: 'write' }] };
+
+function setup(outcome: OpaqueCallOutcome, opts: { idempotent?: boolean; fenced?: boolean } = {}) {
+  const events: string[] = [];
+  const caller = new ScriptedCaller(events, outcome, opts.idempotent ?? false);
+  const batch = new FakeBatch(events, opts.fenced ?? false);
+  const seen: ChangeSetRecord[] = [];
+  const writer = new OpaqueCallWriter({
+    callerFor: (cs) => {
+      seen.push(cs);
+      return caller;
+    },
+  });
+  return { events, caller, batch, seen, writer };
+}
+
+const NOT_SENT_CODES: readonly OpaqueNotSentCode[] = [
+  'upstream_rejected',
+  'credential_missing',
+  'credential_unusable',
+  'egress_denied',
+  'upstream_changed',
+  'upstream_unavailable',
+];
+
+describe('EXE-4 NFR-2 OpaqueCallWriter', () => {
+  it('records the submission before sending, then written on accepted', async () => {
+    const { events, caller, batch, seen, writer } = setup({ kind: 'accepted' });
+    const outcomes = await writer.writeBatch({ changeset, items: [callItem], batch });
+    expect(events).toEqual(['record', 'send']);
+    expect(batch.recorded).toEqual([RECORDED]);
+    expect(outcomes).toEqual([{ targetId: 'call', status: 'written' }]);
+    expect(caller.calls).toEqual([{ args: { scope: 'all' }, idempotencyKey: 'cs-1:call' }]);
+    expect(seen).toEqual([changeset]);
+  });
+
+  it('a recorded submission without idempotency ends failed/no_outcome and calls nothing', async () => {
+    const { events, caller, batch, seen, writer } = setup({ kind: 'accepted' });
+    batch.submission = RECORDED;
+    const outcomes = await writer.writeBatch({ changeset, items: [callItem], batch });
+    expect(outcomes).toEqual([{ targetId: 'call', status: 'failed', error: 'no_outcome' }]);
+    expect(caller.calls).toEqual([]);
+    expect(events).toEqual([]);
+    expect(batch.recorded).toEqual([]);
+    expect(seen.length).toBeLessThanOrEqual(1);
+  });
+
+  it('a recorded submission with idempotency is resent with the same key and not recorded again', async () => {
+    const { events, caller, batch, writer } = setup({ kind: 'accepted' }, { idempotent: true });
+    batch.submission = RECORDED;
+    const outcomes = await writer.writeBatch({ changeset, items: [callItem], batch });
+    expect(events).toEqual(['send']);
+    expect(batch.recorded).toEqual([]);
+    expect(caller.calls).toEqual([{ args: { scope: 'all' }, idempotencyKey: 'cs-1:call' }]);
+    expect(outcomes).toEqual([{ targetId: 'call', status: 'written' }]);
+  });
+
+  it('refused is failed/upstream_rejected; unknown is failed/no_outcome', async () => {
+    const refused = setup({ kind: 'refused' });
+    expect(await refused.writer.writeBatch({ changeset, items: [callItem], batch: refused.batch })).toEqual([
+      { targetId: 'call', status: 'failed', error: 'upstream_rejected' },
+    ]);
+    expect(refused.events).toEqual(['record', 'send']);
+
+    const unknown = setup({ kind: 'unknown' });
+    expect(await unknown.writer.writeBatch({ changeset, items: [callItem], batch: unknown.batch })).toEqual([
+      { targetId: 'call', status: 'failed', error: 'no_outcome' },
+    ]);
+    expect(unknown.events).toEqual(['record', 'send']);
+  });
+
+  it('not_sent ends failed with its code and records nothing', async () => {
+    for (const code of NOT_SENT_CODES) {
+      const { events, batch, writer } = setup({ kind: 'not_sent', code });
+      const outcomes = await writer.writeBatch({ changeset, items: [callItem], batch });
+      expect(outcomes).toEqual([{ targetId: 'call', status: 'failed', error: code }]);
+      expect(events).toEqual([]);
+      expect(batch.recorded).toEqual([]);
+    }
+  });
+
+  it('a fenced record propagates BatchFenced and nothing is sent', async () => {
+    const { events, batch, writer } = setup({ kind: 'accepted' }, { fenced: true });
+    await expect(writer.writeBatch({ changeset, items: [callItem], batch })).rejects.toBeInstanceOf(BatchFenced);
+    expect(events).toEqual(['record']);
+  });
+
+  it('the idempotency key is <changeset-id>:call', async () => {
+    const { caller, batch, writer } = setup({ kind: 'accepted' }, { idempotent: true });
+    await writer.writeBatch({ changeset: { ...changeset, id: 'cs-42' }, items: [callItem], batch });
+    expect(caller.calls.map((c) => c.idempotencyKey)).toEqual(['cs-42:call']);
+  });
+
+  it('more than one item fails every item with write_mode_unsupported', async () => {
+    const { events, caller, batch, writer } = setup({ kind: 'accepted' });
+    const second: ChangeItemRecord = { ...callItem, targetId: 'other' };
+    const outcomes = await writer.writeBatch({ changeset, items: [callItem, second], batch });
+    expect(outcomes).toEqual([
+      { targetId: 'call', status: 'failed', error: 'write_mode_unsupported' },
+      { targetId: 'other', status: 'failed', error: 'write_mode_unsupported' },
+    ]);
+    expect(caller.calls).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it('an item other than call fails with write_mode_unsupported and calls nothing', async () => {
+    const { events, caller, batch, writer } = setup({ kind: 'accepted' });
+    const outcomes = await writer.writeBatch({ changeset, items: [{ ...callItem, targetId: 'sku-1' }], batch });
+    expect(outcomes).toEqual([{ targetId: 'sku-1', status: 'failed', error: 'write_mode_unsupported' }]);
+    expect(caller.calls).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it('zero items answer no outcomes and call nothing', async () => {
+    const { events, caller, batch, writer } = setup({ kind: 'accepted' });
+    expect(await writer.writeBatch({ changeset, items: [], batch })).toEqual([]);
+    expect(caller.calls).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it('an error thrown by the caller propagates unchanged', async () => {
+    const events: string[] = [];
+    const boom = new Error('transport bug');
+    const batch = new FakeBatch(events);
+    const writer = new OpaqueCallWriter({
+      callerFor: () => ({ idempotent: false, call: () => Promise.reject(boom) }),
+    });
+    await expect(writer.writeBatch({ changeset, items: [callItem], batch })).rejects.toBe(boom);
+  });
+});

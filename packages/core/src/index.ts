@@ -110,6 +110,9 @@ export type {
   ItemsPageQuery,
   LimitName,
   NewChangeSet,
+  OpaqueCaller,
+  OpaqueCallOutcome,
+  OpaqueNotSentCode,
   PlanEntry,
   PreparationRepository,
   PrepareFailure,
@@ -196,5 +199,6 @@ export {
   type ChangeSetKind,
   type OpaquePreparationRequest,
 } from './changeset/opaque.js';
+export { OpaqueCallWriter, type OpaqueCallWriterDeps } from './changeset/opaque-writer.js';
 export * from './approval/index.js';
 export * from './notification/index.js';

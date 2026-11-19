@@ -331,6 +331,38 @@ export class BatchFenced extends Error {
   }
 }
 
+/** Why an opaque call was never sent (pre-flight); nothing was recorded or sent (design §5). */
+export type OpaqueNotSentCode =
+  | 'upstream_rejected'
+  | 'credential_missing'
+  | 'credential_unusable'
+  | 'egress_denied'
+  | 'upstream_changed'
+  | 'upstream_unavailable';
+
+/** The answer to one opaque call: codes only, never upstream text (SEC-3, SEC-5). */
+export type OpaqueCallOutcome =
+  | { readonly kind: 'accepted' }
+  | { readonly kind: 'refused' }
+  | { readonly kind: 'unknown' }
+  | { readonly kind: 'not_sent'; readonly code: OpaqueNotSentCode };
+
+/** One upstream call of an opaque operation, bound to one operation and correlation (design §5). */
+export interface OpaqueCaller {
+  /** True when the upstream deduplicates by key (OpenAPI `idempotency`), so a resumed call may be resent. */
+  readonly idempotent: boolean;
+  /**
+   * Pre-flight, then `beforeSend()` immediately before the request leaves, then one send without retry.
+   * Pre-flight failure answers `not_sent` without calling `beforeSend`. If `beforeSend` throws, nothing is
+   * sent and the error propagates unchanged.
+   */
+  call(input: {
+    readonly args: Readonly<Record<string, unknown>>;
+    readonly idempotencyKey: string;
+    readonly beforeSend: () => Promise<void>;
+  }): Promise<OpaqueCallOutcome>;
+}
+
 export interface ChangeWriter {
   writeBatch(input: {
     changeset: ChangeSetRecord;
