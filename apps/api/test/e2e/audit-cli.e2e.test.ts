@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { cp, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,17 +56,36 @@ async function seedSealed(url: string, count: number, ageDays: number): Promise<
 async function cli(argv: string[], url: string, extraEnv: Record<string, string> = {}): Promise<{ code: number; lines: string[] }> {
   const lines: string[] = [];
   const code = await runApiCli(argv, (line) => lines.push(line), {
-    env: { AIOPS_CONFIG_DIR: AUDIT_CONFIG, DATABASE_URL: url, AIOPS_MASTER_KEYS: `1:${KEY_1}`, ...extraEnv },
+    env: { DATABASE_URL: url, AIOPS_MASTER_KEYS: `1:${KEY_1}`, ...extraEnv },
     defaultPresetDir: null,
   });
   return { code, lines };
+}
+
+/** Stores `dir` as the active revision through `aiops config apply` (CFG-3). */
+async function activate(url: string, dir: string): Promise<void> {
+  const { code, lines } = await cli(['config', 'apply', dir], url);
+  expect(lines.at(-1), lines.join('\n')).toMatch(/^applied revision /);
+  expect(code).toBe(0);
+}
+
+/** A copy of the audit fixture without `settings.yaml`, so without `audit.retention_days`. */
+async function withoutRetention(): Promise<string> {
+  const dir = await mkdtemp(join(archiveDir, 'cfg-'));
+  await cp(AUDIT_CONFIG, dir, { recursive: true });
+  await rm(join(dir, 'settings.yaml'));
+  return dir;
+}
+
+async function auditCount(url: string): Promise<number> {
+  return withPool(url, async (pool) => Number((await pool.query<{ n: string }>("SELECT count(*) AS n FROM audit_event WHERE action = 'tool.call'")).rows[0]?.n));
 }
 
 describe('AUD-5 aiops audit verify', () => {
   it('AUD-5 audit verify prints ok with the head and exits 0', async () => {
     const url = await freshDatabase();
     await seedSealed(url, 3, 0);
-    const { code, lines } = await cli(['audit', 'verify'], url, { AIOPS_CONFIG_DIR: '' });
+    const { code, lines } = await cli(['audit', 'verify'], url);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/^ok sealed=3 unsealed=0 from=1 head=3:sha256:[0-9a-f]{64}$/);
     expect(code).toBe(0);
@@ -104,6 +123,8 @@ describe('AUD-7 aiops audit retention', () => {
     const url = await freshDatabase();
     const dir = await mkdtemp(join(archiveDir, 'ok-'));
     await seedSealed(url, 5, 3);
+    // Applied after sealing, so the config.apply row stays outside the sealed prefix.
+    await activate(url, AUDIT_CONFIG);
     const run = await cli(['audit', 'retention', '--now'], url, { AIOPS_AUDIT_ARCHIVE_DIR: dir });
     expect(run.lines).toEqual(['archived first=1 last=5 count=5 archive=audit-1-5.jsonl']);
     expect(run.code).toBe(0);
@@ -121,6 +142,7 @@ describe('AUD-7 aiops audit retention', () => {
   it('AUD-7 audit retention --now exits 0 when nothing is due and 1 when the archive directory is missing', async () => {
     const url = await freshDatabase();
     await seedSealed(url, 2, 0);
+    await activate(url, AUDIT_CONFIG);
     const none = await cli(['audit', 'retention', '--now'], url, { AIOPS_AUDIT_ARCHIVE_DIR: archiveDir });
     expect(none.lines).toEqual(['nothing due']);
     expect(none.code).toBe(0);
@@ -131,15 +153,34 @@ describe('AUD-7 aiops audit retention', () => {
     expect(refused.code).toBe(1);
   });
 
-  it('AUD-7 audit retention --now without audit.retention_days says so and exits 0', async () => {
+  it('AUD-7 CFG-3 audit retention --now without audit.retention_days in the active revision says so, whatever AIOPS_CONFIG_DIR holds', async () => {
     const url = await freshDatabase();
-    const dir = await mkdtemp(join(archiveDir, 'cfg-'));
-    const { cp } = await import('node:fs/promises');
-    await cp(AUDIT_CONFIG, dir, { recursive: true });
-    await rm(join(dir, 'settings.yaml'));
-    const { code, lines } = await cli(['audit', 'retention', '--now'], url, { AIOPS_CONFIG_DIR: dir });
+    await seedSealed(url, 2, 3);
+    await activate(url, await withoutRetention());
+    const { code, lines } = await cli(['audit', 'retention', '--now'], url, { AIOPS_CONFIG_DIR: AUDIT_CONFIG, AIOPS_AUDIT_ARCHIVE_DIR: archiveDir });
     expect(lines).toEqual(['nothing due (audit.retention_days is not set)']);
     expect(code).toBe(0);
+    expect(await auditCount(url)).toBe(2);
+  });
+
+  it('AUD-7 CFG-3 audit retention --now applies the active revision retention_days even when AIOPS_CONFIG_DIR has none', async () => {
+    const url = await freshDatabase();
+    const dir = await mkdtemp(join(archiveDir, 'active-'));
+    await seedSealed(url, 2, 3);
+    await activate(url, AUDIT_CONFIG);
+    const { code, lines } = await cli(['audit', 'retention', '--now'], url, { AIOPS_CONFIG_DIR: await withoutRetention(), AIOPS_AUDIT_ARCHIVE_DIR: dir });
+    expect(lines).toEqual(['archived first=1 last=2 count=2 archive=audit-1-2.jsonl']);
+    expect(code).toBe(0);
+    expect(await auditCount(url)).toBe(0);
+  });
+
+  it('AUD-7 CFG-3 audit retention --now without an active revision exits 2 and deletes nothing', async () => {
+    const url = await freshDatabase();
+    await seedSealed(url, 2, 3);
+    const { code, lines } = await cli(['audit', 'retention', '--now'], url, { AIOPS_CONFIG_DIR: AUDIT_CONFIG, AIOPS_AUDIT_ARCHIVE_DIR: archiveDir });
+    expect(lines).toEqual(['no active configuration: start the api once or run aiops config apply']);
+    expect(code).toBe(2);
+    expect(await auditCount(url)).toBe(2);
   });
 });
 

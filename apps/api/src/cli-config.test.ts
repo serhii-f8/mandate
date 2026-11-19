@@ -99,7 +99,7 @@ interface Run {
   readonly closed: number;
 }
 
-async function run(argv: string[], store: ConfigRevisionStore, env: Record<string, string | undefined> = { DATABASE_URL }): Promise<Run> {
+async function run(argv: string[], store: ConfigRevisionStore, env: Record<string, string | undefined> = { DATABASE_URL }, extra: Partial<CliDeps> = {}): Promise<Run> {
   const lines: string[] = [];
   let next = 0;
   let closed = 0;
@@ -116,6 +116,7 @@ async function run(argv: string[], store: ConfigRevisionStore, env: Record<strin
       }),
     newId: () => `00000000-0000-4000-8000-1000000000${String((next += 1)).padStart(2, '0')}`,
     defaultPresetDir: null,
+    ...extra,
   };
   const code = await runApiCli(argv, (line) => lines.push(line), deps);
   return { code, lines, closed };
@@ -359,5 +360,50 @@ describe('CFG-3 POL-7 aiops config explain', () => {
     expect(mismatch.code).toBe(2);
 
     expect((await run(explain('--operation', 'shop.list_items', '--groups', 'viewers'), empty.store, {})).code).toBe(2);
+  });
+});
+
+describe('AUD-7 CFG-3 aiops audit retention reads the active revision', () => {
+  const retention = ['audit', 'retention', '--now'];
+  let pools = 0;
+  const openPool: CliDeps['openPool'] = () => {
+    pools += 1;
+    return Promise.reject(new Error('the retention pool must not open'));
+  };
+
+  it('AUD-7 CFG-3 audit retention --now without an active revision exits 2 before touching the audit table', async () => {
+    pools = 0;
+    const dir = await configDir();
+    const empty = fixture();
+    const none = await run(retention, empty.store, { DATABASE_URL, AIOPS_CONFIG_DIR: dir }, { openPool });
+    expect(none.lines).toEqual(['no active configuration: start the api once or run aiops config apply']);
+    expect(none.code).toBe(2);
+    expect(none.closed).toBe(1);
+    expect(pools).toBe(0);
+  });
+
+  it('AUD-7 CFG-3 audit retention --now refuses an active revision that cannot be loaded here with exit 2', async () => {
+    pools = 0;
+    const other = fixture();
+    await other.store.bootstrap({ id: '00000000-0000-4000-8000-000000000009', hash: 'a'.repeat(64), files: { 'config.yaml': 'version: 1\n' }, summary: { connections: 0, operations: 0, roles: 0, notifications: 0 } });
+    const mismatch = await run(retention, other.store, { DATABASE_URL }, { openPool });
+    expect(mismatch.lines).toEqual(['configuration_mismatch']);
+    expect(mismatch.code).toBe(2);
+
+    const invalid = fixture();
+    await invalid.store.bootstrap({ id: '00000000-0000-4000-8000-000000000008', hash: 'b'.repeat(64), files: { 'config.yaml': 'version: 99\n' }, summary: { connections: 0, operations: 0, roles: 0, notifications: 0 } });
+    const refused = await run(retention, invalid.store, { DATABASE_URL }, { openPool });
+    expect(refused.lines).toEqual(['active revision 00000000-0000-4000-8000-000000000008 cannot be loaded here (invalid)']);
+    expect(refused.code).toBe(2);
+    expect(pools).toBe(0);
+  });
+
+  it('AUD-7 CFG-3 audit retention --now needs no AIOPS_CONFIG_DIR, only DATABASE_URL', async () => {
+    const { store } = fixture();
+    await bootstrap(store, await configDir());
+    const missing = await run(retention, store, {}, { openPool });
+    expect(missing.lines.join('\n')).toMatch(/DATABASE_URL/);
+    expect(missing.lines.join('\n')).not.toMatch(/AIOPS_CONFIG_DIR/);
+    expect(missing.code).toBe(2);
   });
 });

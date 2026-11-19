@@ -6,7 +6,7 @@
  *   aiops test-connection <connection>             runs the connection's declared test read
  *   aiops credentials rotate                       re-wraps credential data keys under the newest master key
  *   aiops audit verify [--archive <file>]          checks the audit hash chain, or one retention archive (AUD-5)
- *   aiops audit retention --now                    runs the audit retention job once (AUD-7)
+ *   aiops audit retention --now                    runs the audit retention job once with the active revision (AUD-7, CFG-3)
  *   aiops config diff <dir> [--preset-dir <dir>]...                 compares <dir> with the active revision (CFG-3)
  *   aiops config apply <dir> [--preset-dir <dir>]... [--actor <n>]  stores <dir> as the new active revision (CFG-3, CFG-4)
  *   aiops config explain --operation <id> --groups <g,...> [--subject <s>] [--args <json>] [--records <n>]
@@ -281,14 +281,13 @@ async function audit(args: readonly string[], out: (line: string) => void, deps:
   }
   const env = parseEnv(
     {
-      AIOPS_CONFIG_DIR: nonEmpty,
       DATABASE_URL: postgresUrl,
       AIOPS_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
     },
     deps.env,
   );
-  const configuration = await loadChecked(env.AIOPS_CONFIG_DIR, presetDirsOf([], deps.env, deps), deps.adapter ?? createOpenApiAdapter(), out);
-  if (configuration === undefined) return 1;
+  // The worker's job reads the active revision, so the one-off run does too: files in AIOPS_CONFIG_DIR may be stale (CFG-3).
+  const configuration = await withConfigStore(deps, env.DATABASE_URL, (store) => loadActiveChecked(store, activeLoadOptions(deps)));
   const sensitiveKeys = configuration.sensitiveFields;
   return withPool(deps, env.DATABASE_URL, async ({ pool, db }) => {
     const newId = deps.newId ?? randomUUID;
@@ -541,6 +540,30 @@ function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
   return { operationId, groups, args: parsedArgs as Record<string, unknown>, records, ...(subject === undefined ? {} : { subject }) };
 }
 
+/** The adapter's resolver and the preset directories of `AIOPS_PRESET_DIRS` or the default, for loading the active revision. */
+function activeLoadOptions(deps: CliDeps): LoadOptions {
+  const presetDirs = presetDirsOf([], deps.env, deps);
+  return { resolver: (deps.adapter ?? createOpenApiAdapter()).resolver, ...(presetDirs === undefined ? {} : { presetDirs }) };
+}
+
+/**
+ * The active revision, loaded and hash-checked as the running system holds it (CFG-3). No active
+ * revision, one that cannot be loaded here, or another hash is an environment error (exit 2).
+ */
+async function loadActiveChecked(store: ConfigRevisionStore, options: LoadOptions): Promise<LoadedConfiguration> {
+  const active = await store.active();
+  if (active === undefined) throw new CliError(NO_ACTIVE_CONFIGURATION, 2);
+  let result: LoadResult;
+  try {
+    result = await loadConfigurationFiles(active.files, options);
+  } catch {
+    throw new CliError(`active revision ${active.id} cannot be loaded here (unavailable)`, 2);
+  }
+  if (!result.ok) throw new CliError(`active revision ${active.id} cannot be loaded here (invalid)`, 2);
+  if (result.configuration.hash !== active.hash) throw new CliError('configuration_mismatch', 2);
+  return result.configuration;
+}
+
 /** `aiops config explain`: evaluates one call against the active revision; writes nothing (POL-7). */
 async function configExplain(args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
   const input = parseExplainArgs(args);
@@ -549,21 +572,9 @@ async function configExplain(args: readonly string[], out: (line: string) => voi
     return 2;
   }
   const env = parseEnv({ DATABASE_URL: postgresUrl }, deps.env);
-  const adapter = deps.adapter ?? createOpenApiAdapter();
-  const presetDirs = presetDirsOf([], deps.env, deps);
-  const options: LoadOptions = { resolver: adapter.resolver, ...(presetDirs === undefined ? {} : { presetDirs }) };
   return withConfigStore(deps, env.DATABASE_URL, async (store) => {
-    const active = await store.active();
-    if (active === undefined) throw new CliError(NO_ACTIVE_CONFIGURATION, 2);
-    let result: LoadResult;
-    try {
-      result = await loadConfigurationFiles(active.files, options);
-    } catch {
-      throw new CliError(`active revision ${active.id} cannot be loaded here (unavailable)`, 2);
-    }
-    if (!result.ok) throw new CliError(`active revision ${active.id} cannot be loaded here (invalid)`, 2);
-    if (result.configuration.hash !== active.hash) throw new CliError('configuration_mismatch', 2);
-    const explained = explainCall(result.configuration, input);
+    const configuration = await loadActiveChecked(store, activeLoadOptions(deps));
+    const explained = explainCall(configuration, input);
     for (const line of formatExplain(explained)) out(line);
     return explained.kind === 'decision' && explained.decision.effect === 'allow' ? 0 : 1;
   });
