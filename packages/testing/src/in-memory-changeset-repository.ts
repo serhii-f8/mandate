@@ -17,9 +17,18 @@ import type {
   ItemsPageQuery,
   NewChangeSet,
   NewNotification,
+  RollbackCounts,
   Submission,
 } from '@aiops/core';
-import { changesetTransitionEvent, compareTargetIds, EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
+import {
+  changesetTransitionEvent,
+  compareTargetIds,
+  EMPTY_STATS,
+  evaluateLimits,
+  executionStarted,
+  isExpiryDue,
+  ROLLBACK_FROM,
+} from '@aiops/core';
 import { createHash, randomUUID } from 'node:crypto';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
 import { InMemoryNotificationOutbox } from './in-memory-notification-outbox.js';
@@ -48,6 +57,13 @@ interface Batch {
 type StartRequestOf = Parameters<ChangeSetRepository['startExecution']>[0];
 type StartResult = Awaited<ReturnType<ChangeSetRepository['startExecution']>>;
 type ClaimResult = Awaited<ReturnType<ChangeSetRepository['claimBatch']>>;
+type RollbackRequestOf = Parameters<ChangeSetRepository['requestRollback']>[0];
+type RollbackResult = Awaited<ReturnType<ChangeSetRepository['requestRollback']>>;
+
+export interface InMemoryChangeSetRepositoryOptions {
+  /** The clock `requestRollback` judges the window on (PostgreSQL uses `now()`). */
+  readonly now?: () => Date;
+}
 
 function copyDate(d: Date): Date {
   return new Date(d.getTime());
@@ -75,9 +91,16 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
   /** Highest batch number per change-set, tracked as batches are created. */
   private readonly highestBatch = new Map<string, number>();
 
-  constructor(audit: InMemoryAuditLog = new InMemoryAuditLog(), outbox = new InMemoryNotificationOutbox(audit)) {
+  private readonly now: () => Date;
+
+  constructor(
+    audit: InMemoryAuditLog = new InMemoryAuditLog(),
+    outbox = new InMemoryNotificationOutbox(audit),
+    options: InMemoryChangeSetRepositoryOptions = {},
+  ) {
     this.audit = audit;
     this.outbox = outbox;
+    this.now = options.now ?? (() => new Date());
   }
 
   async create(cs: NewChangeSet, audit: AuditEventInput): Promise<ChangeSetRecord> {
@@ -557,6 +580,48 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     return { ok: true, counts: { ...counts } };
   }
 
+  rollbackableCount(changesetId: string): Promise<number> {
+    let n = 0;
+    for (const it of this.entries.get(changesetId)?.items.values() ?? []) if (isRollbackable(it)) n += 1;
+    return Promise.resolve(n);
+  }
+
+  openRollbackWindow(changesetId: string, until: Date): Promise<Date | undefined> {
+    if (Number.isNaN(until.getTime())) return Promise.reject(new Error('invalid rollback window'));
+    const entry = this.entries.get(changesetId);
+    if (entry === undefined) return Promise.resolve(undefined);
+    // Write-once: a later call answers the stored window.
+    if (entry.record.rollbackUntil === undefined) entry.record = { ...entry.record, rollbackUntil: copyDate(until) };
+    return Promise.resolve(entry.record.rollbackUntil === undefined ? undefined : copyDate(entry.record.rollbackUntil));
+  }
+
+  async requestRollback(req: RollbackRequestOf): Promise<RollbackResult> {
+    // Checked and applied synchronously up to the audit append: the in-memory form of the locked transaction.
+    const entry = this.entries.get(req.changesetId);
+    if (entry === undefined) return { ok: false, reason: 'not_found' };
+    const record = entry.record;
+    if (record.status === 'rolling_back' || record.status === 'rolled_back' || record.rollbackRequest !== undefined) {
+      return { ok: false, reason: 'already_rolled_back' };
+    }
+    const finished =
+      ROLLBACK_FROM.includes(record.status) &&
+      ((record.status !== 'cancelled' && record.status !== 'failed') || executionStarted(record));
+    if (!finished) return { ok: false, reason: 'not_finished' };
+    const until = record.rollbackUntil;
+    // Written as `!(now < end)` so an invalid date or margin (NaN) closes the window.
+    if (until === undefined || !(this.now().getTime() < until.getTime() - req.marginMs)) {
+      return { ok: false, reason: 'window_closed' };
+    }
+    const next: ChangeSetRecord = {
+      ...record,
+      status: 'rolling_back',
+      rollbackRequest: structuredClone(req.request),
+      updatedAt: new Date(),
+    };
+    await this.commit(entry, next, ...req.audit);
+    return { ok: true, changeset: copyRecord(next) };
+  }
+
   /** Applies `next` synchronously, then appends `audit`; undoes the change if the append fails. */
   private async commit(entry: Entry, next: ChangeSetRecord, ...audit: AuditEventInput[]): Promise<void> {
     const previous = entry.record;
@@ -621,13 +686,23 @@ function derivedItem(it: ChangeItemRecord, exclude: ReadonlySet<string>, include
   return { ...base, status: it.status, ...(it.reason === undefined ? {} : { reason: it.reason }) };
 }
 
+/** EXE-8: this run wrote the item itself (no `already_applied`) and it has no rollback outcome yet. */
+function isRollbackable(it: ChangeItemRecord): boolean {
+  return it.status === 'written' && it.error === undefined && it.rollbackStatus === undefined;
+}
+
 function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetStats {
   const excluded: Partial<Record<ExclusionReason, number>> = {};
   let included = 0;
   let written = 0;
   let failed = 0;
   let skipped = 0;
+  let rollback: { -readonly [K in keyof RollbackCounts]: number } | undefined;
   for (const it of items.values()) {
+    if (it.rollbackStatus !== undefined) {
+      rollback ??= { restored: 0, skipped: 0, failed: 0 };
+      rollback[it.rollbackStatus] += 1;
+    }
     if (it.status === 'excluded') {
       if (it.reason !== undefined) excluded[it.reason] = (excluded[it.reason] ?? 0) + 1;
       continue;
@@ -637,5 +712,5 @@ function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetSt
     else if (it.status === 'failed') failed += 1;
     else if (it.status === 'skipped') skipped += 1;
   }
-  return { total: items.size, included, excluded, written, failed, skipped };
+  return { total: items.size, included, excluded, written, failed, skipped, ...(rollback === undefined ? {} : { rollback }) };
 }

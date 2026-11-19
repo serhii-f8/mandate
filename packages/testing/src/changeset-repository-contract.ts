@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { changesetBatchEvent, EMPTY_STATS, startEventFactory } from '@aiops/core';
+import { changesetBatchEvent, EMPTY_STATS, ROLLBACK_REQUEST_MARGIN_MS, rollbackRequestEvents, startEventFactory } from '@aiops/core';
 import { recordApproval, submitChangeSet } from './approval-fixtures.js';
 import type {
   AuditEventInput,
@@ -9,11 +9,13 @@ import type {
   ChangeSetRecord,
   ChangeSetRepository,
   ChangeSetStats,
+  ChangeSetStatus,
   ExecutionLimits,
   ItemOutcome,
   NewChangeSet,
   NewNotification,
   NotificationRow,
+  RollbackRequest,
 } from '@aiops/core';
 
 /**
@@ -1376,6 +1378,205 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
           expect(await c.notifications(c.id)).toEqual([]);
           expect((await run('h')).ok).toBe(true);
           expect((await c.notifications(c.id)).map((r) => r.target)).toEqual(['chat']);
+        }));
+    });
+
+    describe('EXE-8 rollback request', () => {
+      /** The default run: `a` written, `b` written as already applied, `c` failed. */
+      const RUN: readonly ItemOutcome[] = [
+        { targetId: 'a', status: 'written' },
+        { targetId: 'b', status: 'written', error: 'already_applied' },
+        { targetId: 'c', status: 'failed', error: 'upstream_5xx' },
+      ];
+
+      /**
+       * Created with one pending item per outcome, prepared, started (so `executionRequest` is set), the
+       * outcomes recorded, then moved to `status` (`cancelled` through `requestCancel` and the transition).
+       */
+      async function finished(
+        c: Ctx,
+        status: 'completed' | 'completed_with_errors' | 'cancelled' | 'failed',
+        items: readonly ItemOutcome[] = RUN,
+      ): Promise<ChangeSetRecord> {
+        await c.repository.create(newChangeSet(c.id), auditEvent(c.id));
+        await c.repository.appendItems(c.id, items.map((o) => item(o.targetId)));
+        await c.repository.completePreparation(
+          c.id,
+          { status: 'prepared', hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
+          auditEvent(c.id),
+        );
+        expect((await start(c, c.id)).ok).toBe(true);
+        await c.repository.recordItemOutcomes(c.id, items);
+        if (status === 'cancelled') {
+          const cancel = await c.repository.requestCancel(c.id, { actor: 'alice', correlationId: 'corr-c', requestedAt: NOW });
+          expect(cancel.ok).toBe(true);
+        }
+        const moved = await c.repository.transition(c.id, ['executing'], status, auditEvent(c.id));
+        if (moved === undefined) throw new Error(`could not move to ${status}`);
+        return moved;
+      }
+
+      /** Wall-clock offsets: the PostgreSQL implementation judges the window on the database clock. */
+      const fromNow = (ms: number): Date => new Date(Date.now() + ms);
+
+      function rollbackRequest(over: Partial<RollbackRequest> = {}): RollbackRequest {
+        return { actor: 'alice', clientId: 'cli', correlationId: `corr-rb-${randomUUID()}`, requestedAt: new Date(), ...over };
+      }
+
+      async function request(
+        c: Ctx,
+        req: RollbackRequest = rollbackRequest(),
+        marginMs = ROLLBACK_REQUEST_MARGIN_MS,
+      ): ReturnType<ChangeSetRepository['requestRollback']> {
+        const cs = await c.repository.get(c.id);
+        const audit =
+          cs === undefined
+            ? [auditEvent(c.id)]
+            : rollbackRequestEvents({ newId: randomUUID, changeset: cs, request: req, channel: 'page', count: 1 });
+        return c.repository.requestRollback({ changesetId: c.id, request: req, marginMs, audit });
+      }
+
+      it('EXE-8 rollbackableCount counts written items without error only', async () =>
+        withRepo(async (c) => {
+          await finished(c, 'completed_with_errors');
+          expect(await c.repository.rollbackableCount(c.id)).toBe(1);
+          expect(await c.repository.rollbackableCount(randomUUID())).toBe(0);
+          expect(await c.repository.rollbackableCount('x')).toBe(0);
+        }));
+
+      it('EXE-8 openRollbackWindow writes the window once and answers the stored value', async () =>
+        withRepo(async (c) => {
+          await finished(c, 'completed');
+          const t1 = new Date('2026-12-01T00:00:00.000Z');
+          const t2 = new Date('2026-12-02T00:00:00.000Z');
+          expect(await c.repository.openRollbackWindow(c.id, t1)).toEqual(t1);
+          expect(await c.repository.openRollbackWindow(c.id, t2)).toEqual(t1);
+          expect((await c.repository.get(c.id))?.rollbackUntil).toEqual(t1);
+          expect(await c.repository.openRollbackWindow(randomUUID(), t1)).toBeUndefined();
+          expect(await c.repository.openRollbackWindow('x', t1)).toBeUndefined();
+        }));
+
+      it('EXE-8 requestRollback moves a completed change-set to rolling_back with the request and both audit rows', async () =>
+        withRepo(async (c) => {
+          const cs = await finished(c, 'completed');
+          await c.repository.openRollbackWindow(c.id, fromNow(HOUR));
+          const req = rollbackRequest();
+          const before = (await c.events()).length;
+          const audit = rollbackRequestEvents({ newId: randomUUID, changeset: cs, request: req, channel: 'page', count: 1 });
+          const answer = await c.repository.requestRollback({
+            changesetId: c.id,
+            request: req,
+            marginMs: ROLLBACK_REQUEST_MARGIN_MS,
+            audit,
+          });
+          expect(answer.ok).toBe(true);
+          if (!answer.ok) return;
+          expect(answer.changeset.status).toBe('rolling_back');
+          expect(answer.changeset.rollbackRequest).toEqual(req);
+          expect((await c.repository.get(c.id))?.rollbackRequest).toEqual(req);
+          expect((await c.events()).slice(before).map((e) => e.id)).toEqual(audit.map((e) => e.id));
+        }));
+
+      it('EXE-8 requestRollback refusals write nothing', async () =>
+        withRepo(async (c) => {
+          const unchanged = async (id: string, status: ChangeSetStatus, events: number): Promise<void> => {
+            const cs = await c.repository.get(id);
+            expect(cs?.status).toBe(status);
+            expect(cs?.rollbackRequest).toBeUndefined();
+            expect(await eventsOf(c, id)).toHaveLength(events);
+          };
+
+          await finished(c, 'completed');
+          let events = (await c.events()).length;
+          expect(await request(c)).toEqual({ ok: false, reason: 'window_closed' });
+          await unchanged(c.id, 'completed', events);
+          await c.repository.openRollbackWindow(c.id, fromNow(30_000));
+          expect(await request(c, rollbackRequest(), 60_000)).toEqual({ ok: false, reason: 'window_closed' });
+          await unchanged(c.id, 'completed', events);
+
+          const prep = { ...c, id: randomUUID() };
+          await preparedSet(c, prep.id, 1);
+          events = (await eventsOf(c, prep.id)).length;
+          expect(await request(prep)).toEqual({ ok: false, reason: 'not_finished' });
+          await unchanged(prep.id, 'prepared', events);
+
+          const neverRan = { ...c, id: randomUUID() };
+          await preparedSet(c, neverRan.id, 1);
+          await c.repository.transition(neverRan.id, ['prepared'], 'cancelled', auditEvent(neverRan.id));
+          await c.repository.openRollbackWindow(neverRan.id, fromNow(HOUR));
+          events = (await eventsOf(c, neverRan.id)).length;
+          expect(await request(neverRan)).toEqual({ ok: false, reason: 'not_finished' });
+          await unchanged(neverRan.id, 'cancelled', events);
+
+          const done = { ...c, id: randomUUID() };
+          await finished(done, 'completed');
+          await c.repository.openRollbackWindow(done.id, fromNow(HOUR));
+          const first = rollbackRequest();
+          expect((await request(done, first)).ok).toBe(true);
+          events = (await eventsOf(c, done.id)).length;
+          expect(await request(done, rollbackRequest({ actor: 'bob' }))).toEqual({ ok: false, reason: 'already_rolled_back' });
+          expect((await c.repository.get(done.id))?.rollbackRequest).toEqual(first);
+          expect(await eventsOf(c, done.id)).toHaveLength(events);
+
+          for (const id of [randomUUID(), 'x']) {
+            expect(await request({ ...c, id })).toEqual({ ok: false, reason: 'not_found' });
+            expect(await eventsOf(c, id)).toHaveLength(0);
+          }
+        }));
+
+      it('EXE-8 only one of two concurrent requests wins', async () =>
+        withRepo(async (c) => {
+          const cs = await finished(c, 'completed');
+          await c.repository.openRollbackWindow(c.id, fromNow(HOUR));
+          const before = (await c.events()).length;
+          const ask = (actor: string): ReturnType<ChangeSetRepository['requestRollback']> => {
+            const req = rollbackRequest({ actor });
+            return c.repository.requestRollback({
+              changesetId: c.id,
+              request: req,
+              marginMs: ROLLBACK_REQUEST_MARGIN_MS,
+              audit: rollbackRequestEvents({ newId: randomUUID, changeset: cs, request: req, channel: 'page', count: 1 }),
+            });
+          };
+          const results = await Promise.all([ask('alice'), ask('bob')]);
+          expect(results.filter((r) => r.ok)).toHaveLength(1);
+          expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, reason: 'already_rolled_back' }]);
+          expect((await c.events()).slice(before)).toHaveLength(2);
+          expect((await c.repository.get(c.id))?.status).toBe('rolling_back');
+        }));
+
+      it('EXE-8 a cancelled and a failed run that wrote items can be requested', async () =>
+        withRepo(async (c) => {
+          for (const status of ['cancelled', 'failed'] as const) {
+            const run = { ...c, id: randomUUID() };
+            const cs = await finished(run, status);
+            expect(cs.executionRequest).toBeDefined();
+            await c.repository.openRollbackWindow(run.id, fromNow(HOUR));
+            const answer = await request(run);
+            expect(answer.ok).toBe(true);
+            expect((await c.repository.get(run.id))?.status).toBe('rolling_back');
+          }
+        }));
+
+      it('EXE-8 get and itemsPage carry the rollback fields; stats.rollback appears only once an item has a rollback status', async () =>
+        withRepo(async (c) => {
+          await finished(c, 'completed');
+          const fresh = await c.repository.get(c.id);
+          expect(fresh?.rollbackUntil).toBeUndefined();
+          expect(fresh?.rollbackRequest).toBeUndefined();
+          await c.repository.openRollbackWindow(c.id, fromNow(HOUR));
+          const withoutClient: RollbackRequest = { actor: 'alice', correlationId: `corr-rb-${randomUUID()}`, requestedAt: new Date() };
+          expect((await request(c, withoutClient)).ok).toBe(true);
+          const cs = await c.repository.get(c.id);
+          expect(cs?.rollbackRequest).toEqual(withoutClient);
+          expect(cs?.rollbackRequest && 'clientId' in cs.rollbackRequest).toBe(false);
+          for (const it of await c.repository.itemsPage(c.id, { limit: 10 })) {
+            expect(it.rollbackStatus).toBeUndefined();
+            expect(it.rollbackError).toBeUndefined();
+            expect('rollbackStatus' in it).toBe(false);
+          }
+          expect((await c.repository.stats(c.id)).rollback).toBeUndefined();
+          expect(cs?.stats.rollback).toBeUndefined();
         }));
     });
   });

@@ -9,6 +9,7 @@ import type {
   ChangeSetStatus,
   ExecutionRequest,
   ItemStatus,
+  RollbackRequest,
 } from './model.js';
 
 export type PrepareFailure = 'targets_missing' | 'too_many_targets' | 'incomplete_read' | 'cancelled' | (string & {});
@@ -206,6 +207,26 @@ export interface ChangeSetRepository {
     outcomes: readonly ItemOutcome[],
     audit: AuditEventInput,
   ): Promise<{ ok: true; counts: BatchCounts } | { ok: false }>;
+  /** EXE-8: items with status `written`, no error and no rollback status; 0 for an unknown or non-UUID ID. */
+  rollbackableCount(changesetId: string): Promise<number>;
+  /** EXE-8: sets `rollback_until = until` only while it is NULL (write-once) and answers the stored value; undefined for an unknown or non-UUID ID. */
+  openRollbackWindow(changesetId: string, until: Date): Promise<Date | undefined>;
+  /**
+   * EXE-8, SEC-8: one transaction. Locks the change-set FOR UPDATE and reads the database clock; refuses
+   * `not_found`; `already_rolled_back` (status rolling_back/rolled_back, or a request stored); `not_finished`
+   * (status not in ROLLBACK_FROM, or cancelled/failed without execution); `window_closed` (rollback_until NULL or
+   * `now() >= rollback_until − marginMs`). Then sets status `rolling_back` with the four request columns and
+   * `updated_at`, appends `audit` in order, and answers the record. A refusal writes nothing.
+   */
+  requestRollback(req: {
+    readonly changesetId: string;
+    readonly request: RollbackRequest;
+    readonly marginMs: number;
+    readonly audit: readonly AuditEventInput[];
+  }): Promise<
+    | { ok: true; changeset: ChangeSetRecord }
+    | { ok: false; reason: 'not_found' | 'already_rolled_back' | 'not_finished' | 'window_closed' }
+  >;
 }
 
 /** A claimed write batch (EXE-3). */
