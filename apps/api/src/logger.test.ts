@@ -1,4 +1,5 @@
 import { Writable } from 'node:stream';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { describe, expect, it } from 'vitest';
 import { createLogger } from './logger.js';
 
@@ -31,5 +32,31 @@ describe('SEC-3 the api logger redacts credential-bearing paths', () => {
     expect(parsed.req.headers.authorization).toBe('[REDACTED]');
     expect(parsed.res.headers['set-cookie']).toBe('[REDACTED]');
     expect(parsed.upstream.client_secret).toBe('[REDACTED]');
+  });
+});
+
+describe('NFR-11 log correlation', () => {
+  it('NFR-11 log lines inside a span carry trace_id and span_id, lines outside carry neither', async () => {
+    const provider = new NodeTracerProvider();
+    provider.register();
+    try {
+      const { lines, stream } = capture();
+      const logger = createLogger('info', stream);
+      logger.info('outside');
+      const tracer = provider.getTracer('test');
+      tracer.startActiveSpan('work', (span) => {
+        logger.info('inside');
+        const ctx = span.spanContext();
+        const inside = JSON.parse(lines[1] ?? '{}') as Record<string, unknown>;
+        expect(inside.trace_id).toBe(ctx.traceId);
+        expect(inside.span_id).toBe(ctx.spanId);
+        span.end();
+      });
+      const outside = JSON.parse(lines[0] ?? '{}') as Record<string, unknown>;
+      expect(outside).not.toHaveProperty('trace_id');
+      expect(outside).not.toHaveProperty('span_id');
+    } finally {
+      await provider.shutdown();
+    }
   });
 });
