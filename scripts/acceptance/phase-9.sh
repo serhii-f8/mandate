@@ -228,7 +228,7 @@ group_1() {
     alice_echo="$(user_mcp alice everything.echo "{\"message\":\"$stamp_1\"}")"
     if [[ "$(lists alice everything.echo)" == no && "$(json "$echo_answer" '.structuredContent.value.text[0]')" == "Echo: $stamp_1" &&
       "$alice_echo" == *"Tool everything.echo not found"* ]]; then
-      pass mcp-enable-grants "config apply → exit 0; bob lists everything.echo, alice does not; bob's call → $(json "$echo_answer" '.structuredContent.value'); alice's call → ${alice_echo:0:200}"
+      pass mcp-enable-grants "config apply → exit 0; bob lists everything.echo, alice does not; bob's call → $(json "$echo_answer" '.structuredContent.value'); alice's call → $(grep -o 'Tool everything.echo not found' <<<"$alice_echo" | head -1)"
     else
       fail mcp-enable-grants "alice lists echo: $(lists alice everything.echo); bob: ${echo_answer:0:800}; alice: ${alice_echo:0:400}"
       return 0
