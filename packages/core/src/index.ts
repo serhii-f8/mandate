@@ -1,5 +1,7 @@
 /** Domain model, policy evaluation, manifest engine and diff. Free of frameworks, drivers and adapters. */
-export type { AuditAction, AuditDecision, AuditEventInput, AuditLog, AuditOutcome } from './audit.js';
+export { AUDIT_ACTIONS, type AuditAction, type AuditDecision, type AuditEventInput, type AuditLog, type AuditOutcome } from './audit.js';
+export { REDACTED, redactAuditDetails } from './audit/redact.js';
+export type { AuditReader, AuditRecord, AuditSearchFilter } from './audit/search.js';
 export {
   AUDIT_CHAIN_FORMAT,
   auditRowHash,
