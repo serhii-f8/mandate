@@ -113,7 +113,7 @@ describe('MCP-5 tool linkage over HTTP', () => {
       const { tools } = await client.listTools();
       const meta = (name: string) => tools.find((t) => t.name === name)?._meta;
       const linked = { ui: { resourceUri: 'ui://aiops/changeset.html' }, 'ui/resourceUri': 'ui://aiops/changeset.html' };
-      for (const name of ['shop.update_content', 'shop.retire_content', 'get_changeset', 'submit_for_approval', 'exclude_changeset_items']) {
+      for (const name of ['shop.update_content', 'shop.retire_content', 'get_changeset', 'submit_for_approval', 'exclude_changeset_items', 'rollback_changeset']) {
         expect(meta(name), name).toEqual(linked);
       }
       for (const name of ['ping', 'cancel_changeset']) {

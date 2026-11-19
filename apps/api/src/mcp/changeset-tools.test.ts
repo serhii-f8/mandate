@@ -1,9 +1,23 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import { CANCELLABLE, READ_RESULT_TEXT, encodeCursor, ExecutorUnavailable, type Caller, type ChangeSetExecutor, type ChangeSetStatus, type ExecutionProgress } from '@aiops/core';
+import type { LoadedConfiguration } from '@aiops/config';
+import {
+  CANCELLABLE,
+  READ_RESULT_TEXT,
+  encodeCursor,
+  ExecutorUnavailable,
+  type Caller,
+  type ChangeSetExecutor,
+  type ChangeSetStatus,
+  type ExecutionProgress,
+  type OperationDefinition,
+  type PolicyDecision,
+  type PolicyEngine,
+} from '@aiops/core';
 import { InMemoryChangeSetRepository } from '@aiops/testing';
 import { createChangesetTools } from './changeset-tools.js';
 import { isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
+import type { Snapshot } from './tool-pipeline.js';
 
 /** Narrows an answer to a plain tool result; these tests never ask for a task. */
 function plain(answer: ToolAnswer): CallToolResult {
@@ -58,6 +72,16 @@ class StubExecutor implements ChangeSetExecutor {
   }
 }
 
+function stubSnapshot(effect: PolicyDecision['effect'] = 'allow'): Snapshot {
+  // Only `manifest.rollback.strategy` is read from the definition.
+  const operation = { id: 'shop.update_content', manifest: { rollback: { strategy: 'replay_previous_state' } } } as unknown as OperationDefinition;
+  const engine: PolicyEngine = { grantedOperations: () => [], evaluate: () => ({ effect, rule: 'test', roles: [] }) };
+  // Only `policy.operations` is read from the configuration.
+  return { configuration: { policy: { operations: [operation] } } as unknown as LoadedConfiguration, engine };
+}
+
+const SNAPSHOT = stubSnapshot();
+
 async function setup(expiresAt = new Date('2026-01-02T12:00:00Z')) {
   const repository = new InMemoryChangeSetRepository();
   const base = { operation: 'shop.update_content', connection: 'shop', requester: 'alice', args: {}, configHash: 'h', correlationId: 'c0', createdAt: NOW, expiresAt };
@@ -73,8 +97,8 @@ async function setup(expiresAt = new Date('2026-01-02T12:00:00Z')) {
   const executor = new StubExecutor(repository);
   const [get, cancel] = createChangesetTools({ repository, executor, newId: () => `id-${String(n++)}`, now: () => NOW });
   if (get === undefined || cancel === undefined) throw new Error('tools missing');
-  // The handlers under test use only the caller and the correlation ID from the context.
-  const ctx = (caller: Caller) => ({ caller, snapshot: undefined as never, correlationId: 'c1', tasks: false, report: () => undefined });
+  // The handlers under test use the caller, the correlation ID and (rollback block) the snapshot.
+  const ctx = (caller: Caller, snapshot: Snapshot = SNAPSHOT) => ({ caller, snapshot, correlationId: 'c1', tasks: false, report: () => undefined });
   const audit0 = { ...audit, id: 'ax' };
   /** Moves the change-set on: executing, then optionally finished with item outcomes. */
   const advance = async (to: ChangeSetStatus, outcomes: { targetId: string; status: 'written' | 'skipped' | 'failed'; error?: string }[] = []) => {
@@ -219,12 +243,12 @@ describe('MCP-8 CS-6 built-in change-set tools', () => {
     expect((result.structuredContent as { progress?: unknown }).progress).toEqual({ total: 3, done: 2, failed: 0, skipped: 1 });
   });
 
-  it('UI-4 get_changeset carries execution.drift once execution summarised, and rollback.available false always', async () => {
+  it('UI-4 get_changeset carries execution.drift once execution summarised', async () => {
     const { get, ctx, executor, advance } = await setup();
     executor.progressAnswer = { status: 'prepared', total: 3, done: 0, failed: 0, skipped: 0 };
     const before = plain(await get.handler({ changeset_id: ID }, ctx(alice))).structuredContent as Record<string, unknown>;
     expect(before.execution).toBeUndefined();
-    expect(before.rollback).toEqual({ available: false });
+    expect(before.rollback).toEqual({ available: false, reason: 'not_finished' });
     executor.progressAnswer = { status: 'completed', total: 3, done: 3, failed: 0, skipped: 0 };
     await advance('completed', [
       { targetId: 'a', status: 'skipped', error: 'drift' },
@@ -233,7 +257,25 @@ describe('MCP-8 CS-6 built-in change-set tools', () => {
     ]);
     const after = plain(await get.handler({ changeset_id: ID }, ctx(alice))).structuredContent as Record<string, unknown>;
     expect(after.execution).toEqual({ drift: 2 });
-    expect(after.rollback).toEqual({ available: false });
+    // No window was opened for this run.
+    expect(after.rollback).toEqual({ available: false, reason: 'window_closed' });
+  });
+
+  it('UI-4 get_changeset reports rollback availability, count and until', async () => {
+    const { get, ctx, executor, advance, repository } = await setup();
+    executor.progressAnswer = { status: 'completed', total: 3, done: 3, failed: 0, skipped: 0 };
+    await advance('completed', [
+      { targetId: 'a', status: 'written' },
+      { targetId: 'b', status: 'written' },
+      { targetId: 'c', status: 'skipped', error: 'drift' },
+    ]);
+    const until = new Date('2026-01-08T12:00:00Z');
+    await repository.openRollbackWindow(ID, until);
+    const own = plain(await get.handler({ changeset_id: ID }, ctx(alice))).structuredContent as Record<string, unknown>;
+    expect(own.rollback).toStrictEqual({ available: true, count: 2, until: until.toISOString() });
+    // POL-6: the policy is evaluated now for the caller.
+    const denied = plain(await get.handler({ changeset_id: ID }, ctx(alice, stubSnapshot('deny')))).structuredContent as Record<string, unknown>;
+    expect(denied.rollback).toStrictEqual({ available: false, reason: 'policy_denied' });
   });
 
   it('CS-5 get_changeset of a derived change-set names derivedFrom', async () => {
@@ -254,7 +296,7 @@ describe('MCP-8 CS-6 built-in change-set tools', () => {
     executor.progressAnswer = { status: 'prepared', total: 3, done: 0, failed: 0, skipped: 0 };
     const result = plain(await get.handler({ changeset_id: ID }, ctx(alice)));
     const { rollback, ...rest } = result.structuredContent as Record<string, unknown>;
-    expect(rollback).toEqual({ available: false });
+    expect(rollback).toEqual({ available: false, reason: 'not_finished' });
     expect(Object.keys(rest).sort()).toEqual(['changeset', 'items']);
     expect(result.content[0]).toEqual({
       type: 'text',

@@ -20,6 +20,8 @@ import {
   type PageViewer,
 } from './detail.js';
 
+const NO_ROLLBACK = { available: false } as const;
+
 const ID = '11111111-1111-4111-8111-111111111111';
 const HASH = `sha256:${'a'.repeat(64)}`;
 const CREATED = new Date('2026-11-17T09:50:00.000Z');
@@ -116,7 +118,7 @@ const erin = viewer('erin-sub', ['brand_owner'], { name: 'erin' });
 describe('changesetDetail', () => {
   it('APR-5 the detail carries the stored request, policy, stats, hash and expiry', () => {
     const cs = pending();
-    const d = changesetDetail({ changeset: cs, approvals: [], operation: OPERATION, viewer: dave, now: NOW });
+    const d = changesetDetail({ changeset: cs, approvals: [], operation: OPERATION, viewer: dave, now: NOW, rollback: NO_ROLLBACK });
     expect(d.request.args).toStrictEqual(ARGS);
     expect(d.request.submittedAt).toBe(SUBMITTED.toISOString());
     expect(d.request).toStrictEqual({
@@ -141,7 +143,7 @@ describe('changesetDetail', () => {
   });
 
   it('APR-3 the approval chain shows each step with its decision, comment as stored text', () => {
-    const d = changesetDetail({ changeset: atStep2, approvals: [daveApproved], operation: OPERATION, viewer: erin, now: NOW });
+    const d = changesetDetail({ changeset: atStep2, approvals: [daveApproved], operation: OPERATION, viewer: erin, now: NOW, rollback: NO_ROLLBACK });
     expect(d.approval?.round).toBe(1);
     expect(d.approval?.steps).toHaveLength(2);
     expect(d.approval?.steps[0]).toStrictEqual({
@@ -158,14 +160,14 @@ describe('changesetDetail', () => {
 
   it('APR-3 decisions of an earlier round are not shown in the current round', () => {
     const cs = pending({ approvalRound: 2 });
-    const d = changesetDetail({ changeset: cs, approvals: [approval({ decision: 'returned', comment: 'fix' })], viewer: dave, now: NOW });
+    const d = changesetDetail({ changeset: cs, approvals: [approval({ decision: 'returned', comment: 'fix' })], viewer: dave, now: NOW, rollback: NO_ROLLBACK });
     expect(d.approval?.round).toBe(2);
     expect(d.approval?.steps[0]?.decision).toBeUndefined();
   });
 
   it('APR-5 a change-set never submitted has no approval or policy block', () => {
     const cs = prepared();
-    const d = changesetDetail({ changeset: cs, approvals: [], operation: OPERATION, viewer: alice, now: NOW });
+    const d = changesetDetail({ changeset: cs, approvals: [], operation: OPERATION, viewer: alice, now: NOW, rollback: NO_ROLLBACK });
     expect(d.approval).toBeUndefined();
     expect(d.policy).toBeUndefined();
     expect(d.request.submittedAt).toBeUndefined();
@@ -180,6 +182,7 @@ describe('changesetDetail', () => {
       progress: { status: 'executing', total: 3, done: 1, failed: 0, skipped: 0 },
       viewer: alice,
       now: NOW,
+      rollback: NO_ROLLBACK,
     });
     expect(d.progress).toStrictEqual({ total: 3, done: 1, failed: 0, skipped: 0 });
     expect(d.errorCode).toBe('drift');
@@ -187,17 +190,17 @@ describe('changesetDetail', () => {
 
   it('AUTH-6 the approval block carries the plan step-up', () => {
     const cs = pending({ approvalPlan: { ...PLAN, stepUp: { maxAgeSeconds: 120 } } });
-    expect(changesetDetail({ changeset: cs, approvals: [], viewer: dave, now: NOW }).approval?.stepUp).toStrictEqual({ maxAgeSeconds: 120 });
+    expect(changesetDetail({ changeset: cs, approvals: [], viewer: dave, now: NOW, rollback: NO_ROLLBACK }).approval?.stepUp).toStrictEqual({ maxAgeSeconds: 120 });
   });
 
   it('UI-2 an unconfigured operation shows its id only', () => {
-    const d = changesetDetail({ changeset: pending(), approvals: [], viewer: dave, now: NOW });
+    const d = changesetDetail({ changeset: pending(), approvals: [], viewer: dave, now: NOW, rollback: NO_ROLLBACK });
     expect(d.operation).toStrictEqual({ id: 'catalog.update_content' });
   });
 
   it('UI-2 the operation title falls back to its id', () => {
     const untitled: OperationDefinition = { id: OPERATION.id, toolName: OPERATION.toolName, source: OPERATION.source, connection: OPERATION.connection, risk: OPERATION.risk, description: OPERATION.description, inputSchema: OPERATION.inputSchema };
-    const d = changesetDetail({ changeset: pending(), approvals: [], operation: untitled, viewer: dave, now: NOW });
+    const d = changesetDetail({ changeset: pending(), approvals: [], operation: untitled, viewer: dave, now: NOW, rollback: NO_ROLLBACK });
     expect(d.operation).toStrictEqual({ id: 'catalog.update_content', title: 'catalog.update_content', description: 'Update product content.', risk: 'write' });
   });
 });
@@ -205,18 +208,26 @@ describe('changesetDetail', () => {
 describe('detail additions', () => {
   it('CS-5 the detail carries derivedFrom of a derived change-set', () => {
     const src = '22222222-2222-4222-8222-222222222222';
-    expect(changesetDetail({ changeset: { ...prepared(), derivedFrom: src }, approvals: [], viewer: alice, now: NOW }).derivedFrom).toBe(src);
-    expect('derivedFrom' in changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW })).toBe(false);
+    expect(changesetDetail({ changeset: { ...prepared(), derivedFrom: src }, approvals: [], viewer: alice, now: NOW, rollback: NO_ROLLBACK }).derivedFrom).toBe(src);
+    expect('derivedFrom' in changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, rollback: NO_ROLLBACK })).toBe(false);
   });
 
-  it('UI-4 drift is present once execution summarised; rollback is never available in this phase', () => {
-    const without = changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW });
+  it('UI-4 drift is present once execution summarised', () => {
+    const without = changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, rollback: NO_ROLLBACK });
     expect('drift' in without).toBe(false);
-    expect(without.rollback).toStrictEqual({ available: false });
-    const withDrift = changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, drift: 0 });
+    const withDrift = changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, rollback: NO_ROLLBACK, drift: 0 });
     expect(withDrift.drift).toBe(0);
-    expect(changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, drift: 2 }).drift).toBe(2);
-    expect(withDrift.rollback).toStrictEqual({ available: false });
+    expect(changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, rollback: NO_ROLLBACK, drift: 2 }).drift).toBe(2);
+  });
+
+  it('UI-4 the detail carries the rollback block it is given', () => {
+    const available = { available: true, count: 2, until: '2026-11-24T10:00:00.000Z' };
+    const refused = { available: false, reason: 'window_closed' as const, stats: { restored: 1, skipped: 0, failed: 1 } };
+    for (const rollback of [NO_ROLLBACK, available, refused]) {
+      expect(changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, rollback }).rollback).toStrictEqual(rollback);
+      const widget = widgetViewerBlock(prepared(), [], toApprover(alice), NOW);
+      expect(changesetDetailWith({ changeset: prepared(), approvals: [], viewer: widget, rollback }).rollback).toStrictEqual(rollback);
+    }
   });
 });
 
@@ -266,7 +277,7 @@ describe('viewerBlock', () => {
   });
 
   it('UI-7 the detail embeds the viewer block', () => {
-    expect(changesetDetail({ changeset: pending(), approvals: [], viewer: dave, now: NOW }).viewer).toStrictEqual(viewerBlock(pending(), [], dave, NOW));
+    expect(changesetDetail({ changeset: pending(), approvals: [], viewer: dave, now: NOW, rollback: NO_ROLLBACK }).viewer).toStrictEqual(viewerBlock(pending(), [], dave, NOW));
   });
 
   it('APR-7 viewer.canStart for the last step role on an approved change-set', () => {
@@ -387,17 +398,17 @@ describe('APR-8 widget channel', () => {
   it('APR-5 changesetDetailWith(page block) equals changesetDetail; itemRow keeps the page item shape', () => {
     for (const drift of [undefined, 0, 2]) {
       const extra = drift === undefined ? {} : { drift };
-      const page = changesetDetail({ changeset: atStep2, approvals: [daveApproved], operation: OPERATION, viewer: erin, now: NOW, ...extra });
+      const page = changesetDetail({ changeset: atStep2, approvals: [daveApproved], operation: OPERATION, viewer: erin, now: NOW, rollback: NO_ROLLBACK, ...extra });
       const viewerOf = viewerBlock(atStep2, [daveApproved], erin, NOW);
-      expect(changesetDetailWith({ changeset: atStep2, approvals: [daveApproved], operation: OPERATION, viewer: viewerOf, ...extra })).toStrictEqual(page);
+      expect(changesetDetailWith({ changeset: atStep2, approvals: [daveApproved], operation: OPERATION, viewer: viewerOf, rollback: NO_ROLLBACK, ...extra })).toStrictEqual(page);
     }
     const progress = { status: 'executing', total: 3, done: 1, failed: 0, skipped: 0 } as const;
     const executing = pending({ status: 'executing', errorCode: 'drift' });
-    expect(changesetDetailWith({ changeset: executing, approvals: [], progress, viewer: viewerBlock(executing, [], alice, NOW) })).toStrictEqual(
-      changesetDetail({ changeset: executing, approvals: [], progress, viewer: alice, now: NOW }),
+    expect(changesetDetailWith({ changeset: executing, approvals: [], progress, viewer: viewerBlock(executing, [], alice, NOW), rollback: NO_ROLLBACK })).toStrictEqual(
+      changesetDetail({ changeset: executing, approvals: [], progress, viewer: alice, now: NOW, rollback: NO_ROLLBACK }),
     );
     const widget = widgetViewerBlock(atStep2, [daveApproved], toApprover(erin), NOW);
-    expect(changesetDetailWith({ changeset: atStep2, approvals: [daveApproved], viewer: widget }).viewer).toBe(widget);
+    expect(changesetDetailWith({ changeset: atStep2, approvals: [daveApproved], viewer: widget, rollback: NO_ROLLBACK }).viewer).toBe(widget);
 
     const plain: ChangeItemRecord = { targetId: 'ACME-1', status: 'pending', before: { name: 'a' }, after: { name: 'b' } };
     expect(itemRow(plain)).toStrictEqual({ targetId: 'ACME-1', status: 'pending', before: { name: 'a' }, after: { name: 'b' } });

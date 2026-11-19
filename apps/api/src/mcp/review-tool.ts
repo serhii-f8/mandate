@@ -11,6 +11,7 @@ import { createSchemaCompiler, type LoadedConfiguration } from '@aiops/config';
 import { canView, currentStep, encodeCursor, resolveRoles, type ApprovalRecord, type Approver, type Caller, type ChangeSetRecord, type ItemStatus } from '@aiops/core';
 import { changesetDetailWith, itemRow, widgetViewerBlock, type ViewerBlock } from '../approvals/detail.js';
 import { decodeCursor, newSeed } from '../approvals/page-query.js';
+import { rollbackBlock } from '../changesets/rollback.js';
 import { DECISION_REFUSAL_TEXT } from '../approvals/texts.js';
 import type { BuiltinToolDeps } from './builtin-tools.js';
 import { isSummarised, notFound, progressOf } from './changeset-tools.js';
@@ -108,6 +109,8 @@ export function reviewChangesetTool(deps: BuiltinToolDeps): BuiltinTool {
       };
       const viewer = widgetViewerBlock(cs, approvals, approver, deps.now());
       const operation = configuration.policy.operations.find((op) => op.id === cs.operation);
+      // The same block as get_changeset: available only to the requester (T11/F3), who may also view here.
+      const rollback = await rollbackBlock({ repository: deps.repository, snapshot, now: deps.now }, cs, caller);
       const detail = changesetDetailWith({
         changeset: cs,
         approvals,
@@ -115,6 +118,7 @@ export function reviewChangesetTool(deps: BuiltinToolDeps): BuiltinTool {
         ...(progress === undefined ? {} : { progress }),
         ...(drift === undefined ? {} : { drift }),
         viewer,
+        rollback,
       });
       report({ canDecide: viewer.canDecide });
 
