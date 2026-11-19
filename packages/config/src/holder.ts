@@ -34,9 +34,17 @@ export type LoadErrorCode = 'invalid' | 'configuration_mismatch' | 'unavailable'
 export type RefreshResult =
   | { readonly outcome: 'unchanged' }
   | { readonly outcome: 'loaded'; readonly revision: string; readonly hash: string }
-  | { readonly outcome: 'refused'; readonly revision: string | null; readonly code: LoadErrorCode; readonly issues: readonly ConfigIssue[] };
+  | {
+      readonly outcome: 'refused';
+      readonly revision: string | null;
+      readonly code: LoadErrorCode;
+      readonly issues: readonly ConfigIssue[];
+      /** Set when the previous refusal had the same seq (null: a failed store read) and code; it was not audited again. */
+      readonly repeated?: true;
+    };
 
 export interface ConfigurationLogger {
+  debug(fields: object, message: string): void;
   info(fields: object, message: string): void;
   warn(fields: object, message: string): void;
   error(fields: object, message: string): void;
@@ -70,9 +78,12 @@ type Source = { readonly kind: 'directory'; readonly dir: string } | { readonly 
 export class ConfigurationHolder implements ConfigurationStateSource {
   private queue: Promise<unknown> = Promise.resolve();
   private status: ConfigurationState;
-  /** Seq of the loaded revision, and of the last revision refused as invalid or mismatching. */
   private loadedSeq: number | undefined;
-  private refusedSeq: number | undefined;
+  /**
+   * The last refusal (AUD-1): a repeat of the same seq and code is retried but not audited again.
+   * `seq` null is a failed store read; a successful store read or a load clears the marker.
+   */
+  private lastRefusal: { readonly seq: number | null; readonly code: LoadErrorCode } | undefined;
   private waiters: (() => void)[] = [];
 
   private constructor(
@@ -135,9 +146,13 @@ export class ConfigurationHolder implements ConfigurationStateSource {
   }
 
   /**
-   * Re-reads the active revision's seq and loads the revision when the seq is new (CFG-3).
-   * A seq refused as invalid or mismatching is retried only on `signal`; a failed store read
-   * is not remembered. Refreshes run one after another.
+   * Re-reads the active revision's seq and loads the revision unless that seq is the loaded one
+   * (CFG-3). A refused seq is retried on every refresh, whatever the trigger, so a refusal caused
+   * by a transient failure (a spec URL that could not be fetched, a full tmpdir, a store read)
+   * heals within one poll interval (CFG-2). A refusal that repeats the previous one (same seq, or a
+   * failed store read again, with the same code) writes no new `config.load` row and logs at
+   * debug (AUD-1); the first refusal, a change of code and a load are audited. Refreshes run one
+   * after another.
    */
   refresh(trigger: LoadTrigger): Promise<RefreshResult> {
     const { source } = this;
@@ -146,12 +161,13 @@ export class ConfigurationHolder implements ConfigurationStateSource {
       let revision: ConfigRevision | undefined;
       try {
         const seq = await source.options.store.activeSeq();
-        if (seq === undefined || !this.isNew(seq, trigger)) return { outcome: 'unchanged' as const };
+        if (this.lastRefusal?.seq === null) this.lastRefusal = undefined;
+        if (seq === undefined || seq === this.loadedSeq) return { outcome: 'unchanged' as const };
         revision = await source.options.store.active();
       } catch {
         return this.unavailable(source.options, trigger);
       }
-      if (revision === undefined || !this.isNew(revision.seq, trigger)) return { outcome: 'unchanged' as const };
+      if (revision === undefined || revision.seq === this.loadedSeq) return { outcome: 'unchanged' as const };
       return this.attempt(trigger, revision);
     });
   }
@@ -178,9 +194,11 @@ export class ConfigurationHolder implements ConfigurationStateSource {
     return next;
   }
 
-  private isNew(seq: number, trigger: LoadTrigger): boolean {
-    if (seq === this.loadedSeq) return false;
-    return seq !== this.refusedSeq || trigger === 'signal';
+  /** Records the refusal and tells whether it repeats the previous one (then it is not audited again). */
+  private repeats(seq: number | null, code: LoadErrorCode): boolean {
+    const repeated = this.lastRefusal?.seq === seq && this.lastRefusal.code === code;
+    this.lastRefusal = { seq, code };
+    return repeated;
   }
 
   private async attempt(trigger: LoadTrigger, revision: ConfigRevision): Promise<RefreshResult> {
@@ -191,26 +209,40 @@ export class ConfigurationHolder implements ConfigurationStateSource {
       result = await loadConfigurationFiles(revision.files, this.options);
     } catch (error) {
       // The revision could not be written to the local temporary directory (full or read-only
-      // tmpdir, a name over the file system limit). Not remembered: the next refresh retries it.
-      await this.audit(options, 'error', { ...base, code: 'unavailable' });
-      options.logger.warn({ revision: revision.id, trigger, code: 'unavailable', error: error instanceof Error ? error.name : 'unknown' }, 'configuration revision could not be loaded');
-      return { outcome: 'refused', revision: revision.id, code: 'unavailable', issues: [LOCAL_UNAVAILABLE_ISSUE] };
+      // tmpdir, a name over the file system limit); the next refresh retries it.
+      const repeated = this.repeats(revision.seq, 'unavailable');
+      const fields = { revision: revision.id, trigger, code: 'unavailable', error: error instanceof Error ? error.name : 'unknown' };
+      if (repeated) options.logger.debug(fields, 'configuration revision could not be loaded');
+      else {
+        await this.audit(options, 'error', { ...base, code: 'unavailable' });
+        options.logger.warn(fields, 'configuration revision could not be loaded');
+      }
+      return refused(revision.id, 'unavailable', [LOCAL_UNAVAILABLE_ISSUE], repeated);
     }
     if (!result.ok) {
-      this.refuse(revision, 'invalid');
-      await this.audit(options, 'error', { ...base, code: 'invalid' });
-      options.logger.warn({ revision: revision.id, trigger, code: 'invalid', issues: result.issues.length }, 'configuration revision refused');
-      return { outcome: 'refused', revision: revision.id, code: 'invalid', issues: result.issues };
+      const repeated = this.refuse(revision, 'invalid');
+      const fields = { revision: revision.id, trigger, code: 'invalid', issues: result.issues.length };
+      if (repeated) options.logger.debug(fields, 'configuration revision refused');
+      else {
+        await this.audit(options, 'error', { ...base, code: 'invalid' });
+        options.logger.warn(fields, 'configuration revision refused');
+      }
+      return refused(revision.id, 'invalid', result.issues, repeated);
     }
     const computedHash = result.configuration.hash;
     if (computedHash !== revision.hash) {
-      this.refuse(revision, 'configuration_mismatch');
-      await this.audit(options, 'error', { ...base, computedHash, code: 'configuration_mismatch' });
-      options.logger.error({ revision: revision.id, trigger, code: 'configuration_mismatch', hash: revision.hash, computedHash }, 'configuration revision refused');
-      return { outcome: 'refused', revision: revision.id, code: 'configuration_mismatch', issues: [MISMATCH_ISSUE] };
+      const repeated = this.refuse(revision, 'configuration_mismatch');
+      const fields = { revision: revision.id, trigger, code: 'configuration_mismatch', hash: revision.hash, computedHash };
+      if (repeated) options.logger.debug(fields, 'configuration revision refused');
+      else {
+        await this.audit(options, 'error', { ...base, computedHash, code: 'configuration_mismatch' });
+        options.logger.error(fields, 'configuration revision refused');
+      }
+      return refused(revision.id, 'configuration_mismatch', [MISMATCH_ISSUE], repeated);
     }
     this.active = result.configuration;
     this.loadedSeq = revision.seq;
+    this.lastRefusal = undefined;
     this.status = { status: 'active', revision: revision.id, hash: computedHash };
     const waiters = this.waiters;
     this.waiters = [];
@@ -220,17 +252,25 @@ export class ConfigurationHolder implements ConfigurationStateSource {
     return { outcome: 'loaded', revision: revision.id, hash: computedHash };
   }
 
-  /** CFG-2: an active configuration stays; without one the state names why nothing is active. */
-  private refuse(revision: ConfigRevision, code: 'invalid' | 'configuration_mismatch'): void {
-    this.refusedSeq = revision.seq;
-    if (this.active !== undefined) return;
-    this.status = code === 'invalid' ? { status: 'none' } : { status: 'configuration_mismatch', revision: revision.id };
+  /**
+   * CFG-2: an active configuration stays; without one the state names why nothing is active.
+   * Returns whether the refusal repeats the previous one.
+   */
+  private refuse(revision: ConfigRevision, code: 'invalid' | 'configuration_mismatch'): boolean {
+    const repeated = this.repeats(revision.seq, code);
+    if (this.active === undefined) this.status = code === 'invalid' ? { status: 'none' } : { status: 'configuration_mismatch', revision: revision.id };
+    return repeated;
   }
 
+  /** A failed store read: audited once until a store read succeeds again (AUD-1). */
   private async unavailable(options: RevisionHolderOptions, trigger: LoadTrigger): Promise<RefreshResult> {
-    await this.audit(options, 'error', { revision: null, hash: null, service: options.service, trigger, code: 'unavailable' });
-    options.logger.warn({ trigger, code: 'unavailable' }, 'configuration store unavailable');
-    return { outcome: 'refused', revision: null, code: 'unavailable', issues: [UNAVAILABLE_ISSUE] };
+    const repeated = this.repeats(null, 'unavailable');
+    if (repeated) options.logger.debug({ trigger, code: 'unavailable' }, 'configuration store unavailable');
+    else {
+      await this.audit(options, 'error', { revision: null, hash: null, service: options.service, trigger, code: 'unavailable' });
+      options.logger.warn({ trigger, code: 'unavailable' }, 'configuration store unavailable');
+    }
+    return refused(null, 'unavailable', [UNAVAILABLE_ISSUE], repeated);
   }
 
   /** AUD-1: a failing append is logged and never blocks or reverses the load. */
@@ -254,4 +294,8 @@ export class ConfigurationHolder implements ConfigurationStateSource {
     if (this.source.kind !== 'revisions') throw new Error('not a revision-backed configuration holder');
     return this.source;
   }
+}
+
+function refused(revision: string | null, code: LoadErrorCode, issues: readonly ConfigIssue[], repeated: boolean): RefreshResult {
+  return { outcome: 'refused', revision, code, issues, ...(repeated ? { repeated: true as const } : {}) };
 }

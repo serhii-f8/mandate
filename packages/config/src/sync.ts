@@ -106,6 +106,11 @@ function report(logger: ConfigurationLogger, trigger: LoadTrigger, result: Refre
       logger.info({ revision: result.revision, hash: result.hash, trigger }, 'configuration loaded');
       return;
     case 'refused':
+      if (result.repeated === true) {
+        // The holder retries a refused revision on every refresh and audits only the first refusal (AUD-1).
+        logger.debug({ revision: result.revision, code: result.code, trigger, issues: result.issues.length }, 'configuration refused again; previous configuration stays active');
+        return;
+      }
       logger.warn({ revision: result.revision, code: result.code, trigger }, 'configuration refused; previous configuration stays active');
       for (const issue of result.issues) logger.warn({ issue: formatIssue(issue) }, 'configuration refused; previous configuration stays active');
       return;

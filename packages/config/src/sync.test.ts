@@ -11,13 +11,16 @@ import { loadConfigurationFiles, revisionFilesOf, revisionSummary } from './revi
 import { CONFIG_POLL_INTERVAL_MS, startConfigurationSync, type ConfigurationSyncOptions } from './sync.js';
 
 interface LogCall {
-  readonly level: 'info' | 'warn' | 'error';
+  readonly level: 'debug' | 'info' | 'warn' | 'error';
   readonly fields: object;
   readonly message: string;
 }
 
 class RecordingLogger implements ConfigurationLogger {
   readonly calls: LogCall[] = [];
+  debug(fields: object, message: string): void {
+    this.calls.push({ level: 'debug', fields, message });
+  }
   info(fields: object, message: string): void {
     this.calls.push({ level: 'info', fields, message });
   }
@@ -168,6 +171,17 @@ describe('configuration sync', () => {
     await sync.close();
   });
 
+  it('AUD-1 CFG-3 a repeated refusal is logged once at debug, not warn', async () => {
+    holder.answer = () => Promise.resolve({ outcome: 'refused', revision: 'rev-2', code: 'invalid', issues: [ISSUE], repeated: true });
+    const sync = await startConfigurationSync(options());
+    vi.advanceTimersByTime(30_000);
+    await settle();
+    expect(logger.calls).toEqual([
+      { level: 'debug', fields: { revision: 'rev-2', code: 'invalid', trigger: 'poll', issues: 1 }, message: 'configuration refused again; previous configuration stays active' },
+    ]);
+    await sync.close();
+  });
+
   it('NFR-4 CFG-2 a rejected refresh never ends the process and is logged without its message', async () => {
     holder.answer = () => Promise.reject(new Error('EACCES: permission denied, open /secret/path'));
     const unhandled = vi.fn();
@@ -207,6 +221,7 @@ describe('configuration sync', () => {
 
   it('CFG-3 a throwing logger inside a listener handler never escapes to the listener', async () => {
     const throwing: ConfigurationLogger = {
+      debug: () => undefined,
       info: () => undefined,
       warn: () => {
         throw new Error('logger down');

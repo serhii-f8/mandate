@@ -22,7 +22,7 @@ import { auditRows, connectClient, FIXTURE_CONFIG, rawPost, startApi, startDatab
 
 const GRANTED = 'support.lookup_order';
 
-const silent: ConfigurationLogger = { info: () => undefined, warn: () => undefined, error: () => undefined };
+const silent: ConfigurationLogger = { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined };
 
 let postgres: StartedPostgres;
 let databaseUrl: string;

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { UpstreamResolver } from '@aiops/connector-sdk';
 import type { AuditEventInput, ConfigRevision } from '@aiops/core';
 import { InMemoryAuditLog, InMemoryConfigRevisionStore } from '@aiops/testing';
 import { ConfigurationHolder, ConfigurationUnavailableError, type ConfigurationLogger, type RevisionHolderOptions } from './holder.js';
@@ -14,15 +15,34 @@ const VALID_DIR = fileURLToPath(new URL('../test/fixtures/valid', import.meta.ur
 const EXTRA_ROLES = 'version: 1\nroles:\n  - id: content_manager\n    grants: []\n  - id: support_agent\n    grants: []\n  - id: extra\n    grants: []\n';
 const BROKEN_ROLES = 'version: 1\nroles: nope\n';
 const MISMATCH = 'f'.repeat(64);
+const URL_SPEC_CONNECTIONS =
+  'version: 1\nconnections:\n  - id: magento\n    adapter: openapi\n    base_url: https://shop.example.test/rest\n    credential_ref: magento-integration\n    auth: { scheme: bearer }\n    openapi: { spec: https://shop.example.test/openapi.json }\n';
+
+/** A resolver whose next `failures` calls fail as a network fetch of the spec URL does; afterwards an empty catalog. */
+class RecoveringResolver implements UpstreamResolver {
+  failures = 0;
+  calls = 0;
+  resolveSpec(): ReturnType<UpstreamResolver['resolveSpec']> {
+    this.calls += 1;
+    if (this.failures > 0) {
+      this.failures -= 1;
+      return Promise.resolve({ ok: false, issues: [{ path: [], message: 'the spec URL could not be fetched (network)' }] });
+    }
+    return Promise.resolve({ ok: true, catalog: [] });
+  }
+}
 
 interface LogCall {
-  readonly level: 'info' | 'warn' | 'error';
+  readonly level: 'debug' | 'info' | 'warn' | 'error';
   readonly fields: object;
   readonly message: string;
 }
 
 class RecordingLogger implements ConfigurationLogger {
   readonly calls: LogCall[] = [];
+  debug(fields: object, message: string): void {
+    this.calls.push({ level: 'debug', fields, message });
+  }
   info(fields: object, message: string): void {
     this.calls.push({ level: 'info', fields, message });
   }
@@ -38,6 +58,7 @@ class RecordingLogger implements ConfigurationLogger {
 class FlakyStore extends InMemoryConfigRevisionStore {
   failReads = 0;
   seqReads = 0;
+  activeReads = 0;
   gate: Promise<void> | undefined;
 
   override async activeSeq(): Promise<number | undefined> {
@@ -55,6 +76,7 @@ class FlakyStore extends InMemoryConfigRevisionStore {
   }
 
   override async active(): Promise<ConfigRevision | undefined> {
+    this.activeReads += 1;
     if (this.failReads > 0) {
       this.failReads -= 1;
       throw new Error('connection refused');
@@ -88,12 +110,12 @@ function loads(): AuditEventInput[] {
   return audit.events.filter((e) => e.action === 'config.load');
 }
 
-/** Files of the fixture directory with `roles.yaml` replaced, and their computed hash. */
-async function filesWith(roles: string | undefined): Promise<{ files: Record<string, string>; hash: string | undefined }> {
+/** Files of the fixture directory with `file` (default `roles.yaml`) replaced, and their computed hash. */
+async function filesWith(roles: string | undefined, file = 'roles.yaml'): Promise<{ files: Record<string, string>; hash: string | undefined }> {
   const copy = await mkdtemp(join(tmpdir(), 'aiops-holder-rev-src-'));
   try {
     await cp(VALID_DIR, copy, { recursive: true });
-    if (roles !== undefined) await writeFile(join(copy, 'roles.yaml'), roles);
+    if (roles !== undefined) await writeFile(join(copy, file), roles);
     const result = await loadConfigurationDirectory(copy);
     if (!result.ok) {
       const base = await loadConfigurationDirectory(VALID_DIR);
@@ -236,20 +258,93 @@ describe('CFG-4 AUD-1 configuration from revisions', () => {
     });
   });
 
-  it('AUD-1 a refused seq is not retried on poll or notify, but is on signal', async () => {
+  it('CFG-2 CFG-3 AUD-1 a refused seq is retried on every poll, notify and signal, and audited once', async () => {
     const holder = await ConfigurationHolder.fromRevisions(options());
     const next = await filesWith(EXTRA_ROLES);
     await applyRevision(next.files, MISMATCH);
     expect(await holder.refresh('notify')).toMatchObject({ outcome: 'refused', code: 'configuration_mismatch' });
     const rows = loads().length;
+    const fileReads = store.activeReads;
 
-    for (let i = 0; i < 3; i += 1) expect(await holder.refresh('poll')).toEqual({ outcome: 'unchanged' });
-    expect(await holder.refresh('notify')).toEqual({ outcome: 'unchanged' });
+    for (let i = 0; i < 3; i += 1) expect(await holder.refresh('poll')).toMatchObject({ outcome: 'refused', code: 'configuration_mismatch', repeated: true });
+    expect(await holder.refresh('notify')).toMatchObject({ outcome: 'refused', code: 'configuration_mismatch', repeated: true });
+    expect(await holder.refresh('signal')).toMatchObject({ outcome: 'refused', code: 'configuration_mismatch', repeated: true });
+    expect(store.activeReads).toBe(fileReads + 5);
     expect(loads()).toHaveLength(rows);
+    const refusals = logger.calls.filter((c) => c.message === 'configuration revision refused');
+    expect(refusals.map((c) => c.level)).toEqual(['error', 'debug', 'debug', 'debug', 'debug', 'debug']);
+  });
 
-    expect(await holder.refresh('signal')).toMatchObject({ outcome: 'refused', code: 'configuration_mismatch' });
+  it('AUD-1 CFG-2 a permanently invalid revision polled many times yields exactly one audit row; a change of code or a load is audited', async () => {
+    const holder = await ConfigurationHolder.fromRevisions(options());
+    const broken = await filesWith(BROKEN_ROLES);
+    const invalid = await applyRevision(broken.files, 'a'.repeat(64));
+    const first = await holder.refresh('poll');
+    expect(first).toMatchObject({ outcome: 'refused', revision: invalid.id, code: 'invalid' });
+    expect(first).not.toHaveProperty('repeated');
+    for (let i = 0; i < 5; i += 1) expect(await holder.refresh('poll')).toMatchObject({ outcome: 'refused', revision: invalid.id, code: 'invalid', repeated: true });
+    expect(loads().filter((e) => e.details.revision === invalid.id)).toHaveLength(1);
+    expect(logger.calls.filter((c) => c.level === 'warn' && c.message === 'configuration revision refused')).toHaveLength(1);
+
+    const other = await filesWith(EXTRA_ROLES);
+    const mismatching = await applyRevision(other.files, MISMATCH);
+    expect(await holder.refresh('poll')).toMatchObject({ outcome: 'refused', revision: mismatching.id, code: 'configuration_mismatch' });
+    expect(loads().at(-1)).toMatchObject({ outcome: 'error', details: { revision: mismatching.id, code: 'configuration_mismatch' } });
+
+    if (other.hash === undefined) throw new Error('extra roles must load');
+    const good = await applyRevision(other.files, other.hash);
+    expect(await holder.refresh('poll')).toEqual({ outcome: 'loaded', revision: good.id, hash: other.hash });
+    expect(loads().at(-1)).toMatchObject({ outcome: 'ok', details: { revision: good.id, trigger: 'poll' } });
+    expect(loads()).toHaveLength(4);
+  });
+
+  it('CFG-2 CFG-3 a revision refused invalid because the spec fetch failed is loaded on the next poll once the resolver recovers', async () => {
+    const resolver = new RecoveringResolver();
+    const holder = await ConfigurationHolder.fromRevisions(options({ load: { resolver } }));
+    const before = holder.current;
+    const next = await filesWith(URL_SPEC_CONNECTIONS, 'connections.yaml');
+    if (next.hash === undefined) throw new Error('url spec connections must load');
+    const revision = await applyRevision(next.files, next.hash);
+
+    resolver.failures = 1;
+    expect(await holder.refresh('notify')).toMatchObject({ outcome: 'refused', revision: revision.id, code: 'invalid' });
+    expect(holder.current).toBe(before);
+    expect(await holder.refresh('poll')).toEqual({ outcome: 'loaded', revision: revision.id, hash: next.hash });
+    expect(holder.state()).toEqual({ status: 'active', revision: revision.id, hash: next.hash });
+    expect(resolver.calls).toBe(2);
+    expect(loads().slice(1).map((e) => [e.outcome, e.details.trigger, e.details.code])).toEqual([
+      ['error', 'notify', 'invalid'],
+      ['ok', 'poll', undefined],
+    ]);
+  });
+
+  it('CFG-2 CFG-3 at start a revision refused because the spec fetch failed becomes active on the next poll', async () => {
+    const next = await filesWith(URL_SPEC_CONNECTIONS, 'connections.yaml');
+    if (next.hash === undefined) throw new Error('url spec connections must load');
+    const revision = await applyRevision(next.files, next.hash);
+    const resolver = new RecoveringResolver();
+    resolver.failures = 1;
+    const holder = await ConfigurationHolder.fromRevisions(options({ load: { resolver } }));
+    expect(holder.state()).toEqual({ status: 'none' });
+
+    expect(await holder.refresh('poll')).toEqual({ outcome: 'loaded', revision: revision.id, hash: next.hash });
+    await holder.whenActive();
+    expect(holder.state()).toEqual({ status: 'active', revision: revision.id, hash: next.hash });
+  });
+
+  it('AUD-1 repeated store unavailability is audited once until a store read succeeds again', async () => {
+    const holder = await ConfigurationHolder.fromRevisions(options());
+    const rows = loads().length;
+    store.failReads = 3;
+    for (const trigger of ['poll', 'notify', 'poll'] as const) expect(await holder.refresh(trigger)).toMatchObject({ outcome: 'refused', revision: null, code: 'unavailable' });
     expect(loads()).toHaveLength(rows + 1);
-    expect(loads().at(-1)?.details).toMatchObject({ trigger: 'signal' });
+    expect(logger.calls.filter((c) => c.message === 'configuration store unavailable').map((c) => c.level)).toEqual(['warn', 'debug', 'debug']);
+
+    expect(await holder.refresh('poll')).toEqual({ outcome: 'unchanged' });
+    store.failReads = 1;
+    expect(await holder.refresh('poll')).toMatchObject({ outcome: 'refused', code: 'unavailable' });
+    expect(loads()).toHaveLength(rows + 2);
+    expect(loads().at(-1)).toMatchObject({ outcome: 'error', details: { revision: null, code: 'unavailable', trigger: 'poll' } });
   });
 
   it('CFG-2 at start a mismatching revision leaves state configuration_mismatch and current throws', async () => {
@@ -331,8 +426,8 @@ describe('CFG-4 AUD-1 configuration from revisions', () => {
       outcome: 'error',
       details: { revision: revision.id, hash: next.hash, service: 'api', trigger: 'notify', code: 'unavailable' },
     });
-    expect(await holder.refresh('poll')).toMatchObject({ outcome: 'refused', revision: revision.id, code: 'unavailable' });
-    expect(loads()).toHaveLength(3);
+    expect(await holder.refresh('poll')).toMatchObject({ outcome: 'refused', revision: revision.id, code: 'unavailable', repeated: true });
+    expect(loads()).toHaveLength(2);
   });
 
   it('AUD-1 at start a revision whose files cannot be written locally leaves state none', async () => {
@@ -398,15 +493,16 @@ describe('CFG-4 AUD-1 configuration from revisions', () => {
     expect(order).toEqual(['first', 'second']);
   });
 
-  it('CFG-2 reload on a revision holder is a signal refresh', async () => {
+  it('CFG-2 AUD-1 reload on a revision holder is a signal refresh', async () => {
     const holder = await ConfigurationHolder.fromRevisions(options());
     expect(await holder.reload()).toEqual({ ok: true });
     const broken = await filesWith(BROKEN_ROLES);
     await applyRevision(broken.files, 'a'.repeat(64));
     const result = await holder.reload();
     expect(result).toMatchObject({ ok: false, issues: [expect.objectContaining({ file: 'roles.yaml' })] });
-    expect(await holder.reload()).toMatchObject({ ok: false });
-    expect(loads().filter((e) => e.details.trigger === 'signal')).toHaveLength(2);
+    expect(await holder.reload()).toMatchObject({ ok: false, issues: [expect.objectContaining({ file: 'roles.yaml' })] });
+    // The second refusal of the same seq and code is not audited again (AUD-1).
+    expect(loads().filter((e) => e.details.trigger === 'signal')).toHaveLength(1);
   });
 
   it('CFG-2 a directory holder is always active with revision null', async () => {
