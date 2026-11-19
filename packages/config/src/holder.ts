@@ -81,7 +81,9 @@ export class ConfigurationHolder implements ConfigurationStateSource {
   private loadedSeq: number | undefined;
   /**
    * The last refusal (AUD-1): a repeat of the same seq and code is retried but not audited again.
-   * `seq` null is a failed store read; a successful store read or a load clears the marker.
+   * `seq` null is a failed store read, cleared by the next successful seq read. A load clears the
+   * marker, a refusal of another seq or code replaces it, and a refusal whose audit row could not
+   * be written clears it, so its next repeat is audited.
    */
   private lastRefusal: { readonly seq: number | null; readonly code: LoadErrorCode } | undefined;
   private waiters: (() => void)[] = [];
@@ -214,7 +216,7 @@ export class ConfigurationHolder implements ConfigurationStateSource {
       const fields = { revision: revision.id, trigger, code: 'unavailable', error: error instanceof Error ? error.name : 'unknown' };
       if (repeated) options.logger.debug(fields, 'configuration revision could not be loaded');
       else {
-        await this.audit(options, 'error', { ...base, code: 'unavailable' });
+        if (!(await this.audit(options, 'error', { ...base, code: 'unavailable' }))) this.lastRefusal = undefined;
         options.logger.warn(fields, 'configuration revision could not be loaded');
       }
       return refused(revision.id, 'unavailable', [LOCAL_UNAVAILABLE_ISSUE], repeated);
@@ -224,7 +226,7 @@ export class ConfigurationHolder implements ConfigurationStateSource {
       const fields = { revision: revision.id, trigger, code: 'invalid', issues: result.issues.length };
       if (repeated) options.logger.debug(fields, 'configuration revision refused');
       else {
-        await this.audit(options, 'error', { ...base, code: 'invalid' });
+        if (!(await this.audit(options, 'error', { ...base, code: 'invalid' }))) this.lastRefusal = undefined;
         options.logger.warn(fields, 'configuration revision refused');
       }
       return refused(revision.id, 'invalid', result.issues, repeated);
@@ -235,7 +237,7 @@ export class ConfigurationHolder implements ConfigurationStateSource {
       const fields = { revision: revision.id, trigger, code: 'configuration_mismatch', hash: revision.hash, computedHash };
       if (repeated) options.logger.debug(fields, 'configuration revision refused');
       else {
-        await this.audit(options, 'error', { ...base, computedHash, code: 'configuration_mismatch' });
+        if (!(await this.audit(options, 'error', { ...base, computedHash, code: 'configuration_mismatch' }))) this.lastRefusal = undefined;
         options.logger.error(fields, 'configuration revision refused');
       }
       return refused(revision.id, 'configuration_mismatch', [MISMATCH_ISSUE], repeated);
@@ -267,14 +269,18 @@ export class ConfigurationHolder implements ConfigurationStateSource {
     const repeated = this.repeats(null, 'unavailable');
     if (repeated) options.logger.debug({ trigger, code: 'unavailable' }, 'configuration store unavailable');
     else {
-      await this.audit(options, 'error', { revision: null, hash: null, service: options.service, trigger, code: 'unavailable' });
+      if (!(await this.audit(options, 'error', { revision: null, hash: null, service: options.service, trigger, code: 'unavailable' }))) this.lastRefusal = undefined;
       options.logger.warn({ trigger, code: 'unavailable' }, 'configuration store unavailable');
     }
     return refused(null, 'unavailable', [UNAVAILABLE_ISSUE], repeated);
   }
 
-  /** AUD-1: a failing append is logged and never blocks or reverses the load. */
-  private async audit(options: RevisionHolderOptions, outcome: 'ok' | 'error', details: Record<string, unknown>): Promise<void> {
+  /**
+   * AUD-1: a failing append is logged and never blocks or reverses the load. Returns whether the
+   * row was written; a refusal whose row was not written is not treated as seen, so its next
+   * repeat is audited.
+   */
+  private async audit(options: RevisionHolderOptions, outcome: 'ok' | 'error', details: Record<string, unknown>): Promise<boolean> {
     const event: AuditEventInput = {
       id: options.newId(),
       actor: `system:${options.service}`,
@@ -285,8 +291,10 @@ export class ConfigurationHolder implements ConfigurationStateSource {
     };
     try {
       await options.audit.append(event);
+      return true;
     } catch (error) {
       options.logger.error({ revision: details.revision, trigger: details.trigger, error: error instanceof Error ? error.name : 'unknown' }, 'configuration load audit failed');
+      return false;
     }
   }
 

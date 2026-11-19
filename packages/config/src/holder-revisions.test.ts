@@ -400,6 +400,21 @@ describe('CFG-4 AUD-1 configuration from revisions', () => {
     expect(loads()).toHaveLength(3);
   });
 
+  it('AUD-1 a refusal whose audit append failed is audited on its next repeat', async () => {
+    const holder = await ConfigurationHolder.fromRevisions(options());
+    const broken = await filesWith(BROKEN_ROLES);
+    const invalid = await applyRevision(broken.files, 'a'.repeat(64));
+    audit.failNext = new Error('audit down');
+    const first = await holder.refresh('poll');
+    expect(first).toMatchObject({ outcome: 'refused', revision: invalid.id, code: 'invalid' });
+    expect(loads().filter((e) => e.details.revision === invalid.id)).toHaveLength(0);
+    const second = await holder.refresh('poll');
+    expect(second).not.toHaveProperty('repeated');
+    expect(loads().filter((e) => e.details.revision === invalid.id)).toHaveLength(1);
+    expect(await holder.refresh('poll')).toMatchObject({ repeated: true });
+    expect(loads().filter((e) => e.details.revision === invalid.id)).toHaveLength(1);
+  });
+
   it('AUD-1 a failing audit append is logged and the load still happens', async () => {
     audit.failNext = new Error('audit down');
     const holder = await ConfigurationHolder.fromRevisions(options());
