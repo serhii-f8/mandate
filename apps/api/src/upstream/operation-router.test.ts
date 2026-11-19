@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadConfigurationSources, type PinState } from '@aiops/config';
+import { createSchemaCompiler, loadConfigurationSources, type PinEvaluation, type PinState } from '@aiops/config';
 import type { ReadAdapter } from '@aiops/connector-sdk';
 import { READ_RESULT_TEXT } from '@aiops/core';
 import type {
@@ -53,10 +53,15 @@ class Recording implements OperationInvoker {
   }
 }
 
+/** No MCP binding: the risk routing cases run under an HTTP-only configuration. */
+const HTTP_ONLY = await loadConfigurationSources([{ file: 'connections.yaml', text: 'version: 1\nconnections: []\n' }]);
+if (!HTTP_ONLY.ok) throw new Error(JSON.stringify(HTTP_ONLY.issues));
+const HTTP_CONFIGURATION = HTTP_ONLY.configuration;
+
 function setup() {
   const read = new Recording('read');
   const changeset = new Recording('changeset');
-  return { read, changeset, router: new OperationRouter({ read, changeset }) };
+  return { read, changeset, router: new OperationRouter({ read, changeset }, { configuration: HTTP_CONFIGURATION }) };
 }
 
 describe('MCP-4 CS-1 operation routing by risk', () => {
@@ -220,21 +225,26 @@ operations:
   },
 ];
 
+const DERIVED = { type: 'object' };
+/** What the monitor answers for a usable pin: `ok` with the derived schema and its validator. */
+const OK_EVALUATION: PinEvaluation = { state: 'ok', liveHash: MCP_PIN, inputSchema: DERIVED, validator: createSchemaCompiler()(DERIVED) };
+
 /** A view that answers one fixed evaluation for every MCP-backed operation. */
-function fixedView(state: PinState, liveHash: string | null = MCP_PIN): UpstreamToolView & { viewed: string[] } {
+function fixedView(state: PinState | PinEvaluation, liveHash: string | null = MCP_PIN): UpstreamToolView & { viewed: string[] } {
   const viewed: string[] = [];
+  const evaluation: PinEvaluation = typeof state === 'string' ? (state === 'ok' ? OK_EVALUATION : { state, liveHash }) : state;
   return {
     viewed,
     view: (_configuration, operationId) => {
       viewed.push(operationId);
-      return { state, liveHash };
+      return evaluation;
     },
-    current: () => Promise.resolve({ state, liveHash }),
+    current: () => Promise.resolve(evaluation),
     touch: () => undefined,
   };
 }
 
-async function mcpSetup(state: PinState | undefined) {
+async function mcpSetup(state: PinState | PinEvaluation | undefined) {
   const loaded = await loadConfigurationSources(MCP_SOURCES);
   if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
   const configuration = loaded.configuration;
@@ -292,6 +302,13 @@ describe('CONN-4 refusal after policy', () => {
     const { router, read, op } = await mcpSetup(undefined);
     const result = await router.invoke({ operation: op, args: {}, caller });
     expect(result.auditDetails).toEqual({ operation: 'tools.echo', connection: 'tools', errorCode: 'upstream_unavailable', pinState: 'unverified' });
+    expect(read.seen).toEqual([]);
+  });
+
+  it('CONN-4 an ok view without a derived schema or validator is refused as schema_invalid (fail closed)', async () => {
+    const { router, read, op } = await mcpSetup({ state: 'ok', liveHash: MCP_PIN });
+    const result = await router.invoke({ operation: op, args: {}, caller });
+    expect(result.auditDetails).toEqual({ operation: 'tools.echo', connection: 'tools', errorCode: 'upstream_unavailable', pinState: 'schema_invalid' });
     expect(read.seen).toEqual([]);
   });
 

@@ -4,7 +4,12 @@ import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/confi
 import type { ReadAdapter, ReadOutcome } from '@aiops/connector-sdk';
 import { READ_RESULT_TEXT, type Caller, type CredentialHandle, type CredentialStatus, type CredentialVault, type OperationDefinition } from '@aiops/core';
 import type { UpstreamCallLog } from '@aiops/upstream';
-import { DirectReadInvoker, directReadInvokers, NOT_DIRECT_READ } from './read-invoker.js';
+import { DirectReadInvoker, NOT_DIRECT_READ, type DirectReadInvokerDeps } from './read-invoker.js';
+
+/** One invoker per (configuration, correlation ID), as `operationInvokers` builds them behind the router. */
+function directReadInvokers(base: Omit<DirectReadInvokerDeps, 'configuration' | 'correlationId'>) {
+  return (configuration: LoadedConfiguration, correlationId: string) => new DirectReadInvoker({ ...base, configuration, correlationId });
+}
 
 const SOURCES = {
   'connections.yaml': `version: 1

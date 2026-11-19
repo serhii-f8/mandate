@@ -22,6 +22,7 @@ import {
   type RateCounter,
 } from '@aiops/core';
 import { withPageLink } from '../changesets/links.js';
+import { usablePin } from '../upstream/pin-refusal.js';
 import { toCallToolResult } from '../changesets/results.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
@@ -153,10 +154,10 @@ function operationTools(deps: PipelineDeps, configuration: LoadedConfiguration, 
       continue;
     }
     mcpBacked.push(op.id);
-    const view = deps.upstreamTools?.view(configuration, op.id);
-    if (view?.state !== 'ok') continue;
-    if (!binding.schemaFromTool) tools.push(operationTool(op, deps.widgets));
-    else if (view.inputSchema !== undefined) tools.push(operationTool(op, deps.widgets, view.inputSchema));
+    // Without a tool view the state is `unverified`: never listed (fail closed).
+    const view = usablePin(binding, deps.upstreamTools?.view(configuration, op.id));
+    if (view.state !== 'ok') continue;
+    tools.push(binding.schemaFromTool && view.inputSchema !== undefined ? operationTool(op, deps.widgets, view.inputSchema) : operationTool(op, deps.widgets));
   }
   if (mcpBacked.length > 0) deps.upstreamTools?.touch(configuration, mcpBacked);
   return tools;
@@ -173,10 +174,10 @@ const validateObjectOnly: ArgumentValidator = createSchemaCompiler()({ type: 'ob
 async function operationValidator(deps: PipelineDeps, configuration: LoadedConfiguration, op: OperationDefinition): Promise<ArgumentValidator | undefined> {
   const binding = configuration.bindings.get(op.id);
   if (binding?.kind !== 'mcp') return configuration.validators.get(op.id);
-  const view = await deps.upstreamTools?.current(configuration, op.id);
+  const view = usablePin(binding, await deps.upstreamTools?.current(configuration, op.id));
   if (!binding.schemaFromTool) return configuration.validators.get(op.id);
-  if (view?.state === 'ok' && view.validator !== undefined) return view.validator;
-  return validateObjectOnly;
+  // usablePin makes an `ok` view without a validator `schema_invalid`, which the router refuses.
+  return view.state === 'ok' && view.validator !== undefined ? view.validator : validateObjectOnly;
 }
 
 export async function listTools(deps: PipelineDeps, req: PipelineRequest): Promise<Tool[]> {

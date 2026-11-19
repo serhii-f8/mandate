@@ -4,7 +4,6 @@
  * section 2 says for reads. Writes need change-sets (Phase 4).
  */
 import type { ReadOutcome } from '@aiops/connector-sdk';
-import type { LoadedConfiguration } from '@aiops/config';
 import {
   READ_RESULT_TEXT,
   readErrorResult,
@@ -19,13 +18,6 @@ import { performRead, type ReadDeps } from '@aiops/upstream';
 export const NOT_DIRECT_READ = 'only read operations bound to GET run directly';
 
 export type DirectReadInvokerDeps = ReadDeps;
-
-/** Builds the per-call invoker the pipeline asks for (`PipelineDeps.invokerFor`). */
-export function directReadInvokers(
-  base: Omit<DirectReadInvokerDeps, 'configuration' | 'correlationId'>,
-): (configuration: LoadedConfiguration, correlationId: string) => DirectReadInvoker {
-  return (configuration, correlationId) => new DirectReadInvoker({ ...base, configuration, correlationId });
-}
 
 type Details = Record<string, string | number | boolean>;
 

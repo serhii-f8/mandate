@@ -9,7 +9,7 @@ import type { UpstreamToolView } from '@aiops/upstream';
 import type { ChangeSetRepository, InvocationRequest, InvocationResult, OperationInvoker, TaskRepository, WorkflowStarter } from '@aiops/core';
 import { ChangeSetInvoker, checkPrepareWait } from '../changesets/changeset-invoker.js';
 import type { PipelineDeps } from '../mcp/tool-pipeline.js';
-import { pinRefusal } from './pin-refusal.js';
+import { pinRefusal, usablePin } from './pin-refusal.js';
 import { DirectReadInvoker, type DirectReadInvokerDeps } from './read-invoker.js';
 import { riskNotSupportedResult } from './risk-not-supported.js';
 
@@ -24,19 +24,20 @@ export interface RouterUpstream {
 }
 
 export class OperationRouter implements OperationInvoker {
+  /** `upstream` is required: without the configuration the router could not tell an MCP-backed operation apart (fail closed). */
   constructor(
     private readonly paths: { readonly read: OperationInvoker; readonly changeset: OperationInvoker },
-    private readonly upstream?: RouterUpstream,
+    private readonly upstream: RouterUpstream,
   ) {}
 
   invoke(request: InvocationRequest): Promise<InvocationResult> {
     const { operation } = request;
     // R8: an MCP-backed operation runs only while its pinned tool is `ok`, whatever its risk
     // class; the read path itself does not check the pin (performRead assumes the caller did).
-    const configuration = this.upstream?.configuration;
-    if (configuration?.bindings.get(operation.id)?.kind === 'mcp') {
-      const view = this.upstream?.upstreamTools?.view(configuration, operation.id) ?? { state: 'unverified' as const, liveHash: null };
-      const refusal = pinRefusal(operation, view);
+    const { configuration, upstreamTools } = this.upstream;
+    const binding = configuration.bindings.get(operation.id);
+    if (binding?.kind === 'mcp') {
+      const refusal = pinRefusal(operation, usablePin(binding, upstreamTools?.view(configuration, operation.id)));
       if (refusal !== undefined) return Promise.resolve(refusal);
     }
     if (operation.risk === 'read') return this.paths.read.invoke(request);

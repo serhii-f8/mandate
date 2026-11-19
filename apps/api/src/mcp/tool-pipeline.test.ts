@@ -948,6 +948,12 @@ describe('CONN-4 MCP-backed operations in the pipeline', () => {
     expect(view.touched).toEqual([['tools.echo']]);
   });
 
+  it('CONN-4 an ok view without a derived schema is not listed, and its call is not validated against it (the router refuses it)', async () => {
+    const view = toolView({ state: 'ok', liveHash: MCP_PIN });
+    const { deps, req } = setupWith(MCP_LOADED, new FakeInvoker());
+    expect((await listTools({ ...deps, upstreamTools: view }, req(bob))).map((t) => t.name)).toEqual(['ping']);
+  });
+
   it('MCP-3 an ok call is validated against the derived schema after a refresh', async () => {
     const view = toolView(OK);
     const invoker = new FakeInvoker();

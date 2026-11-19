@@ -140,6 +140,8 @@ async function until(probe: () => Promise<boolean>, what: string): Promise<void>
 
 const upstreamCalls = (server: FakeMcpServer): number => server.requests.filter((r) => r.rpcMethod === 'tools/call').length;
 
+// The cases share one api and one fake server and run in order: the CONN-4 cases change the
+// fake's `echo` (changed), then re-pin it (changed -> ok); the late-start case comes last.
 describe('CONN-1 CONN-4 SEC-5 SEC-6 MCP-backed operations', () => {
   it('CONN-1 unbound tools are not listed or callable', async () => {
     const names = await listNames(bob);

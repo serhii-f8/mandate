@@ -148,6 +148,24 @@ function invokerFactory(
   });
 }
 
+/**
+ * The pin monitor's run (CONN-4): `createApp` starts it once a configuration is active, and a
+ * start that arrives after `stop()` is ignored, since the database is closed by then.
+ */
+class PinMonitorRun {
+  private closed = false;
+  constructor(readonly monitor: PinMonitor) {}
+
+  start(): void {
+    if (!this.closed) this.monitor.start();
+  }
+
+  async stop(): Promise<void> {
+    this.closed = true;
+    await this.monitor.stop();
+  }
+}
+
 /** Closes the per-process resources when the application shuts down, then runs the caller's `onShutdown`. */
 class Resources implements OnApplicationShutdown {
   constructor(
@@ -156,7 +174,7 @@ class Resources implements OnApplicationShutdown {
     @Inject(TEMPORAL) private readonly temporal: TemporalHandle | null,
     @Inject(ON_SHUTDOWN) private readonly onShutdown: (() => Promise<void>) | null,
     @Inject(TELEMETRY) private readonly telemetry: ApiTelemetry | null,
-    @Inject(PIN_MONITOR) private readonly pinMonitor: PinMonitor | null,
+    @Inject(PIN_MONITOR) private readonly pinMonitor: PinMonitorRun | null,
   ) {}
 
   async onApplicationShutdown(): Promise<void> {
@@ -278,11 +296,11 @@ class AppModule {
           // CONN-4: pin states of MCP-backed operations; started by `createApp`, stopped first by `Resources`.
           provide: PIN_MONITOR,
           inject: [AUDIT_LOG, CREDENTIAL_VAULT],
-          useFactory: (audit: AuditLog, vault: CredentialVault): PinMonitor | null => {
+          useFactory: (audit: AuditLog, vault: CredentialVault): PinMonitorRun | null => {
             // Bound: an adapter may implement it as a method.
             const listTools = adapter.listTools?.bind(adapter);
             if (overrides.upstreamTools !== undefined || listTools === undefined) return null;
-            return new PinMonitor({
+            const monitor = new PinMonitor({
               configuration: () => configuration.current,
               lister: vaultToolLister({ listTools }, vault),
               audit,
@@ -290,6 +308,7 @@ class AppModule {
               logger,
               compile: createSchemaCompiler(),
             });
+            return new PinMonitorRun(monitor);
           },
         },
         {
@@ -304,12 +323,12 @@ class AppModule {
             approvals: ApprovalService,
             starter: WorkflowStarter,
             widgets: WidgetBundles,
-            pinMonitor: PinMonitor | null,
+            pinMonitor: PinMonitorRun | null,
           ) => {
             // One task store for the write path that creates tasks and the handlers that read them.
             const tasks = overrides.tasks ?? new PostgresTaskRepository(database.db);
             // Without either, MCP-backed operations are never listed and always refused (fail closed).
-            const upstreamTools = overrides.upstreamTools ?? pinMonitor ?? undefined;
+            const upstreamTools = overrides.upstreamTools ?? pinMonitor?.monitor;
             const io: UpstreamIo = {
               vault,
               adapter,
@@ -427,7 +446,7 @@ export async function createApp(options: CreateAppOptions): Promise<INestApplica
   // CFG-2, SEC-1: no request reaches a route that reads the configuration while none is active.
   app.use(configurationGate(options.configuration));
   // CONN-4: pin checks start once a configuration is active (its first tick lists every mcp connection).
-  const pinMonitor = app.get<PinMonitor | null>(PIN_MONITOR);
+  const pinMonitor = app.get<PinMonitorRun | null>(PIN_MONITOR);
   if (pinMonitor !== null) {
     void options.configuration.whenActive().then(() => {
       pinMonitor.start();
