@@ -1,6 +1,7 @@
 /** PostgreSQL persistence: Drizzle schema, SQL migrations, migrator and repository implementations. */
 export { DrizzleAuditLog, type AuditLogOptions } from './audit-log.js';
 export { CHAIN_COLUMNS, chainHead, SEAL_BATCH, sealAuditChain, toSealedChainRow, type SealResult } from './audit-chain.js';
+export { formatVerifyReport, VERIFY_PAGE, verifyAuditChain, type VerifyReport } from './audit-verify.js';
 export { AUDIT_RETENTION_LOCK_KEY, AUDIT_SEAL_LOCK_KEY, START_LOCK_NAMESPACE } from './locks.js';
 export { PostgresChangeSetRepository, type PostgresChangeSetRepositoryOptions } from './changeset-repository.js';
 export { insertNotifications, PostgresNotificationOutbox } from './notification-outbox.js';
