@@ -49,6 +49,8 @@ export interface ApiEnv {
   readonly temporalKeys: string;
   /** How long a write call without Tasks waits for its preparation, in ms (MCP-7). */
   readonly prepareWaitMs: number;
+  /** Absolute directory of audit retention archives (`AIOPS_AUDIT_ARCHIVE_DIR`, AUD-7); unset keeps rows. */
+  readonly auditArchiveDir?: string;
 }
 
 /** Activity timeouts and retries of the operation workflow (same shape as `ActivityTuning` of `@aiops/temporal`). */
@@ -172,6 +174,7 @@ const apiSchema = z.object({
   TEMPORAL_TASK_QUEUE: nonEmpty('aiops-operations'),
   AIOPS_TEMPORAL_KEYS: z.string().trim().min(1),
   AIOPS_PREPARE_WAIT_MS: z.coerce.number().int().min(0).max(300_000).default(20_000),
+  AIOPS_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
 });
 
 /**
@@ -274,6 +277,7 @@ export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
     taskQueue: e.TEMPORAL_TASK_QUEUE,
     temporalKeys: e.AIOPS_TEMPORAL_KEYS,
     prepareWaitMs: e.AIOPS_PREPARE_WAIT_MS,
+    ...(e.AIOPS_AUDIT_ARCHIVE_DIR === undefined ? {} : { auditArchiveDir: e.AIOPS_AUDIT_ARCHIVE_DIR }),
   };
 }
 

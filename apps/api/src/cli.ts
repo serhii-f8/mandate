@@ -5,6 +5,8 @@
  *   aiops validate <dir> [--preset-dir <dir>]...   full check: specs resolved, presets loaded
  *   aiops test-connection <connection>             runs the connection's declared test read
  *   aiops credentials rotate                       re-wraps credential data keys under the newest master key
+ *   aiops audit verify [--archive <file>]          checks the audit hash chain, or one retention archive (AUD-5)
+ *   aiops audit retention --now                    runs the audit retention job once (AUD-7)
  *
  * Exit codes: 0 success, 1 failed or invalid, 2 usage or environment. Each command parses
  * only the environment it needs; errors name variables, never values (SEC-3).
@@ -16,13 +18,28 @@ import { z } from 'zod';
 import { createOpenApiAdapter, type OpenApiAdapter } from '@aiops/adapters';
 import { formatIssue, loadConfigurationDirectory, type LoadResult } from '@aiops/config';
 import type { AuditLog, CredentialVault } from '@aiops/core';
-import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresCredentialVault } from '@aiops/db';
+import {
+  createDb,
+  type Db,
+  DrizzleAuditLog,
+  formatArchiveReport,
+  formatVerifyReport,
+  parseMasterKeys,
+  PostgresCredentialVault,
+  PostgresRateCounter,
+  runAuditRetention,
+  verifyAuditArchive,
+  verifyAuditChain,
+} from '@aiops/db';
+import type pg from 'pg';
 import { ConnectionTestService } from './upstream/connection-test.js';
 
 const USAGE = [
   'usage: aiops validate <dir> [--preset-dir <dir>]...',
   '       aiops test-connection <connection>',
   '       aiops credentials rotate',
+  '       aiops audit verify [--archive <file>]',
+  '       aiops audit retention --now',
 ].join('\n');
 
 /** The actor and client the CLI audits as. */
@@ -49,6 +66,8 @@ export interface CliDeps {
   readonly adapter?: OpenApiAdapter;
   /** Opens the database and vault; the default connects to PostgreSQL (already migrated). */
   readonly openStore?: (input: StoreInput) => Promise<CliStore>;
+  /** Opens the database for the audit commands; the default connects to PostgreSQL (already migrated). */
+  readonly openPool?: (databaseUrl: string) => Promise<{ pool: pg.Pool; db: Db; close(): Promise<void> }>;
   readonly newId?: () => string;
   /** Preset directory used when none is given and presets are declared; `null` for none. Defaults to `presets/` of the repository, when it exists next to the package. */
   readonly defaultPresetDir?: string | null;
@@ -182,6 +201,105 @@ async function withStore<T>(
   }
 }
 
+/** Opens the audit commands' database; any failure is a fixed message (SEC-3). */
+async function withPool<T>(deps: CliDeps, databaseUrl: string, action: (database: { pool: pg.Pool; db: Db }) => Promise<T>): Promise<T> {
+  let database: Awaited<ReturnType<NonNullable<CliDeps['openPool']>>>;
+  try {
+    database = await (deps.openPool ?? ((url) => Promise.resolve(createDb(url, { onError: () => undefined }))))(databaseUrl);
+  } catch {
+    throw new CliError('cannot open the database', 1);
+  }
+  try {
+    return await action(database);
+  } finally {
+    await database.close();
+  }
+}
+
+type AuditArgs = { kind: 'verify'; archive: string | undefined } | { kind: 'retention' };
+
+function parseAuditArgs(args: readonly string[]): AuditArgs | undefined {
+  const [sub, ...rest] = args;
+  if (sub === 'verify') {
+    if (rest.length === 0) return { kind: 'verify', archive: undefined };
+    const [flag, file, ...extra] = rest;
+    if (flag !== '--archive' || file === undefined || file === '' || extra.length > 0) return undefined;
+    return { kind: 'verify', archive: file };
+  }
+  if (sub === 'retention' && rest.length === 1 && rest[0] === '--now') return { kind: 'retention' };
+  return undefined;
+}
+
+async function audit(args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
+  const parsed = parseAuditArgs(args);
+  if (parsed === undefined) {
+    out(USAGE);
+    return 2;
+  }
+  if (parsed.kind === 'verify') {
+    const env = parseEnv({ DATABASE_URL: postgresUrl }, deps.env);
+    return withPool(deps, env.DATABASE_URL, async ({ pool }) => {
+      try {
+        const { archive } = parsed;
+        if (archive === undefined) {
+          const report = await verifyAuditChain(pool);
+          out(formatVerifyReport(report));
+          return report.ok ? 0 : 1;
+        }
+        const report = await verifyAuditArchive(pool, archive);
+        out(formatArchiveReport(report));
+        return report.ok ? 0 : 1;
+      } catch {
+        // Verification can throw on tampered columns; the message must carry no row content (SEC-3).
+        out('audit verification could not run');
+        return 1;
+      }
+    });
+  }
+  const env = parseEnv(
+    {
+      AIOPS_CONFIG_DIR: nonEmpty,
+      DATABASE_URL: postgresUrl,
+      AIOPS_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
+    },
+    deps.env,
+  );
+  const configuration = await loadChecked(env.AIOPS_CONFIG_DIR, presetDirsOf([], deps.env, deps), deps.adapter ?? createOpenApiAdapter(), out);
+  if (configuration === undefined) return 1;
+  const sensitiveKeys = configuration.sensitiveFields;
+  return withPool(deps, env.DATABASE_URL, async ({ pool, db }) => {
+    const newId = deps.newId ?? randomUUID;
+    const report = await runAuditRetention({
+      pool,
+      audit: new DrizzleAuditLog(db, { sensitiveKeys: () => sensitiveKeys }),
+      rateCounter: new PostgresRateCounter(db),
+      retentionDays: configuration.audit.retentionDays,
+      archiveDir: env.AIOPS_AUDIT_ARCHIVE_DIR,
+      actor: CLI_ACTOR,
+      now: () => new Date(),
+      newId,
+    });
+    // `locked` writes no audit row and has no logger here: the printed line is the log (ruling T8/F16, R6).
+    switch (report.kind) {
+      case 'archived':
+        out(`archived first=${String(report.first)} last=${String(report.last)} count=${String(report.count)} archive=${report.archive}`);
+        return 0;
+      case 'nothing_due':
+        out('nothing due');
+        return 0;
+      case 'not_configured':
+        out('nothing due (audit.retention_days is not set)');
+        return 0;
+      case 'refused':
+        out(`refused reason=${report.reason}`);
+        return 1;
+      case 'locked':
+        out('refused reason=locked');
+        return 1;
+    }
+  });
+}
+
 async function testConnection(args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
   const [connectionId, ...extra] = args;
   if (connectionId === undefined || extra.length > 0) {
@@ -227,6 +345,7 @@ export async function runApiCli(argv: readonly string[], out: (line: string) => 
     if (command === 'validate') return await validate(rest, out, deps);
     if (command === 'test-connection') return await testConnection(rest, out, deps);
     if (command === 'credentials' && rest[0] === 'rotate') return await rotate(rest.slice(1), out, deps);
+    if (command === 'audit') return await audit(rest, out, deps);
     out(USAGE);
     return 2;
   } catch (error) {

@@ -421,3 +421,11 @@ describe('AUD-7 worker audit archive environment', () => {
     }
   });
 });
+
+describe('AUD-7 api audit archive environment', () => {
+  it('AUD-7 the api parses AIOPS_AUDIT_ARCHIVE_DIR: optional, absolute', () => {
+    expect('auditArchiveDir' in parseApiEnv(API)).toBe(false);
+    expect(parseApiEnv({ ...API, AIOPS_AUDIT_ARCHIVE_DIR: '/var/lib/aiops/audit-archive' }).auditArchiveDir).toBe('/var/lib/aiops/audit-archive');
+    expect(() => parseApiEnv({ ...API, AIOPS_AUDIT_ARCHIVE_DIR: 'relative/dir' })).toThrow(EnvError);
+  });
+});

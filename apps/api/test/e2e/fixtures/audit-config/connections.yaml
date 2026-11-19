@@ -1,0 +1,11 @@
+# Approval pages e2e (UI-7, APR-5, NFR-8). The upstream is never called: change-sets are seeded.
+version: 1
+connections:
+  - id: shop
+    adapter: openapi
+    base_url: http://127.0.0.1:9/rest
+    credential_ref: shop-token
+    auth: { scheme: bearer }
+    allow_private_network: true
+    timeout_ms: 5000
+    retry: { max_attempts: 1 }
