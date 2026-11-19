@@ -233,10 +233,10 @@ describe('EXE-5 EXE-9 changesets in the loaded configuration', () => {
   it('EXE-5 EXE-9 the loaded configuration carries both values and the single-document rule still applies', async () => {
     const defaults = await load();
     if (!defaults.ok) throw new Error('expected ok');
-    expect(defaults.configuration.changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.5, itemsPerWorkflowRun: 2000 });
+    expect(defaults.configuration.changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.5, itemsPerWorkflowRun: 2000, rollbackWindowHours: 168 });
     const set = await load({ 'cs.yaml': 'version: 1\nchangesets: { failure_threshold: 0.25, items_per_workflow_run: 300 }\n' });
     if (!set.ok) throw new Error('expected ok');
-    expect(set.configuration.changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.25, itemsPerWorkflowRun: 300 });
+    expect(set.configuration.changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.25, itemsPerWorkflowRun: 300, rollbackWindowHours: 168 });
     const twice = issues(await load({ 'cs.yaml': 'version: 1\nchangesets: { failure_threshold: 0.25 }\n', 'cs2.yaml': 'version: 1\nchangesets: { items_per_workflow_run: 300 }\n' }));
     expect(twice).toEqual([expect.objectContaining({ path: 'changesets' })]);
   });

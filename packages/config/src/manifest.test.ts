@@ -285,6 +285,27 @@ describe('OPS-3 rollback strategy', () => {
     expect(inverse.policy.operations.find((o) => o.id === 'catalog.update_content')?.manifest?.rollback).toEqual({ strategy: 'inverse_operation', operation: 'catalog.update_content' });
   });
 
+  // A second write operation on the same connection, to serve as the inverse.
+  const withInverse = (inverseEdit: (t: string) => string) => {
+    const [, body = ''] = WRITE.split('operations:\n');
+    const second = inverseEdit(body.replace('catalog.update_content', 'catalog.revert_content').replace('{ strategy: replay_previous_state }', '{ strategy: none }'));
+    return WRITE.replace('{ strategy: replay_previous_state }', '{ strategy: inverse_operation, operation: catalog.revert_content }') + second;
+  };
+
+  it('OPS-3 check 7: inverse_operation accepts a matching id_field and field list', async () => {
+    ok(await load({ 'write.yaml': withInverse((t) => t) }));
+  });
+
+  it('OPS-3 check 7: inverse_operation needs the same id_field', async () => {
+    const found = issues(await load({ 'write.yaml': withInverse((t) => t.replace('id_field: sku', 'id_field: brand')) }));
+    expect(found).toEqual([expect.objectContaining({ path: `${M}.rollback.operation`, message: 'must name an operation with the same id_field' })]);
+  });
+
+  it('OPS-3 check 7: inverse_operation lists every field of the original', async () => {
+    const found = issues(await load({ 'write.yaml': withInverse((t) => t.replace('fields: [name, description]', 'fields: [name]').replace(', description: { type: string }', '')) }));
+    expect(found).toEqual([expect.objectContaining({ path: `${M}.rollback.operation`, message: 'must name an operation whose manifest lists every field of this one' })]);
+  });
+
   it('OPS-3 check 7: inverse_operation names an enabled write operation on the same connection', async () => {
     const edit = (target: string) => (t: string) => t.replace('{ strategy: replay_previous_state }', `{ strategy: inverse_operation, operation: ${target} }`);
     await expectIssue(edit('catalog.get_products_by_sku'), `${M}.rollback.operation`, 'get_products_by_sku');
@@ -294,7 +315,7 @@ describe('OPS-3 rollback strategy', () => {
 
 describe('CS-6 change-set expiry setting', () => {
   it('CS-6 defaults expireAfterHours to 72', async () => {
-    expect(ok(await load()).changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.5, itemsPerWorkflowRun: 2000 });
+    expect(ok(await load()).changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.5, itemsPerWorkflowRun: 2000, rollbackWindowHours: 168 });
   });
 
   it('CS-6 expire_after_hours accepts one minute and refuses less', async () => {
@@ -305,8 +326,17 @@ describe('CS-6 change-set expiry setting', () => {
     }
   });
 
+  it('EXE-8 NFR-18 changesets.rollback_window_hours defaults to 168 and accepts 0', async () => {
+    expect(ok(await load()).changesets.rollbackWindowHours).toBe(168);
+    const withWindow = (h: string) => load({ 'changesets.yaml': `version: 1\nchangesets: { rollback_window_hours: ${h} }\n` });
+    expect(ok(await withWindow('0')).changesets.rollbackWindowHours).toBe(0);
+    for (const bad of ['2161', '-1']) {
+      expect(issues(await withWindow(bad)), bad).toEqual([expect.objectContaining({ path: 'changesets.rollback_window_hours' })]);
+    }
+  });
+
   it('CS-6 reads changesets.expire_after_hours and checks its range', async () => {
-    expect(ok(await load({ 'changesets.yaml': 'version: 1\nchangesets: { expire_after_hours: 24 }\n' })).changesets).toEqual({ expireAfterHours: 24, failureThreshold: 0.5, itemsPerWorkflowRun: 2000 });
+    expect(ok(await load({ 'changesets.yaml': 'version: 1\nchangesets: { expire_after_hours: 24 }\n' })).changesets).toEqual({ expireAfterHours: 24, failureThreshold: 0.5, itemsPerWorkflowRun: 2000, rollbackWindowHours: 168 });
     const found = issues(await load({ 'changesets.yaml': 'version: 1\nchangesets: { expire_after_hours: 5000 }\n' }));
     expect(found).toEqual([expect.objectContaining({ file: 'changesets.yaml', path: 'changesets.expire_after_hours' })]);
     expect(found[0]?.message).not.toContain('5000');
