@@ -22,6 +22,8 @@ import type {
   ApprovalPlan,
   ChangeSetStats,
   ChangeSetStatus,
+  ConfigRevisionSource,
+  ConfigRevisionSummary,
   ExclusionReason,
   ItemStatus,
   NotificationError,
@@ -394,5 +396,30 @@ export const notificationOutbox = pgTable(
       sql`${t.kind} IN ('approval_requested', 'approval_decided', 'execution_finished', 'rollback_result')`,
     ),
     check('notification_outbox_state_check', sql`${t.state} IN ('pending', 'sent', 'failed')`),
+  ],
+);
+
+/**
+ * Configuration revisions (CFG-4), added by migration `0014_config_revision`. One row per applied
+ * or bootstrapped configuration; the active revision is the row with the highest `seq`. `files`
+ * maps a path relative to the configuration directory (with `/`) to its text, and `hash` is the
+ * hex configuration hash without prefix. Append-only: the migration's triggers reject UPDATE,
+ * DELETE and TRUNCATE.
+ */
+export const configRevision = pgTable(
+  'config_revision',
+  {
+    seq: bigint('seq', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    id: uuid('id').notNull().unique(),
+    hash: text('hash').notNull(),
+    files: jsonb('files').$type<Record<string, string>>().notNull(),
+    source: text('source').$type<ConfigRevisionSource>().notNull(),
+    actor: text('actor').notNull(),
+    appliedAt: timestamp('applied_at', { withTimezone: true }).notNull().defaultNow(),
+    summary: jsonb('summary').$type<ConfigRevisionSummary>().notNull(),
+  },
+  (t) => [
+    check('config_revision_hash_check', sql`${t.hash} ~ '^[0-9a-f]{64}$'`),
+    check('config_revision_source_check', sql`${t.source} IN ('apply', 'bootstrap')`),
   ],
 );
