@@ -9,6 +9,9 @@ import {
   PostgresChangeSetRepository,
   PostgresCredentialVault,
   PostgresNotificationOutbox,
+  PostgresRateCounter,
+  runAuditRetention,
+  sealAuditChain,
 } from '@aiops/db';
 import { parseTemporalKeys, workerDataConverter, type ActivityTuning } from '@aiops/temporal';
 import { assertFullyChecked, configurationLoadOptions, createUpstreamReader, type UpstreamCallLog } from '@aiops/upstream';
@@ -16,6 +19,7 @@ import { heartbeat } from '@temporalio/activity';
 import { NativeConnection } from '@temporalio/worker';
 import type { Logger } from 'pino';
 import { createActivities, createExecutionGuard, echo, type WorkerActivities } from './activities/index.js';
+import { createAuditJobs } from './audit-jobs.js';
 import { createNotificationDispatcher } from './notifications/dispatcher.js';
 import { createSmtpSender } from './notifications/email.js';
 import { createWebhookSender } from './notifications/webhook.js';
@@ -24,7 +28,10 @@ import { createWorker } from './worker.js';
 import { createRollbackWriterFor, createWriterFor } from './writers.js';
 
 export interface WorkerRuntime {
-  /** Polls the task queue until SIGINT/SIGTERM (`Worker.run` installs those handlers); dispatches notifications meanwhile (NTF-3). */
+  /**
+   * Polls the task queue until SIGINT/SIGTERM (`Worker.run` installs those handlers); dispatches
+   * notifications (NTF-3), seals the audit chain (AUD-3) and runs audit retention (AUD-7) meanwhile.
+   */
   run(): Promise<void>;
   /** Closes the SMTP transport, the Temporal connection and the database pool. */
   close(): Promise<void>;
@@ -123,11 +130,13 @@ export async function startWorkerRuntime(
   try {
     const repository = new PostgresChangeSetRepository(database.db);
     const vault = new PostgresCredentialVault(database.db, masterKeys);
+    // Preset sensitive fields are covered: the configuration was loaded with the preset directories (AUD-4).
+    const audit = new DrizzleAuditLog(database.db, { sensitiveKeys: () => configuration.current.sensitiveFields });
     const activities = activitiesFor({
       configuration,
       adapter,
       repository,
-      audit: new DrizzleAuditLog(database.db, { sensitiveKeys: () => configuration.current.sensitiveFields }),
+      audit,
       vault,
       tuning: env.activityTuning,
       logger,
@@ -143,6 +152,23 @@ export async function startWorkerRuntime(
       now: () => new Date(),
       logger,
     });
+    const rateCounter = new PostgresRateCounter(database.db);
+    const auditJobs = createAuditJobs({
+      seal: () => sealAuditChain(database.pool),
+      // The configuration is read on every run, so a reload changes the retention period (CFG-2).
+      retain: () =>
+        runAuditRetention({
+          pool: database.pool,
+          audit,
+          rateCounter,
+          retentionDays: configuration.current.audit.retentionDays,
+          archiveDir: env.auditArchiveDir,
+          actor: 'system',
+          now: () => new Date(),
+          newId: randomUUID,
+        }),
+      logger,
+    });
     connection = await NativeConnection.connect({ address: env.temporalAddress });
     const worker = await createWorker({
       connection,
@@ -154,12 +180,13 @@ export async function startWorkerRuntime(
     const open = connection;
     return {
       run: async () => {
-        // Delivery runs beside the worker; a channel that is down never stops polling (NTF-3).
+        // Delivery and the audit jobs run beside the worker; a failure in either never stops polling (NTF-3, AUD-3).
         const delivery = dispatcher.start();
+        const jobs = auditJobs.start();
         try {
           await worker.run();
         } finally {
-          await delivery.stop();
+          await Promise.all([delivery.stop(), jobs.stop()]);
         }
       },
       close: async () => {

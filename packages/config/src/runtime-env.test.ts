@@ -407,3 +407,17 @@ describe('NTF-1 worker notification environment', () => {
     }
   });
 });
+
+describe('AUD-7 worker audit archive environment', () => {
+  it('AUD-7 AIOPS_AUDIT_ARCHIVE_DIR is optional and must be absolute', () => {
+    const unset = parseWorkerEnv(WORKER);
+    expect('auditArchiveDir' in unset).toBe(false);
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_AUDIT_ARCHIVE_DIR: '/var/lib/aiops/audit-archive' }).auditArchiveDir).toBe(
+      '/var/lib/aiops/audit-archive',
+    );
+    for (const bad of ['', 'relative/dir', './archive', ' ']) {
+      const error = workerEnvError({ ...WORKER, AIOPS_AUDIT_ARCHIVE_DIR: bad });
+      expect(error.issues.map((i) => i.variable)).toEqual(['AIOPS_AUDIT_ARCHIVE_DIR']);
+    }
+  });
+});

@@ -83,6 +83,8 @@ export interface WorkerEnv {
   readonly mailFrom: string;
   /** Public origin of the api (no path); base of the change-set links in notifications (NTF-2). */
   readonly publicUrl: URL;
+  /** Absolute directory of the audit archive files (AUD-7); without it retention refuses with `archive_unavailable`. */
+  readonly auditArchiveDir?: string;
 }
 
 export interface EnvIssue {
@@ -200,6 +202,7 @@ const workerSchema = z.object({
   AIOPS_SMTP_URL: smtpUrl.optional(),
   AIOPS_MAIL_FROM: mailAddress.default('aiops@localhost'),
   AIOPS_PUBLIC_URL: originUrl.default('http://localhost:8400'),
+  AIOPS_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
 }).superRefine((e, ctx) => {
   // Cross-field checks run only once every field parsed; the messages name variables, never values (SEC-3).
   if (e.AIOPS_RETRY_INITIAL_MS > e.AIOPS_RETRY_MAX_MS) {
@@ -297,5 +300,6 @@ export function parseWorkerEnv(env: NodeJS.ProcessEnv): WorkerEnv {
     ...(e.AIOPS_SMTP_URL === undefined ? {} : { smtpUrl: e.AIOPS_SMTP_URL }),
     mailFrom: e.AIOPS_MAIL_FROM,
     publicUrl: new URL(e.AIOPS_PUBLIC_URL),
+    ...(e.AIOPS_AUDIT_ARCHIVE_DIR === undefined ? {} : { auditArchiveDir: e.AIOPS_AUDIT_ARCHIVE_DIR }),
   };
 }
