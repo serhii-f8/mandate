@@ -29,6 +29,7 @@ export const AUDIT_ACTIONS = [
   'audit.retention',
   'config.apply',
   'config.load',
+  'upstream.pin',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -8,3 +8,11 @@ export {
   type UpstreamInstrumentationDeps,
   type UpstreamOutcome,
 } from './instrumentation.js';
+export {
+  PinMonitor,
+  vaultToolLister,
+  verifyPinNow,
+  type PinMonitorDeps,
+  type ToolLister,
+  type UpstreamToolView,
+} from './pin-monitor.js';
