@@ -18,10 +18,11 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * `upstream_error` with a fixed message.
  */
 export function mapToolResult(result: unknown, scrubber: Scrubber, durationMs: number): ReadOutcome {
+  // Checked first: an error result is an error whatever its content looks like.
+  if (isPlainObject(result) && result.isError === true) return { ok: false, code: 'upstream_error', durationMs, message: TOOL_ERROR_MESSAGE };
   if (!isPlainObject(result) || !Array.isArray(result.content)) {
     return { ok: false, code: 'invalid_response', durationMs, message: 'upstream tool returned an unusable result' };
   }
-  if (result.isError === true) return { ok: false, code: 'upstream_error', durationMs, message: TOOL_ERROR_MESSAGE };
   const text: string[] = [];
   let omitted = 0;
   for (const block of result.content as readonly unknown[]) {

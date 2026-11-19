@@ -47,6 +47,12 @@ describe('SEC-5 MCP result mapping', () => {
     expect(outcome).toEqual({ ok: false, code: 'upstream_error', durationMs: 7, message: 'upstream tool reported an error' });
   });
 
+  it('SEC-5 isError true is upstream_error even when content is missing or not an array', () => {
+    for (const result of [{ isError: true }, { isError: true, content: 'boom' }, { isError: true, content: null }]) {
+      expect(mapToolResult(result, scrubber, 2)).toEqual({ ok: false, code: 'upstream_error', durationMs: 2, message: 'upstream tool reported an error' });
+    }
+  });
+
   it('SEC-3 scrubs a secret inside a text block and inside structuredContent', () => {
     const outcome = mapToolResult(
       { content: [{ type: 'text', text: 'token=s3cr3t-token' }], structuredContent: { echo: 'Bearer s3cr3t-token', ['s3cr3t-token']: 1 } },

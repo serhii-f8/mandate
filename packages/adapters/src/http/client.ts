@@ -18,7 +18,8 @@ import { semaphoreFor } from './semaphore.js';
 export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 /** Upper bound for an honoured `Retry-After` (spec §4.5). */
 export const MAX_RETRY_AFTER_MS = 10_000;
-const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+/** HTTP statuses a read is retried on (CONN-6, R5); shared with the MCP adapter. */
+export const RETRYABLE_STATUS: ReadonlySet<number> = new Set([429, 502, 503, 504]);
 
 /** Outcome of one HTTP exchange, before credential and retry handling. Carries no request headers. */
 export type RawResult =

@@ -3,6 +3,13 @@
  * upstream MCP server through the official client over the guarded fetch. The era (stateless
  * 2026-07-28 or a 2025 session) is negotiated once per connection and reused; every list or call
  * is one `Client`, one semaphore slot and, for a legacy server, one session that is ended after it.
+ *
+ * Time bound: one attempt waits up to `timeoutMs` for a slot, then sends up to five exchanges, each
+ * bounded by `timeoutMs` (the guarded fetch's per-exchange timer and the SDK request timeout):
+ * the `server/discover` probe, `initialize` and `notifications/initialized` (legacy only), the
+ * list or call, and the session `DELETE` (legacy only). A list or a retryable call makes up to
+ * `retry.maxAttempts` attempts with backoff between them, so the worst case is about
+ * `maxAttempts × 6 × timeoutMs` plus the backoff.
  */
 import type { LookupFunction } from 'node:net';
 import {
@@ -18,9 +25,9 @@ import {
   type RequestInstrumentation,
   type ToolListOutcome,
 } from '@aiops/connector-sdk';
-import { Client, SdkError, SdkErrorCode, SdkHttpError, StreamableHTTPClientTransport, type PriorDiscovery, type Tool } from '@modelcontextprotocol/client';
+import { Client, ProtocolError, SdkError, SdkErrorCode, SdkHttpError, StreamableHTTPClientTransport, type PriorDiscovery, type Tool } from '@modelcontextprotocol/client';
 import { prepareAuth } from '../http/auth.js';
-import { createTransport } from '../http/client.js';
+import { createTransport, RETRYABLE_STATUS } from '../http/client.js';
 import { createGuardedLookup } from '../http/egress.js';
 import { createGuardedFetch, GuardedFetchError, type GuardedFetch } from '../http/guarded-fetch.js';
 import type { Scrubber } from '../http/scrub.js';
@@ -45,8 +52,6 @@ const LIST_MAX_PAGES = 10;
 const ERA_TTL_MS = 10 * 60 * 1000;
 /** A definition nested deeper than this is not hashed (canonical JSON recurses). */
 const MAX_DEFINITION_DEPTH = 256;
-/** The failures retried for reads (R5): the same set as the HTTP client's. */
-const RETRYABLE_STATUS: ReadonlySet<number> = new Set([429, 502, 503, 504]);
 
 interface Failure {
   ok: false;
@@ -84,15 +89,20 @@ function definitionOf(tool: Tool): McpToolDefinition {
   };
 }
 
+function isAbort(e: unknown): boolean {
+  return e instanceof Error && e.name === 'AbortError';
+}
+
 /**
- * The outcome code of an error thrown by the client (ruling F8). A guarded failure counts only
+ * The outcome code of an error thrown by the client (ruling F8), or undefined for an error this
+ * adapter does not recognise (a bug, which the caller rethrows). A guarded failure counts only
  * when the error comes from the transport: a `GuardedFetchError` in its cause chain, or an
  * `SdkHttpError` for the status the guarded fetch recorded last. Era negotiation produces expected
  * non-2xx exchanges, so `lastFailure()` alone is never trusted. A request timeout is `timeout`, a
- * reply the SDK cannot parse is `invalid_response`; every other SDK or JSON-RPC error is
- * `upstream_error`.
+ * list the SDK cannot parse is `invalid_response`; every other SDK error, a JSON-RPC error
+ * (`ProtocolError`) and an abort are `upstream_error`.
  */
-function classify(error: unknown, guarded: GuardedFetch, kind: 'list' | 'call'): { code: ReadErrorCode; status?: number } {
+function classify(error: unknown, guarded: GuardedFetch, kind: 'list' | 'call'): { code: ReadErrorCode; status?: number } | undefined {
   for (let e: unknown = error, depth = 0; e instanceof Error && depth < 8; e = e.cause, depth += 1) {
     if (e instanceof GuardedFetchError) return { code: e.code };
   }
@@ -105,8 +115,10 @@ function classify(error: unknown, guarded: GuardedFetch, kind: 'list' | 'call'):
     if (kind === 'list' && (error.code === SdkErrorCode.InvalidResult || error.code === SdkErrorCode.ListPaginationExceeded)) {
       return { code: 'invalid_response' };
     }
+    return { code: 'upstream_error' };
   }
-  return { code: 'upstream_error' };
+  if (ProtocolError.isInstance(error) || isAbort(error)) return { code: 'upstream_error' };
+  return undefined;
 }
 
 function isRetryable(f: { ok: boolean; code?: ReadErrorCode; status?: number }): boolean {
@@ -193,6 +205,9 @@ export function createMcpToolAdapter(deps: McpAdapterDeps = {}): McpToolAdapter 
       } catch (error) {
         eras.delete(eraKey(connection));
         const c = classify(error, guarded, kind);
+        // Not an upstream failure: a bug here must not look like a misbehaving upstream. The
+        // finally blocks still end the session and release the slot.
+        if (c === undefined) throw error;
         return fail(c.code, c.status);
       } finally {
         // F2: the client's close() only aborts; a legacy session is ended with DELETE first.

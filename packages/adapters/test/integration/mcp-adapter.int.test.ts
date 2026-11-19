@@ -1,6 +1,7 @@
 import { mcpToolHash, type ConnectionSettings, type CredentialSource, type McpToolDefinition } from '@aiops/connector-sdk';
 import { startFakeMcpServer, type FakeMcpServer, type FakeMcpTool, type RecordedMcpRequest } from '@aiops/testing';
 import { afterEach, describe, expect, it } from 'vitest';
+import { semaphoreFor } from '../../src/http/semaphore.js';
 import { createMcpToolAdapter } from '../../src/mcp/adapter.js';
 
 const TOKEN = 'mcp-s3cr3t-token-value';
@@ -219,35 +220,95 @@ describe('CONN-1 CONN-4 MCP tool adapter', () => {
 
   it('CONN-6 holds one semaphore slot per operation', async () => {
     const events: string[] = [];
+    const gates = new Map<string, () => void>();
     let active = 0;
     let maxActive = 0;
-    const slow: FakeMcpTool = {
-      name: 'slow',
+    const gated: FakeMcpTool = {
+      name: 'gated',
       inputSchema: { type: 'object', properties: { n: { type: 'string' } } },
       respond: async (args) => {
         const n = typeof args.n === 'string' ? args.n : '?';
         active += 1;
         maxActive = Math.max(maxActive, active);
         events.push(`start ${n}`);
-        // Slow enough for a second call to reach the server if it were not held; the test's
-        // outcome does not depend on this delay (it only makes a broken semaphore visible).
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await new Promise<void>((resolve) => gates.set(n, resolve));
         events.push(`end ${n}`);
         active -= 1;
         return { content: [{ type: 'text', text: n }] };
       },
     };
-    const server = await start({ tools: [slow] });
+    const server = await start({ tools: [gated] });
     const connection = settings(server, { maxConcurrency: 1 });
     const adapter = createMcpToolAdapter();
-    const [a, b] = await Promise.all([
-      adapter.callTool({ connection, tool: 'slow', args: { n: 'a' }, retryable: true }),
-      adapter.callTool({ connection, tool: 'slow', args: { n: 'b' }, retryable: true }),
-    ]);
-    expect(a.ok && a.value).toMatchObject({ text: ['a'] });
-    expect(b.ok && b.value).toMatchObject({ text: ['b'] });
+    // Prime the era so each call is exactly one tools/call exchange.
+    expect((await adapter.listTools({ connection })).ok).toBe(true);
+    const toolCalls = (): number => rpcMethods(server.requests).filter((m) => m === 'tools/call').length;
+    const a = adapter.callTool({ connection, tool: 'gated', args: { n: 'a' }, retryable: true });
+    const b = adapter.callTool({ connection, tool: 'gated', args: { n: 'b' }, retryable: true });
+    await expect.poll(() => gates.size, { timeout: 10_000 }).toBe(1);
+    // The first call is inside the upstream; the second is still waiting for the slot.
+    expect(toolCalls()).toBe(1);
+    expect(events).toEqual(['start a']);
+    gates.get('a')?.();
+    await expect.poll(() => gates.has('b'), { timeout: 10_000 }).toBe(true);
+    gates.get('b')?.();
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(ra.ok && ra.value).toMatchObject({ text: ['a'] });
+    expect(rb.ok && rb.value).toMatchObject({ text: ['b'] });
     expect(maxActive).toBe(1);
     expect(events).toEqual(['start a', 'end a', 'start b', 'end b']);
+  });
+
+  it('CONN-6 a call the upstream does not answer within timeoutMs is timeout; the slot is released and the session ended', async () => {
+    let open: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    const hanging: FakeMcpTool = {
+      name: 'hang',
+      inputSchema: { type: 'object' },
+      respond: async () => {
+        await gate;
+        return { content: [{ type: 'text', text: 'late' }] };
+      },
+    };
+    const server = await start({ mode: 'legacy-stateful', tools: [hanging, lookup] });
+    // A small timeout is the point of this test: the outcome waits on the timer, not on a sleep.
+    const connection = settings(server, { maxConcurrency: 1, timeoutMs: 1000 });
+    const adapter = createMcpToolAdapter();
+    try {
+      const outcome = await adapter.callTool({ connection, tool: 'hang', args: {}, retryable: false });
+      expect(outcome).toMatchObject({ ok: false, code: 'timeout', message: 'upstream tool call failed (timeout)' });
+      expect(rpcMethods(server.requests).filter((m) => m === 'DELETE')).toHaveLength(1);
+      // The only slot was released: it can be taken without waiting.
+      const slot = await semaphoreFor(connection.id, 1).acquire(0);
+      expect(slot).toBeTypeOf('function');
+      slot?.();
+      const next = await adapter.callTool({ connection: { ...connection, timeoutMs: 10_000 }, tool: 'lookup', args: { key: 'k' }, retryable: false });
+      expect(next.ok).toBe(true);
+    } finally {
+      open();
+    }
+  });
+
+  it('CONN-6 an error that is not an upstream failure is rethrown; the slot is released and the session ended', async () => {
+    const server = await start({ mode: 'legacy-stateful' });
+    const connection = settings(server, { maxConcurrency: 1 });
+    const adapter = createMcpToolAdapter();
+    // A caller-side bug: reading the arguments throws inside the operation.
+    const args = Object.defineProperty({}, 'text', {
+      enumerable: true,
+      get() {
+        throw new RangeError('argument getter failed');
+      },
+    }) as Record<string, unknown>;
+    await expect(adapter.callTool({ connection, tool: 'echo', args, retryable: true })).rejects.toThrow('argument getter failed');
+    expect(rpcMethods(server.requests).filter((m) => m === 'DELETE')).toHaveLength(1);
+    expect(rpcMethods(server.requests)).not.toContain('tools/call');
+    const slot = await semaphoreFor(connection.id, 1).acquire(0);
+    expect(slot).toBeTypeOf('function');
+    slot?.();
+    expect((await adapter.callTool({ connection, tool: 'echo', args: { text: 'x' }, retryable: false })).ok).toBe(true);
   });
 
   it('CONN-6 an operation that gets no slot within timeoutMs is busy', async () => {
