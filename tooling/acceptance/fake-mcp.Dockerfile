@@ -1,6 +1,6 @@
-# The fake MCP server of the Phase 9 acceptance (scripts/acceptance/phase-9.sh): one `lookup` tool,
-# mutable through POST /_control/tools/<name> (packages/testing/src/fake-mcp-main.ts). Built from
-# the repository root:
+# The fake MCP server of the Phase 9 acceptance (scripts/acceptance/phase-9.sh): tools `lookup` and
+# `create_note`, mutable through POST /_control/tools/<name>, and its request log at
+# GET /_control/requests (packages/testing/src/fake-mcp-main.ts). Built from the repository root:
 #   docker build -f tooling/acceptance/fake-mcp.Dockerfile .
 # Test tooling only; never part of a deployment.
 FROM node:22-bookworm-slim

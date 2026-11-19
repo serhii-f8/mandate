@@ -21,6 +21,8 @@ export interface FakeMcpTool {
 export interface RecordedMcpRequest {
   readonly httpMethod: string;
   readonly rpcMethod?: string;
+  /** `params.name` of a `tools/call`. */
+  readonly tool?: string;
   readonly headers: Readonly<Record<string, string>>;
 }
 
@@ -42,7 +44,10 @@ export interface FakeMcpServerOptions {
   responseMode?: 'json' | 'sse';
   host?: string;
   port?: number;
-  /** Serves POST /_control/tools/<name> (JSON patch -> 204) for the acceptance container. */
+  /**
+   * Serves POST /_control/tools/<name> (JSON patch -> 204) and GET /_control/requests
+   * (`[{ rpcMethod?, tool? }]`, no headers or arguments) for the acceptance container.
+   */
   control?: boolean;
 }
 
@@ -50,6 +55,7 @@ const DEFAULT_RESULT: Record<string, unknown> = { content: [{ type: 'text', text
 /** The adapters type `method` and `url` as required; a Node server request always has both. */
 type NodeRequest = IncomingMessage & { method: string; url: string };
 const CONTROL_PREFIX = '/_control/tools/';
+const CONTROL_REQUESTS = '/_control/requests';
 
 function flattenHeaders(req: IncomingMessage): Record<string, string> {
   const out: Record<string, string> = {};
@@ -73,11 +79,23 @@ function parseJson(text: string): unknown {
   }
 }
 
-function rpcMethodOf(body: unknown): string | undefined {
+function firstMessage(body: unknown): Record<string, unknown> | undefined {
   const first: unknown = Array.isArray(body) ? body[0] : body;
-  if (typeof first !== 'object' || first === null) return undefined;
-  const method: unknown = (first as Record<string, unknown>).method;
+  return typeof first === 'object' && first !== null ? (first as Record<string, unknown>) : undefined;
+}
+
+function rpcMethodOf(body: unknown): string | undefined {
+  const method: unknown = firstMessage(body)?.method;
   return typeof method === 'string' ? method : undefined;
+}
+
+/** The tool name of a `tools/call` request. */
+function toolOf(body: unknown): string | undefined {
+  if (rpcMethodOf(body) !== 'tools/call') return undefined;
+  const params: unknown = firstMessage(body)?.params;
+  if (typeof params !== 'object' || params === null) return undefined;
+  const name: unknown = (params as Record<string, unknown>).name;
+  return typeof name === 'string' ? name : undefined;
 }
 
 /** An MCP server over Streamable HTTP with a mutable tool list, for adapter tests and the acceptance container. */
@@ -155,6 +173,14 @@ export async function startFakeMcpServer(options: FakeMcpServerOptions): Promise
       res.writeHead(204).end();
       return;
     }
+    if (options.control === true && req.method === 'GET' && url.pathname === CONTROL_REQUESTS) {
+      const listed = requests.map((r) => ({
+        ...(r.rpcMethod === undefined ? {} : { rpcMethod: r.rpcMethod }),
+        ...(r.tool === undefined ? {} : { tool: r.tool }),
+      }));
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(listed));
+      return;
+    }
     if (url.pathname !== '/mcp') {
       res.writeHead(404).end();
       return;
@@ -162,7 +188,13 @@ export async function startFakeMcpServer(options: FakeMcpServerOptions): Promise
 
     const body = parseJson(text);
     const rpcMethod = rpcMethodOf(body);
-    requests.push({ httpMethod: req.method ?? '', ...(rpcMethod === undefined ? {} : { rpcMethod }), headers: flattenHeaders(req) });
+    const tool = toolOf(body);
+    requests.push({
+      httpMethod: req.method ?? '',
+      ...(rpcMethod === undefined ? {} : { rpcMethod }),
+      ...(tool === undefined ? {} : { tool }),
+      headers: flattenHeaders(req),
+    });
 
     if (req.method === 'POST') {
       const status = failures.shift();

@@ -9,14 +9,24 @@
 #   pins `aiops mcp tools` shows and grants them, checks that bob sees only the configured text
 #   (SEC-6) and alice no image or base64 (SEC-5), changes the fake's tool and sees the operation
 #   refused and audited, then records the new pin and sees it offered again, all without a restart
-#   of the api or the worker.
-# AIOPS_ACCEPT9_GROUPS selects the groups (default "1"); a selected group that is not defined is a
+#   of the api or the worker;
+#   group 2, an opaque MCP write approved and executed once (CS-1, CS-5, APR-5, APR-6, EXE-4, EXE-8,
+#   POL-5, SEC-3): op-prepare, op-exclude-refused, op-raw-args, op-approved, op-executed-once,
+#   op-rollback-refused, op-audit. It binds the fake's `create_note` as the `write_opaque` operation
+#   notes.create_note with its live pin and grants it to content_manager (whose role rule needs one
+#   content_lead step). alice's call prepares one item and sends nothing; exclusion is refused; alice
+#   submits (plan reason `opaque`) and dave, now the approver, sees the raw arguments on the page and
+#   approves there, and the change-set runs; the fake received exactly one tools/call of create_note; rollback is
+#   refused; the audit has the transitions and the batch and never the argument text. It runs alone
+#   or after group 1 (it attaches the connections itself when group 1 did not).
+# AIOPS_ACCEPT9_GROUPS selects the groups (default "1 2"); a selected group that is not defined is a
 # FAIL (ADR 0043).
 # Tests the committed HEAD (a fresh clone sees only commits), with a Compose override that mounts a
 # generated configuration and adds the two MCP containers. No Magento sandbox.
 # Prints one PASS/FAIL line per check and `# RESULT: PASS|FAIL`; exits non-zero if any fails.
 # Not part of CI: pulls node:24-bookworm-slim and fetches the everything server with npx.
-# Secrets: access tokens travel through variables and the environment of node only, never argv.
+# Secrets: access tokens and session cookies travel through variables and the environment of node
+# only, never argv.
 # Needs: docker with compose v2, git, node, curl, and `pnpm install` in this checkout.
 # The functions run through the trap and the group dispatch, which shellcheck cannot follow.
 # shellcheck disable=SC2317
@@ -37,6 +47,7 @@ export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
 export AIOPS_PUBLIC_URL="http://localhost:${AIOPS_API_PORT}"
 export AIOPS_ACCEPT_CONFIG_DIR="$WORK/config"
 MCP="http://127.0.0.1:${AIOPS_API_PORT}/mcp"
+API="$AIOPS_PUBLIC_URL"
 FAKE="http://127.0.0.1:${AIOPS_FAKE_MCP_PORT}"
 
 compose() { docker compose -p "$PROJECT" -f compose.yaml -f scripts/acceptance/phase-9.compose.yaml "$@"; }
@@ -51,6 +62,8 @@ pass() { echo "PASS $1${2:+ — $2}"; }
 fail() { echo "FAIL $1${2:+ — $2}"; FAILED=1; }
 json() { node -e "try{const v=JSON.parse(process.argv[1])$2;console.log(v===undefined?'':typeof v==='string'?v:JSON.stringify(v))}catch{console.log('')}" "$1"; }
 login() { node "$REPO/tooling/acceptance/login.mjs" "$AIOPS_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$AIOPS_MCP_RESOURCE"; }
+page_login() { node "$REPO/tooling/acceptance/page-login.mjs" "$API" "$1" dev-only-password "${2:-/app/approvals}"; }
+page_api() { AIOPS_PAGE_COOKIE="$1" node "$REPO/tooling/acceptance/page-api.mjs" "$API" "${@:2}"; }
 # A user runs mcp-call.mjs with the given flags; the user logs in again before every call, so no
 # token expires during the run.
 user_client() {
@@ -121,7 +134,8 @@ role_mapping:
 YAML
 }
 
-# mcp.yaml: both connections; with pins ($1 echo, $2 get-tiny-image, $3 lookup) also the operations.
+# mcp.yaml: both connections; with pins ($1 echo, $2 get-tiny-image, $3 lookup) also the operations,
+# and with a fourth pin ($4 create_note) also the opaque operation notes.create_note.
 write_mcp() {
   cat >"$AIOPS_ACCEPT_CONFIG_DIR/mcp.yaml" <<'YAML'
 version: 1
@@ -155,6 +169,14 @@ operations:
     risk: read
     description: Look up a record.
     upstream: { tool: lookup, pin: '$3' }
+YAML
+  (($# >= 4)) || return 0
+  cat >>"$AIOPS_ACCEPT_CONFIG_DIR/mcp.yaml" <<YAML
+  - id: notes.create_note
+    connection: fakemcp
+    risk: write_opaque
+    description: Create a note.
+    upstream: { tool: create_note, pin: '$4' }
 YAML
 }
 
@@ -297,8 +319,143 @@ group_1() {
   fi
 }
 
+# ---- Group 2: an opaque MCP write approved and executed once (EXE-4, APR-5, APR-6, CS-5, EXE-8) --
+
+# How many tools/call of the tool ($1) the fake MCP server received (its control route's log).
+fake_calls() {
+  local log
+  log="$(curl -sf "$FAKE/_control/requests" 2>/dev/null || echo null)"
+  node -e 'try{const l=JSON.parse(process.argv[1]);if(!Array.isArray(l))throw 0;console.log(l.filter((r)=>r.rpcMethod==="tools/call"&&r.tool===process.argv[2]).length)}catch{console.log("unreadable")}' "$log" "$1"
+}
+# get_changeset as alice every 2 s until the status matches the regex or the timeout (s) passes; the
+# last answer is left in POLL and its status in POLL_STATUS. Returns 1 on timeout.
+poll_cs() {
+  local deadline=$((SECONDS + $3))
+  while :; do
+    POLL="$(user_mcp alice get_changeset "{\"changeset_id\":\"$1\"}")"
+    POLL_STATUS="$(json "$POLL" '.structuredContent.changeset.status')"
+    [[ "$POLL_STATUS" =~ $2 ]] && return 0
+    ((SECONDS >= deadline)) && return 1
+    sleep 2
+  done
+}
+TERMINAL='^(completed|completed_with_errors|failed|cancelled|expired|rolled_back)$'
+NOTE_TEXT="phase 9 acceptance"
+
+group_2() {
+  local apply apply_code tools fake_tools echo_pin image_pin lookup_pin note_pin prep cs hash calls dave view exclude
+  local sub plan decide items rollback audit
+
+  # 0. The connections are attached (group 1 did it when it ran); the pins are the live ones.
+  if [[ ! -f "$AIOPS_ACCEPT_CONFIG_DIR/mcp.yaml" ]]; then
+    write_mcp
+    apply_code=0
+    apply="$(apply_config)" || apply_code=$?
+    [[ "$apply_code" == 0 ]] || { fail op-prepare "attach: apply exit $apply_code: $(tr '\n' '|' <<<"$apply")"; return 0; }
+  fi
+  tools="$(cli mcp tools everything 2>&1 || true)"
+  fake_tools="$(cli mcp tools fakemcp 2>&1 || true)"
+  echo_pin="$(hash_of "$tools" echo)"
+  image_pin="$(hash_of "$tools" get-tiny-image)"
+  lookup_pin="$(hash_of "$fake_tools" lookup)"
+  note_pin="$(hash_of "$fake_tools" create_note)"
+  if [[ -z "$echo_pin" || -z "$image_pin" || -z "$lookup_pin" || -z "$note_pin" ]]; then
+    fail op-prepare "pins missing: mcp tools everything: $(tr '\n' '|' <<<"$tools" | head -c 800); fakemcp: $(tr '\n' '|' <<<"$fake_tools")"
+    return 0
+  fi
+  write_mcp "$echo_pin" "$image_pin" "$lookup_pin" "$note_pin"
+  write_roles "$GRANTS_SUPPORT" "$GRANTS_CONTENT
+      - { operation: notes.create_note }"
+  apply_code=0
+  apply="$(apply_config)" || apply_code=$?
+  if [[ "$apply_code" != 0 ]] || ! await_listed alice notes.create_note yes; then
+    fail op-prepare "apply exit $apply_code: $(tr '\n' '|' <<<"$apply"); alice lists notes.create_note: $(lists alice notes.create_note)"
+    return 0
+  fi
+
+  # 1. alice's call prepares one item and sends nothing upstream (CS-1, EXE-4).
+  prep="$(user_mcp alice notes.create_note "{\"text\":\"$NOTE_TEXT\"}")"
+  cs="$(json "$prep" '.structuredContent.changeset.id')"
+  hash="$(json "$prep" '.structuredContent.changeset.hash')"
+  calls="$(fake_calls create_note)"
+  if [[ "$(json "$prep" '.structuredContent.changeset.status')" == prepared && "$(json "$prep" '.structuredContent.changeset.stats.included')" == 1 &&
+    "$(json "$prep" '.structuredContent.changeset.kind')" == opaque && "$calls" == 0 ]]; then
+    pass op-prepare "config apply → exit 0; alice notes.create_note → change-set $cs prepared, kind opaque, stats $(json "$prep" '.structuredContent.changeset.stats'), hash $hash; tools/call create_note at the fake: $calls"
+  else
+    fail op-prepare "tools/call create_note: $calls; answer: ${prep:0:1200}"
+    return 0
+  fi
+
+  # 2. An opaque change-set has no items to exclude (CS-5).
+  exclude="$(user_mcp alice exclude_changeset_items "{\"changeset_id\":\"$cs\",\"hash\":\"$hash\",\"exclude\":[\"call\"]}")"
+  audit="$(psql_q "select count(*) from audit_event where action = 'tool.call' and details->>'errorCode' = 'not_excludable'" 2>&1 || true)"
+  if [[ "$(json "$exclude" '.isError')" == true && "$(json "$exclude" '.content[0]')" == "Change-set $cs is a single upstream call; it has no items to exclude."* && "$audit" == 1 ]]; then
+    pass op-exclude-refused "exclude_changeset_items → isError: $(json "$exclude" '.content[0]'); tool.call not_excludable: $audit"
+  else
+    fail op-exclude-refused "tool.call not_excludable: $audit; answer: ${exclude:0:800}"
+  fi
+
+  # 3. alice submits; the plan needs approval because the call is opaque (POL-5). dave, the
+  #    approver, sees the change-set from now on: his page detail states the opaque kind and the
+  #    stored raw arguments (APR-5, APR-6).
+  sub="$(user_mcp alice submit_for_approval "{\"changeset_id\":\"$cs\",\"hash\":\"$hash\"}")"
+  plan="$(psql_q "select approval_plan->>'reason' from change_set where id = '$cs'" 2>&1 || true)"
+  dave="$(page_login dave 2>&1)" || { fail op-raw-args "page login: $dave"; return 0; }
+  view="$(page_api "$dave" changeset "$cs" 2>&1 || true)"
+  if [[ "$(json "$view" '.status')" == 200 && "$(json "$view" '.body.kind')" == opaque && "$(json "$view" '.body.request.args.text')" == "$NOTE_TEXT" ]]; then
+    pass op-raw-args "dave: changeset $cs → 200, kind $(json "$view" '.body.kind'), request.args $(json "$view" '.body.request.args')"
+  else
+    fail op-raw-args "submit: ${sub:0:400}; view: ${view:0:1200}"
+    return 0
+  fi
+
+  # 4. dave approves on the page with the hash and count he sees; the last step starts the run.
+  decide="$(page_api "$dave" decide "$cs" approve "$(json "$view" '.body.hash')" "$(json "$view" '.body.stats.included')" 2>&1 || true)"
+  if [[ "$(json "$sub" '.structuredContent.status')" == pending_approval && "$plan" == opaque && "$(json "$view" '.body.hash')" == "$hash" &&
+    "$(json "$decide" '.status')" == 200 ]]; then
+    pass op-approved "submit → pending_approval, plan reason $plan; dave: decide approve $hash 1 → $decide"
+  else
+    fail op-approved "submit: ${sub:0:600}; plan reason: $plan; view hash: $(json "$view" '.body.hash'); decide: $decide"
+    return 0
+  fi
+
+  # 5. The run completes, its item is written, and the fake received exactly one call (EXE-4).
+  poll_cs "$cs" "$TERMINAL" 180 || true
+  items="$(json "$POLL" '.structuredContent.items.map((i)=>i.targetId+":"+i.status).join(",")')"
+  calls="$(fake_calls create_note)"
+  if [[ "$POLL_STATUS" == completed && "$items" == "call:written" && "$calls" == 1 ]]; then
+    pass op-executed-once "$cs $POLL_STATUS; items $items; tools/call create_note at the fake: $calls"
+  else
+    fail op-executed-once "status $POLL_STATUS; items $items; tools/call create_note: $calls; answer: ${POLL:0:800}"
+    return 0
+  fi
+
+  # 6. The operation has no rollback (EXE-8, MCP-8).
+  rollback="$(user_mcp alice rollback_changeset "{\"changeset_id\":\"$cs\",\"hash\":\"$hash\"}")"
+  audit="$(psql_q "select count(*) from audit_event where action = 'tool.call' and details->>'errorCode' = 'not_rollbackable'" 2>&1 || true)"
+  if [[ "$(json "$rollback" '.isError')" == true && "$(json "$rollback" '.structuredContent.rollback.reason')" == strategy_none && "$audit" == 1 ]]; then
+    pass op-rollback-refused "rollback_changeset → isError $(json "$rollback" '.structuredContent.rollback'); tool.call not_rollbackable: $audit"
+  else
+    fail op-rollback-refused "tool.call not_rollbackable: $audit; answer: ${rollback:0:800}"
+  fi
+
+  # 7. Audit: the transitions to prepared, approved and completed and one batch row; no audit row
+  #    carries the argument text (SEC-3).
+  audit="$(psql_q "select
+      (select count(*) from audit_event where action = 'changeset.transition' and changeset_id = '$cs' and details->>'to' = 'prepared')
+      || ',' || (select count(*) from audit_event where action = 'changeset.transition' and changeset_id = '$cs' and details->>'to' = 'approved')
+      || ',' || (select count(*) from audit_event where action = 'changeset.transition' and changeset_id = '$cs' and details->>'to' = 'completed')
+      || ',' || (select count(*) from audit_event where action = 'changeset.batch' and changeset_id = '$cs')
+      || ',' || (select count(*) from audit_event where details::text like '%$NOTE_TEXT%')" 2>&1 || true)"
+  if [[ "$audit" == "1,1,1,1,0" ]]; then
+    pass op-audit "transitions to prepared, approved, completed; changeset.batch; rows with the argument text: $audit"
+  else
+    fail op-audit "counts (to prepared, to approved, to completed, batch, rows with the argument text) = $audit; rows: $(psql_q "select action, details::text from audit_event where changeset_id = '$cs' order by ts" 2>&1 | tr '\n' '|' | head -c 1500 || true)"
+  fi
+}
+
 # Not GROUPS: bash ignores assignments to its own GROUPS array (the user's group IDs).
-RUN_GROUPS="${AIOPS_ACCEPT9_GROUPS:-1}"
+RUN_GROUPS="${AIOPS_ACCEPT9_GROUPS:-1 2}"
 for g in $RUN_GROUPS; do
   if declare -F "group_$g" >/dev/null; then
     "group_$g"

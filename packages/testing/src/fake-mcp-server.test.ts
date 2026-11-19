@@ -84,4 +84,21 @@ describe.each(['stateless', 'legacy-stateful'] as const)('CONN-1 fake MCP server
     const missing = await fetch(`${base}/_control/tools/nope`, { method: 'POST', body: '{}' });
     expect(missing.status).toBe(404);
   });
+
+  it('EXE-4 control endpoint lists the recorded requests with the called tool', async () => {
+    const server = await start({ control: true });
+    const client = await connect(server);
+    await client.listTools();
+    await client.callTool({ name: 'echo', arguments: { text: 'secret text' } });
+    await client.close();
+    expect(server.requests.filter((r) => r.rpcMethod === 'tools/call').map((r) => r.tool)).toEqual(['echo']);
+    const res = await fetch(`${new URL(server.url).origin}/_control/requests`);
+    expect(res.status).toBe(200);
+    const listed = (await res.json()) as { rpcMethod?: string; tool?: string }[];
+    expect(listed.filter((r) => r.rpcMethod === 'tools/call')).toEqual([{ rpcMethod: 'tools/call', tool: 'echo' }]);
+    expect(listed.filter((r) => r.rpcMethod === 'tools/list')).toEqual([{ rpcMethod: 'tools/list' }]);
+    // Only the method and the tool name: no headers, no arguments.
+    expect(JSON.stringify(listed)).not.toContain('secret text');
+    expect(listed.every((r) => Object.keys(r).every((k) => k === 'rpcMethod' || k === 'tool'))).toBe(true);
+  });
 });
