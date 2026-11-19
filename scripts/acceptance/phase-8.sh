@@ -523,6 +523,15 @@ has_sample() {
   done <"$file"
   echo no
 }
+# The evidence of a refused call in one line: a tool result with isError, or the first line of the
+# error mcp-call.mjs printed (an unlisted tool is refused as a JSON-RPC error, not as a result).
+denial_of() {
+  if [[ "$(json "$1" '.isError')" == true ]]; then
+    echo "isError true: $(text0 "$1" | head -c 200)"
+  else
+    echo "error: $(grep -m 1 -iE 'error' <<<"$1" | head -c 200)"
+  fi
+}
 
 group_4() {
   local skus="UMBRELLA-0801,UMBRELLA-0802,UMBRELLA-0803,UMBRELLA-0804" stamp_4 args denied deadline services
@@ -603,15 +612,17 @@ group_4() {
   fi
 
   # 4. The trace carries no secret and no argument value (SEC-3): not the Magento token, not the
-  #    string authorization (any case), not the description, a SKU or the brand of the call.
+  #    string authorization (any case), not the description, a SKU or the brand (any case) of the call.
   #    The token reaches node through its environment only.
   leaks="$(MAGENTO_TOKEN="$TOKEN" node -e '
     const text = require("fs").readFileSync(process.argv[1], "utf8");
     const found = [];
     if (process.env.MAGENTO_TOKEN && text.includes(process.env.MAGENTO_TOKEN)) found.push("magento-token");
     if (/authorization/i.test(text)) found.push("authorization");
+    // The brand in any case (the SKUs carry it upper-case), then the other values as given.
+    if (/umbrella/i.test(text)) found.push("umbrella");
     for (const v of process.argv.slice(2)) if (text.includes(v)) found.push(JSON.stringify(v));
-    console.log(text.length < 100 ? "trace-missing" : found.join(",") || "none");' "$WORK/trace.json" "$stamp_4" umbrella ${skus//,/ } 2>&1)"
+    console.log(text.length < 100 ? "trace-missing" : found.join(",") || "none");' "$WORK/trace.json" "$stamp_4" ${skus//,/ } 2>&1)"
   if [[ "$leaks" == none ]]; then
     pass obs-no-secrets "trace $trace_id ($(wc -c <"$WORK/trace.json" | tr -d ' ') bytes): no token, no authorization, no argument value"
   else
@@ -648,7 +659,7 @@ group_4() {
   [[ "$(has_sample "$worker_text" 'aiops_upstream_requests_total{')" == yes ]] || missing+=" aiops_upstream_requests_total"
   [[ "$(has_sample "$worker_text" 'aiops_upstream_request_duration_seconds_bucket{')" == yes ]] || missing+=" aiops_upstream_request_duration_seconds_bucket"
   if [[ -z "$missing" ]]; then
-    pass metrics-names "dave catalog.update_content → isError $(json "$denied" '.isError'); api: $(grep -cE '^aiops_(tool_calls|policy_denials)_total\{' "$api_text") samples of aiops_tool_calls_total and aiops_policy_denials_total; worker: $(grep -cE '^aiops_(changesets|batch_duration_seconds_bucket|upstream_requests_total|upstream_request_duration_seconds_bucket)\{' "$worker_text") samples of the other four names"
+    pass metrics-names "dave catalog.update_content → $(denial_of "$denied"); api: $(grep -cE '^aiops_(tool_calls|policy_denials)_total\{' "$api_text") samples of aiops_tool_calls_total and aiops_policy_denials_total; worker: $(grep -cE '^aiops_(changesets|batch_duration_seconds_bucket|upstream_requests_total|upstream_request_duration_seconds_bucket)\{' "$worker_text") samples of the other four names"
   else
     fail metrics-names "missing:$missing; dave answer ${denied:0:400}; api $(head -c 300 "$api_text" | tr '\n' ' '); worker $(head -c 300 "$worker_text" | tr '\n' ' ')"
   fi
