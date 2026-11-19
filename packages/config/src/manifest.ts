@@ -27,6 +27,8 @@ export const manifestSchema = z.strictObject({
   values_arg: name,
   fields: z.array(name).min(1),
   required_fields: z.array(name).default([]),
+  /** AUD-4: fields whose values the audit trail redacts; each must be one of fields. */
+  sensitive_fields: z.array(name).default([]),
   scope_args: z.record(name, name).default({}),
   read_before: z.strictObject({ operation: operationId, ids_arg: name, args: templateMap }),
   selector: z
@@ -156,6 +158,9 @@ export function checkManifests(input: ManifestCheckInput): void {
     if (value.fields_arg !== undefined && value.fields_arg !== manifest.values_arg) {
       at(source, [...path, 'fields_arg'], 'must equal manifest.values_arg');
     }
+    manifest.sensitive_fields.forEach((f, index) => {
+      if (!manifest.fields.includes(f)) mAt(['sensitive_fields', index], 'must be one of fields');
+    });
     if (!op.enabled) continue;
 
     const schema = op.definition.inputSchema;

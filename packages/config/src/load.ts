@@ -78,6 +78,12 @@ export interface LoadedConfiguration {
   /** True when specs were declared but not resolved because no resolver was given. */
   readonly specChecksSkipped: boolean;
   /** CS-6: hours after which a prepared change-set expires. */
+  /** AUD-7: absent = keep forever. */
+  readonly audit: { readonly retentionDays?: number };
+  /** SEC-1, AUD-6: role IDs with view_audit: true. */
+  readonly auditViewers: ReadonlySet<string>;
+  /** AUD-4: union of every loaded manifest's sensitive_fields (presets included). */
+  readonly sensitiveFields: ReadonlySet<string>;
   readonly changesets: { readonly expireAfterHours: number; readonly failureThreshold: number; readonly itemsPerWorkflowRun: number; readonly rollbackWindowHours: number };
   /** SHA-256 over the sorted files, the preset files and the spec files (CFG-4 records it from Phase 8). */
   readonly hash: string;
@@ -194,6 +200,13 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     if (doc.changesets === undefined) continue;
     if (changesets === undefined) changesets = { value: doc.changesets, source, path: ['changesets'] };
     else at(source, ['changesets'], `may be set in one document only; first set in ${changesets.source.file}`);
+  }
+  // AUD-7: audit settings come from at most one document.
+  let audit: Located<{ retention_days?: number | undefined }> | undefined;
+  for (const { source, doc } of documents) {
+    if (doc.audit === undefined) continue;
+    if (audit === undefined) audit = { value: doc.audit, source, path: ['audit'] };
+    else at(source, ['audit'], `may be set in one document only; first set in ${audit.source.file}`);
   }
 
   const connectionById = indexById(connections);
@@ -494,6 +507,9 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       credentialManagers,
       specChecksSkipped,
       presetChecksSkipped,
+      audit: audit?.value.retention_days === undefined ? {} : { retentionDays: audit.value.retention_days },
+      auditViewers: new Set(roles.filter(({ value }) => value.view_audit).map(({ value }) => value.id)),
+      sensitiveFields: new Set([...registry.all.values()].flatMap((op) => op.located.value.manifest?.sensitive_fields ?? [])),
       changesets: {
         expireAfterHours: changesets?.value.expire_after_hours ?? DEFAULT_EXPIRE_AFTER_HOURS,
         failureThreshold: changesets?.value.failure_threshold ?? DEFAULT_FAILURE_THRESHOLD,

@@ -288,3 +288,25 @@ describe('CFG-2 APR-3 POL-5 approval configuration', () => {
     expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval' }));
   });
 });
+
+describe('AUD-7 SEC-1 audit configuration in the loaded configuration', () => {
+  it('AUD-7 audit settings come from one document only', async () => {
+    const none = await load();
+    if (!none.ok) throw new Error(JSON.stringify(none.issues));
+    expect(none.configuration.audit).toEqual({});
+    const set = await load({ 'a.yaml': 'version: 1\naudit: { retention_days: 90 }\n' });
+    if (!set.ok) throw new Error(JSON.stringify(set.issues));
+    expect(set.configuration.audit).toEqual({ retentionDays: 90 });
+    const twice = issues(await load({ 'a.yaml': 'version: 1\naudit: { retention_days: 90 }\n', 'b.yaml': 'version: 1\naudit: { retention_days: 30 }\n' }));
+    expect(twice).toEqual([expect.objectContaining({ path: 'audit', message: 'may be set in one document only; first set in a.yaml' })]);
+  });
+
+  it('SEC-1 view_audit defaults to false and fills auditViewers', async () => {
+    const result = await load({ 'auditor.yaml': 'version: 1\nroles:\n  - id: auditor\n    grants: []\n    view_audit: true\n' });
+    if (!result.ok) throw new Error(JSON.stringify(result.issues));
+    expect([...result.configuration.auditViewers]).toEqual(['auditor']);
+    const plain = await load();
+    if (!plain.ok) throw new Error(JSON.stringify(plain.issues));
+    expect(plain.configuration.auditViewers.size).toBe(0);
+  });
+});

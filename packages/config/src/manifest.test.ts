@@ -473,3 +473,17 @@ describe('CFG-2 POL-5 approval steps for write grants', () => {
     expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.steps', message: needs }));
   });
 });
+
+describe('AUD-4 manifest sensitive_fields', () => {
+  const withSensitive = (t: string, fields: string): string => t.replace('      rollback:', `      sensitive_fields: [${fields}]\n      rollback:`);
+  it('AUD-4 sensitive_fields entries must be manifest fields', async () => {
+    const issue = await expectIssue((t) => withSensitive(t, 'colour'), `${M}.sensitive_fields[0]`, 'colour');
+    expect(issue.message).toBe('must be one of fields');
+  });
+  it('AUD-4 sensitiveFields is the union of the manifests sensitive_fields', async () => {
+    const plain = ok(await load());
+    expect(plain.sensitiveFields.size).toBe(0);
+    const config = ok(await load({ 'write.yaml': withSensitive(WRITE, 'description') }));
+    expect([...config.sensitiveFields]).toEqual(['description']);
+  });
+});

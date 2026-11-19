@@ -163,3 +163,14 @@ describe('APR-3 AUTH-6 approval schema', () => {
     expect(issuesOf(role('{ step_up_max_age_seconds: 3600 }'))).toEqual([]);
   });
 });
+
+describe('NFR-18 AUD-7 audit settings', () => {
+  const parseDoc = (audit: unknown) => configDocumentSchema.safeParse({ version: 1, audit });
+  it('NFR-18 AUD-7 audit.retention_days is an integer of at least 1; unknown audit keys are refused', () => {
+    expect(parseDoc({ retention_days: 0 }).success).toBe(false);
+    expect(parseDoc({ retention_days: 1.5 }).success).toBe(false);
+    expect(parseDoc({ keep: 1 }).success).toBe(false);
+    expect(parseDoc({ retention_days: 30 }).success).toBe(true);
+    expect(parseDoc({}).success).toBe(true);
+  });
+});
