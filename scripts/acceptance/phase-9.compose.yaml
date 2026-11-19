@@ -1,0 +1,39 @@
+# Compose override of the Phase 9 acceptance (scripts/acceptance/phase-9.sh).
+# The api and the worker read the generated acceptance configuration instead of deploy/config, and
+# two MCP upstreams run on the project network: the reference server `everything` and the fake MCP
+# server of packages/testing, whose tools the script changes at run time through its control route.
+#   AIOPS_ACCEPT_CONFIG_DIR   absolute path of the generated configuration directory
+#   AIOPS_FAKE_MCP_PORT       host port (127.0.0.1) of the fake's control route
+services:
+  api:
+    volumes:
+      - ${AIOPS_ACCEPT_CONFIG_DIR:?set AIOPS_ACCEPT_CONFIG_DIR}:/etc/aiops/config:ro
+  worker:
+    volumes:
+      - ${AIOPS_ACCEPT_CONFIG_DIR:?set AIOPS_ACCEPT_CONFIG_DIR}:/etc/aiops/config:ro
+
+  # @modelcontextprotocol/server-everything 2.2.1: `streamableHttp` selects the transport, the
+  # endpoint is /mcp on PORT; the package needs Node 24 or later.
+  mcp-everything:
+    image: node:24-bookworm-slim
+    command: ["npx", "-y", "@modelcontextprotocol/server-everything@2.2.1", "streamableHttp"]
+    environment:
+      PORT: "3001"
+      npm_config_update_notifier: "false"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(3001,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      retries: 60
+
+  mcp-fake:
+    build:
+      context: .
+      dockerfile: tooling/acceptance/fake-mcp.Dockerfile
+    environment:
+      PORT: "3002"
+    ports:
+      - "127.0.0.1:${AIOPS_FAKE_MCP_PORT:?set AIOPS_FAKE_MCP_PORT}:3002"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(3002,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      retries: 60
