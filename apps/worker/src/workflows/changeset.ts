@@ -5,8 +5,10 @@
  * arguments carry identifiers and counters only (EXE-2).
  *
  * Deterministic code (ADR 0006): imports only `@temporalio/workflow` and the contract.
- * A brand-new workflow type with no patches; any change to its command sequence from now on
- * follows the versioning convention (EXE-10).
+ * Any change to its command sequence follows the versioning convention (EXE-10). Patches:
+ * - first patch: `changeset-workflow-rollback-20261118` (EXE-8, ADR 0042) — after a finished status
+ *   the workflow keeps a rollback window open and runs a requested rollback; executions that
+ *   finished before it keep their old path on replay.
  */
 import {
   ActivityFailure,
@@ -15,6 +17,7 @@ import {
   continueAsNew,
   defineQuery,
   defineSignal,
+  patched,
   proxyActivities,
   setHandler,
   sleep,
@@ -25,15 +28,28 @@ import {
   PREPARE_MAX_ATTEMPTS,
   PROGRESS_QUERY,
   WAKE_SIGNAL,
+  type ActivityTuning,
   type BatchResult,
   type BeginResult,
+  type BeginRollbackResult,
   type ChangesetActivities,
   type ChangesetWorkflowInput,
   type ChangesetWorkflowResult,
   type ChangeSetStatus,
   type FinishOutcome,
+  type RollbackBatchResult,
+  type RollbackOutcome,
+  type RollbackWindow,
   type WorkflowProgress,
 } from '@aiops/temporal/contract';
+
+/**
+ * EXE-8 (ADR 0042): after a finished status the workflow keeps a rollback window open.
+ * remove not before 2027-06-23 — earliest deployment 2026-11-18 + 90 d maximum expiry
+ * (expire_after_hours ≤ 2160) + 90 d maximum rollback window (rollback_window_hours ≤ 2160)
+ * + 30 d assumed longest execution + 7 d namespace retention; recompute from the real deployment date.
+ */
+const ROLLBACK_PATCH = 'changeset-workflow-rollback-20261118';
 
 /** Statuses in which the workflow waits for a wake (a start or a cancel) until the change-set expires. */
 const WAITING: readonly ChangeSetStatus[] = ['prepared', 'pending_approval', 'approved'];
@@ -54,9 +70,37 @@ const progressQuery = defineQuery<WorkflowProgress>(PROGRESS_QUERY);
  * (`batch_superseded`: another attempt owns the batch; `operation_unavailable`) is not the
  * writer's: the executor could not run the batch.
  */
-function batchFailureOutcome(failure: ActivityFailure): FinishOutcome {
+function batchFailureOutcome(failure: ActivityFailure): 'executor_error' | 'writer_error' {
   const cause = failure.cause;
   return cause instanceof ApplicationFailure && cause.nonRetryable ? 'executor_error' : 'writer_error';
+}
+
+/** Retries of the slow PostgreSQL-and-guard activities, from the tuning. */
+function slowRetry(tuning: ActivityTuning): { initialInterval: number; maximumInterval: number; maximumAttempts: number } {
+  return { initialInterval: tuning.retryInitialMs, maximumInterval: tuning.retryMaxMs, maximumAttempts: PREPARE_MAX_ATTEMPTS };
+}
+
+/** The begin activities of execution and rollback. Building a proxy emits no command. */
+function slowActivities(tuning: ActivityTuning): ChangesetActivities {
+  return proxyActivities<ChangesetActivities>({
+    startToCloseTimeout: '15 minutes',
+    heartbeatTimeout: PREPARE_HEARTBEAT_MS,
+    retry: slowRetry(tuning),
+  });
+}
+
+/** The batch activities of execution and rollback (EXE-3, NFR-2). Building a proxy emits no command. */
+function batchActivities(tuning: ActivityTuning): ChangesetActivities {
+  return proxyActivities<ChangesetActivities>({
+    startToCloseTimeout: tuning.batchTimeoutMs,
+    heartbeatTimeout: tuning.batchHeartbeatMs,
+    retry: {
+      initialInterval: tuning.retryInitialMs,
+      backoffCoefficient: 2,
+      maximumInterval: tuning.retryMaxMs,
+      maximumAttempts: tuning.batchMaxAttempts,
+    },
+  });
 }
 
 export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<ChangesetWorkflowResult> {
@@ -82,6 +126,85 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
   // Whether the previous turn called `expire` (reset by any turn that does not).
   let expireTried = false;
   let turns = 0;
+
+  /**
+   * EXE-8: compensation of a change-set in `rolling_back`, in fenced batches from the next open or
+   * unrun batch on; continues as new (input `{ changesetId }`) after `itemsPerRun` items, and the
+   * next run comes back here through `inspect`. Ends with `finishRollback`; no second window.
+   */
+  const compensate = async (tuning: ActivityTuning): Promise<ChangesetWorkflowResult> => {
+    const batches = batchActivities(tuning);
+    const slow = slowActivities(tuning);
+    const finishRollback = async (outcome: RollbackOutcome): Promise<ChangesetWorkflowResult> => {
+      const r = await db.finishRollback(id, outcome);
+      progress = { ...progress, status: r.status };
+      return { status: r.status };
+    };
+
+    let begin: BeginRollbackResult;
+    try {
+      begin = await slow.beginRollback(id);
+    } catch (e) {
+      if (e instanceof ActivityFailure) return finishRollback('executor_error');
+      throw e;
+    }
+    if (!begin.ok) return finishRollback(begin.outcome);
+
+    let batchNo = begin.nextBatch;
+    let thisRun = 0;
+    for (;;) {
+      let r: RollbackBatchResult;
+      try {
+        r = await batches.rollbackBatch(id, batchNo);
+      } catch (e) {
+        if (e instanceof ActivityFailure) return finishRollback(batchFailureOutcome(e));
+        throw e;
+      }
+      // An empty claim: nothing rollbackable is left.
+      if (r.empty) return finishRollback('done');
+      batchNo += 1;
+      const processed = r.restored + r.skipped + r.failed;
+      thisRun += processed;
+      // As execution: nothing left finishes before the continue-as-new check (ruling F2); a batch
+      // that took nothing while items remain would loop forever, so it fails closed.
+      if (r.remaining === 0) return finishRollback('done');
+      if (processed === 0) return finishRollback('executor_error');
+      if (thisRun >= begin.itemsPerRun || workflowInfo().continueAsNewSuggested) {
+        await continueAsNew<typeof changesetWorkflow>({ changesetId: id });
+      }
+    }
+  };
+
+  /**
+   * A finished status (EXE-8): behind the first patch, opens the rollback window and waits in it
+   * for a wake; a stored request runs `compensate`, the window's end closes the workflow. Without
+   * the patch marker (an execution that finished before it, on replay) it returns at once.
+   */
+  const settle = async (status: ChangeSetStatus): Promise<ChangesetWorkflowResult> => {
+    if (!patched(ROLLBACK_PATCH)) return { status };
+    let w: RollbackWindow;
+    try {
+      w = await db.openRollbackWindow(id);
+    } catch (e) {
+      if (e instanceof ActivityFailure) return { status };
+      throw e;
+    }
+    if (w.untilMs === null) return { status };
+    for (;;) {
+      const left = w.untilMs - Date.now(); // workflow time
+      const fired = left <= 0 || !(await condition(() => woken, left));
+      // Reset before inspect: a wake that arrives while inspect runs is not lost.
+      woken = false;
+      const s = await db.inspect(id);
+      progress = { status: s.status, total: s.total, done: s.done, failed: s.failed, skipped: s.skipped };
+      if (s.status === 'rolling_back') return compensate(s.tuning);
+      if (fired) return { status: s.status };
+      turns += 1;
+      if (turns >= MAX_TURNS_PER_RUN || workflowInfo().continueAsNewSuggested) {
+        await continueAsNew<typeof changesetWorkflow>({ changesetId: id });
+      }
+    }
+  };
   for (;;) {
     // Bounded history outside execution: a fresh run re-reads everything from PostgreSQL, so it
     // carries the change-set ID only (execution continues as new with its resume state below).
@@ -93,23 +216,14 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
     woken = false;
     const s = await db.inspect(id);
     progress = { status: s.status, total: s.total, done: s.done, failed: s.failed, skipped: s.skipped };
-    const slowRetry = {
-      initialInterval: s.tuning.retryInitialMs,
-      maximumInterval: s.tuning.retryMaxMs,
-      maximumAttempts: PREPARE_MAX_ATTEMPTS,
-    };
     // A whole preparation is one attempt: its ceiling comes from the tuning (NFR-7); the heartbeat
     // timeout notices a lost worker.
     const preparing = proxyActivities<ChangesetActivities>({
       startToCloseTimeout: s.tuning.prepareTimeoutMs,
       heartbeatTimeout: PREPARE_HEARTBEAT_MS,
-      retry: slowRetry,
+      retry: slowRetry(s.tuning),
     });
-    const slow = proxyActivities<ChangesetActivities>({
-      startToCloseTimeout: '15 minutes',
-      heartbeatTimeout: PREPARE_HEARTBEAT_MS,
-      retry: slowRetry,
-    });
+    const slow = slowActivities(s.tuning);
 
     if (s.status === 'preparing' || WAITING.includes(s.status)) {
       const left = s.expiresAtMs - Date.now(); // workflow time
@@ -135,23 +249,18 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
       continue;
     }
 
-    if (s.status !== 'executing') return { status: s.status };
+    if (s.status !== 'executing') {
+      // `patched` only on a rollback: no pre-patch history ever saw `rolling_back`.
+      if (s.status === 'rolling_back' && patched(ROLLBACK_PATCH)) return compensate(s.tuning);
+      return settle(s.status);
+    }
 
     // Execution (EXE-3, EXE-5, EXE-6, EXE-7, EXE-9).
-    const batches = proxyActivities<ChangesetActivities>({
-      startToCloseTimeout: s.tuning.batchTimeoutMs,
-      heartbeatTimeout: s.tuning.batchHeartbeatMs,
-      retry: {
-        initialInterval: s.tuning.retryInitialMs,
-        backoffCoefficient: 2,
-        maximumInterval: s.tuning.retryMaxMs,
-        maximumAttempts: s.tuning.batchMaxAttempts,
-      },
-    });
+    const batches = batchActivities(s.tuning);
     const finish = async (outcome: FinishOutcome): Promise<ChangesetWorkflowResult> => {
       const r = await db.finishExecution(id, outcome);
       progress = { ...progress, status: r.status };
-      return { status: r.status };
+      return settle(r.status);
     };
 
     // Always runs: it supplies the run size; `verified` skips only the guard on resumed runs.
