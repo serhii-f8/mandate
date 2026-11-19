@@ -85,6 +85,7 @@ describe('AUD-1 refusal answers', () => {
       unknown_items: 409,
       nothing_left: 409,
       policy_denied: 403,
+      not_rollbackable: 409,
     });
   });
 

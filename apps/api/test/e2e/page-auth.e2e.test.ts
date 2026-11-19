@@ -341,6 +341,7 @@ describe('SEC-1 every page route is authorized', () => {
         'ChangeSetExportController.download',
         'ChangeSetActionsController.submit',
         'ChangeSetActionsController.exclude',
+        'ChangeSetActionsController.rollback',
       ]),
     );
     expect(routes.filter((r) => !r.marked)).toEqual([]);

@@ -153,3 +153,8 @@ export const exclusionBodySchema: z.ZodType<{ hash: string; exclude?: string[] |
   exclude: targets,
   include: targets,
 });
+
+/** `POST /api/v1/changesets/:id/rollback` (EXE-8): the hash of the change-set the requester saw (SEC-9). */
+export const rollbackBodySchema: z.ZodType<{ hash: string }> = z.strictObject({
+  hash: z.string().regex(HASH),
+});
