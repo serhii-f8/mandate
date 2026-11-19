@@ -480,24 +480,31 @@ group_3() {
 JAEGER="http://127.0.0.1:${AIOPS_JAEGER_PORT}"
 # GET on a port inside a service's container (not published); prints the status, a space, the body.
 in_container() { compose exec -T "$1" node -e "fetch('http://127.0.0.1:$2$3').then(async (r) => console.log(r.status, await r.text()), (e) => { console.log('000', String(e)); process.exit(1); })" 2>&1; }
-# Summarises a Jaeger trace answer (file) against the correlation ID as JSON: the trace ID, the span
-# names found, whether RunActivity:prepare carries the ID, the http.request spans of aiops-worker.
+# Jaeger 2.23.0 serves only its api_v3 query API (/api/v3/...; the legacy /api/services and
+# /api/traces answer 404), with OTLP JSON answers: {result: {resourceSpans: [...]}}.
+# Summarises such an answer (file) against the correlation ID as JSON: the trace count and ID, the
+# span names, whether RunActivity:prepare carries the ID, the http.request spans of aiops-worker.
 trace_summary() {
   node -e '
     const fs = require("fs");
     try {
-      const body = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-      const traces = body.data ?? [];
-      const t = traces[0] ?? { spans: [], processes: {} };
-      const tag = (s, k) => (s.tags ?? []).find((x) => x.key === k)?.value;
-      const service = (s) => t.processes?.[s.processID]?.serviceName;
-      const names = [...new Set(t.spans.map((s) => s.operationName))].sort();
+      const text = fs.readFileSync(process.argv[1], "utf8");
+      // One JSON object, or one per line when the answer is streamed in chunks.
+      const bodies = text.trim().split(/\n(?=\{)/).map((l) => JSON.parse(l));
+      const value = (v) => v?.stringValue ?? v?.intValue ?? v?.boolValue;
+      const attr = (list, k) => value((list ?? []).find((x) => x.key === k)?.value);
+      const spans = [];
+      for (const b of bodies)
+        for (const rs of b.result?.resourceSpans ?? [])
+          for (const ss of rs.scopeSpans ?? [])
+            for (const sp of ss.spans ?? []) spans.push({ ...sp, service: attr(rs.resource?.attributes, "service.name") });
+      const ids = [...new Set(spans.map((s) => s.traceId))];
       console.log(JSON.stringify({
-        traces: traces.length,
-        traceID: t.traceID ?? "",
-        names,
-        prepareTagged: t.spans.some((s) => s.operationName === "RunActivity:prepare" && tag(s, "aiops.correlation_id") === process.argv[2]),
-        workerHttp: t.spans.filter((s) => s.operationName === "http.request" && service(s) === "aiops-worker").length,
+        traces: ids.length,
+        traceID: ids[0] ?? "",
+        names: [...new Set(spans.map((s) => s.name))].sort(),
+        prepareTagged: spans.some((s) => s.name === "RunActivity:prepare" && attr(s.attributes, "aiops.correlation_id") === process.argv[2]),
+        workerHttp: spans.filter((s) => s.name === "http.request" && s.service === "aiops-worker").length,
       }));
     } catch { console.log("{}"); }' "$1" "$2"
 }
@@ -519,7 +526,7 @@ has_sample() {
 
 group_4() {
   local skus="UMBRELLA-0801,UMBRELLA-0802,UMBRELLA-0803,UMBRELLA-0804" stamp_4 args denied deadline services
-  local call cid cs status tags summary trace_id expected cancel leaks readyz body api_text worker_text missing
+  local call cid cs status tags window summary trace_id expected cancel leaks readyz body api_text worker_text missing
 
   # 0. One call dave is not granted (no_grant), so aiops_policy_denials_total has a sample (F16).
   stamp_4="$(stamp observability)"
@@ -529,15 +536,15 @@ group_4() {
   # 1. The trace backend answers (bounded).
   deadline=$((SECONDS + 60))
   while :; do
-    services="$(curl -sf --max-time 5 "$JAEGER/api/services" 2>/dev/null || true)"
+    services="$(curl -sf --max-time 5 "$JAEGER/api/v3/services" 2>/dev/null || true)"
     [[ -n "$services" ]] && break
     ((SECONDS >= deadline)) && break
     sleep 2
   done
   if [[ -n "$services" ]]; then
-    pass obs-jaeger-up "GET $JAEGER/api/services → $services"
+    pass obs-jaeger-up "GET $JAEGER/api/v3/services → $services"
   else
-    fail obs-jaeger-up "no answer from $JAEGER/api/services within 60 s"
+    fail obs-jaeger-up "no 2xx answer from $JAEGER/api/v3/services within 60 s"
     return 0
   fi
 
@@ -558,10 +565,12 @@ group_4() {
     return 0
   fi
   tags="$(node -e 'console.log(encodeURIComponent(JSON.stringify({ "aiops.correlation_id": process.argv[1] })))' "$cid")"
+  # The last hour up to a minute ahead (RFC 3339, as api_v3 requires both bounds).
+  window="query.start_time_min=$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)&query.start_time_max=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)"
   expected="mcp.request mcp.tool_call StartWorkflow:changesetWorkflow StartActivity:prepare RunActivity:prepare http.request"
   deadline=$((SECONDS + 30))
   while :; do
-    curl -sf --max-time 5 "$JAEGER/api/traces?service=aiops-api&lookback=1h&limit=5&tags=$tags" >"$WORK/trace.json" 2>/dev/null || echo '{}' >"$WORK/trace.json"
+    curl -sf --max-time 5 "$JAEGER/api/v3/traces?query.service_name=aiops-api&$window&query.num_traces=5&query.attributes=$tags" >"$WORK/trace.json" 2>/dev/null || echo '{}' >"$WORK/trace.json"
     summary="$(trace_summary "$WORK/trace.json" "$cid")"
     [[ "$(json "$summary" '.traces')" == 1 && "$(has_spans "$summary" "$expected")" == yes && "$(json "$summary" '.prepareTagged')" == true &&
       "$(json "$summary" '.workerHttp')" =~ ^[1-9] ]] && break
@@ -581,7 +590,7 @@ group_4() {
   cancel="$(alice_mcp cancel_changeset "{\"changeset_id\":\"$cs\"}")"
   deadline=$((SECONDS + 30))
   while :; do
-    curl -sf --max-time 5 "$JAEGER/api/traces/$trace_id" >"$WORK/trace.json" 2>/dev/null || echo '{}' >"$WORK/trace.json"
+    curl -sf --max-time 5 "$JAEGER/api/v3/traces/$trace_id" >"$WORK/trace.json" 2>/dev/null || echo '{}' >"$WORK/trace.json"
     summary="$(trace_summary "$WORK/trace.json" "$cid")"
     [[ "$(has_spans "$summary" "RunWorkflow:changesetWorkflow")" == yes ]] && break
     ((SECONDS >= deadline)) && break
