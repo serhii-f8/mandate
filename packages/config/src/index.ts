@@ -33,3 +33,4 @@ export { PLACEHOLDER_SCHEMA } from './registry.js';
 export { toUpstreamMapping, type AuthConfig, type ConnectionTestConfig, type UpstreamConfig } from './upstream-schema.js';
 export { executionLimits } from './limits.js';
 export { isRevisionFilePath, loadConfigurationFiles, MAX_REVISION_PATH, revisionFilesOf, revisionSummary } from './revision-files.js';
+export { diffConfigurations, diffCounts, formatDiff, type ConfigDiff, type EntityChange, type EntityKind } from './diff.js';
