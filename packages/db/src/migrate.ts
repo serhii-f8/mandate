@@ -4,12 +4,10 @@ import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
+import { MIGRATION_LOCK_KEY } from './locks.js';
 
-/**
- * Advisory-lock key reserved for schema migrations. Nothing else may use it.
- * (ASCII "aiops-mg" as a signed 64-bit integer.)
- */
-export const MIGRATION_LOCK_KEY = 0x6169_6f70_732d_6d67n;
+/** Re-exported unchanged; the key lives in `locks.ts` with the other advisory-lock keys. */
+export { MIGRATION_LOCK_KEY };
 
 /** Committed SQL migrations, shipped next to `dist/` in the package. */
 const migrationsFolder = fileURLToPath(new URL('../migrations', import.meta.url));

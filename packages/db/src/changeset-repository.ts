@@ -36,14 +36,13 @@ import {
 import { DrizzleAuditLog } from './audit-log.js';
 import { guarded, isUniqueViolation } from './errors.js';
 import type { Db, DbExecutor } from './client.js';
+import { START_LOCK_NAMESPACE } from './locks.js';
 import { insertNotifications } from './notification-outbox.js';
 import { approval, changeBatch, changeItem, changeRollbackBatch, changeSet, type StoredSubmission } from './schema.js';
 
 const MAX_PAGE = 500;
 const MAX_BATCH = 1000;
 const DAY_MS = 24 * 3_600_000;
-/** First key of the two-key advisory lock `startExecution` takes per requester ('aex1'). */
-const START_LOCK_NAMESPACE = 0x6165_7831;
 const OUTCOMES_REFUSED = 'item outcomes rejected: change-set is not executing';
 const BATCH_REFUSED = 'batch outcomes rejected: change-set is not executing';
 const ROLLBACK_BATCH_REFUSED = 'rollback batch outcomes rejected: change-set is not rolling back';
