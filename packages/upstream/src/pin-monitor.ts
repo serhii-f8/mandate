@@ -37,9 +37,17 @@ export function vaultToolLister(adapter: Pick<McpToolAdapter, 'listTools'>, vaul
 export interface UpstreamToolView {
   /** NFR-6: synchronous, in memory; undefined when the operation is not MCP-backed. */
   view(configuration: LoadedConfiguration, operationId: string): PinEvaluation | undefined;
-  /** Refreshes the operation's connection first when its last successful list is older than the freshness window. */
+  /**
+   * Refreshes the operation's connection first when its last successful list and its last
+   * list attempt are both older than the freshness window `min(60 s, pin_check_seconds)`, so a
+   * failing upstream is listed at most once per window (R4 still turns it `unverified`). A
+   * caller arriving while a list is in flight waits for that list.
+   */
   current(configuration: LoadedConfiguration, operationId: string): Promise<PinEvaluation | undefined>;
-  /** R9: schedules, without waiting, a refresh of each stale connection of these operations. */
+  /**
+   * R9: schedules, without waiting, a refresh of each stale connection of these operations;
+   * stale as for `current` (last success and last attempt both older than the freshness window).
+   */
   touch(configuration: LoadedConfiguration, operationIds: readonly string[]): void;
 }
 
@@ -74,6 +82,8 @@ interface ConnectionState {
 }
 
 const keyOf = (settings: ConnectionSettings): string => `${settings.id}\0${settings.baseUrl}`;
+
+const errorName = (error: unknown): string => (error instanceof Error ? error.name : 'unknown');
 
 function mcpBinding(configuration: LoadedConfiguration, operationId: string): McpOperationBinding | undefined {
   const binding = configuration.bindings.get(operationId);
@@ -130,6 +140,8 @@ export class PinMonitor implements UpstreamToolView {
   async tick(): Promise<void> {
     const configuration = this.deps.configuration();
     const states = this.statesOf(configuration);
+    // Connections the current configuration no longer has (removed, or a new base URL) are dropped.
+    for (const [key, state] of this.connections) if (!states.has(key) && state.inFlight === undefined) this.connections.delete(key);
     const now = this.clock();
     const due = [...states.values()].filter((c) => c.lastAttemptAt === undefined || now - c.lastAttemptAt >= c.pinCheckMs);
     await Promise.all(due.map((c) => this.refresh(c)));
@@ -169,7 +181,7 @@ export class PinMonitor implements UpstreamToolView {
     if (this.ticking !== undefined) return;
     this.ticking = this.tick()
       .catch((error: unknown) => {
-        this.deps.logger.warn({ error: error instanceof Error ? error.name : 'unknown' }, 'upstream pin check failed');
+        this.safeWarn({ error: errorName(error) }, 'upstream pin check failed');
       })
       .finally(() => {
         this.ticking = undefined;
@@ -196,9 +208,13 @@ export class PinMonitor implements UpstreamToolView {
       if (catalog.status === 'listed') this.adopt(connection, catalog);
       await this.evaluate();
     };
-    connection.inFlight = run().finally(() => {
-      connection.inFlight = undefined;
-    });
+    connection.inFlight = run()
+      .catch((error: unknown) => {
+        this.safeWarn({ connection: connection.settings.id, error: errorName(error) }, 'upstream pin refresh failed');
+      })
+      .finally(() => {
+        connection.inFlight = undefined;
+      });
     return connection.inFlight;
   }
 
@@ -274,10 +290,24 @@ export class PinMonitor implements UpstreamToolView {
     return states;
   }
 
+  /** Never rejects: a failing evaluation is logged and the chain stays usable for the next one. */
   private evaluate(): Promise<void> {
-    const next = this.evaluation.then(() => this.evaluateOnce());
+    const next = this.evaluation
+      .then(() => this.evaluateOnce())
+      .catch((error: unknown) => {
+        this.safeWarn({ error: errorName(error) }, 'upstream pin evaluation failed');
+      });
     this.evaluation = next;
     return next;
+  }
+
+  /** A warning that cannot throw: a failing logger must not poison the evaluation chain or a refresh. */
+  private safeWarn(fields: object, message: string): void {
+    try {
+      this.deps.logger.warn(fields, message);
+    } catch {
+      // Nothing left to report to.
+    }
   }
 
   /** Compares each MCP-backed operation of the current configuration with its recorded state and audits changes (R12). */
@@ -309,7 +339,7 @@ export class PinMonitor implements UpstreamToolView {
         });
       } catch (error) {
         // Not recorded: the next evaluation writes the row again.
-        this.deps.logger.warn({ operation: operationId, ...details, error: error instanceof Error ? error.name : 'unknown' }, 'upstream pin audit failed');
+        this.deps.logger.warn({ operation: operationId, ...details, error: errorName(error) }, 'upstream pin audit failed');
         continue;
       }
       this.recorded.set(operationId, to);

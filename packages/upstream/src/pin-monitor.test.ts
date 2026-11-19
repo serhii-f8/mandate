@@ -39,13 +39,13 @@ function listOf(...definitions: McpToolDefinition[]): ToolListOutcome {
 }
 const DOWN: ToolListOutcome = { ok: false, code: 'network', durationMs: 2, message: `connect refused ${INJECTION}` };
 
-function sources(pin: string): { file: string; text: string }[] {
+function sources(pin: string, url: string): { file: string; text: string }[] {
   return [
     {
       file: 'connections.yaml',
       text: `version: 1
 connections:
-  - { id: tools, adapter: mcp, mcp_url: http://tools.example.test/mcp, pin_check_seconds: 100 }
+  - { id: tools, adapter: mcp, mcp_url: ${url}, pin_check_seconds: 100 }
 `,
     },
     {
@@ -63,12 +63,12 @@ operations:
 }
 
 /** The fixture configuration, with the load-time tool list `atLoad` taken at `listedAt`. */
-async function load(atLoad: ToolListOutcome, options: { pin?: string; listedAt?: number } = {}): Promise<LoadedConfiguration> {
+async function load(atLoad: ToolListOutcome, options: { pin?: string; listedAt?: number; url?: string } = {}): Promise<LoadedConfiguration> {
   const resolver: UpstreamResolver = {
     resolveSpec: () => Promise.resolve({ ok: true, catalog: [] }),
     resolveTools: () => Promise.resolve(atLoad),
   };
-  const result = await loadConfigurationSources(sources(options.pin ?? PIN), { resolver, now: () => options.listedAt ?? T0 });
+  const result = await loadConfigurationSources(sources(options.pin ?? PIN, options.url ?? 'http://tools.example.test/mcp'), { resolver, now: () => options.listedAt ?? T0 });
   if (!result.ok) throw new Error(JSON.stringify(result.issues));
   return result.configuration;
 }
@@ -108,22 +108,37 @@ function setup(initial: LoadedConfiguration) {
   let now = T0;
   let configuration = initial;
   let ids = 0;
+  /** Injected faults: the next N calls of the logger's `warn` / of `configuration()` throw. */
+  const faults = { warn: 0, configuration: 0 };
   const lister = new ScriptedLister();
   const audit = new InMemoryAuditLog();
   const logs: LogRecord[] = [];
   const monitor = new PinMonitor({
-    configuration: () => configuration,
+    configuration: () => {
+      if (faults.configuration > 0) {
+        faults.configuration--;
+        throw new Error('configuration holder fault');
+      }
+      return configuration;
+    },
     lister: lister.list,
     audit,
     newId: () => `id-${String(++ids)}`,
     clock: () => now,
     logger: {
       info: (fields, message) => logs.push({ level: 'info', fields, message }),
-      warn: (fields, message) => logs.push({ level: 'warn', fields, message }),
+      warn: (fields, message) => {
+        if (faults.warn > 0) {
+          faults.warn--;
+          throw new Error('logger fault');
+        }
+        logs.push({ level: 'warn', fields, message });
+      },
     },
   });
   return {
     monitor,
+    faults,
     lister,
     audit,
     logs,
@@ -312,6 +327,60 @@ describe('CONN-4 pin monitor', () => {
     ]);
     await monitor.tick();
     expect(pinRows(audit)).toHaveLength(2);
+    expect(lister.calls).toHaveLength(0);
+  });
+
+  it('CONN-4 AUD-1 a failing evaluation does not stop later transitions from being audited', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const config = await load(listOf(ECHO_CHANGED));
+      const { monitor, lister, audit, logs, faults, advance, use } = setup(config);
+      // The changed row is written, then its log line throws.
+      faults.warn = 1;
+      await monitor.tick();
+      expect(pinRows(audit)).toHaveLength(1);
+      expect(logs).toContainEqual(expect.objectContaining({ level: 'warn', message: 'upstream pin evaluation failed' }));
+
+      use(await load(listOf(ECHO_CHANGED), { pin: CHANGED_HASH }));
+      await monitor.tick();
+      expect(pinRows(audit).map((e) => e.details)).toEqual([
+        { connection: 'tools', tool: 'echo', from: null, to: 'changed', hash: CHANGED_HASH },
+        { connection: 'tools', tool: 'echo', from: 'changed', to: 'ok', hash: CHANGED_HASH },
+      ]);
+
+      // A touch whose evaluation throws (configuration holder fault, logger fault while reporting it).
+      lister.next = listOf(OTHER);
+      advance(61_000);
+      faults.configuration = 1;
+      faults.warn = 1;
+      monitor.touch(config, ['tools.echo']);
+      expect(lister.calls).toHaveLength(1);
+      await monitor.stop();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+
+      // The chain still works: the next evaluation audits the missing tool.
+      await monitor.tick();
+      expect(pinRows(audit).map((e) => e.details.to)).toEqual(['changed', 'ok', 'missing']);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('CONN-4 connection states the current configuration no longer has are pruned', async () => {
+    const config = await load(listOf(ECHO));
+    const { monitor, lister, use } = setup(config);
+    await monitor.tick();
+    expect(monitor.view(config, 'tools.echo')).toMatchObject({ state: 'ok' });
+    // Same connection id, new base URL: a new key, seeded from the new configuration's list.
+    const moved = await load(listOf(ECHO), { url: 'http://tools-2.example.test/mcp' });
+    use(moved);
+    await monitor.tick();
+    expect(monitor.view(moved, 'tools.echo')).toMatchObject({ state: 'ok' });
+    // The old key's state (and its catalog) is gone: the old, already seeded snapshot is not re-seeded.
+    expect(monitor.view(config, 'tools.echo')).toEqual({ state: 'unverified', liveHash: null });
     expect(lister.calls).toHaveLength(0);
   });
 
