@@ -1,6 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { changesetBatchEvent, EMPTY_STATS, ROLLBACK_REQUEST_MARGIN_MS, rollbackRequestEvents, startEventFactory } from '@aiops/core';
+import {
+  changesetBatchEvent,
+  changesetRollbackBatchEvent,
+  EMPTY_STATS,
+  ROLLBACK_REQUEST_MARGIN_MS,
+  rollbackRequestEvents,
+  startEventFactory,
+} from '@aiops/core';
 import { recordApproval, submitChangeSet } from './approval-fixtures.js';
 import type {
   AuditEventInput,
@@ -15,6 +22,7 @@ import type {
   NewChangeSet,
   NewNotification,
   NotificationRow,
+  RollbackItemOutcome,
   RollbackRequest,
 } from '@aiops/core';
 
@@ -1578,6 +1586,221 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
           expect((await c.repository.stats(c.id)).rollback).toBeUndefined();
           expect(cs?.stats.rollback).toBeUndefined();
         }));
+
+      describe('EXE-8 rollback batches', () => {
+        /** Five items this run wrote (t-1…t-5), one written as already applied and one failed, between them. */
+        const BATCH_RUN: readonly ItemOutcome[] = [
+          ...written(['t-1', 't-2', 't-3', 't-4', 't-5']),
+          { targetId: 't-2a', status: 'written', error: 'already_applied' },
+          { targetId: 't-4a', status: 'failed', error: 'upstream_5xx' },
+        ];
+
+        /** BATCH_RUN finished `completed`, the window open and the rollback requested. */
+        async function rollingBack(c: Ctx): Promise<void> {
+          await finished(c, 'completed', BATCH_RUN);
+          await c.repository.openRollbackWindow(c.id, fromNow(HOUR));
+          expect((await request(c)).ok).toBe(true);
+        }
+
+        function rollbackAudit(id: string, batchNo: number, outcomes: readonly RollbackItemOutcome[]): AuditEventInput {
+          const count = (s: RollbackItemOutcome['status']): number => outcomes.filter((o) => o.status === s).length;
+          return changesetRollbackBatchEvent({
+            id: randomUUID(),
+            changeset: { id, operation: 'catalog.update' },
+            batchNo,
+            counts: { restored: count('restored'), skipped: count('skipped'), failed: count('failed') },
+            correlationId: 'corr-rb',
+          });
+        }
+
+        function restored(ids: readonly string[]): RollbackItemOutcome[] {
+          return ids.map((targetId) => ({ targetId, status: 'restored' }));
+        }
+
+        async function claimedIds(c: Ctx, batchNo: number, attempt: number, size: number): Promise<readonly string[]> {
+          const claim = await c.repository.claimRollbackBatch(c.id, batchNo, attempt, size);
+          if (claim.kind !== 'claimed') throw new Error(`expected a claim, got ${claim.kind}`);
+          expect(claim.batch.targetIds).toEqual(claim.items.map((i) => i.targetId));
+          return claim.batch.targetIds;
+        }
+
+        it('EXE-8 EXE-3 rollback batches claim only rollbackable items in target order', async () =>
+          withRepo(async (c) => {
+            await rollingBack(c);
+            expect(await claimedIds(c, 1, 1, 2)).toEqual(['t-1', 't-2']);
+            expect(await claimedIds(c, 2, 1, 2)).toEqual(['t-3', 't-4']);
+            expect(await claimedIds(c, 3, 1, 2)).toEqual(['t-5']);
+            expect(await c.repository.claimRollbackBatch(c.id, 4, 1, 2)).toEqual({ kind: 'empty' });
+            expect(await c.repository.claimRollbackBatch(randomUUID(), 1, 1, 2)).toEqual({ kind: 'empty' });
+            expect(await c.repository.claimRollbackBatch('x', 1, 1, 2)).toEqual({ kind: 'empty' });
+            await expect(c.repository.claimRollbackBatch(c.id, 5, 1, 0)).rejects.toThrow();
+            // Execution batches are a separate sequence: none was claimed by the rollback claims.
+            expect(await c.repository.claimBatch(c.id, 1, 1, 10)).toEqual({ kind: 'fenced' });
+          }));
+
+        it('EXE-3 NFR-2 a done rollback batch answers its stored counts; a lower or equal attempt is fenced; a takeover claims the same items', async () =>
+          withRepo(async (c) => {
+            await rollingBack(c);
+            expect(await claimedIds(c, 1, 2, 2)).toEqual(['t-1', 't-2']);
+            expect(await c.repository.claimRollbackBatch(c.id, 1, 1, 2)).toEqual({ kind: 'fenced' });
+            expect(await c.repository.claimRollbackBatch(c.id, 1, 2, 2)).toEqual({ kind: 'fenced' });
+            // A takeover with a different size still claims the batch's own items.
+            expect(await claimedIds(c, 1, 3, 5)).toEqual(['t-1', 't-2']);
+            // The superseded attempt can neither record nor complete.
+            expect(await c.repository.recordRollbackSubmission(c.id, 1, 2, { upstreamBatchId: 'u-old', plan: [] })).toBe(false);
+            const outcomes: RollbackItemOutcome[] = [
+              { targetId: 't-1', status: 'restored' },
+              { targetId: 't-2', status: 'failed', error: 'upstream_5xx' },
+            ];
+            const stale = await c.repository.completeRollbackBatch(c.id, 1, 2, outcomes, rollbackAudit(c.id, 1, outcomes));
+            expect(stale).toEqual({ ok: false });
+            expect(await c.repository.completeRollbackBatch(c.id, 1, 3, outcomes, rollbackAudit(c.id, 1, outcomes))).toEqual({
+              ok: true,
+              counts: { restored: 1, skipped: 0, failed: 1 },
+            });
+            for (const attempt of [1, 3, 4]) {
+              expect(await c.repository.claimRollbackBatch(c.id, 1, attempt, 2)).toEqual({
+                kind: 'done',
+                counts: { restored: 1, skipped: 0, failed: 1 },
+              });
+            }
+          }));
+
+        it('EXE-3 a rollback batch is not claimed unless the change-set is rolling_back', async () =>
+          withRepo(async (c) => {
+            await finished(c, 'completed', BATCH_RUN);
+            await c.repository.openRollbackWindow(c.id, fromNow(HOUR));
+            expect(await c.repository.claimRollbackBatch(c.id, 1, 1, 2)).toEqual({ kind: 'fenced' });
+            expect(await c.repository.nextRollbackBatch(c.id)).toBe(1);
+
+            // A takeover after the rollback ended is fenced too; a done batch still answers its counts.
+            const ended = { ...c, id: randomUUID() };
+            await rollingBack(ended);
+            expect(await claimedIds(ended, 1, 1, 2)).toEqual(['t-1', 't-2']);
+            expect(await claimedIds(ended, 2, 1, 2)).toEqual(['t-3', 't-4']);
+            const outcomes = restored(['t-1', 't-2']);
+            const done = await c.repository.completeRollbackBatch(ended.id, 1, 1, outcomes, rollbackAudit(ended.id, 1, outcomes));
+            expect(done.ok).toBe(true);
+            await c.repository.transition(ended.id, ['rolling_back'], 'failed', auditEvent(ended.id));
+            expect(await c.repository.claimRollbackBatch(ended.id, 2, 2, 2)).toEqual({ kind: 'fenced' });
+            expect(await c.repository.claimRollbackBatch(ended.id, 3, 1, 2)).toEqual({ kind: 'fenced' });
+            expect(await c.repository.claimRollbackBatch(ended.id, 1, 2, 2)).toEqual({
+              kind: 'done',
+              counts: { restored: 2, skipped: 0, failed: 0 },
+            });
+          }));
+
+        it('EXE-4 recordRollbackSubmission stores the submission for the owning attempt only', async () =>
+          withRepo(async (c) => {
+            await rollingBack(c);
+            await claimedIds(c, 1, 1, 2);
+            const submission: BatchSubmission = {
+              upstreamBatchId: 'u-rb-1',
+              plan: [
+                { targetId: 't-1', action: 'write' },
+                { targetId: 't-2', action: 'outcome', status: 'skipped', error: 'drift' },
+              ],
+            };
+            expect(await c.repository.recordRollbackSubmission(c.id, 1, 2, submission)).toBe(false);
+            expect(await c.repository.recordRollbackSubmission(c.id, 9, 1, submission)).toBe(false);
+            expect(await c.repository.recordRollbackSubmission(randomUUID(), 1, 1, submission)).toBe(false);
+            expect(await c.repository.recordRollbackSubmission('x', 1, 1, submission)).toBe(false);
+            expect(await c.repository.recordRollbackSubmission(c.id, 1, 1, submission)).toBe(true);
+            const takeover = await c.repository.claimRollbackBatch(c.id, 1, 2, 2);
+            expect(takeover.kind).toBe('claimed');
+            if (takeover.kind !== 'claimed') return;
+            expect(takeover.batch.submission).toEqual(submission);
+            expect(await c.repository.recordRollbackSubmission(c.id, 1, 1, { upstreamBatchId: 'u-stale', plan: [] })).toBe(false);
+            // The execution batch table is untouched.
+            expect(await c.repository.recordSubmission(c.id, 1, 1, submission)).toBe(false);
+          }));
+
+        it('EXE-8 completeRollbackBatch applies outcomes once and recomputes stats.rollback', async () =>
+          withRepo(async (c) => {
+            await rollingBack(c);
+            const before = await c.repository.itemsPage(c.id, { limit: 10 });
+            expect(await claimedIds(c, 1, 1, 3)).toEqual(['t-1', 't-2', 't-3']);
+            const outcomes: RollbackItemOutcome[] = [
+              { targetId: 't-1', status: 'restored' },
+              { targetId: 't-2', status: 'skipped', error: 'drift' },
+              { targetId: 't-3', status: 'restored', error: 'already_restored' },
+              // Ignored: a second outcome for a target, a target outside the batch, an item never rollbackable.
+              { targetId: 't-1', status: 'failed', error: 'upstream_5xx' },
+              { targetId: 't-4', status: 'restored' },
+              { targetId: 't-2a', status: 'restored' },
+            ];
+            const audit = rollbackAudit(c.id, 1, outcomes.slice(0, 3));
+
+            // A failed audit append writes nothing.
+            const eventsBefore = (await c.events()).length;
+            c.failNextAudit();
+            await expect(c.repository.completeRollbackBatch(c.id, 1, 1, outcomes, audit)).rejects.toThrow();
+            expect(await c.repository.itemsPage(c.id, { limit: 10 })).toEqual(before);
+            expect((await c.repository.get(c.id))?.stats.rollback).toBeUndefined();
+            expect(await c.events()).toHaveLength(eventsBefore);
+
+            const counts = { restored: 2, skipped: 1, failed: 0 };
+            expect(await c.repository.completeRollbackBatch(c.id, 1, 1, outcomes, audit)).toEqual({ ok: true, counts });
+            const after = await c.repository.itemsPage(c.id, { limit: 10 });
+            const byId = new Map(after.map((i) => [i.targetId, i]));
+            expect(byId.get('t-1')).toMatchObject({ rollbackStatus: 'restored' });
+            expect('rollbackError' in (byId.get('t-1') ?? {})).toBe(false);
+            expect(byId.get('t-2')).toMatchObject({ rollbackStatus: 'skipped', rollbackError: 'drift' });
+            expect(byId.get('t-3')).toMatchObject({ rollbackStatus: 'restored', rollbackError: 'already_restored' });
+            for (const id of ['t-2a', 't-4', 't-4a', 't-5']) expect(byId.get(id)?.rollbackStatus).toBeUndefined();
+            // Execution status and error of every item are unchanged.
+            expect(after.map((i) => [i.targetId, i.status, i.error])).toEqual(before.map((i) => [i.targetId, i.status, i.error]));
+            const cs = await c.repository.get(c.id);
+            expect(cs?.stats.rollback).toEqual(counts);
+            expect(cs?.stats).toMatchObject({ written: 6, failed: 1, skipped: 0 });
+            expect((await c.repository.stats(c.id)).rollback).toEqual(counts);
+            expect(await c.repository.rollbackableCount(c.id)).toBe(2);
+            expect((await c.events()).slice(eventsBefore).map((e) => e.id)).toEqual([audit.id]);
+
+            // A second completion of the batch is fenced and writes nothing.
+            const again = rollbackAudit(c.id, 1, outcomes);
+            expect(await c.repository.completeRollbackBatch(c.id, 1, 1, restored(['t-2']), again)).toEqual({ ok: false });
+            expect(await c.repository.itemsPage(c.id, { limit: 10 })).toEqual(after);
+            expect(await c.events()).toHaveLength(eventsBefore + 1);
+            expect(await c.repository.completeRollbackBatch(randomUUID(), 1, 1, outcomes, again)).toEqual({ ok: false });
+            expect(await c.repository.completeRollbackBatch('x', 1, 1, outcomes, again)).toEqual({ ok: false });
+          }));
+
+        it('EXE-8 nextRollbackBatch is 1, then the open batch, then highest done + 1', async () =>
+          withRepo(async (c) => {
+            await rollingBack(c);
+            expect(await c.repository.nextRollbackBatch(c.id)).toBe(1);
+            await claimedIds(c, 1, 1, 2);
+            expect(await c.repository.nextRollbackBatch(c.id)).toBe(1);
+            const first = restored(['t-1', 't-2']);
+            expect((await c.repository.completeRollbackBatch(c.id, 1, 1, first, rollbackAudit(c.id, 1, first))).ok).toBe(true);
+            expect(await c.repository.nextRollbackBatch(c.id)).toBe(2);
+            await claimedIds(c, 2, 1, 2);
+            expect(await c.repository.nextRollbackBatch(c.id)).toBe(2);
+            const second = restored(['t-3', 't-4']);
+            expect((await c.repository.completeRollbackBatch(c.id, 2, 1, second, rollbackAudit(c.id, 2, second))).ok).toBe(true);
+            expect(await c.repository.nextRollbackBatch(c.id)).toBe(3);
+            expect(await c.repository.nextRollbackBatch(randomUUID())).toBe(1);
+            expect(await c.repository.nextRollbackBatch('x')).toBe(1);
+          }));
+
+        it('EXE-8 completeRollbackBatch is rejected after the change-set left rolling_back', async () =>
+          withRepo(async (c) => {
+            await rollingBack(c);
+            await claimedIds(c, 1, 1, 2);
+            const before = await c.repository.itemsPage(c.id, { limit: 10 });
+            await c.repository.transition(c.id, ['rolling_back'], 'rolled_back', auditEvent(c.id));
+            const events = (await c.events()).length;
+            const outcomes = restored(['t-1', 't-2']);
+            await expect(
+              c.repository.completeRollbackBatch(c.id, 1, 1, outcomes, rollbackAudit(c.id, 1, outcomes)),
+            ).rejects.toThrow();
+            expect(await c.repository.itemsPage(c.id, { limit: 10 })).toEqual(before);
+            expect((await c.repository.get(c.id))?.stats.rollback).toBeUndefined();
+            expect(await c.events()).toHaveLength(events);
+            expect(await c.repository.nextRollbackBatch(c.id)).toBe(1);
+          }));
+      });
     });
   });
 }

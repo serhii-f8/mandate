@@ -9,6 +9,8 @@ import type {
   ChangeSetStatus,
   ExecutionRequest,
   ItemStatus,
+  RollbackCounts,
+  RollbackItemStatus,
   RollbackRequest,
 } from './model.js';
 
@@ -38,6 +40,13 @@ export interface ItemsPageQuery {
 export interface ItemOutcome {
   readonly targetId: string;
   readonly status: 'written' | 'failed' | 'skipped';
+  readonly error?: string;
+}
+
+/** EXE-8: the rollback outcome of one item of a rollback batch. */
+export interface RollbackItemOutcome {
+  readonly targetId: string;
+  readonly status: RollbackItemStatus;
   readonly error?: string;
 }
 
@@ -227,6 +236,42 @@ export interface ChangeSetRepository {
     | { ok: true; changeset: ChangeSetRecord }
     | { ok: false; reason: 'not_found' | 'already_rolled_back' | 'not_finished' | 'window_closed' }
   >;
+  /**
+   * EXE-8: the open rollback batch's number, else the highest done batch + 1, else 1 (ruling R12); 1 for an
+   * unknown or non-UUID ID.
+   */
+  nextRollbackBatch(changesetId: string): Promise<number>;
+  /**
+   * EXE-8, EXE-3: like claimBatch, over rollbackable items (`written`, no error, no rollback status) after the
+   * highest existing rollback batch's last target; a new claim or takeover only while `rolling_back`. Rollback
+   * batches are their own sequence (`change_rollback_batch`), apart from the execution batches.
+   */
+  claimRollbackBatch(
+    changesetId: string,
+    batchNo: number,
+    attempt: number,
+    size: number,
+  ): Promise<
+    | { kind: 'claimed'; batch: BatchRecord; items: readonly ChangeItemRecord[] }
+    | { kind: 'done'; counts: RollbackCounts }
+    | { kind: 'fenced' }
+    | { kind: 'empty' }
+  >;
+  /** Like recordSubmission, for the owning attempt of an open rollback batch; false when fenced (NFR-2, EXE-4). */
+  recordRollbackSubmission(changesetId: string, batchNo: number, attempt: number, submission: BatchSubmission): Promise<boolean>;
+  /**
+   * One transaction for the owning attempt of an open rollback batch: the first outcome per target of the batch
+   * is applied to items whose rollback status is NULL (rejected unless `rolling_back`), stats recomputed (with
+   * `stats.rollback`), batch `done` with `restored/skipped/failed` counts stored in its `written/skipped/failed`
+   * columns (`written` = restored), `audit` appended. Fenced → `{ ok: false }`, nothing written.
+   */
+  completeRollbackBatch(
+    changesetId: string,
+    batchNo: number,
+    attempt: number,
+    outcomes: readonly RollbackItemOutcome[],
+    audit: AuditEventInput,
+  ): Promise<{ ok: true; counts: RollbackCounts } | { ok: false }>;
 }
 
 /** A claimed write batch (EXE-3). */

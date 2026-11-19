@@ -90,6 +90,7 @@ export type {
   PrepareFailure,
   RateCounter,
   ReadPage,
+  RollbackItemOutcome,
   StartEvent,
   StartOutcome,
   StartRefusal,
