@@ -63,6 +63,10 @@ export interface DisabledOperation {
   readonly path: string;
   readonly operationId?: string;
   readonly summary?: string;
+  /** CONN-1: the upstream tool of an MCP-backed entry (`method` is then `MCP`, `path` the tool name). */
+  readonly tool?: string;
+  /** CONN-4: the live tool hash, when the tool was listed. */
+  readonly hash?: string;
 }
 
 export interface GrantDefinition {

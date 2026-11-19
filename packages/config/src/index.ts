@@ -41,7 +41,8 @@ export {
 } from './load.js';
 export { presetDocumentSchema, resolvePreset, type LoadedPreset, type PresetEntryLocation, type PresetResult } from './presets.js';
 export { changesetsSchema, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN, DEFAULT_ROLLBACK_WINDOW_HOURS, manifestSchema, toManifestDefinition, type ManifestConfig } from './manifest.js';
-export { PLACEHOLDER_SCHEMA } from './registry.js';
+export { PLACEHOLDER_SCHEMA, type HttpOperationBinding, type McpOperationBinding } from './registry.js';
+export { isMcpUpstream, MCP_TOOL_NAME, PIN_PATTERN, type McpUpstreamConfig } from './mcp.js';
 export { toUpstreamMapping, type AuthConfig, type ConnectionTestConfig, type UpstreamConfig } from './upstream-schema.js';
 export { executionLimits } from './limits.js';
 export { isRevisionFilePath, loadConfigurationFiles, MAX_REVISION_PATH, revisionFilesOf, revisionSummary } from './revision-files.js';

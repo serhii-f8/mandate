@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ConfigIssue } from './issues.js';
 import { loadConfigurationSources, type LoadedConfiguration, type LoadResult } from './load.js';
+import type { HttpOperationBinding } from './registry.js';
 
 const CONNECTIONS = `version: 1
 connections:
@@ -103,6 +104,13 @@ roles:
 function load(overrides: Record<string, string> = {}): Promise<LoadResult> {
   const files: Record<string, string> = { 'connections.yaml': CONNECTIONS, 'reads.yaml': READS, 'write.yaml': WRITE, 'roles.yaml': ROLES, ...overrides };
   return loadConfigurationSources(Object.entries(files).map(([file, text]) => ({ file, text })));
+}
+
+/** The HTTP binding of an operation; throws for an MCP binding or none. */
+function httpBinding(config: LoadedConfiguration, id: string): HttpOperationBinding {
+  const binding = config.bindings.get(id);
+  if (binding?.kind !== 'http') throw new Error(`${id} has no HTTP binding`);
+  return binding;
 }
 
 function ok(result: LoadResult): LoadedConfiguration {
@@ -376,7 +384,7 @@ const U = 'operations[0].upstream';
 describe('OPS-6 bulk binding configuration', () => {
   it('OPS-6 loads a bulk binding and converts it to the SDK type', async () => {
     const config = ok(await load({ 'write.yaml': withBulk(WRITE) }));
-    expect(config.bindings.get('catalog.update_content')?.mapping.bulk).toEqual({
+    expect(httpBinding(config, 'catalog.update_content').mapping.bulk).toEqual({
       body: { wrap: 'product', nest: { path: 'custom_attributes', key: 'attribute_code', value: 'value', keep: ['sku', 'name', 'status'] } },
       batchId: 'bulk_uuid',
       status: {
@@ -390,7 +398,7 @@ describe('OPS-6 bulk binding configuration', () => {
     });
   });
   it('OPS-6 a write operation without bulk still loads (Phase 4 configuration stays valid)', async () => {
-    expect(ok(await load()).bindings.get('catalog.update_content')?.mapping.bulk).toBeUndefined();
+    expect(httpBinding(ok(await load()), 'catalog.update_content').mapping.bulk).toBeUndefined();
   });
   it('OPS-6 CFG-2 status path without {batch_id} is located', () =>
     expectIssue((t) => withBulk(t).replace('/V1/bulk/{batch_id}/detailed-status', '/V1/bulk/{uuid}/detailed-status'), `${U}.bulk.status.path`, 'uuid'));

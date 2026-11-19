@@ -38,8 +38,9 @@ export function createBulkWriter(deps: BulkWriterDeps): BulkWriter | undefined {
   const { configuration, adapter } = deps;
   const binding = configuration.bindings.get(deps.operationId);
   const connection = binding === undefined ? undefined : configuration.connectionSettings.get(binding.connection);
-  const bulk = binding?.mapping.bulk;
-  if (binding === undefined || connection === undefined || bulk === undefined) return undefined;
+  // Bulk writes are HTTP only (OPS-6); an MCP tool has no bulk mapping.
+  const bulk = binding?.kind === 'http' ? binding.mapping.bulk : undefined;
+  if (binding?.kind !== 'http' || connection === undefined || bulk === undefined) return undefined;
   const { mapping } = binding;
 
   const log = (method: string, outcome: { readonly status?: number; readonly durationMs: number } & ({ ok: true } | WriteFailure)): void => {

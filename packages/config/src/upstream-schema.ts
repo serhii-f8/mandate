@@ -5,6 +5,7 @@
  */
 import type { AuthSettings, BulkMapping, ResponseMapping, TemplateValue, UpstreamMapping } from '@aiops/connector-sdk';
 import { z } from 'zod';
+import { mcpUpstreamSchema, type McpUpstreamConfig } from './mcp.js';
 
 export const id = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
 /** Operation IDs are also MCP tool names. */
@@ -149,7 +150,8 @@ export type BulkConfig = z.output<typeof bulkSchema>;
  */
 const PLATFORM_HEADERS: ReadonlySet<string> = new Set(['host', 'content-length', 'transfer-encoding', 'connection']);
 
-export const upstreamSchema = z
+/** The HTTP mapping of an operation of an `openapi` connection. */
+export const httpUpstreamSchema = z
   .strictObject({
     operation: z.string().min(1).max(512).optional(),
     method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
@@ -174,7 +176,31 @@ export const upstreamSchema = z
       if (PLATFORM_HEADERS.has(name.toLowerCase())) ctx.addIssue({ code: 'custom', path: ['headers', name], message: 'is set by the platform' });
     }
   });
-export type UpstreamConfig = z.output<typeof upstreamSchema>;
+/** Alias of `httpUpstreamSchema`, kept for existing importers (new code uses the new name). */
+export const upstreamSchema = httpUpstreamSchema;
+export type UpstreamConfig = z.output<typeof httpUpstreamSchema>;
+
+/** True when the input is an object with an own `tool` or `pin` key: the MCP variant. */
+function isMcpShaped(input: unknown): boolean {
+  return typeof input === 'object' && input !== null && !Array.isArray(input) && (Object.hasOwn(input, 'tool') || Object.hasOwn(input, 'pin'));
+}
+
+/**
+ * An operation's `upstream`: `{ tool, pin }` (CONN-1) when the object has a `tool` or `pin`
+ * key, the HTTP mapping otherwise. Choosing by key, not `z.union`, keeps each variant's
+ * issues at their own paths (`upstream.pin`, `upstream: unknown key: method`) instead of
+ * one "does not match any allowed form". `reportInput` as `PARSE_PARAMS` of `schema.ts`
+ * (not imported: `schema.ts` imports this module), so a missing key still reads "is required".
+ */
+export const operationUpstreamSchema = z.unknown().transform((input, ctx): UpstreamConfig | McpUpstreamConfig => {
+  const result = isMcpShaped(input) ? mcpUpstreamSchema.safeParse(input, { reportInput: true }) : httpUpstreamSchema.safeParse(input, { reportInput: true });
+  if (result.success) return result.data;
+  // Re-raised as they are: Zod prefixes their paths with `upstream`, as it does for nested
+  // schemas. The cast only widens `input` (reported because of `reportInput`) to the raw-issue
+  // type; undefined still marks a missing key ("is required").
+  for (const issue of result.error.issues) ctx.issues.push(issue as z.core.$ZodRawIssue);
+  return z.NEVER;
+});
 type TemplateConfig = z.output<typeof templateValue>;
 
 /** True when the block declares request templates, which only an explicit `input_schema` can back. */

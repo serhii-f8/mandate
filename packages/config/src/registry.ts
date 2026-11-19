@@ -11,7 +11,8 @@ import { pathToString } from './issues.js';
 import type { OverrideConfig, PresetOperationConfig } from './schema.js';
 import type { SourceDocument } from './yaml-source.js';
 import { toManifestDefinition } from './manifest.js';
-import { hasTemplates, pathPlaceholders, templateArgs, toBulkMapping, toResponse, toUpstreamMapping } from './upstream-schema.js';
+import { isMcpUpstream, type McpUpstreamConfig } from './mcp.js';
+import { hasTemplates, pathPlaceholders, templateArgs, toBulkMapping, toResponse, toUpstreamMapping, type UpstreamConfig } from './upstream-schema.js';
 
 export interface Located<T> {
   readonly value: T;
@@ -36,11 +37,25 @@ export type CatalogState =
   | { readonly status: 'none' | 'skipped' | 'failed' }
   | { readonly status: 'resolved'; readonly entries: readonly CatalogEntry[] };
 
-/** The upstream call of an enabled operation: its connection and complete mapping. */
-export interface OperationBinding {
+/** The upstream call of an enabled operation of an `openapi` connection: its connection and complete mapping. */
+export interface HttpOperationBinding {
+  readonly kind: 'http';
   readonly connection: string;
   readonly mapping: UpstreamMapping & { method: HttpMethod; path: string };
 }
+
+/** The upstream tool of an enabled operation of an `mcp` connection (CONN-1, CONN-4). */
+export interface McpOperationBinding {
+  readonly kind: 'mcp';
+  readonly connection: string;
+  readonly tool: string;
+  /** The reviewed tool hash; the operation runs only while the live tool hashes to it. */
+  readonly pin: string;
+  /** True when `input_schema` is absent: the schema is derived from the pinned tool at run time. */
+  readonly schemaFromTool: boolean;
+}
+
+export type OperationBinding = HttpOperationBinding | McpOperationBinding;
 
 export interface RegisteredOperation {
   readonly definition: OperationDefinition;
@@ -66,6 +81,8 @@ export interface RegistryInput {
   readonly overrides: readonly Located<OverrideConfig>[];
   readonly catalogs: ReadonlyMap<string, CatalogState>;
   readonly connectionIds: ReadonlySet<string>;
+  /** The adapter of each defined connection: decides which `upstream` variant its operations need. */
+  readonly connectionKinds: ReadonlyMap<string, 'openapi' | 'mcp'>;
   /** A bound preset failed to load, so an unknown operation ID may be one of its operations. */
   readonly operationsIncomplete?: boolean;
   readonly reserved: ReadonlySet<string>;
@@ -86,6 +103,64 @@ export function buildRegistry(input: RegistryInput): Registry {
   const disabled: DisabledOperation[] = [];
   /** Catalog entry keys already accounted for: used by an enabled operation, or listed with a disabled one. */
   const used = new Set<string>();
+  /** `<connection>\0<tool>` → the operation that binds it. */
+  const boundTools = new Map<string, string>();
+
+  /** Compiles an input schema whose root must be an object; reports at `schemaAt`. */
+  const compileAt = (schema: Readonly<Record<string, unknown>>, source: SourceDocument, schemaAt: readonly PropertyKey[], explicit: boolean): ArgumentValidator | undefined => {
+    if (schema.type !== 'object') {
+      at(source, schemaAt, explicit ? 'root must be type: object' : 'derived input schema root is not type: object');
+      return undefined;
+    }
+    try {
+      return input.compile(schema);
+    } catch (error) {
+      // Ajv's message names the schema problem (keyword, path), not argument data.
+      at(source, schemaAt, `is not a valid JSON Schema 2020-12: ${error instanceof Error ? error.message : 'compile failed'}`);
+      return undefined;
+    }
+  };
+
+  /** The policy definition with overrides applied (MCP-9, OPS-1). */
+  const definitionOf = (located: OperationSource, schema: Readonly<Record<string, unknown>>): { definition: OperationDefinition; enabled: boolean } => {
+    const op = located.value;
+    const override = overrideByOp.get(op.id)?.value;
+    // OPS-2: `fields_arg` of a manifest operation defaults to `values_arg`.
+    const fieldsArg = op.fields_arg ?? op.manifest?.values_arg;
+    const definition: OperationDefinition = {
+      id: op.id,
+      toolName: override?.tool_name ?? op.id,
+      source: located.origin,
+      connection: located.connection,
+      risk: op.risk,
+      ...(override?.title !== undefined ? { title: override.title } : op.title !== undefined ? { title: op.title } : {}),
+      description: override?.description ?? op.description,
+      inputSchema: schema,
+      ...(fieldsArg === undefined ? {} : { fieldsArg }),
+      ...(op.manifest === undefined ? {} : { manifest: toManifestDefinition(op.manifest) }),
+    };
+    return { definition, enabled: override?.enabled ?? true };
+  };
+
+  /**
+   * An MCP-backed operation (CONN-1). Without `input_schema` its schema is derived from the
+   * pinned tool at run time (ADR 0051 R2): a placeholder here, no validator, and grant
+   * scope checks skipped as for an unresolved spec.
+   */
+  const registerMcp = (located: OperationSource, u: McpUpstreamConfig): void => {
+    const { value: op, source, path, connection } = located;
+    const explicit = op.input_schema !== undefined;
+    const schema: Readonly<Record<string, unknown>> = op.input_schema ?? PLACEHOLDER_SCHEMA;
+    const validator = explicit ? compileAt(schema, source, [...path, 'input_schema'], true) : undefined;
+    const { definition, enabled } = definitionOf(located, schema);
+    all.set(op.id, { definition, located, enabled, schemaKnown: explicit, ...(validator === undefined ? {} : { validator }) });
+    if (enabled) {
+      if (validator !== undefined) validators.set(op.id, validator);
+      bindings.set(op.id, { kind: 'mcp', connection, tool: u.tool, pin: u.pin, schemaFromTool: !explicit });
+    } else {
+      disabled.push({ key: op.id, connection, method: 'MCP', path: u.tool, tool: u.tool });
+    }
+  };
 
   for (const located of input.operations) {
     const { value: op, source, path, connection } = located;
@@ -94,6 +169,22 @@ export function buildRegistry(input: RegistryInput): Registry {
       at(source, [...path, 'upstream', ...sub], message);
     };
     if (input.reserved.has(op.id)) at(source, [...path, 'id'], 'is reserved for a built-in tool');
+    const kind = input.connectionKinds.get(connection);
+
+    // Before any HTTP rule: none of them applies to an MCP tool (ADR 0050 decision 7).
+    if (isMcpUpstream(u)) {
+      if (kind === 'openapi') upstreamAt(['tool'], 'is allowed only for operations of an mcp connection');
+      if (op.risk === 'write') at(source, [...path, 'risk'], 'write needs a manifest, which MCP-backed operations cannot carry (use read, write_opaque or destructive)');
+      if (op.manifest !== undefined) at(source, [...path, 'manifest'], 'is not allowed on an MCP-backed operation');
+      if (op.fields_arg !== undefined) at(source, [...path, 'fields_arg'], 'is not allowed on an MCP-backed operation');
+      const toolKey = `${connection}\0${u.tool}`;
+      const boundBy = boundTools.get(toolKey);
+      if (boundBy !== undefined) upstreamAt(['tool'], `tool ${u.tool} of connection ${connection} is already bound by operation ${boundBy}`);
+      else boundTools.set(toolKey, op.id);
+      registerMcp(located, u);
+      continue;
+    }
+    if (kind === 'mcp') upstreamAt([], 'an operation of an mcp connection needs upstream: { tool, pin }');
 
     // Resolve `upstream.operation` against the connection's catalog.
     let entry: CatalogEntry | undefined;
@@ -116,16 +207,7 @@ export function buildRegistry(input: RegistryInput): Registry {
     const schema: Readonly<Record<string, unknown>> = op.input_schema ?? entry?.inputSchema ?? PLACEHOLDER_SCHEMA;
     const schemaAt: readonly PropertyKey[] = explicit ? [...path, 'input_schema'] : [...path, 'upstream', 'operation'];
 
-    let validator: ArgumentValidator | undefined;
-    if (schema.type !== 'object') at(source, schemaAt, explicit ? 'root must be type: object' : 'derived input schema root is not type: object');
-    else {
-      try {
-        validator = input.compile(schema);
-      } catch (error) {
-        // Ajv's message names the schema problem (keyword, path), not argument data.
-        at(source, schemaAt, `is not a valid JSON Schema 2020-12: ${error instanceof Error ? error.message : 'compile failed'}`);
-      }
-    }
+    const validator = compileAt(schema, source, schemaAt, explicit);
 
     if (schemaKnown) {
       const properties = propertiesOf(schema);
@@ -161,7 +243,7 @@ export function buildRegistry(input: RegistryInput): Registry {
       upstreamAt(['response', 'fields_from_arg'], 'requires fields_arg naming the same argument');
     }
 
-    const binding = bindingOf(connection, op, entry);
+    const binding = bindingOf(connection, op, u, entry);
     // A non-GET call labelled read would skip the change-set path (MCP-4).
     const method = binding?.mapping.method ?? u.method;
     if (op.risk === 'read' && method !== undefined && method !== 'GET') {
@@ -174,22 +256,7 @@ export function buildRegistry(input: RegistryInput): Registry {
       }
       for (const ref of templateArgs(u)) upstreamAt(ref.path, 'cannot reference arguments in a bulk binding');
     }
-    const override = overrideByOp.get(op.id)?.value;
-    // OPS-2: `fields_arg` of a manifest operation defaults to `values_arg`.
-    const fieldsArg = op.fields_arg ?? op.manifest?.values_arg;
-    const enabled = override?.enabled ?? true;
-    const definition: OperationDefinition = {
-      id: op.id,
-      toolName: override?.tool_name ?? op.id,
-      source: located.origin,
-      connection,
-      risk: op.risk,
-      ...(override?.title !== undefined ? { title: override.title } : op.title !== undefined ? { title: op.title } : {}),
-      description: override?.description ?? op.description,
-      inputSchema: schema,
-      ...(fieldsArg === undefined ? {} : { fieldsArg }),
-      ...(op.manifest === undefined ? {} : { manifest: toManifestDefinition(op.manifest) }),
-    };
+    const { definition, enabled } = definitionOf(located, schema);
     all.set(op.id, { definition, located, enabled, schemaKnown, ...(validator === undefined ? {} : { validator }) });
 
     if (enabled) {
@@ -241,21 +308,23 @@ export function buildRegistry(input: RegistryInput): Registry {
  * list argument counts too: the response is projected by it.
  */
 export function sentArguments(op: PresetOperationConfig): ReadonlySet<string> | undefined {
+  // An MCP tool receives the validated arguments as they are (CONN-1).
+  if (isMcpUpstream(op.upstream)) return undefined;
   if (op.input_schema === undefined && op.upstream.operation !== undefined) return undefined;
   return new Set(templateArgs(op.upstream).map((ref) => ref.arg));
 }
 
-function bindingOf(connection: string, op: PresetOperationConfig, entry: CatalogEntry | undefined): OperationBinding | undefined {
-  const u = op.upstream;
+function bindingOf(connection: string, op: PresetOperationConfig, u: UpstreamConfig, entry: CatalogEntry | undefined): HttpOperationBinding | undefined {
   if (u.method !== undefined && u.path !== undefined) {
-    return { connection, mapping: { ...toUpstreamMapping(u), method: u.method, path: u.path } };
+    return { kind: 'http', connection, mapping: { ...toUpstreamMapping(u), method: u.method, path: u.path } };
   }
   if (entry === undefined) return undefined; // spec not resolved: the api always resolves
   if (op.input_schema !== undefined) {
-    return { connection, mapping: { ...toUpstreamMapping(u), method: entry.method, path: entry.path } };
+    return { kind: 'http', connection, mapping: { ...toUpstreamMapping(u), method: entry.method, path: entry.path } };
   }
   const base = entry.defaultMapping;
   return {
+    kind: 'http',
     connection,
     mapping: {
       ...base,

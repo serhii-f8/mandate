@@ -88,7 +88,9 @@ describe('CS-1 upstream reader for preparation', () => {
     const page = await reader.read('catalog.get_products', ARGS);
     expect(page).toEqual({ ok: true, items: ITEMS, total: 2, truncated: false });
     expect(adapter.reads).toHaveLength(1);
-    expect(adapter.reads[0]?.mapping).toBe(CONFIG.bindings.get('catalog.get_products')?.mapping);
+    const binding = CONFIG.bindings.get('catalog.get_products');
+    if (binding?.kind !== 'http') throw new Error('fixture has no HTTP binding');
+    expect(adapter.reads[0]?.mapping).toBe(binding.mapping);
     expect(adapter.reads[0]?.args).toEqual(ARGS);
   });
 
@@ -107,7 +109,7 @@ describe('CS-1 upstream reader for preparation', () => {
 
   it('CS-1 refuses a read operation whose binding is not GET, without calling the upstream', async () => {
     const binding = CONFIG.bindings.get('catalog.get_products');
-    if (binding === undefined) throw new Error('fixture has no binding');
+    if (binding?.kind !== 'http') throw new Error('fixture has no HTTP binding');
     const bindings = new Map(CONFIG.bindings);
     bindings.set('catalog.get_products', { ...binding, mapping: { ...binding.mapping, method: 'POST' } });
     const { reader, adapter } = setup(OK, { ...CONFIG, bindings });

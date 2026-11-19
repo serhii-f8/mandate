@@ -63,7 +63,10 @@ export interface LoadedConfiguration {
   readonly bindings: ReadonlyMap<string, OperationBinding>;
   /** Catalog entries nothing enables, and operations disabled by an override (CONN-2, OPS-1). */
   readonly disabled: readonly DisabledOperation[];
+  /** Every connection's settings; `kind` is set for each (CONN-1). */
   readonly connectionSettings: ReadonlyMap<string, ConnectionSettings>;
+  /** CONN-4: seconds between pin checks, per `mcp` connection only. */
+  readonly pinCheckSeconds: ReadonlyMap<string, number>;
   /** CONN-7: the read operation and arguments that test a connection. */
   readonly connectionTests: ReadonlyMap<string, { readonly operation: string; readonly args: Readonly<Record<string, unknown>> }>;
   /** Credential reference → its scheme and the connections and webhook notifications that use it (SEC-2). */
@@ -277,6 +280,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     } else if (preset !== undefined) spec = { kind: 'file', file: preset.specFile, owner: 'preset' };
     const settings: ConnectionSettings = {
       id: c.id,
+      kind: c.adapter,
       baseUrl: c.adapter === 'openapi' ? c.base_url : c.mcp_url,
       ...(auth === undefined ? {} : { auth: toAuthSettings(auth) }),
       ...(c.credential_ref === undefined ? {} : { credentialRef: c.credential_ref }),
@@ -334,6 +338,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     overrides,
     catalogs,
     connectionIds: new Set(connectionById.keys()),
+    connectionKinds: new Map([...connectionById].map(([id, c]) => [id, c.value.adapter] as const)),
     operationsIncomplete,
     reserved: new Set(options.reservedToolNames ?? BUILTIN_TOOL_NAMES),
     compile,
@@ -508,6 +513,9 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       bindings: registry.bindings,
       disabled: registry.disabled,
       connectionSettings: new Map([...states].map(([id, s]) => [id, s.settings] as const)),
+      pinCheckSeconds: new Map(
+        [...connectionById].flatMap(([id, { value: c }]) => (c.adapter === 'mcp' ? [[id, c.pin_check_seconds] as const] : [])),
+      ),
       connectionTests,
       credentialRefs,
       credentialManagers,

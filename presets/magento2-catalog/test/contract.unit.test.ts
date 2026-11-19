@@ -9,7 +9,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildBulkBody, buildRequest, createOpenApiAdapter, mapBulkStatus, mapResponse } from '@aiops/adapters';
-import { loadConfigurationSources, type LoadedConfiguration, type OperationBinding } from '@aiops/config';
+import { loadConfigurationSources, type HttpOperationBinding, type LoadedConfiguration } from '@aiops/config';
 import type { BulkItemState, BulkMapping, ConnectionSettings, CredentialSource } from '@aiops/connector-sdk';
 import { startFakeUpstream, type FakeUpstream } from '@aiops/testing';
 import { PRESET_DIR } from '../src/index.js';
@@ -71,9 +71,9 @@ async function loadPreset(baseUrl: string): Promise<LoadedConfiguration> {
   return result.configuration;
 }
 
-function bindingOf(config: LoadedConfiguration, operation: string): OperationBinding {
+function bindingOf(config: LoadedConfiguration, operation: string): HttpOperationBinding {
   const binding = config.bindings.get(operation);
-  if (binding === undefined) throw new Error(`no binding for ${operation}`);
+  if (binding?.kind !== 'http') throw new Error(`no HTTP binding for ${operation}`);
   return binding;
 }
 

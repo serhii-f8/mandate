@@ -41,6 +41,13 @@ const loaded = await loadConfigurationSources(Object.entries(SOURCES).map(([file
 if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
 const CONFIG: LoadedConfiguration = loaded.configuration;
 
+/** The mapping of an operation's HTTP binding; throws for an MCP binding or none. */
+function httpMapping(id: string) {
+  const binding = CONFIG.bindings.get(id);
+  if (binding?.kind !== 'http') throw new Error(`${id} has no HTTP binding`);
+  return binding.mapping;
+}
+
 function op(id: string): OperationDefinition {
   const found = CONFIG.policy.operations.find((o) => o.id === id);
   if (found === undefined) throw new Error(`fixture has no ${id}`);
@@ -100,7 +107,7 @@ describe('MCP-4 direct read invoker', () => {
 
   it('MCP-4 refuses a read operation bound to a non-GET call without calling the upstream (defence in depth)', async () => {
     const binding = CONFIG.bindings.get('catalog.search_products');
-    if (binding === undefined) throw new Error('fixture has no binding');
+    if (binding?.kind !== 'http') throw new Error('fixture has no HTTP binding');
     const bindings = new Map(CONFIG.bindings);
     bindings.set('catalog.search_products', { ...binding, mapping: { ...binding.mapping, method: 'POST' } });
     const adapter = new FakeAdapter(OK);
@@ -118,7 +125,7 @@ describe('MCP-4 direct read invoker', () => {
     expect(adapter.reads).toHaveLength(1);
     const [read] = adapter.reads;
     expect(read?.connection).toBe(CONFIG.connectionSettings.get('magento'));
-    expect(read?.mapping).toBe(CONFIG.bindings.get('catalog.search_products')?.mapping);
+    expect(read?.mapping).toBe(httpMapping('catalog.search_products'));
     expect(read?.args).toEqual(ARGS);
     expect(read?.credential).toBeUndefined();
   });
@@ -200,7 +207,7 @@ describe('MCP-4 direct read invoker', () => {
     await invokerFor(CONFIG, 'corr-a').invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
     await invokerFor(other.configuration, 'corr-b').invoke({ operation: op('catalog.search_products'), args: ARGS, caller });
     expect(adapter.reads.map((r) => r.connection.baseUrl)).toEqual(['https://shop.example.test/rest', 'https://other.example.test/rest']);
-    expect(adapter.reads[0]?.mapping).toBe(CONFIG.bindings.get('catalog.search_products')?.mapping);
+    expect(adapter.reads[0]?.mapping).toBe(httpMapping('catalog.search_products'));
     // Direct reads keep the adapter's string clipping (MCP-4); only preparation asks for exact values.
     expect(adapter.reads[0]).not.toHaveProperty('exactValues');
   });

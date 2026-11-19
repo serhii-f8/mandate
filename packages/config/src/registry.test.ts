@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FakeResolver, fakeCatalogEntry } from '@aiops/testing';
 import { formatIssue, type ConfigIssue } from './issues.js';
+import type { HttpOperationBinding } from './registry.js';
 import { loadConfigurationDirectory, loadConfigurationSources, type LoadedConfiguration, type LoadOptions, type LoadResult } from './load.js';
 
 const FIXTURES = fileURLToPath(new URL('../test/fixtures', import.meta.url));
@@ -54,6 +55,13 @@ function ok(result: LoadResult): LoadedConfiguration {
   return result.configuration;
 }
 
+/** The HTTP binding of an operation; throws for an MCP binding or none. */
+function httpBinding(config: LoadedConfiguration, id: string): HttpOperationBinding {
+  const binding = config.bindings.get(id);
+  if (binding?.kind !== 'http') throw new Error(`${id} has no HTTP binding`);
+  return binding;
+}
+
 function issues(result: LoadResult): readonly ConfigIssue[] {
   if (result.ok) throw new Error('expected issues');
   return result.issues;
@@ -100,10 +108,11 @@ describe('OPS-1 operations are enabled only by configuration or an applied prese
       ['fake.get_item', 'preset:fake', 'shop', 'fake.get_item'],
     ]);
     expect(config.bindings.get('fake.get_item')).toEqual({
+      kind: 'http',
       connection: 'shop',
       mapping: { operation: 'getItem', method: 'GET', path: '/items/{sku}', pathParams: { sku: { arg: 'sku' } }, query: {}, headers: {}, response: { maxItems: 100 } },
     });
-    expect(config.bindings.get('fake.search_items')?.mapping).toMatchObject({
+    expect(httpBinding(config, 'fake.search_items').mapping).toMatchObject({
       method: 'GET',
       path: '/items',
       query: { brand: { arg: 'brand' } },
@@ -219,8 +228,8 @@ describe('CONN-2 derived input schema from the spec', () => {
     const validate = config.validators.get('shop.get_item');
     expect(validate?.({ sku: 'A-1' })).toEqual({ ok: true });
     expect(validate?.({})).toMatchObject({ ok: false });
-    expect(config.bindings.get('shop.get_item')?.mapping).toEqual({ ...shopCatalog()[1]?.defaultMapping, operation: 'getItem' });
-    expect(config.bindings.get('shop.list_items')?.mapping.response).toEqual({ items: 'items', maxItems: 100 });
+    expect(httpBinding(config, 'shop.get_item').mapping).toEqual({ ...shopCatalog()[1]?.defaultMapping, operation: 'getItem' });
+    expect(httpBinding(config, 'shop.list_items').mapping.response).toEqual({ items: 'items', maxItems: 100 });
     expect(config.disabled.map((d) => d.key)).toEqual(['shop:deleteItem']);
 
     expect(fake.calls).toHaveLength(1);
@@ -228,6 +237,7 @@ describe('CONN-2 derived input schema from the spec', () => {
     expect(fake.calls[0]?.include).toEqual(['listItems', 'getItem', 'deleteItem']);
     expect(config.connectionSettings.get('shop')).toEqual({
       id: 'shop',
+      kind: 'openapi',
       baseUrl: 'https://shop.example.test/api',
       timeoutMs: 10_000,
       retry: { maxAttempts: 3, initialBackoffMs: 200 },
@@ -264,6 +274,7 @@ connections:
     );
     expect(config.specChecksSkipped).toBe(true);
     expect(config.bindings.get('shop.search')).toEqual({
+      kind: 'http',
       connection: 'shop',
       mapping: {
         method: 'GET',
@@ -276,6 +287,7 @@ connections:
     });
     expect(config.connectionSettings.get('shop')).toEqual({
       id: 'shop',
+      kind: 'openapi',
       baseUrl: 'https://shop.example.test/api',
       auth: { scheme: 'oauth_client_credentials', tokenUrl: 'https://idp.example.test/token', scopes: ['read'] },
       credentialRef: 'shop-oauth',

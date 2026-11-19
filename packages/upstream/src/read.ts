@@ -68,6 +68,8 @@ export async function performRead(
   const binding = configuration.bindings.get(operationId);
   const connection = binding === undefined ? undefined : configuration.connectionSettings.get(binding.connection);
   if (binding === undefined || connection === undefined) return { ok: false, code: 'not_bound' };
+  // MCP-backed reads are not wired here yet (Phase 9 adapter plan, Task 9).
+  if (binding.kind !== 'http') return { ok: false, code: 'not_bound' };
   // Configuration refuses a read that is not GET; checked again so nothing writes without a change-set (CS-1, MCP-4).
   if (binding.mapping.method !== 'GET') return { ok: false, code: 'not_get', connection: binding.connection };
   const credential = await connectionCredential(deps.vault, connection.credentialRef);
