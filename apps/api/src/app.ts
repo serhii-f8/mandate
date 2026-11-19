@@ -22,8 +22,8 @@ import {
   type TaskRepository,
   type WorkflowStarter,
 } from '@aiops/core';
-import { clientDataConverter, parseTemporalKeys, TemporalExecutor, TemporalWorkflowStarter } from '@aiops/temporal';
-import { Client, Connection } from '@temporalio/client';
+import { parseTemporalKeys, TemporalExecutor, TemporalWorkflowStarter } from '@aiops/temporal';
+import type { Client, Connection } from '@temporalio/client';
 import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresAuditReader, PostgresChangeSetRepository, PostgresCredentialVault, PostgresRateCounter, PostgresSessionStore, PostgresTaskRepository, type Database } from '@aiops/db';
 import { createBearerGate } from './auth/bearer-gate.js';
 import { createJwtVerifier } from './auth/jwt-verifier.js';
@@ -42,6 +42,7 @@ import { ChangeSetExportController } from './export/export.controller.js';
 import { createBuiltinTools } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
 import { createServerFactory } from './mcp/mcp-server-factory.js';
+import { createPipelineTelemetry, NO_TELEMETRY, type PipelineTelemetry } from './mcp/pipeline-telemetry.js';
 import { snapshotOf, type PipelineDeps } from './mcp/tool-pipeline.js';
 import { resolveWidgetDir, WidgetBundles } from './mcp/widget-bundles.js';
 import {
@@ -63,11 +64,14 @@ import {
   PAGE_CHECKS,
   PAGE_SESSIONS,
   SUBMIT_SERVICE,
+  TELEMETRY,
   TEMPORAL,
   TRACER,
   WIDGET_BUNDLES,
   WORKFLOW_STARTER,
 } from './tokens.js';
+import { createApiTemporalClient } from './temporal-client.js';
+import type { ApiTelemetry } from './telemetry.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
 import { operationInvokers, type OperationInvokersBase } from './upstream/operation-router.js';
 import { assertFullyChecked } from '@aiops/upstream';
@@ -143,6 +147,7 @@ class Resources implements OnApplicationShutdown {
     @Inject(MCP_HANDLER) private readonly handler: McpHttpHandler,
     @Inject(TEMPORAL) private readonly temporal: TemporalHandle | null,
     @Inject(ON_SHUTDOWN) private readonly onShutdown: (() => Promise<void>) | null,
+    @Inject(TELEMETRY) private readonly telemetry: ApiTelemetry | null,
   ) {}
 
   async onApplicationShutdown(): Promise<void> {
@@ -150,17 +155,21 @@ class Resources implements OnApplicationShutdown {
     await this.temporal?.connection.close();
     await this.database.close();
     await this.onShutdown?.();
+    // Last: spans of the shutdown above are still exported (NFR-11).
+    await this.telemetry?.shutdown();
   }
 }
 
 @Module({})
 class AppModule {
-  static forRoot(env: ApiEnv, logger: Logger, configuration: ConfigurationHolder, overrides: AppOverrides): DynamicModule {
+  static forRoot(env: ApiEnv, logger: Logger, configuration: ConfigurationHolder, overrides: AppOverrides, telemetry: ApiTelemetry | undefined): DynamicModule {
     // Parsed eagerly so a malformed key set stops the start (SEC-2); the message names no key material.
     const keys = overrides.vault === undefined ? parseMasterKeys(env.masterKeys) : undefined;
     // Likewise the Temporal payload keys (SEC-4), whenever a Temporal client is built.
     const temporalKeys = overrides.executor === undefined || overrides.starter === undefined ? parseTemporalKeys(env.temporalKeys) : undefined;
     const adapter = overrides.adapter ?? createOpenApiAdapter();
+    // Without telemetry the api's spans go to the global tracer (a no-op unless one is registered) and no metric is counted.
+    const pipelineTelemetry: PipelineTelemetry = telemetry === undefined ? NO_TELEMETRY : createPipelineTelemetry({ tracer: telemetry.tracer, meter: telemetry.meter });
     // One key set for MCP access tokens and page ID tokens: same issuer.
     const jwks = overrides.jwks ?? createRemoteJWKSet(env.oidcJwksUrl);
     const verifier = createJwtVerifier({ issuer: env.oidcIssuer, audience: env.mcpResource.href, jwks });
@@ -183,7 +192,8 @@ class AppModule {
         { provide: LOGGER, useValue: logger },
         { provide: CONFIGURATION, useValue: configuration },
         { provide: ON_SHUTDOWN, useValue: overrides.onShutdown ?? null },
-        { provide: TRACER, useValue: trace.getTracer('aiops-api') },
+        { provide: TRACER, useValue: telemetry?.tracer ?? trace.getTracer('aiops-api') },
+        { provide: TELEMETRY, useValue: telemetry ?? null },
         { provide: BEARER_GATE, useValue: createBearerGate({ verifier, resource: env.mcpResource }) },
         {
           provide: DATABASE,
@@ -200,9 +210,7 @@ class AppModule {
           provide: TEMPORAL,
           useFactory: (): TemporalHandle | null => {
             if (temporalKeys === undefined) return null;
-            const connection = Connection.lazy({ address: env.temporalAddress });
-            const client = new Client({ connection, namespace: env.temporalNamespace, dataConverter: clientDataConverter(temporalKeys) });
-            return { connection, client };
+            return createApiTemporalClient(env, temporalKeys);
           },
         },
         { provide: AUDIT_LOG, inject: [DATABASE], useFactory: (d: Database) => new DrizzleAuditLog(d.db, { sensitiveKeys: () => configuration.current.sensitiveFields }) },
@@ -309,6 +317,7 @@ class AppModule {
                   wallClock: () => new Date(),
                   widgets,
                   publicUrl: env.publicUrl,
+                  telemetry: pipelineTelemetry,
                 },
                 { tasks, repository: changesets, executor, audit, newId: randomUUID, publicUrl: env.publicUrl },
               ),
@@ -360,6 +369,8 @@ export interface CreateAppOptions {
   readonly configuration: ConfigurationHolder;
   readonly overrides?: AppOverrides;
   readonly logger?: Logger;
+  /** Tracer and meter of the api (NFR-11, NFR-12); the app shuts it down last. Without it: `NO_TELEMETRY` and the global tracer. */
+  readonly telemetry?: ApiTelemetry;
 }
 
 /** Builds the api application without listening (used by `main.ts` and the e2e tests). */
@@ -369,7 +380,7 @@ export async function createApp(options: CreateAppOptions): Promise<INestApplica
   if (options.configuration.state().status === 'active') assertFullyChecked(options.configuration.current);
   const logger = options.logger ?? createLogger(options.env.logLevel);
   const app = await NestFactory.create<NestExpressApplication>(
-    AppModule.forRoot(options.env, logger, options.configuration, options.overrides ?? {}),
+    AppModule.forRoot(options.env, logger, options.configuration, options.overrides ?? {}, options.telemetry),
     // NestFactory types its options as a class; a plain object is what Nest documents.
     // eslint-disable-next-line @typescript-eslint/no-unsafe-class-instance-assignment
     { logger: new PinoNestLogger(logger), bodyParser: false },

@@ -8,11 +8,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { SpanKind } from '@opentelemetry/api';
+import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { createOpenApiAdapter } from '@aiops/adapters';
 import { ConfigurationHolder, type ApiEnv } from '@aiops/config';
 import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@aiops/testing';
 import { configurationLoadOptions } from '@aiops/upstream';
 import { createApp } from '../../src/app.js';
+import { startApiTelemetry } from '../../src/telemetry.js';
 import { auditRows, connectClient, freePort, startDatabase, testApiEnv, text } from './helpers.js';
 
 const CHANGESET_CONFIG = fileURLToPath(new URL('./fixtures/changeset-config', import.meta.url));
@@ -83,6 +86,67 @@ describe('MCP-7 EXE-11 production Temporal wiring while Temporal is down', () =>
         ['tool.call', null],
       ]);
       expect(rows.at(-1)?.details).toMatchObject({ errorCode: 'executor_unavailable' });
+
+      await app.close();
+      closed = true;
+    } finally {
+      if (!closed) await app.close();
+    }
+  }, 120_000);
+
+  it('NFR-11 a tool call is one mcp.request span with a child mcp.tool_call span, both carrying the response correlation ID', async () => {
+    const port = await freePort();
+    const env: ApiEnv = { ...testApiEnv(databaseUrl, port, { issuer, configDir }), temporalAddress: UNREACHABLE };
+    const { adapter, configuration } = await load(env);
+    const exporter = new InMemorySpanExporter();
+    // register: true installs the context manager, so the active span crosses the SDK's node handler.
+    const telemetry = startApiTelemetry({ serviceName: 'aiops-api', spanProcessor: new SimpleSpanProcessor(exporter), register: true });
+    const app = await createApp({ env, configuration, telemetry, overrides: { adapter } });
+    let closed = false;
+    try {
+      await app.listen(port, '127.0.0.1');
+      const token = await issuer.token({ sub: 'alice-id', groups: ['content'], aud: env.mcpResource.href, azp: 'aiops-mcp' });
+      const correlationIds: string[] = [];
+      const client = await connectClient({
+        era: 'modern',
+        baseUrls: [`http://127.0.0.1:${String(port)}`],
+        token,
+        onResponse: (r) => {
+          const id = r.headers.get('x-correlation-id');
+          if (id !== null) correlationIds.push(id);
+        },
+      });
+      // Only the tools/call request counts: initialize and the rest come before it.
+      exporter.reset();
+      correlationIds.length = 0;
+      try {
+        await client.callTool({ name: 'ping', arguments: {} });
+      } finally {
+        await client.close();
+      }
+      const spans = exporter.getFinishedSpans();
+      const toolCalls = spans.filter((s) => s.name === 'mcp.tool_call');
+      expect(toolCalls).toHaveLength(1);
+      const toolCall = toolCalls[0];
+      if (toolCall === undefined) throw new Error('no mcp.tool_call span');
+      const correlationId = toolCall.attributes['aiops.correlation_id'];
+      // The tool call's correlation ID is the one a response carried (the client may send more than tools/call).
+      expect(correlationIds).toContain(correlationId);
+      const requests = spans.filter((s) => s.name === 'mcp.request' && s.attributes['aiops.correlation_id'] === correlationId);
+      expect(requests).toHaveLength(1);
+      const request = requests[0];
+      if (request === undefined) throw new Error('no mcp.request span');
+      // Ended (finished spans only are exported), a server span, the correlation ID its only attribute.
+      expect(request.kind).toBe(SpanKind.SERVER);
+      expect(request.ended).toBe(true);
+      expect(request.attributes).toEqual({ 'aiops.correlation_id': correlationId });
+      expect(toolCall.spanContext().traceId).toBe(request.spanContext().traceId);
+      expect(toolCall.parentSpanId).toBe(request.spanContext().spanId);
+      expect(toolCall.attributes).toMatchObject({ 'aiops.tool': 'ping', 'aiops.correlation_id': correlationId });
+      // SEC-3: no attribute of any span carries the bearer token.
+      for (const span of spans) {
+        for (const value of Object.values(span.attributes)) expect(String(value)).not.toContain(token);
+      }
 
       await app.close();
       closed = true;

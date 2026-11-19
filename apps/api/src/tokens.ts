@@ -18,6 +18,8 @@ export const ON_SHUTDOWN = Symbol('OnShutdown');
 export const PAGE_CHECKS = Symbol('PageChecks');
 export const PAGE_SESSIONS = Symbol('SessionService');
 export const SUBMIT_SERVICE = Symbol('SubmitService');
+/** The api's telemetry, or `null` without one; shut down after everything else (NFR-11). */
+export const TELEMETRY = Symbol('Telemetry');
 export const TEMPORAL = Symbol('Temporal');
 /** The tracer of the api's own spans (NFR-11). */
 export const TRACER = Symbol('Tracer');
