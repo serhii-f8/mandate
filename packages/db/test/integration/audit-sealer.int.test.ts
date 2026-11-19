@@ -91,6 +91,20 @@ describe('AUD-3 audit sealer', () => {
     });
   });
 
+  describe('numeric seq order', () => {
+    const db = migratedDatabase();
+
+    it('AUD-3 seals past seq 9 in numeric, not text, order', async () => {
+      for (let i = 1; i <= 12; i++) await append(db(), `actor-${i}`);
+
+      await sealAuditChain(db().pool);
+
+      const rows = await sealedRows(db().pool);
+      expect(rows.map((row) => row.actor)).toEqual(Array.from({ length: 12 }, (_, i) => `actor-${i + 1}`));
+      expect(rows.map((row) => Number(row.seq))).toEqual([...rows.map((row) => Number(row.seq))].sort((a, b) => a - b));
+    });
+  });
+
   describe('batches', () => {
     const db = migratedDatabase();
 

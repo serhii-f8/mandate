@@ -124,8 +124,9 @@ export async function sealAuditChain(pool: pg.Pool, options?: { readonly batchSi
         }
         await client.query("SELECT set_config('aiops.audit_seal', 'on', true)");
         const head = await chainHead(client);
+        // Qualified: a bare `seq` would bind to the `seq::text` output column and sort as text.
         const pending = await client.query<Record<string, unknown>>(
-          `SELECT ${CHAIN_COLUMNS} FROM audit_event WHERE chain_pos IS NULL ORDER BY seq LIMIT $1`,
+          `SELECT ${CHAIN_COLUMNS} FROM audit_event WHERE chain_pos IS NULL ORDER BY audit_event.seq LIMIT $1`,
           [batchSize],
         );
         if (pending.rows.length === 0) {
