@@ -51,6 +51,10 @@ export interface ApiEnv {
   readonly prepareWaitMs: number;
   /** Absolute directory of audit retention archives (`AIOPS_AUDIT_ARCHIVE_DIR`, AUD-7); unset keeps rows. */
   readonly auditArchiveDir?: string;
+  /** OTLP/HTTP collector base URL (`OTEL_EXPORTER_OTLP_ENDPOINT`); unset disables export (NFR-11). */
+  readonly otlpEndpoint?: URL;
+  /** Port of the Prometheus metrics listener; 0 picks a free port (NFR-12). */
+  readonly metricsPort: number;
 }
 
 /** Activity timeouts and retries of the operation workflow (same shape as `ActivityTuning` of `@aiops/temporal`). */
@@ -87,6 +91,10 @@ export interface WorkerEnv {
   readonly publicUrl: URL;
   /** Absolute directory of the audit archive files (AUD-7); without it retention refuses with `archive_unavailable`. */
   readonly auditArchiveDir?: string;
+  /** OTLP/HTTP collector base URL (`OTEL_EXPORTER_OTLP_ENDPOINT`); unset disables export (NFR-11). */
+  readonly otlpEndpoint?: URL;
+  /** Port of the worker's health and metrics HTTP listener; 0 picks a free port (NFR-10). */
+  readonly httpPort: number;
 }
 
 export interface EnvIssue {
@@ -103,6 +111,7 @@ export class EnvError extends Error {
 
 const logLevel = z.enum(['debug', 'info', 'warn', 'error']).default('info');
 const port = (fallback: number) => z.coerce.number().int().min(1).max(65_535).default(fallback);
+const portOrZero = (fallback: number) => z.coerce.number().int().min(0).max(65_535).default(fallback);
 const nonEmpty = (fallback: string) => z.string().trim().min(1).default(fallback);
 const postgresUrl = z
   .string()
@@ -126,6 +135,16 @@ const originUrl = httpUrl.refine(
   },
   { message: 'must be an origin without path, query or fragment' },
 );
+
+/** Empty or blank means unset; otherwise an http(s) URL. The message is fixed, the value is never echoed (SEC-3). */
+const otlpEndpoint = z
+  .string()
+  .trim()
+  .transform((v) => (v === '' ? undefined : v))
+  .refine((v) => v === undefined || (URL.canParse(v) && /^https?:$/.test(new URL(v).protocol)), {
+    message: 'must be an http(s) URL',
+  })
+  .optional();
 
 const SMTP_URL = /^smtps?:\/\/[^/?#\s]+(:\d{1,5})?\/?$/;
 
@@ -175,6 +194,8 @@ const apiSchema = z.object({
   AIOPS_TEMPORAL_KEYS: z.string().trim().min(1),
   AIOPS_PREPARE_WAIT_MS: z.coerce.number().int().min(0).max(300_000).default(20_000),
   AIOPS_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
+  OTEL_EXPORTER_OTLP_ENDPOINT: otlpEndpoint,
+  AIOPS_METRICS_PORT: portOrZero(9464),
 });
 
 /**
@@ -206,6 +227,8 @@ const workerSchema = z.object({
   AIOPS_MAIL_FROM: mailAddress.default('aiops@localhost'),
   AIOPS_PUBLIC_URL: originUrl.default('http://localhost:8400'),
   AIOPS_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
+  OTEL_EXPORTER_OTLP_ENDPOINT: otlpEndpoint,
+  AIOPS_WORKER_HTTP_PORT: portOrZero(8081),
 }).superRefine((e, ctx) => {
   // Cross-field checks run only once every field parsed; the messages name variables, never values (SEC-3).
   if (e.AIOPS_RETRY_INITIAL_MS > e.AIOPS_RETRY_MAX_MS) {
@@ -278,6 +301,8 @@ export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
     temporalKeys: e.AIOPS_TEMPORAL_KEYS,
     prepareWaitMs: e.AIOPS_PREPARE_WAIT_MS,
     ...(e.AIOPS_AUDIT_ARCHIVE_DIR === undefined ? {} : { auditArchiveDir: e.AIOPS_AUDIT_ARCHIVE_DIR }),
+    ...(e.OTEL_EXPORTER_OTLP_ENDPOINT === undefined ? {} : { otlpEndpoint: new URL(e.OTEL_EXPORTER_OTLP_ENDPOINT) }),
+    metricsPort: e.AIOPS_METRICS_PORT,
   };
 }
 
@@ -305,5 +330,7 @@ export function parseWorkerEnv(env: NodeJS.ProcessEnv): WorkerEnv {
     mailFrom: e.AIOPS_MAIL_FROM,
     publicUrl: new URL(e.AIOPS_PUBLIC_URL),
     ...(e.AIOPS_AUDIT_ARCHIVE_DIR === undefined ? {} : { auditArchiveDir: e.AIOPS_AUDIT_ARCHIVE_DIR }),
+    ...(e.OTEL_EXPORTER_OTLP_ENDPOINT === undefined ? {} : { otlpEndpoint: new URL(e.OTEL_EXPORTER_OTLP_ENDPOINT) }),
+    httpPort: e.AIOPS_WORKER_HTTP_PORT,
   };
 }

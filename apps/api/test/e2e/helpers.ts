@@ -116,6 +116,7 @@ export function testApiEnv(
     taskQueue: 'aiops-operations',
     temporalKeys: TEST_TEMPORAL_KEYS,
     prepareWaitMs: options.prepareWaitMs ?? 20_000,
+    metricsPort: 0,
   };
 }
 
