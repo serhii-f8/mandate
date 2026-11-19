@@ -1,6 +1,6 @@
 import { CanonicalJsonError, checkLink, GENESIS_HASH, type ChainBreak, type ChainHead } from '@aiops/core';
 import type pg from 'pg';
-import { CHAIN_COLUMNS, toSealedChainRow } from './audit-chain.js';
+import { CHAIN_COLUMNS, safeInteger, toSealedChainRow } from './audit-chain.js';
 import { guarded } from './errors.js';
 
 /** Sealed rows read per page (design §3). */
@@ -9,13 +9,6 @@ export const VERIFY_PAGE = 1000;
 export type VerifyReport =
   | { readonly ok: true; readonly sealed: number; readonly unsealed: number; readonly from: number; readonly head: ChainHead }
   | { readonly ok: false; readonly chainPos: number; readonly reason: ChainBreak };
-
-/** A bigint read as decimal text, as a safe JS number. */
-function position(value: string, what: string): number {
-  const pos = Number(value);
-  if (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(pos)) throw new Error(`${what} is not a safe chain position`);
-  return pos;
-}
 
 /** `checkLink`, with a row whose content cannot be canonicalised counted as a hash mismatch (ruling T7). */
 function linkBreak(previous: ChainHead, row: ReturnType<typeof toSealedChainRow>): ChainBreak | undefined {
@@ -66,7 +59,7 @@ async function walk(client: pg.PoolClient, pageSize: number): Promise<VerifyRepo
       'SELECT chain_pos::text AS pos, hash FROM audit_anchor ORDER BY chain_pos DESC LIMIT 1',
     )
   ).rows[0];
-  const start: ChainHead = anchor === undefined ? { pos: 0, hash: GENESIS_HASH } : { pos: position(anchor.pos, 'anchor'), hash: anchor.hash };
+  const start: ChainHead = anchor === undefined ? { pos: 0, hash: GENESIS_HASH } : { pos: safeInteger(anchor.pos, 'anchor'), hash: anchor.hash };
   let previous = start;
   let sealed = 0;
   for (;;) {
@@ -78,7 +71,7 @@ async function walk(client: pg.PoolClient, pageSize: number): Promise<VerifyRepo
       const row = toSealedChainRow(raw);
       const reason = linkBreak(previous, row);
       if (reason !== undefined) return { ok: false, chainPos: row.pos, reason };
-      // checkLink only passes a row whose hash is non-null and matches.
+      // Type narrowing only: checkLink already returned hash_mismatch for a null hash, so this never fires.
       if (row.hash === null) return { ok: false, chainPos: row.pos, reason: 'hash_mismatch' };
       previous = { pos: row.pos, hash: row.hash };
       sealed += 1;
@@ -91,7 +84,7 @@ async function walk(client: pg.PoolClient, pageSize: number): Promise<VerifyRepo
   return {
     ok: true,
     sealed,
-    unsealed: position(unsealed.rows[0]?.count ?? '0', 'unsealed count'),
+    unsealed: safeInteger(unsealed.rows[0]?.count ?? '0', 'unsealed count'),
     from: start.pos + 1,
     head: previous,
   };

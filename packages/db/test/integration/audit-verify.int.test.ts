@@ -178,6 +178,19 @@ describe('AUD-5 audit chain verification', () => {
     expect(formatVerifyReport(report)).toBe(`ok sealed=50 unsealed=0 from=101 head=150:${head}`);
   });
 
+  it('AUD-5 an anchor whose hash differs from the next row prev_hash fails at anchor + 1', async () => {
+    const pool = await fresh();
+    await insertRows(pool, 30);
+    await sealAll(pool);
+    await pool.query(
+      `INSERT INTO audit_anchor (chain_pos, hash, archive, sha256, count)
+       VALUES (20, $1, 'audit-1-20.jsonl', 'sha256:x', 20)`,
+      [`sha256:${'f'.repeat(64)}`],
+    );
+
+    expect(formatVerifyReport(await verifyAuditChain(pool))).toBe('failed chain_pos=21 reason=prev_mismatch');
+  });
+
   it('AUD-5 an empty table verifies as ok from genesis', async () => {
     const pool = await fresh();
 

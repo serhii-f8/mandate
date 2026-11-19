@@ -49,11 +49,14 @@ function nullableText(row: Record<string, unknown>, key: string): string | null 
   return value;
 }
 
-/** A bigint column read as decimal text, as a JS number; refuses values beyond the safe range. */
-function position(value: string, what: string): number {
-  const pos = Number(value);
-  if (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(pos)) throw new Error(`${what} is not a safe chain position`);
-  return pos;
+/**
+ * A non-negative bigint column (a chain position or a count) read as decimal text, as a JS number;
+ * refuses anything else and values beyond the safe range. Shared by the chain readers.
+ */
+export function safeInteger(value: string, what: string): number {
+  const n = Number(value);
+  if (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(n)) throw new Error(`${what} is not a safe non-negative integer`);
+  return n;
 }
 
 /** The hashed fields except `pos`, plus `seq`, of a row selected with `CHAIN_COLUMNS`. */
@@ -78,7 +81,7 @@ function chainFields(row: Record<string, unknown>): Omit<ChainRow, 'pos'> & { re
 export function toSealedChainRow(row: Record<string, unknown>): SealedChainRow & { readonly seq: string } {
   return {
     ...chainFields(row),
-    pos: position(text(row, 'pos'), 'chain_pos'),
+    pos: safeInteger(text(row, 'pos'), 'chain_pos'),
     prevHash: nullableText(row, 'prevHash'),
     hash: nullableText(row, 'hash'),
   };
@@ -97,7 +100,7 @@ export async function chainHead(client: Queryable): Promise<ChainHead> {
   if (anchor === undefined) return { pos: 0, hash: GENESIS_HASH };
   // The trigger only lets a row gain chain_pos together with a non-null hash.
   if (anchor.hash === null) throw new Error('chain head has no hash');
-  return { pos: position(anchor.pos, 'chain head'), hash: anchor.hash };
+  return { pos: safeInteger(anchor.pos, 'chain head'), hash: anchor.hash };
 }
 
 /**
