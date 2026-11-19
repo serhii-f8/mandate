@@ -74,6 +74,7 @@ const REQUIRED_CHANGESET_FIXTURES = [
   'rollback-failed',
   'rollback-continued-run2',
   'rollback-continued-run3',
+  'opaque-executed',
 ];
 
 /**
