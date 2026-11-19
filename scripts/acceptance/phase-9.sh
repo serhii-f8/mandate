@@ -72,6 +72,19 @@ await_listed() {
   done
 }
 psql_q() { compose exec -T postgres psql -U aiops -d aiops -tAc "$1"; }
+# Polls the count query every 2 s for at most 30 s until it reaches MIN; prints the last count. The
+# pin monitor audits a transition on its next evaluation (about a second after the state changes),
+# so a client can see the new state before its upstream.pin row exists.
+await_count() {
+  local deadline=$((SECONDS + 30)) n
+  while :; do
+    n="$(psql_q "$1" 2>&1 || true)"
+    [[ "$n" =~ ^[0-9]+$ ]] && ((n >= $2)) && break
+    ((SECONDS >= deadline)) && break
+    sleep 2
+  done
+  echo "$n"
+}
 started_at() { docker inspect -f '{{.State.StartedAt}}' "$(compose ps -q "$1")"; }
 cli() { compose exec -T api node dist/cli.js "$@"; }
 apply_config() { cli config apply /etc/aiops/config --actor acceptance 2>&1; }
@@ -248,7 +261,7 @@ group_1() {
   [[ "$control" == 204 ]] || { fail mcp-pin-changed "control route → $control"; return 0; }
   if await_listed alice fakemcp.lookup no; then
     lookup_answer="$(user_mcp alice fakemcp.lookup '{"key":"k1"}')"
-    audit_pin="$(psql_q "select count(*) from audit_event where action = 'upstream.pin' and subject = 'fakemcp.lookup' and details->>'to' = 'changed'" 2>&1 || true)"
+    audit_pin="$(await_count "select count(*) from audit_event where action = 'upstream.pin' and subject = 'fakemcp.lookup' and details->>'to' = 'changed'" 1)"
     audit_call="$(psql_q "select count(*) from audit_event where action = 'tool.call' and details->>'errorCode' = 'upstream_changed'" 2>&1 || true)"
     if [[ "$(json "$lookup_answer" '.isError')" == true &&
       "$(json "$lookup_answer" '.text')" == "fakemcp.lookup cannot run: its upstream tool changed since it was reviewed; an operator must review it and record the new pin." &&
@@ -272,12 +285,12 @@ group_1() {
   apply="$(apply_config)" || apply_code=$?
   if [[ "$apply_code" == 0 ]] && await_listed alice fakemcp.lookup yes; then
     lookup_answer="$(user_mcp alice fakemcp.lookup '{"key":"k1"}')"
-    repin_pin="$(psql_q "select count(*) from audit_event where action = 'upstream.pin' and subject = 'fakemcp.lookup' and details->>'from' = 'changed' and details->>'to' = 'ok'" 2>&1 || true)"
-    if [[ "$(json "$lookup_answer" '.isError')" == false && -n "$(json "$lookup_answer" '.structuredContent')" && "$repin_pin" -ge 1 &&
+    repin_pin="$(await_count "select count(*) from audit_event where action = 'upstream.pin' and subject = 'fakemcp.lookup' and details->>'from' = 'changed' and details->>'to' = 'ok'" 1)"
+    if [[ "$(json "$lookup_answer" '.isError')" == false && -n "$(json "$lookup_answer" '.structuredContent')" && "$repin_pin" == 1 &&
       "$(started_at api)" == "$started_api" && "$(started_at worker)" == "$started_worker" ]]; then
       pass mcp-repin "mcp tools fakemcp: lookup $new_pin fakemcp.lookup changed; apply → exit 0; alice's call → $(json "$lookup_answer" '.structuredContent' | head -c 300); upstream.pin changed→ok: $repin_pin; api started $started_api and worker started $started_worker unchanged"
     else
-      fail mcp-repin "call: ${lookup_answer:0:800}; upstream.pin changed→ok: $repin_pin; api $started_api → $(started_at api); worker $started_worker → $(started_at worker)"
+      fail mcp-repin "call: ${lookup_answer:0:400}; upstream.pin changed→ok: $repin_pin (rows: $(psql_q "select ts, subject, details::text from audit_event where action = 'upstream.pin' order by ts" 2>&1 | tr '\n' '|' || true)); api $started_api → $(started_at api); worker $started_worker → $(started_at worker)"
     fi
   else
     fail mcp-repin "apply exit $apply_code: $(tr '\n' '|' <<<"$apply"); alice lists fakemcp.lookup: $(lists alice fakemcp.lookup)"
