@@ -71,11 +71,12 @@ export async function rollbackEligibility(
   if (!finishedRun(cs)) return refuse('not_finished');
   if (!strategyAllows(deps.operations.find((o) => o.id === cs.operation))) return refuse('strategy_none');
   const until = cs.rollbackUntil;
-  if (until === undefined || deps.now().getTime() >= until.getTime() - ROLLBACK_REQUEST_MARGIN_MS) {
+  // Written as `!(now < end)` so an invalid date (NaN) closes the window instead of opening it.
+  if (until === undefined || !(deps.now().getTime() < until.getTime() - ROLLBACK_REQUEST_MARGIN_MS)) {
     return refuse('window_closed');
   }
   const count = await deps.repository.rollbackableCount(cs.id);
-  if (count <= 0) return refuse('nothing_written');
+  if (!(count > 0)) return refuse('nothing_written');
 
   // 4. POL-6: the policy is evaluated now for the caller with the stored arguments.
   const decision = deps.engine.evaluate({ caller: req.caller, operationId: cs.operation, args: cs.args });

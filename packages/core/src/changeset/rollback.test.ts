@@ -179,6 +179,31 @@ describe('EXE-8 rollback eligibility', () => {
     expect(ROLLBACK_REQUEST_MARGIN_MS).toBe(60_000);
   });
 
+  it('EXE-8 SEC-1 the order holds when two adjacent rules fail at once', async () => {
+    const wrongHash = `sha256:${'b'.repeat(64)}`;
+    const none = [operation({ strategy: 'none' })];
+    expect(await ask(deps(record()), { caller: { subject: 'mallory', groups: [] }, hash: wrongHash })).toEqual({
+      ok: false,
+      refusal: 'not_found',
+    });
+    expect(await ask(deps(record({ status: 'prepared' }), { operations: none }))).toEqual(notRollbackable('not_finished'));
+    expect(await ask(deps(record({ rollbackUntil: undefined }), { operations: none }))).toEqual(
+      notRollbackable('strategy_none'),
+    );
+    expect(await ask(deps(record(), { count: 0, now: new Date(UNTIL.getTime() - 60_000) }))).toEqual(
+      notRollbackable('window_closed'),
+    );
+    expect(await ask(deps(record(), { count: 0, engine: new FakeEngine('deny') }))).toEqual(
+      notRollbackable('nothing_written'),
+    );
+  });
+
+  it('EXE-8 an invalid window end or count fails closed', async () => {
+    expect(await ask(deps(record({ rollbackUntil: new Date(Number.NaN) })))).toEqual(notRollbackable('window_closed'));
+    expect(await ask(deps(record(), { now: new Date(Number.NaN) }))).toEqual(notRollbackable('window_closed'));
+    expect(await ask(deps(record(), { count: Number.NaN }))).toEqual(notRollbackable('nothing_written'));
+  });
+
   it('EXE-8 an eligible change-set answers the count and the window end', async () => {
     expect(await ask(deps(record()))).toEqual({ ok: true, count: 4, until: UNTIL });
     expect(
