@@ -87,6 +87,12 @@ export interface LoadedConfiguration {
   readonly changesets: { readonly expireAfterHours: number; readonly failureThreshold: number; readonly itemsPerWorkflowRun: number; readonly rollbackWindowHours: number };
   /** SHA-256 over the sorted files, the preset files and the spec files (CFG-4 records it from Phase 8). */
   readonly hash: string;
+  /**
+   * Every configuration file and every connection-owned spec file (not presets), keyed
+   * relative to the configuration directory with `/` separators. A revision stores these
+   * (CFG-4); an outside spec gives a key starting with `../`.
+   */
+  readonly sourceFiles: ReadonlyMap<string, string>;
 }
 
 export type LoadResult =
@@ -517,6 +523,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
         rollbackWindowHours: changesets?.value.rollback_window_hours ?? DEFAULT_ROLLBACK_WINDOW_HOURS,
       },
       hash: hash.digest('hex'),
+      sourceFiles: new Map([...sorted, ...specTexts.map(({ file, text }) => ({ file: file.split(sep).join('/'), text }))].map(({ file, text }) => [file, text] as const)),
     },
   };
 }
