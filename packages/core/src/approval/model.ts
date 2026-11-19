@@ -1,7 +1,8 @@
 export type ApprovalDecision = 'approved' | 'rejected' | 'returned';
 export type DecisionRequest = 'approve' | 'reject' | 'return';
 export type ApprovalChannel = 'page' | 'widget';
-export type ApprovalReason = 'risk_destructive' | 'role_always' | 'default' | 'above_threshold';
+/** `opaque`: an opaque call has no record count, so `above_threshold` cannot waive it (POL-5). */
+export type ApprovalReason = 'risk_destructive' | 'role_always' | 'default' | 'above_threshold' | 'opaque';
 
 /** The approval requirement of a change-set round, frozen at submission (POL-5). */
 export interface ApprovalPlan {

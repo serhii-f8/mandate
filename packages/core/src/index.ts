@@ -188,5 +188,6 @@ export {
   preparationErrorResult,
   preparedResult,
 } from './changeset/result.js';
+export { OPAQUE_TARGET_ID, changesetKind, isOpaque, type ChangeSetKind } from './changeset/opaque.js';
 export * from './approval/index.js';
 export * from './notification/index.js';

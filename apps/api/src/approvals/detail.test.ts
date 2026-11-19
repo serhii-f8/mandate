@@ -312,7 +312,7 @@ describe('toApprover', () => {
 
 /** The plan submission would freeze for this risk and rule (POL-5), so `widget` is the real one. */
 function planOf(risk: RiskClass, rule: Omit<RoleApprovalRule, 'steps'>): ApprovalPlan {
-  const r = approvalRequirement({ risk, rule: { steps: ['content_lead', 'brand_owner'], ...rule }, included: 3 });
+  const r = approvalRequirement({ risk, opaque: false, rule: { steps: ['content_lead', 'brand_owner'], ...rule }, included: 3 });
   if (!r.required || r.unroutable === true) throw new Error('expected a routable plan');
   const { required: _required, unroutable: _unroutable, ...plan } = r; // eslint-disable-line @typescript-eslint/no-unused-vars -- not part of the plan
   return plan;

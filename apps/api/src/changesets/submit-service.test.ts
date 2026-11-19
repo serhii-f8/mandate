@@ -47,6 +47,15 @@ operations:
         ids_arg: skus
         args: { brand: { arg: brand } }
       rollback: { strategy: replay_previous_state }
+  - id: notes.create
+    connection: magento
+    risk: write_opaque
+    description: Create a note.
+    upstream: { method: POST, path: /V1/notes }
+    input_schema:
+      type: object
+      properties: { text: { type: string } }
+      required: [text]
 `,
     'roles.yaml': `version: 1
 roles:
@@ -63,10 +72,15 @@ roles:
     grants:
       - { operation: catalog.update_content, id: all }
     approval: { required: always, steps: [{ role: content_manager }] }
+  - id: opaque_role
+    grants:
+      - { operation: notes.create, id: notes }
+    approval: { required: above_threshold, record_threshold: 25, steps: [{ role: content_manager }] }
 role_mapping:
   - { group: content, roles: [content_manager] }
   - { group: other, roles: [other_role] }
   - { group: always, roles: [always_role] }
+  - { group: opaque, roles: [opaque_role] }
 `,
   };
 }
@@ -83,6 +97,7 @@ const NARROWED = snapshotOf(await configuration('globex'));
 
 const alice: Caller = { subject: 'alice', clientId: 'aiops-mcp', groups: ['content'] };
 const aliceAlways: Caller = { subject: 'alice', groups: ['always'] };
+const aliceOpaque: Caller = { subject: 'alice', groups: ['opaque'] };
 const bob: Caller = { subject: 'bob', groups: ['content'] };
 const ID = '11111111-1111-4111-8111-111111111111';
 const UNKNOWN = '99999999-9999-4999-8999-999999999999';
@@ -141,7 +156,8 @@ class RefusingRepository extends InMemoryChangeSetRepository {
 
 type Stage = 'prepared' | 'pending_approval' | 'approved';
 
-async function setup(options: { stage?: Stage; racing?: boolean; refusing?: 'hash_mismatch' | 'expired' } = {}) {
+async function setup(options: { stage?: Stage; racing?: boolean; refusing?: 'hash_mismatch' | 'expired'; opaque?: boolean } = {}) {
+  const opaque = options.opaque === true;
   const audit = new InMemoryAuditLog();
   const repository =
     options.racing === true
@@ -154,10 +170,10 @@ async function setup(options: { stage?: Stage; racing?: boolean; refusing?: 'has
   await repository.create(
     {
       id: ID,
-      operation: 'catalog.update_content',
+      operation: opaque ? 'notes.create' : 'catalog.update_content',
       connection: 'magento',
       requester: 'alice',
-      args: { brand: 'acme', skus: ['a', 'b', 'c'], changes: { name: 'New' } },
+      args: opaque ? { text: 'hello' } : { brand: 'acme', skus: ['a', 'b', 'c'], changes: { name: 'New' } },
       configHash: 'h',
       correlationId: 'c0',
       createdAt: NOW,
@@ -165,10 +181,12 @@ async function setup(options: { stage?: Stage; racing?: boolean; refusing?: 'has
     },
     event,
   );
-  await repository.appendItems(ID, ['a', 'b', 'c'].map((targetId) => ({ targetId, status: 'pending' as const, before: null, after: null })));
+  const targets = opaque ? ['call'] : ['a', 'b', 'c'];
+  await repository.appendItems(ID, targets.map((targetId) => ({ targetId, status: 'pending' as const, before: null, after: null })));
+  const count = targets.length;
   await repository.completePreparation(
     ID,
-    { status: 'prepared', hash: HASH, stats: { total: 3, included: 3, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+    { status: 'prepared', hash: HASH, stats: { total: count, included: count, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
     { ...event, id: 'a1' },
   );
   const stage = options.stage ?? 'prepared';
@@ -238,6 +256,17 @@ describe('MCP-8 SubmitService', () => {
     expect(executor.starts).toEqual([]);
     expect(policyRows()).toHaveLength(1);
     expect(policyRows()[0]).toMatchObject({ subject: 'submit_for_approval', changesetId: ID, decision: 'allow' });
+  });
+
+  it('POL-5 an opaque change-set under above_threshold is submitted for approval', async () => {
+    const { submit, repository, executor } = await setup({ opaque: true });
+    const outcome = await submit(aliceOpaque);
+    expect(outcome.kind).toBe('pending_approval');
+    if (outcome.kind !== 'pending_approval') return;
+    // One record is below the threshold of 25, but an opaque call has no record count to compare.
+    expect(outcome.plan).toEqual({ reason: 'opaque', steps: ['content_manager'], widget: false, included: 1 });
+    expect((await repository.get(ID))?.status).toBe('pending_approval');
+    expect(executor.starts).toEqual([]);
   });
 
   it('MCP-8 POL-5 a prepared change-set needing no approval answers started after executor.start', async () => {

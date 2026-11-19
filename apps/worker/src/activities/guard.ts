@@ -4,6 +4,7 @@ import {
   approvalRequirement,
   createPolicyEngine,
   hashStoredItems,
+  isOpaque,
   policyDecisionAuditEvent,
   type AuditLog,
   type Caller,
@@ -55,10 +56,12 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
   ): Promise<boolean> {
     const role = allowingRole(decision.rule);
     const rule = role === undefined ? undefined : configuration.approval.get(role);
-    // The engine allowed the operation, so it is configured; the strictest risk stands in otherwise.
-    const risk = configuration.policy.operations.find((o) => o.id === changeset.operation)?.risk ?? 'destructive';
+    // The engine allowed the operation, so it is configured; the strictest risk and opaque stand in otherwise.
+    const operation = configuration.policy.operations.find((o) => o.id === changeset.operation);
+    const risk = operation?.risk ?? 'destructive';
     const requirement = approvalRequirement({
       risk,
+      opaque: operation === undefined ? true : isOpaque(operation),
       ...(rule === undefined ? {} : { rule }),
       included: changeset.stats.included,
     });

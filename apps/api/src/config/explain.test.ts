@@ -78,6 +78,47 @@ describe('POL-7 explain', () => {
     expect(explain(input, { ...configuration, approval: new Map() }).at(-1)).toBe('approval: unroutable; reason default');
   });
 
+  it('POL-5 explain reports the approval of a write_opaque operation', async () => {
+    const loaded = await loadConfigurationSources(
+      Object.entries({
+        'connections.yaml': `version: 1
+connections:
+  - { id: notes, adapter: openapi, base_url: https://notes.example.test, credential_ref: notes-token, auth: { scheme: bearer } }
+`,
+        'operations.yaml': `version: 1
+operations:
+  - id: notes.create
+    connection: notes
+    risk: write_opaque
+    description: Create a note.
+    upstream: { method: POST, path: /notes }
+    input_schema: { type: object, properties: { text: { type: string } }, required: [text] }
+`,
+        'roles.yaml': `version: 1
+roles:
+  - id: writer
+    grants:
+      - { operation: notes.create, id: notes }
+    approval: { required: above_threshold, record_threshold: 25, steps: [{ role: lead }] }
+  - id: lead
+    grants: []
+role_mapping:
+  - { group: writers, roles: [writer] }
+`,
+      }).map(([file, text]) => ({ file, text })),
+    );
+    if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
+    // One record is below the threshold, but an opaque call has no record count to compare.
+    expect(explain({ operationId: 'notes.create', groups: ['writers'], args: { text: 'hi' }, records: 1 }, loaded.configuration)).toEqual([
+      'effect: allow',
+      'rule: role:writer/grant:notes',
+      'roles: writer',
+      'reason: -',
+      'detail: -',
+      'approval: required: steps lead; reason opaque',
+    ]);
+  });
+
   it('MCP-3 POL-7 arguments are checked against the input schema before the policy', () => {
     // support has no grant: the schema answers first, as on a real call.
     const lines = explain({ operationId: 'catalog.search_products', groups: ['support'], args: { brand: 'acme' } });

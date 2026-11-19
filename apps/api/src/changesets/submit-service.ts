@@ -14,6 +14,7 @@ import {
   approvalRequirement,
   changesetTransitionEvent,
   ExecutorUnavailable,
+  isOpaque,
   type ApprovalPlan,
   type AuditLog,
   type Caller,
@@ -116,9 +117,11 @@ export class SubmitService {
     // 6. Prepared: the allowing rule's role decides approval (POL-5), as it decides limits (ADR 0027).
     const role = allowingRole(decision.rule);
     const rule = role === undefined ? undefined : snapshot.configuration.approval.get(role);
-    // An operation the engine allowed is in the snapshot; the strictest risk stands in otherwise.
-    const risk = snapshot.configuration.policy.operations.find((op) => op.id === record.operation)?.risk ?? 'destructive';
-    const requirement = approvalRequirement({ risk, ...(rule === undefined ? {} : { rule }), included: record.stats.included });
+    // An operation the engine allowed is in the snapshot; the strictest risk and opaque stand in otherwise.
+    const operation = snapshot.configuration.policy.operations.find((op) => op.id === record.operation);
+    const risk = operation?.risk ?? 'destructive';
+    const opaque = operation === undefined ? true : isOpaque(operation);
+    const requirement = approvalRequirement({ risk, opaque, ...(rule === undefined ? {} : { rule }), included: record.stats.included });
     if (role === undefined || (requirement.required && requirement.unroutable === true)) return refused('approval_unroutable');
     const submission: Submission = {
       actor: caller.subject,

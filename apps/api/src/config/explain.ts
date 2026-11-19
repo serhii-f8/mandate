@@ -4,7 +4,7 @@
  * (MCP-3); an allowed write states the approval it would need (POL-5). Pure: no I/O.
  */
 import { createSchemaCompiler, pinStateOf, type LoadedConfiguration, type PinState } from '@aiops/config';
-import { allowingRole, approvalRequirement, createPolicyEngine, type ApprovalRequirement, type PolicyDecision } from '@aiops/core';
+import { allowingRole, approvalRequirement, createPolicyEngine, isOpaque, type ApprovalRequirement, type PolicyDecision } from '@aiops/core';
 
 export interface ExplainInput {
   readonly operationId: string;
@@ -44,13 +44,17 @@ export function explainCall(configuration: LoadedConfiguration, input: ExplainIn
   const decision: PolicyDecision = operation === undefined && evaluated.effect === 'deny' ? { ...evaluated, reason: 'unknown_tool' } : evaluated;
   const pin = pinOf(configuration, operationId);
   if (decision.effect !== 'allow') return { kind: 'decision', decision, ...pin };
-  const risk = operation?.risk;
-  if (risk !== 'write' && risk !== 'destructive') return { kind: 'decision', decision, ...pin };
+  if (operation === undefined || operation.risk === 'read') return { kind: 'decision', decision, ...pin };
 
   // The allowing rule's role decides approval, as on submission (ADR 0027).
   const role = allowingRole(decision.rule);
   const rule = role === undefined ? undefined : configuration.approval.get(role);
-  const approval = approvalRequirement({ risk, ...(rule === undefined ? {} : { rule }), included: input.records });
+  const approval = approvalRequirement({
+    risk: operation.risk,
+    opaque: isOpaque(operation),
+    ...(rule === undefined ? {} : { rule }),
+    included: input.records,
+  });
   return { kind: 'decision', decision, approval, ...pin };
 }
 

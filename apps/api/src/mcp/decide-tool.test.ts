@@ -236,7 +236,7 @@ describe('APR-8 decide_changeset widget tool', () => {
   it('POL-5 a destructive change-set is never decided in the widget', async () => {
     // The role allows the widget, but the plan of a destructive change-set never does.
     const rule = CONFIG.approval.get('writer');
-    const plan = approvalRequirement({ risk: 'destructive', ...(rule === undefined ? {} : { rule }), included: 2 });
+    const plan = approvalRequirement({ risk: 'destructive', opaque: false, ...(rule === undefined ? {} : { rule }), included: 2 });
     expect(rule?.allowWidget).toBe(true);
     if (!plan.required || plan.unroutable === true) throw new Error('expected a routable approval plan');
     expect(plan.widget).toBe(false);
