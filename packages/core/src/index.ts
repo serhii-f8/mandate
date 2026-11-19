@@ -12,6 +12,16 @@ export {
   type ChainRow,
   type SealedChainRow,
 } from './audit/chain.js';
+export type {
+  ApplyRevisionResult,
+  ConfigListener,
+  ConfigListenerHandlers,
+  ConfigRevision,
+  ConfigRevisionSource,
+  ConfigRevisionStore,
+  ConfigRevisionSummary,
+  NewConfigRevision,
+} from './config-revision.js';
 export { ANONYMOUS_CALLER, type Caller } from './caller.js';
 export { toolCallAuditEvent, type ToolCallRecord } from './tool-call-audit.js';
 export type {

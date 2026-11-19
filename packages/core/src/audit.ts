@@ -27,6 +27,8 @@ export const AUDIT_ACTIONS = [
   'audit.search',
   'audit.export',
   'audit.retention',
+  'config.apply',
+  'config.load',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

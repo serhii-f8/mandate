@@ -1,5 +1,11 @@
 /** Shared test fakes and fixtures. */
 export { InMemoryAuditLog } from './in-memory-audit-log.js';
+export { InMemoryConfigRevisionStore } from './in-memory-config-revision-store.js';
+export {
+  describeConfigRevisionStoreContract,
+  type ConfigRevisionStoreContractOptions,
+  type ConfigRevisionStoreHarness,
+} from './config-revision-store-contract.js';
 export { InMemoryChangeSetRepository } from './in-memory-changeset-repository.js';
 export { describeChangeSetRepositoryContract, type ChangeSetRepositoryHarness } from './changeset-repository-contract.js';
 export { InMemoryNotificationOutbox } from './in-memory-notification-outbox.js';
