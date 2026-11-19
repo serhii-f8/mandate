@@ -90,6 +90,37 @@ describe('CFG-3 configuration diff', () => {
     expect(diff.changes.every((c) => c.change === 'added' && c.keys.length === 0)).toBe(true);
   });
 
+  it('CFG-3 manage_credentials and view_audit changes are reported as role keys', async () => {
+    const before = await load(VALID_DIR);
+    const after = await edited(async (file) => {
+      await file('roles.yaml', (t) => t.replace('    description: Edits product content.\n', '    description: Edits product content.\n    manage_credentials: [magento-integration]\n    view_audit: true\n'));
+    });
+    expect(formatDiff(diffConfigurations(before, after))).toEqual(['~ role content_manager: manage_credentials, view_audit', hashLine(before, after)]);
+  });
+
+  it('CFG-3 a role notify change is reported as key notify', async () => {
+    const withNotification = async (notify: string): Promise<LoadedConfiguration> =>
+      edited(async (file) => {
+        await file('connections.yaml', (t) => `${t}notifications:\n  - id: ops-mail\n    kind: email\n    to: [ops@example.test]\n`);
+        await file('roles.yaml', (t) => t.replace('    description: Edits product content.\n', `    description: Edits product content.\n${notify}`));
+      });
+    const before = await withNotification('');
+    const after = await withNotification('    notify: { approval_requests: [ops-mail] }\n');
+    expect(formatDiff(diffConfigurations(before, after))).toEqual(['~ role content_manager: notify', hashLine(before, after)]);
+  });
+
+  it('CFG-3 Map and Set values compare by content, whatever their insertion order', async () => {
+    const before = await load(VALID_DIR);
+    const [connection] = before.connections;
+    if (connection === undefined) throw new Error('fixture has a connection');
+    const withValues = (map: Map<string, number>, set: Set<string>): LoadedConfiguration =>
+      ({ ...before, connections: [{ ...connection, extraMap: map, extraSet: set } as unknown as typeof connection] });
+    const a = withValues(new Map([['x', 1], ['y', 2]]), new Set(['p', 'q']));
+    expect(diffConfigurations(a, withValues(new Map([['y', 2], ['x', 1]]), new Set(['q', 'p']))).changes).toEqual([]);
+    expect(diffConfigurations(a, withValues(new Map([['x', 1], ['y', 3]]), new Set(['p', 'q']))).changes).toEqual([{ kind: 'connection', id: connection.id, change: 'changed', keys: ['extraMap'] }]);
+    expect(diffConfigurations(a, withValues(new Map([['x', 1], ['y', 2]]), new Set(['p']))).changes).toEqual([{ kind: 'connection', id: connection.id, change: 'changed', keys: ['extraSet'] }]);
+  });
+
   it('CFG-3 an optional key set to undefined, top-level or nested, equals an absent key and does not throw', async () => {
     const before = await load(VALID_DIR);
     const [connection] = before.connections;

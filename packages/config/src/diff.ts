@@ -75,7 +75,7 @@ function entitiesOf(configuration: LoadedConfiguration): ReadonlyMap<EntityKind,
       ...role,
       limits: configuration.limits.get(role.id),
       approval: configuration.approval.get(role.id),
-      notify: notifyOf(configuration.notify, role.id),
+      notify: configuration.notify.get(role.id),
       manage_credentials: configuration.credentialManagers.get(role.id),
       view_audit: configuration.auditViewers.has(role.id) ? true : undefined,
       mapping: mapping.length > 0 ? mapping : undefined,
@@ -86,12 +86,6 @@ function entitiesOf(configuration: LoadedConfiguration): ReadonlyMap<EntityKind,
   put('setting', 'changesets', configuration.changesets);
   put('setting', 'audit', configuration.audit);
   return kinds;
-}
-
-function notifyOf(notify: unknown, roleId: string): unknown {
-  if (notify instanceof Map) return (notify as Map<string, unknown>).get(roleId);
-  if (typeof notify === 'object' && notify !== null) return (notify as Record<string, unknown>)[roleId];
-  return undefined;
 }
 
 /** Per-entity difference between two configurations (CFG-3); `before` undefined lists everything as added. */
