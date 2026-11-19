@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CANCELLABLE, canTransition, isExpiryDue, TRANSITIONS } from './lifecycle.js';
+import { CANCELLABLE, canTransition, executionStarted, isExpiryDue, ROLLBACK_FROM, TRANSITIONS } from './lifecycle.js';
 import type { ChangeSetStatus } from './model.js';
 
 const ALL: ChangeSetStatus[] = [
@@ -17,6 +17,7 @@ const EXPECTED: readonly (readonly [ChangeSetStatus, ChangeSetStatus])[] = [
   ['executing', 'completed'], ['executing', 'completed_with_errors'], ['executing', 'failed'],
   ['executing', 'cancelled'],
   ['completed', 'rolling_back'], ['completed_with_errors', 'rolling_back'],
+  ['cancelled', 'rolling_back'], ['failed', 'rolling_back'],
   ['rolling_back', 'rolled_back'], ['rolling_back', 'failed'],
 ];
 
@@ -39,6 +40,20 @@ describe('CS-6 lifecycle', () => {
     expect(canTransition('expired', 'executing')).toBe(false);
     expect(canTransition('preparing', 'failed')).toBe(true);
     expect(canTransition('executing', 'cancelled')).toBe(true);
+  });
+
+  it('EXE-8 CS-6 cancelled and failed move only to rolling_back; rolled_back is final', () => {
+    expect(TRANSITIONS.cancelled).toEqual(['rolling_back']);
+    expect(TRANSITIONS.failed).toEqual(['rolling_back']);
+    expect(TRANSITIONS.rolled_back).toEqual([]);
+    expect(ROLLBACK_FROM).toEqual(['completed', 'completed_with_errors', 'cancelled', 'failed']);
+    for (const s of ROLLBACK_FROM) expect(canTransition(s, 'rolling_back'), s).toBe(true);
+    expect(executionStarted({})).toBe(false);
+    expect(
+      executionStarted({
+        executionRequest: { actor: 'a', groups: [], correlationId: 'k', startedAt: new Date(0) },
+      }),
+    ).toBe(true);
   });
 
   it('CS-6 CANCELLABLE excludes executing', () => {

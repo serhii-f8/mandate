@@ -18,6 +18,7 @@ export type AuditAction =
   | 'changeset.export'
   | 'changeset.submit'
   | 'changeset.exclude'
+  | 'changeset.rollback'
   | 'notification.sent'
   | 'notification.failed';
 

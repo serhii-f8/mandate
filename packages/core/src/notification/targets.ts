@@ -20,7 +20,7 @@ export function approvalRequestNotifications(
 /** NTF-1: the result targets of the requesting role; none when the role is unknown. */
 export function resultNotifications(
   notify: RoleNotifyTargets,
-  at: { kind: 'approval_decided' | 'execution_finished'; role: string | undefined; round: number; step: number },
+  at: { kind: 'approval_decided' | 'execution_finished' | 'rollback_result'; role: string | undefined; round: number; step: number },
 ): readonly NewNotification[] {
   if (at.role === undefined) return [];
   return rows(at.kind, notify.get(at.role)?.results ?? [], at.round, at.step);

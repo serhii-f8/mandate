@@ -41,9 +41,34 @@ export type {
   ChangeSetStatus,
   ExclusionReason,
   ItemStatus,
+  RollbackCounts,
+  RollbackItemStatus,
+  RollbackRequest,
 } from './changeset/model.js';
 export { EMPTY_STATS } from './changeset/model.js';
-export { CANCELLABLE, canTransition, isExpiryDue, PRE_EXECUTION, TRANSITIONS } from './changeset/lifecycle.js';
+export {
+  CANCELLABLE,
+  canTransition,
+  executionStarted,
+  isExpiryDue,
+  PRE_EXECUTION,
+  ROLLBACK_FROM,
+  TRANSITIONS,
+} from './changeset/lifecycle.js';
+export {
+  changesetRollbackBatchEvent,
+  ROLLBACK_REQUEST_MARGIN_MS,
+  rollbackEligibility,
+  rollbackRequestEvents,
+  rollbackTerminal,
+  rollbackWindowEnd,
+  type RollbackEligibility,
+  type RollbackEligibilityDeps,
+  type RollbackOutcome,
+  type RollbackReads,
+  type RollbackReason,
+  type RollbackRefusal,
+} from './changeset/rollback.js';
 export type {
   BatchContext,
   BatchRecord,

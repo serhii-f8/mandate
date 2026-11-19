@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ApprovalRecord } from '../approval/model.js';
 import type { ChangeSetRecord } from '../changeset/model.js';
 import { renderNotification, type RenderInput } from './render.js';
+import { resultNotifications } from './targets.js';
 
 const changeset = {
   id: 'cs-1',
@@ -56,8 +57,26 @@ describe('NTF-2 notification templates', () => {
     );
   });
 
+  it('NTF-1 NTF-2 rollback_result names the counts and the link only', () => {
+    const rolled = {
+      ...changeset,
+      status: 'rolled_back',
+      stats: { ...changeset.stats, rollback: { restored: 2, skipped: 1, failed: 0 } },
+    } as ChangeSetRecord;
+    const r = renderNotification({ ...base, changeset: rolled, row: row('rollback_result'), operationTitle: 'Up\ndate' });
+    expect(r.subject).toBe('Change-set rolled_back: Up date');
+    expect(r.text).toBe(`Change-set cs-1 rollback finished rolled_back: 2 restored, 1 skipped, 0 failed. ${link}`);
+    const none = renderNotification({ ...base, changeset: { ...changeset, status: 'failed' }, row: row('rollback_result') });
+    expect(none.text).toBe(`Change-set cs-1 rollback finished failed: 0 restored, 0 skipped, 0 failed. ${link}`);
+    const notify = new Map([['editor', { approvalRequests: [], results: ['chat', 'chat', 'mail'] }]]);
+    expect(resultNotifications(notify, { kind: 'rollback_result', role: 'editor', round: 1, step: 0 })).toEqual([
+      { kind: 'rollback_result', round: 1, step: 0, target: 'chat' },
+      { kind: 'rollback_result', round: 1, step: 0, target: 'mail' },
+    ]);
+  });
+
   it('NTF-2 SEC-3 no template carries arguments, item values, comments or error codes', () => {
-    for (const kind of ['approval_requested', 'approval_decided', 'execution_finished'] as const) {
+    for (const kind of ['approval_requested', 'approval_decided', 'execution_finished', 'rollback_result'] as const) {
       const r = renderNotification({ ...base, row: row(kind), decision });
       const all = r.subject + r.text;
       for (const s of ['SKU-SECRET-1', 'ARG-SECRET-VALUE', 'COMMENT-SECRET', 'ERROR-SECRET-CODE']) {

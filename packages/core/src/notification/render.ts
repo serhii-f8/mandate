@@ -63,5 +63,14 @@ export function renderNotification(input: RenderInput): RenderedNotification {
         text: `Change-set ${id} finished ${cs.status}: ${s.written} written, ${s.failed} failed, ${s.skipped} skipped. ${link}`,
       };
     }
+    case 'rollback_result': {
+      const r = cs.stats.rollback ?? { restored: 0, skipped: 0, failed: 0 };
+      const status = clean(cs.status);
+      const counts = `${clean(String(r.restored))} restored, ${clean(String(r.skipped))} skipped, ${clean(String(r.failed))} failed`;
+      return {
+        subject: `Change-set ${status}: ${clean(input.operationTitle ?? cs.operation)}`,
+        text: `Change-set ${id} rollback finished ${status}: ${counts}. ${link}`,
+      };
+    }
   }
 }

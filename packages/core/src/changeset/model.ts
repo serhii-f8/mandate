@@ -27,6 +27,24 @@ export interface ChangeSetStats {
   readonly written: number;
   readonly failed: number;
   readonly skipped: number;
+  /** EXE-8: rollback outcomes, present once an item has a rollback status. */
+  readonly rollback?: RollbackCounts;
+}
+
+export type RollbackItemStatus = 'restored' | 'skipped' | 'failed';
+
+export interface RollbackCounts {
+  readonly restored: number;
+  readonly skipped: number;
+  readonly failed: number;
+}
+
+/** EXE-8: who asked for the rollback of an executed change-set, once (no retry after a failed rollback). */
+export interface RollbackRequest {
+  readonly actor: string;
+  readonly clientId?: string;
+  readonly correlationId: string;
+  readonly requestedAt: Date;
 }
 
 export interface ExecutionRequest {
@@ -73,6 +91,9 @@ export interface ChangeSetRecord {
   readonly awaitingRole?: string;
   /** CS-5: the source change-set this one was derived from; absent for one prepared by a tool call. */
   readonly derivedFrom?: string;
+  /** EXE-8: end of the rollback window, set when execution finished with rollbackable items. */
+  readonly rollbackUntil?: Date;
+  readonly rollbackRequest?: RollbackRequest;
 }
 
 export interface ChangeItemRecord {
@@ -82,6 +103,9 @@ export interface ChangeItemRecord {
   readonly before: unknown;
   readonly after: unknown;
   readonly error?: string;
+  /** EXE-8: the outcome of restoring this item's `before` value. */
+  readonly rollbackStatus?: RollbackItemStatus;
+  readonly rollbackError?: string;
 }
 
 export const EMPTY_STATS: ChangeSetStats = Object.freeze({
