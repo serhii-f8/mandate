@@ -54,6 +54,8 @@ describe('CFG-3 CFG-4 AUD-1 the worker follows applied revisions', () => {
       AIOPS_PRESET_DIRS: PRESET_DIRS,
       AIOPS_MASTER_KEYS: MASTER_KEYS,
       AIOPS_TEMPORAL_KEYS: TEMPORAL_KEYS,
+      // An ephemeral port: integration files run in parallel (ruling F11).
+      AIOPS_WORKER_HTTP_PORT: '0',
     });
     const adapter = createOpenApiAdapter();
     const signals = new EventEmitter();
@@ -142,6 +144,8 @@ describe('CFG-3 CFG-4 AUD-1 the worker follows applied revisions', () => {
       AIOPS_PRESET_DIRS: PRESET_DIRS,
       AIOPS_MASTER_KEYS: MASTER_KEYS,
       AIOPS_TEMPORAL_KEYS: TEMPORAL_KEYS,
+      // An ephemeral port: integration files run in parallel (ruling F11).
+      AIOPS_WORKER_HTTP_PORT: '0',
     });
     const adapter = createOpenApiAdapter();
     const loaded = await loadConfigurationDirectory(CONFIG_DIR, configurationLoadOptions(adapter, env));

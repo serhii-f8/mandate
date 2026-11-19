@@ -3,14 +3,18 @@ import { createOpenApiAdapter } from '@aiops/adapters';
 import {
   ConfigurationError,
   ConfigurationHolder,
+  configurationProbe,
   formatIssue,
+  probeWithin,
   startConfigurationSync,
   type ConfigurationStateSource,
   type ConfigurationSync,
+  type ReadinessReport,
   type WorkerEnv,
 } from '@aiops/config';
 import {
   assertMigrated,
+  countChangeSetsByStatus,
   createDb,
   DrizzleAuditLog,
   parseMasterKeys,
@@ -24,15 +28,25 @@ import {
   type Database,
 } from '@aiops/db';
 import { parseTemporalKeys, workerDataConverter, type ActivityTuning } from '@aiops/temporal';
-import { assertFullyChecked, configurationLoadOptions, createUpstreamReader, type UpstreamCallLog } from '@aiops/upstream';
+import {
+  assertFullyChecked,
+  configurationLoadOptions,
+  createUpstreamInstrumentation,
+  createUpstreamReader,
+  type UpstreamCallLog,
+} from '@aiops/upstream';
 import { heartbeat } from '@temporalio/activity';
-import { NativeConnection } from '@temporalio/worker';
+import { NativeConnection, type Worker } from '@temporalio/worker';
 import type { Logger } from 'pino';
 import { createActivities, createExecutionGuard, echo, type WorkerActivities } from './activities/index.js';
 import { createAuditJobs } from './audit-jobs.js';
+import { startWorkerHttpServer } from './http-server.js';
 import { createNotificationDispatcher } from './notifications/dispatcher.js';
 import { createSmtpSender } from './notifications/email.js';
 import { createWebhookSender } from './notifications/webhook.js';
+import { registerChangeSetGauge, timeBatchActivities } from './telemetry/metrics.js';
+import { startWorkerTelemetry, type WorkerTelemetry } from './telemetry/telemetry.js';
+import { createTracingPlugin } from './telemetry/tracing.js';
 import { createWorker } from './worker.js';
 import { createRollbackWriterFor, createWriterFor } from './writers.js';
 
@@ -42,11 +56,18 @@ export interface WorkerRuntime {
    * notifications (NTF-3), seals the audit chain (AUD-3) and runs audit retention (AUD-7) meanwhile.
    */
   run(): Promise<void>;
-  /** Closes the configuration sync, the SMTP transport, the Temporal connection and the database pool. */
+  /**
+   * Closes the HTTP server, the configuration sync, the SMTP transport, the Temporal connection
+   * and the database pool, then the telemetry when the runtime started its own.
+   */
   close(): Promise<void>;
   /** The configuration state (CFG-4); the worker's `/readyz` reads it. */
   readonly configuration: ConfigurationStateSource;
+  /** The port of `/healthz`, `/readyz` and `/metrics` (NFR-10, NFR-12); the bound one when configured as 0. */
+  readonly httpPort: number;
 }
+
+const READINESS_PROBE_MS = 2000;
 
 /** What the activities are bound to. */
 interface RuntimeStores {
@@ -132,17 +153,21 @@ export async function startRuntimeConfiguration(input: {
 }
 
 /**
- * Worker start-up (NFR-4): refuses an unmigrated schema (migrations are `api`'s job), loads the
+ * Worker start-up (NFR-4): refuses an unmigrated schema (migrations are `api`'s job), starts the
+ * HTTP server (NFR-10; not ready until the worker polls), loads the
  * active configuration revision exactly as `api` does (specs resolved, presets loaded) and keeps
  * it current (CFG-3), waits while no revision is loadable, binds the activities to the
  * database and connects to Temporal with the encrypting data converter (SEC-4). SIGHUP is
  * installed before the connect, so an early one refreshes instead of ending the process.
- * `signals` is the process (a test passes its own emitter).
+ * `signals` is the process (a test passes its own emitter). `telemetry` is main's (registered
+ * globally, NFR-11); without it the runtime starts an unregistered one for its metrics (NFR-12) and
+ * shuts it down on close.
  */
 export async function startWorkerRuntime(
   env: WorkerEnv,
   logger: Logger,
   signals: Pick<NodeJS.EventEmitter, 'on' | 'off'> = process,
+  telemetry?: WorkerTelemetry,
 ): Promise<WorkerRuntime> {
   await assertMigrated(env.databaseUrl);
   // Parsed before the pool and the listener so a malformed key set stops the start; messages name no key material.
@@ -154,17 +179,38 @@ export async function startWorkerRuntime(
       logger.error({ err: error.message }, 'idle database connection failed');
     },
   });
+  const active = telemetry ?? startWorkerTelemetry({ register: false });
+  // Shut down by close() and the start-failure cleanup only when the runtime started it (F10).
+  const ownTelemetry = active === telemetry ? undefined : active;
+  const { meter, spanProcessor, metricsHandler } = active;
+  registerChangeSetGauge(meter, () => countChangeSetsByStatus(database));
   // One adapter: its resolver checks the specs of every revision loaded; it also runs the calls.
-  const adapter = createOpenApiAdapter();
-  // Set as soon as startRuntimeConfiguration returns; the cleanup closes only what was returned
-  // (a listener whose LISTEN never settles is not covered: the start hangs there).
+  const adapter = createOpenApiAdapter({ instrumentation: createUpstreamInstrumentation({ meter }) });
+  // Each is set as soon as its step returns; the cleanup closes only what was returned (a listener
+  // whose LISTEN never settles is not covered: the start hangs there). Readiness reads holder and worker.
+  let http: { close(): Promise<void> } | undefined;
+  let holder: ConfigurationHolder | undefined;
+  let worker: Worker | undefined;
   let sync: ConfigurationSync | undefined;
   let connection: NativeConnection | undefined;
   // Without a relay, e-mail rows fail with channel_unconfigured on the retry schedule (NTF-3).
   const email = env.smtpUrl === undefined ? undefined : createSmtpSender({ url: env.smtpUrl, from: env.mailFrom });
   try {
+    // Before the wait for an active configuration: a waiting worker is alive, not ready (NFR-10, R15).
+    const server = await startWorkerHttpServer(env.httpPort, '0.0.0.0', {
+      readiness: async (): Promise<ReadinessReport> => ({
+        database: await probeWithin(() => database.pool.query('SELECT 1'), READINESS_PROBE_MS),
+        configuration: holder === undefined ? 'none' : configurationProbe(holder.state()),
+        // Only a polling worker is ready; no worker yet, draining or stopped is not (Worker.getState, 1.25.0).
+        temporal: worker?.getState() === 'RUNNING' ? 'ok' : 'unavailable',
+      }),
+      metrics: metricsHandler,
+    });
+    http = server;
+    logger.info({ port: server.port }, 'worker http server listening');
     const started = await startRuntimeConfiguration({ env, database, adapter, logger, signals });
     sync = started.sync;
+    holder = started.holder;
     const configuration = started.holder;
     const state = configuration.state();
     if (state.status !== 'active') {
@@ -180,7 +226,8 @@ export async function startWorkerRuntime(
     const vault = new PostgresCredentialVault(database.db, masterKeys);
     // Preset sensitive fields are covered: the configuration was loaded with the preset directories (AUD-4).
     const audit = new DrizzleAuditLog(database.db, { sensitiveKeys: () => configuration.current.sensitiveFields });
-    const activities = activitiesFor({
+    // The two batch activities record aiops_batch_duration_seconds (NFR-12).
+    const activities = timeBatchActivities(activitiesFor({
       configuration,
       adapter,
       repository,
@@ -188,7 +235,7 @@ export async function startWorkerRuntime(
       vault,
       tuning: env.activityTuning,
       logger,
-    });
+    }), meter);
     const dispatcher = createNotificationDispatcher({
       outbox: new PostgresNotificationOutbox(database.db),
       repository,
@@ -218,48 +265,63 @@ export async function startWorkerRuntime(
       logger,
     });
     connection = await NativeConnection.connect({ address: env.temporalAddress });
-    const worker = await createWorker({
+    const running = await createWorker({
       connection,
       namespace: env.temporalNamespace,
       taskQueue: env.taskQueue,
       activities,
       dataConverter: workerDataConverter(temporalKeys),
+      // Workflow, activity and client spans (NFR-11); the trace header carries only W3C context (SEC-4, ADR 0047).
+      plugins: [createTracingPlugin({ spanProcessor, serviceName: 'aiops-worker' })],
     });
+    worker = running;
     const open = connection;
     const openSync = sync;
     return {
       configuration,
+      httpPort: server.port,
       run: async () => {
         // Delivery and the audit jobs run beside the worker; a failure in either never stops polling (NTF-3, AUD-3).
         const delivery = dispatcher.start();
         const jobs = auditJobs.start();
         try {
-          await worker.run();
+          await running.run();
         } finally {
           await Promise.all([delivery.stop(), jobs.stop()]);
         }
       },
       close: async () => {
-        // The pool is closed even when closing the sync or the Temporal connection fails.
+        // The pool is closed even when closing the server, the sync or the Temporal connection fails.
         try {
+          await server.close();
           await openSync.close();
           email?.close();
           await open.close();
         } finally {
-          await database.close();
+          try {
+            await database.close();
+          } finally {
+            // Never rejects (Task 9).
+            await ownTelemetry?.shutdown();
+          }
         }
       },
     };
   } catch (error) {
     try {
-      // F6: the listener's own client, then the rest; the pool is closed last.
+      // F10: the HTTP server first; F6: the listener's own client, then the rest; the pool is closed last.
+      await http?.close();
       await sync?.close();
       email?.close();
       await connection?.close();
     } catch {
       // The start failure is the error worth reporting; the pool is closed regardless.
     }
-    await database.close();
+    try {
+      await database.close();
+    } finally {
+      await ownTelemetry?.shutdown();
+    }
     throw error;
   }
 }
