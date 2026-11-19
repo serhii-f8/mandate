@@ -45,3 +45,4 @@ export { toUpstreamMapping, type AuthConfig, type ConnectionTestConfig, type Ups
 export { executionLimits } from './limits.js';
 export { isRevisionFilePath, loadConfigurationFiles, MAX_REVISION_PATH, revisionFilesOf, revisionSummary } from './revision-files.js';
 export { diffConfigurations, diffCounts, formatDiff, type ConfigDiff, type EntityChange, type EntityKind } from './diff.js';
+export { CONFIG_POLL_INTERVAL_MS, startConfigurationSync, type ConfigurationSync, type ConfigurationSyncOptions } from './sync.js';
