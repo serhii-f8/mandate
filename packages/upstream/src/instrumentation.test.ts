@@ -130,6 +130,20 @@ describe('upstream instrumentation', () => {
     expect(Object.keys(span.headers)).toEqual(['traceparent']);
   });
 
+  it('NFR-11 NFR-12 a second end of the same attempt is ignored', async () => {
+    const span = instrumentation().start({ connection: 'magento', method: 'GET', host: 'shop.example' });
+    span.end({ status: 200 });
+    span.end({ status: 503 });
+
+    expect(spans.getFinishedSpans()).toHaveLength(1);
+    const counter = await metric('aiops_upstream_requests_total');
+    expect((counter?.dataPoints ?? []).map((p) => ({ attributes: p.attributes, value: p.value }))).toEqual([
+      { attributes: { connection: 'magento', outcome: 'ok' }, value: 1 },
+    ]);
+    const histogram = (await metric('aiops_upstream_request_duration_seconds')) as HistogramMetricData | undefined;
+    expect(histogram?.dataPoints.map((p) => p.value.count)).toEqual([1]);
+  });
+
   it('NFR-12 upstream outcome classification', () => {
     expect(upstreamOutcome({ status: 200 })).toBe('ok');
     expect(upstreamOutcome({ status: 304 })).toBe('ok');

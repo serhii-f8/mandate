@@ -93,8 +93,9 @@ export function createUpstreamInstrumentation(deps: UpstreamInstrumentationDeps)
             span.setAttribute('error.type', errorType);
             span.setStatus({ code: SpanStatusCode.ERROR });
           }
-          span.end();
+          // Measured before span.end(), so a synchronous span export is not counted.
           const seconds = (performance.now() - startedAt) / 1000;
+          span.end();
           requests.add(1, { connection: attempt.connection, outcome: upstreamOutcome(result) });
           duration.record(seconds, { connection: attempt.connection });
         },
