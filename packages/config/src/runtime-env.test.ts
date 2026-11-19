@@ -466,3 +466,20 @@ describe('telemetry environment', () => {
     for (const bad of ['65536', '-1']) expect(() => parseWorkerEnv({ ...WORKER, AIOPS_WORKER_HTTP_PORT: bad })).toThrow(/AIOPS_WORKER_HTTP_PORT/);
   });
 });
+
+describe('telemetry port environment edge cases', () => {
+  it('NFR-12 NFR-10 an empty or blank port variable means the default; non-integers are refused', () => {
+    const cases: [string, (e: Record<string, string>) => number, number][] = [
+      ['AIOPS_METRICS_PORT', (e) => parseApiEnv({ ...API, ...e }).metricsPort, 9464],
+      ['AIOPS_WORKER_HTTP_PORT', (e) => parseWorkerEnv({ ...WORKER, ...e }).httpPort, 8081],
+    ];
+    for (const [variable, read, fallback] of cases) {
+      expect(read({ [variable]: '' })).toBe(fallback);
+      expect(read({ [variable]: '  ' })).toBe(fallback);
+      for (const bad of ['abc', '1.5']) {
+        expect(() => read({ [variable]: bad })).toThrow(EnvError);
+        expect(() => read({ [variable]: bad })).toThrow(new RegExp(variable));
+      }
+    }
+  });
+});

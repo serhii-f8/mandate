@@ -111,7 +111,12 @@ export class EnvError extends Error {
 
 const logLevel = z.enum(['debug', 'info', 'warn', 'error']).default('info');
 const port = (fallback: number) => z.coerce.number().int().min(1).max(65_535).default(fallback);
-const portOrZero = (fallback: number) => z.coerce.number().int().min(0).max(65_535).default(fallback);
+/** 0 (an ephemeral port) is valid; an empty or blank value is unset, so the default applies. */
+const portOrZero = (fallback: number) =>
+  z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.coerce.number().int().min(0).max(65_535).default(fallback),
+  );
 const nonEmpty = (fallback: string) => z.string().trim().min(1).default(fallback);
 const postgresUrl = z
   .string()
