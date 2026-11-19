@@ -21,7 +21,7 @@ import { createSmtpSender } from './notifications/email.js';
 import { createWebhookSender } from './notifications/webhook.js';
 import { installReload } from './reload.js';
 import { createWorker } from './worker.js';
-import { createWriterFor } from './writers.js';
+import { createRollbackWriterFor, createWriterFor } from './writers.js';
 
 export interface WorkerRuntime {
   /** Polls the task queue until SIGINT/SIGTERM (`Worker.run` installs those handlers); dispatches notifications meanwhile (NTF-3). */
@@ -45,7 +45,8 @@ interface RuntimeStores {
  * Activities registered on the worker: `echo` and the change-set activities bound to the stores,
  * the current configuration (it changes on SIGHUP) and the tuning from the environment. Writes
  * go through `createWriterFor` (a bulk binding writes, anything else fails every item with
- * `write_mode_unsupported`); reads run the shared upstream read path.
+ * `write_mode_unsupported`), rollbacks through `createRollbackWriterFor` (EXE-8, OPS-3); reads run
+ * the shared upstream read path.
  */
 function activitiesFor(stores: RuntimeStores): WorkerActivities {
   const { configuration, repository, vault, adapter, logger } = stores;
@@ -58,6 +59,7 @@ function activitiesFor(stores: RuntimeStores): WorkerActivities {
       repository,
       configuration: () => configuration.current,
       writerFor: createWriterFor({ vault, adapter, log }),
+      rollbackWriterFor: createRollbackWriterFor({ vault, adapter, log }),
       readerFor: (current, correlationId) => createUpstreamReader({ configuration: current, vault, adapter, correlationId, log }),
       guardFor: createExecutionGuard({
         repository,

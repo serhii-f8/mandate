@@ -9,13 +9,17 @@ import type { LoadedConfiguration } from '@aiops/config';
 import {
   BatchFenced,
   changesetBatchEvent,
+  changesetRollbackBatchEvent,
   changesetTransitionEvent,
   coverBatch,
   executionTerminal,
   failureThresholdExceeded,
+  hashStoredItems,
   PRE_EXECUTION,
   resultNotifications,
   RetryableWriteError,
+  rollbackTerminal,
+  rollbackWindowEnd,
   runPreparation,
   type BatchContext,
   type ChangeSetRecord,
@@ -25,9 +29,17 @@ import {
   type ChangeWriter,
   type ExecutionGuard,
   type ItemOutcome,
+  type RollbackCounts,
+  type RollbackItemOutcome,
   type UpstreamReader,
 } from '@aiops/core';
-import { PREPARE_MAX_ATTEMPTS, type ActivityTuning, type BatchResult, type ChangesetActivities } from '@aiops/temporal';
+import {
+  PREPARE_MAX_ATTEMPTS,
+  type ActivityTuning,
+  type BatchResult,
+  type ChangesetActivities,
+  type RollbackBatchResult,
+} from '@aiops/temporal';
 import { Context } from '@temporalio/activity';
 import { ApplicationFailure } from '@temporalio/common';
 import { whileHeartbeating } from './heartbeat.js';
@@ -38,6 +50,8 @@ export interface ActivityDeps {
   /** The worker's current configuration (it changes on SIGHUP). */
   readonly configuration: () => LoadedConfiguration;
   readonly writerFor: (configuration: LoadedConfiguration, operationId: string) => ChangeWriter;
+  /** EXE-8, OPS-3: the reverse writer of an operation; undefined when it cannot be rolled back. */
+  readonly rollbackWriterFor: (configuration: LoadedConfiguration, operationId: string) => ChangeWriter | undefined;
   readonly readerFor: (configuration: LoadedConfiguration, correlationId: string) => UpstreamReader;
   readonly guardFor: (configuration: LoadedConfiguration) => ExecutionGuard;
   readonly settingsFor?: (configuration: LoadedConfiguration, operationId: string) => ExecutionSettings;
@@ -51,6 +65,32 @@ const superseded = (): ApplicationFailure => ApplicationFailure.nonRetryable('ba
 
 function remaining(stats: ChangeSetStats): number {
   return stats.included - stats.written - stats.failed - stats.skipped;
+}
+
+/** EXE-4: a rollback's audit rows and transition run under the rollback request's correlation ID. */
+function rollbackCorrelation(cs: ChangeSetRecord): string {
+  return cs.rollbackRequest?.correlationId ?? cs.executionRequest?.correlationId ?? cs.correlationId;
+}
+
+/** A writer's outcome going back: a write restored the item (its error kept, e.g. `already_restored`). */
+function rollbackOutcome(o: ItemOutcome): RollbackItemOutcome {
+  const status = o.status === 'written' ? 'restored' : o.status;
+  return { targetId: o.targetId, status, ...(o.error === undefined ? {} : { error: o.error }) };
+}
+
+/** The same write failure handling for execution and rollback batches (NFR-2, SEC-3). */
+function writeFailure(error: unknown, changesetId: string, batchNo: number, message: string): ApplicationFailure {
+  // A newer attempt owns the batch: this one stops without recording anything (NFR-2).
+  if (error instanceof BatchFenced) return superseded();
+  // The class name and fixed code only, never the message (SEC-3).
+  Context.current().log.warn(message, {
+    changesetId,
+    batchNo,
+    errorClass: error instanceof Error ? error.constructor.name : typeof error,
+    ...(error instanceof RetryableWriteError ? { code: error.code } : {}),
+  });
+  // Retried by the activity's policy; the writer's message stays out of history (SEC-3).
+  return ApplicationFailure.retryable('writer_failed');
 }
 
 export function createActivities(deps: ActivityDeps): ChangesetActivities {
@@ -99,6 +139,15 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
       thresholdExceeded: failureThresholdExceeded(stats, settings.failureThreshold),
     };
   };
+
+  /** Counts of a rollback batch with the rollbackable items left after it (EXE-8). */
+  const rollbackResult = async (changesetId: string, counts: RollbackCounts, empty: boolean): Promise<RollbackBatchResult> => ({
+    restored: counts.restored,
+    skipped: counts.skipped,
+    failed: counts.failed,
+    remaining: await repository.rollbackableCount(changesetId),
+    empty,
+  });
 
   return {
     async inspect(changesetId) {
@@ -223,17 +272,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
         // The whole write (read, submit, poll, verify) is kept alive by the timer heartbeat (EXE-4).
         outcomes = await whileHeartbeating(() => writer.writeBatch({ changeset, items: claim.items, batch }));
       } catch (error) {
-        // A newer attempt owns the batch: this one stops without recording anything (NFR-2).
-        if (error instanceof BatchFenced) throw superseded();
-        // The class name and fixed code only, never the message (SEC-3).
-        Context.current().log.warn('change-set batch write failed', {
-          changesetId,
-          batchNo,
-          errorClass: error instanceof Error ? error.constructor.name : typeof error,
-          ...(error instanceof RetryableWriteError ? { code: error.code } : {}),
-        });
-        // Retried by the activity's policy; the writer's message stays out of history (SEC-3).
-        throw ApplicationFailure.retryable('writer_failed');
+        throw writeFailure(error, changesetId, batchNo, 'change-set batch write failed');
       }
 
       const covered = coverBatch(claim.items, outcomes);
@@ -305,6 +344,124 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
           { notifications, ...(terminal.errorCode === undefined ? {} : { errorCode: terminal.errorCode }) },
         );
       }
+      // A lost compare-and-set (a retry after success, NFR-2) answers the current status.
+      return { status: (finished ?? (await load(changesetId))).status };
+    },
+
+    async openRollbackWindow(changesetId) {
+      const changeset = await load(changesetId);
+      // Write-once (NFR-2): a window already opened is answered as stored.
+      if (changeset.rollbackUntil !== undefined) return { untilMs: changeset.rollbackUntil.getTime() };
+      const configuration = deps.configuration();
+      const operation = configuration.policy.operations.find((o) => o.id === changeset.operation);
+      // An operation gone from the configuration opens no window; this never fails the workflow.
+      if (operation?.manifest === undefined) return { untilMs: null };
+      const end = rollbackWindowEnd({
+        changeset,
+        operation,
+        rollbackable: await repository.rollbackableCount(changesetId),
+        hours: settingsFor(configuration, changeset.operation).rollbackWindowHours,
+        now: deps.now(),
+      });
+      if (end === undefined) return { untilMs: null };
+      const stored = await repository.openRollbackWindow(changesetId, end);
+      return { untilMs: stored === undefined ? null : stored.getTime() };
+    },
+
+    async beginRollback(changesetId) {
+      const changeset = await load(changesetId);
+      if (changeset.status !== 'rolling_back') return { ok: false, outcome: 'executor_error' };
+      // CS-4: the stored items still hash to the stored hash; one heartbeat per page keeps a long hash alive.
+      const pages: Pick<ChangeSetRepository, 'itemsPage'> = {
+        itemsPage: (id, query) => {
+          Context.current().heartbeat();
+          return repository.itemsPage(id, query);
+        },
+      };
+      const hash = changeset.hash === undefined ? undefined : await hashStoredItems(pages, changeset);
+      if (hash === undefined || hash !== changeset.hash) return { ok: false, outcome: 'hash_mismatch' };
+      const configuration = deps.configuration();
+      // Ruling R13: no rollback writer (strategy none, operation or binding gone) ends the rollback failed.
+      if (deps.rollbackWriterFor(configuration, changeset.operation) === undefined) return { ok: false, outcome: 'executor_error' };
+      return {
+        ok: true,
+        nextBatch: await repository.nextRollbackBatch(changesetId),
+        itemsPerRun: settingsFor(configuration, changeset.operation).itemsPerRun,
+      };
+    },
+
+    async rollbackBatch(changesetId, batchNo) {
+      const configuration = deps.configuration();
+      const changeset = await load(changesetId);
+      const settings = settingsFor(configuration, changeset.operation);
+      const attempt = Context.current().info.attempt;
+
+      const claim = await repository.claimRollbackBatch(changesetId, batchNo, attempt, settings.batchSize);
+      if (claim.kind === 'fenced') throw superseded();
+      if (claim.kind === 'done') return rollbackResult(changesetId, claim.counts, false);
+      if (claim.kind === 'empty') return rollbackResult(changesetId, { restored: 0, skipped: 0, failed: 0 }, true);
+
+      const writer = deps.rollbackWriterFor(configuration, changeset.operation);
+      if (writer === undefined) throw ApplicationFailure.nonRetryable('operation_unavailable');
+      // Rollback batches are their own sequence: the key never collides with an execution batch's.
+      const batch: BatchContext = {
+        key: `${changesetId}:rollback:${String(batchNo)}`,
+        ...(claim.batch.submission === undefined ? {} : { submission: claim.batch.submission }),
+        recordSubmission: async (submission) => {
+          if (!(await repository.recordRollbackSubmission(changesetId, batchNo, attempt, submission))) throw new BatchFenced();
+        },
+        heartbeat: () => {
+          Context.current().heartbeat();
+        },
+      };
+      let outcomes: readonly ItemOutcome[];
+      try {
+        // A recorded submission is resumed by the writer, never resubmitted (EXE-4, NFR-2).
+        outcomes = await whileHeartbeating(() => writer.writeBatch({ changeset, items: claim.items, batch }));
+      } catch (error) {
+        throw writeFailure(error, changesetId, batchNo, 'change-set rollback batch write failed');
+      }
+
+      // The writer's returned outcomes decide, never the stored plan (which holds internal outcomes).
+      const covered = coverBatch(claim.items, outcomes).map(rollbackOutcome);
+      // Claimed items are rollbackable, so these are exactly the counts completeRollbackBatch applies.
+      const counts = { restored: 0, skipped: 0, failed: 0 };
+      for (const o of covered) counts[o.status] += 1;
+      const completed = await repository.completeRollbackBatch(
+        changesetId,
+        batchNo,
+        attempt,
+        covered,
+        changesetRollbackBatchEvent({ id: deps.newId(), changeset, batchNo, counts, correlationId: rollbackCorrelation(changeset) }),
+      );
+      if (!completed.ok) throw superseded();
+      return rollbackResult(changesetId, completed.counts, false);
+    },
+
+    async finishRollback(changesetId, outcome) {
+      const changeset = await load(changesetId);
+      const terminal = rollbackTerminal(outcome);
+      // NTF-1: the requester role's result targets, in the transition's transaction; a retry after success inserts nothing (NTF-3).
+      const notifications = resultNotifications(deps.configuration().notify, {
+        kind: 'rollback_result',
+        role: changeset.submission?.role,
+        round: changeset.approvalRound,
+        step: 0,
+      });
+      const finished = await repository.transition(
+        changesetId,
+        ['rolling_back'],
+        terminal.status,
+        changesetTransitionEvent({
+          id: deps.newId(),
+          actor: 'system',
+          changeset,
+          from: 'rolling_back',
+          to: terminal.status,
+          correlationId: rollbackCorrelation(changeset),
+        }),
+        { notifications, ...(terminal.status === 'failed' ? { errorCode: terminal.errorCode } : {}) },
+      );
       // A lost compare-and-set (a retry after success, NFR-2) answers the current status.
       return { status: (finished ?? (await load(changesetId))).status };
     },

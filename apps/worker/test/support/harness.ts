@@ -97,12 +97,17 @@ export const FAST_TUNING: ActivityTuning = {
   retryMaxMs: 200,
 };
 
-export const TEST_SETTINGS: ExecutionSettings = { batchSize: 2, failureThreshold: 0.5, itemsPerRun: 2000 };
+/** `rollbackWindowHours: 0` (ruling R7): no window opens, so a test awaiting the workflow result still sees it close. */
+export const TEST_SETTINGS: ExecutionSettings = { batchSize: 2, failureThreshold: 0.5, itemsPerRun: 2000, rollbackWindowHours: 0 };
 
 export interface TestWorkerOptions {
   readonly writer?: ChangeWriter;
   /** Replaces the writer factory (default: `writer` for every operation), e.g. the production `createWriterFor`. */
   readonly writerFor?: ActivityDeps['writerFor'];
+  /** The rollback writer for every operation (default: `writer`). */
+  readonly rollbackWriter?: ChangeWriter;
+  /** Replaces the rollback writer factory, e.g. the production `createRollbackWriterFor` or one answering undefined. */
+  readonly rollbackWriterFor?: ActivityDeps['rollbackWriterFor'];
   readonly reader?: UpstreamReader;
   /**
    * Replaces the reader factory, e.g. to fail every preparation before any read (an infrastructure
@@ -160,6 +165,10 @@ function spied(a: ChangesetActivities, spy: ((activity: string) => unknown) | un
     beginExecution: async (id, options) => (await before('beginExecution'), a.beginExecution(id, options)),
     executeBatch: async (id, batchNo) => (await before('executeBatch'), a.executeBatch(id, batchNo)),
     finishExecution: async (id, outcome) => (await before('finishExecution'), a.finishExecution(id, outcome)),
+    openRollbackWindow: async (id) => (await before('openRollbackWindow'), a.openRollbackWindow(id)),
+    beginRollback: async (id) => (await before('beginRollback'), a.beginRollback(id)),
+    rollbackBatch: async (id, batchNo) => (await before('rollbackBatch'), a.rollbackBatch(id, batchNo)),
+    finishRollback: async (id, outcome) => (await before('finishRollback'), a.finishRollback(id, outcome)),
   };
 }
 
@@ -168,6 +177,7 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
   const taskQueue = opts.taskQueue ?? `test-${randomUUID()}`;
   const settings: ExecutionSettings = { ...TEST_SETTINGS, ...opts.settings };
   const writer = opts.writer ?? new ScriptedWriter();
+  const rollbackWriter = opts.rollbackWriter ?? writer;
   const reader = opts.reader ?? noReads;
   const { guard } = opts;
   const guardFor = guard === undefined ? createExecutionGuard({ repository: infra.repository, audit: infra.audit, newId: randomUUID }) : () => guard;
@@ -176,6 +186,7 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
     repository: infra.repository,
     configuration: () => configuration,
     writerFor: opts.writerFor ?? (() => writer),
+    rollbackWriterFor: opts.rollbackWriterFor ?? (() => rollbackWriter),
     readerFor: opts.readerFor ?? (() => reader),
     guardFor,
     settingsFor: () => settings,
