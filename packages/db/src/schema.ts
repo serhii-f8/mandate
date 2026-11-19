@@ -49,8 +49,11 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
 
 /**
  * Audit base table (AUD-1). Append-only: a trigger added by migration
- * `0001_audit_event_append_only` rejects UPDATE, DELETE and TRUNCATE (AUD-3).
- * `prev_hash` and `hash` are filled by the hash chain of Phase 8.
+ * `0001_audit_event_append_only` rejects UPDATE, DELETE and TRUNCATE (AUD-3), except the two
+ * sanctioned paths migration `0013_audit_chain` adds, each behind a transaction-local setting:
+ * the sealer (`aiops.audit_seal = on`) may fill `chain_pos`, `prev_hash` and `hash` of an
+ * unsealed row once, and retention (`aiops.audit_retention = on`, AUD-7) may delete sealed rows
+ * at or below the newest `audit_anchor`. TRUNCATE is always refused.
  */
 export const auditEvent = pgTable(
   'audit_event',
@@ -69,13 +72,30 @@ export const auditEvent = pgTable(
     details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
     prevHash: text('prev_hash'),
     hash: text('hash'),
+    chainPos: bigint('chain_pos', { mode: 'number' }).unique(),
   },
   (t) => [
     index('audit_event_ts_idx').on(t.ts),
     index('audit_event_correlation_id_idx').on(t.correlationId),
     index('audit_event_changeset_id_idx').on(t.changesetId),
+    index('audit_event_actor_seq_idx').on(t.actor, t.seq),
+    index('audit_event_action_seq_idx').on(t.action, t.seq),
   ],
 );
+
+/**
+ * Retention anchors (AUD-7): one row per archived range, naming the last archived chain position,
+ * its hash, the archive file and its digest. Verification after retention starts from the newest
+ * anchor. Append-only: migration `0013_audit_chain` rejects UPDATE, DELETE and TRUNCATE.
+ */
+export const auditAnchor = pgTable('audit_anchor', {
+  chainPos: bigint('chain_pos', { mode: 'number' }).primaryKey(),
+  hash: text('hash').notNull(),
+  archive: text('archive').notNull(),
+  sha256: text('sha256').notNull(),
+  count: bigint('count', { mode: 'number' }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * Envelope-encrypted upstream credentials (SEC-2, ADR 0019). Plaintext and data keys are

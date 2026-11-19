@@ -11,6 +11,7 @@ export { parseMasterKeys, type KeyProvider } from './keyring.js';
 export { createDb, type Database, type Db, type DbExecutor } from './client.js';
 export { MIGRATION_LOCK_KEY, assertMigrated, migrationState, runMigrations } from './migrate.js';
 export {
+  auditAnchor,
   auditEvent,
   changeBatch,
   changeItem,

@@ -92,6 +92,13 @@
       "when": 1795079609204,
       "tag": "0012_rollback",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795086809447,
+      "tag": "0013_audit_chain",
+      "breakpoints": true
     }
   ]
 }
