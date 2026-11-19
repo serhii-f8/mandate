@@ -2,6 +2,7 @@
 export const API_ENV = Symbol('ApiEnv');
 export const APPROVAL_SERVICE = Symbol('ApprovalService');
 export const AUDIT_LOG = Symbol('AuditLog');
+export const AUDIT_READER = Symbol('AuditReader');
 export const BEARER_GATE = Symbol('BearerGate');
 export const CHANGESET_EXECUTOR = Symbol('ChangeSetExecutor');
 export const CHANGESET_REPOSITORY = Symbol('ChangeSetRepository');

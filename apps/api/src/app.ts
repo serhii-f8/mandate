@@ -23,7 +23,7 @@ import {
 } from '@aiops/core';
 import { clientDataConverter, parseTemporalKeys, TemporalExecutor, TemporalWorkflowStarter } from '@aiops/temporal';
 import { Client, Connection } from '@temporalio/client';
-import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, PostgresRateCounter, PostgresSessionStore, PostgresTaskRepository, type Database } from '@aiops/db';
+import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresAuditReader, PostgresChangeSetRepository, PostgresCredentialVault, PostgresRateCounter, PostgresSessionStore, PostgresTaskRepository, type Database } from '@aiops/db';
 import { createBearerGate } from './auth/bearer-gate.js';
 import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
@@ -31,6 +31,7 @@ import { HealthController } from './health/health.controller.js';
 import { bodyErrorHandler } from './http/body-errors.js';
 import { createLogger, PinoNestLogger } from './logger.js';
 import { ApprovalService } from './approvals/approval-service.js';
+import { AuditController } from './audit/audit.controller.js';
 import { ApprovalsController } from './approvals/approvals.controller.js';
 import { ChangeSetPagesController } from './approvals/changeset-pages.controller.js';
 import { ChangeSetActionsController } from './changesets/changeset-actions.controller.js';
@@ -45,6 +46,7 @@ import {
   API_ENV,
   APPROVAL_SERVICE,
   AUDIT_LOG,
+  AUDIT_READER,
   BEARER_GATE,
   CHANGESET_EXECUTOR,
   CHANGESET_REPOSITORY,
@@ -167,7 +169,7 @@ class AppModule {
     const pageChecks: PageChecks = { publicOrigin: env.publicUrl.origin, freshAuthSeconds: env.freshAuthSeconds };
     return {
       module: AppModule,
-      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, ApprovalsController, ChangeSetPagesController, ChangeSetExportController, ChangeSetActionsController, WebAppController],
+      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, ApprovalsController, ChangeSetPagesController, ChangeSetExportController, ChangeSetActionsController, AuditController, WebAppController],
       providers: [
         { provide: API_ENV, useValue: env },
         { provide: LOGGER, useValue: logger },
@@ -194,6 +196,7 @@ class AppModule {
           },
         },
         { provide: AUDIT_LOG, inject: [DATABASE], useFactory: (d: Database) => new DrizzleAuditLog(d.db, { sensitiveKeys: () => configuration.current.sensitiveFields }) },
+        { provide: AUDIT_READER, inject: [DATABASE], useFactory: (d: Database) => new PostgresAuditReader(d.pool) },
         {
           provide: CREDENTIAL_VAULT,
           inject: [DATABASE],

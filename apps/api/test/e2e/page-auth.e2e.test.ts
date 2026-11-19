@@ -151,6 +151,7 @@ describe('AUTH-5 pages log in through the identity provider', () => {
       authTime: expect.any(String) as unknown,
       fresh: true,
       expiresAt: expect.any(String) as unknown,
+      viewAudit: false,
     });
     secrets.add(String(body.csrfToken));
 
@@ -342,6 +343,8 @@ describe('SEC-1 every page route is authorized', () => {
         'ChangeSetActionsController.submit',
         'ChangeSetActionsController.exclude',
         'ChangeSetActionsController.rollback',
+        'AuditController.search',
+        'AuditController.export',
       ]),
     );
     expect(routes.filter((r) => !r.marked)).toEqual([]);
