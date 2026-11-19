@@ -74,11 +74,44 @@ const REQUIRED_CHANGESET_FIXTURES = [
 ];
 
 /**
- * SDK-internal payloads that never pass the codec and carry only the patch id (`{id, deprecated}`):
- * the `core_patch` marker's `patch-data` and the `TemporalChangeVersion` search attribute. Skipped by
- * the SEC-4 walk; the patch id is not workflow data.
+ * SDK-internal payloads that never pass the codec and carry only a patch id: the `core_patch`
+ * marker's `patch-data` (`{ id, deprecated }`) and the `TemporalChangeVersion` search attribute
+ * (`[id]`). The SEC-4 walk accepts them only when the decoded content has exactly that shape; any
+ * other content under these keys is walked and reported like every other payload.
  */
-const PATCH_METADATA_KEYS = new Set(['patch-data', 'TemporalChangeVersion']);
+const PATCH_ID = /^[a-z0-9-]+-\d{8}$/;
+
+function isPatchData(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  const keys = Object.keys(value).sort();
+  const v = value as { id?: unknown; deprecated?: unknown };
+  return keys.join() === 'deprecated,id' && typeof v.id === 'string' && PATCH_ID.test(v.id) && typeof v.deprecated === 'boolean';
+}
+
+function isPatchIdList(value: unknown): boolean {
+  return Array.isArray(value) && value.every((id) => typeof id === 'string' && PATCH_ID.test(id));
+}
+
+/** A json/plain payload `{ metadata, data }` whose decoded data passes `check`. */
+function isPatchPayload(payload: unknown, check: (decoded: unknown) => boolean): boolean {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const { metadata, data } = payload as { metadata?: { encoding?: unknown }; data?: unknown };
+  if (typeof metadata?.encoding !== 'string' || Buffer.from(metadata.encoding, 'base64').toString('utf8') !== 'json/plain') return false;
+  if (typeof data !== 'string') return false;
+  try {
+    return check(JSON.parse(Buffer.from(data, 'base64').toString('utf8')));
+  } catch {
+    return false;
+  }
+}
+
+/** True when `value` under `key` is a genuine SDK patch payload. */
+function isPatchMetadata(key: string, value: unknown): boolean {
+  if (key === 'TemporalChangeVersion') return isPatchPayload(value, isPatchIdList);
+  if (key !== 'patch-data' || typeof value !== 'object' || value === null) return false;
+  const payloads = (value as { payloads?: unknown }).payloads;
+  return Array.isArray(payloads) && payloads.length === 1 && isPatchPayload(payloads[0], isPatchData);
+}
 
 /** Every payload's `metadata.encoding` in a history JSON (base64 in the proto JSON form), decoded. */
 function payloadEncodings(node: unknown): string[] {
@@ -86,7 +119,7 @@ function payloadEncodings(node: unknown): string[] {
   if (node === null || typeof node !== 'object') return [];
   const found: string[] = [];
   for (const [key, value] of Object.entries(node) as [string, unknown][]) {
-    if (PATCH_METADATA_KEYS.has(key)) continue;
+    if (isPatchMetadata(key, value)) continue;
     if (key === 'metadata' && value !== null && typeof value === 'object') {
       const encoding: unknown = (value as { encoding?: unknown }).encoding;
       if (typeof encoding === 'string') found.push(Buffer.from(encoding, 'base64').toString('utf8'));
@@ -95,6 +128,24 @@ function payloadEncodings(node: unknown): string[] {
   }
   return found;
 }
+
+const plain = (data: string): { metadata: { encoding: string }; data: string } => ({
+  metadata: { encoding: Buffer.from('json/plain').toString('base64') },
+  data: Buffer.from(data).toString('base64'),
+});
+
+describe('SEC-4 patch payload exemption', () => {
+  it('SEC-4 accepts the SDK patch marker and change-version shapes only', () => {
+    const genuine = { 'patch-data': { payloads: [plain('{"id":"a-b-20261118","deprecated":false}')] }, TemporalChangeVersion: plain('["a-b-20261118"]') };
+    expect(payloadEncodings(genuine)).toEqual([]);
+  });
+
+  it('SEC-4 reports a forged patch-data payload carrying other data', () => {
+    expect(payloadEncodings({ 'patch-data': { payloads: [plain('{"id":"a-b-20261118","deprecated":false,"secret":"x"}')] } })).toEqual(['json/plain']);
+    expect(payloadEncodings({ 'patch-data': { payloads: [plain('{"customer":"jane"}')] } })).toEqual(['json/plain']);
+    expect(payloadEncodings({ TemporalChangeVersion: plain('["jane@example.com"]') })).toEqual(['json/plain']);
+  });
+});
 
 describe('EXE-10 workflow replay gate', () => {
   it('has at least one recorded history', () => {
