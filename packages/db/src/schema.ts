@@ -28,6 +28,7 @@ import type {
   NotificationKind,
   NotificationState,
   PlanEntry,
+  RollbackItemStatus,
   TaskKind,
 } from '@aiops/core';
 
@@ -164,6 +165,13 @@ export const changeSet = pgTable(
     // CS-5: the source of a derived change-set, set on insert and fixed by the identity-column
     // guard of migration `0011_derived_change_sets`; NULL for a change-set prepared by a tool call.
     derivedFrom: uuid('derived_from').references((): AnyPgColumn => changeSet.id),
+    // EXE-8 rollback (migration `0012_rollback`): the window is written once by the workflow; the
+    // request columns are written once, together with the move into `rolling_back`.
+    rollbackUntil: timestamp('rollback_until', { withTimezone: true }),
+    rollbackRequestedAt: timestamp('rollback_requested_at', { withTimezone: true }),
+    rollbackActor: text('rollback_actor'),
+    rollbackCorrelationId: text('rollback_correlation_id'),
+    rollbackClientId: text('rollback_client_id'),
   },
   (t) => [
     index('change_set_requester_created_at_idx').on(t.requester, t.createdAt),
@@ -194,11 +202,18 @@ export const changeItem = pgTable(
     before: jsonb('before').$type<unknown>().notNull(),
     after: jsonb('after').$type<unknown>().notNull(),
     error: text('error'),
+    // EXE-8: the rollback outcome of an item this run wrote, written once (migration `0012_rollback`).
+    rollbackStatus: text('rollback_status').$type<RollbackItemStatus>(),
+    rollbackError: text('rollback_error'),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.changesetId, t.targetId] }),
     check('change_item_status_check', sql`${t.status} IN ('pending', 'excluded', 'written', 'failed', 'skipped')`),
+    check(
+      'change_item_rollback_status_check',
+      sql`${t.rollbackStatus} IS NULL OR ${t.rollbackStatus} IN ('restored', 'skipped', 'failed')`,
+    ),
   ],
 );
 
@@ -229,6 +244,33 @@ export const changeBatch = pgTable(
   (t) => [
     primaryKey({ columns: [t.changesetId, t.batchNo] }),
     check('change_batch_state_check', sql`${t.state} IN ('open', 'done')`),
+  ],
+);
+
+// EXE-3, EXE-8: the batches of a rollback run, with the columns and guards of `change_batch`
+// (migration `0012_rollback`).
+export const changeRollbackBatch = pgTable(
+  'change_rollback_batch',
+  {
+    changesetId: uuid('changeset_id')
+      .notNull()
+      .references(() => changeSet.id),
+    batchNo: integer('batch_no').notNull(),
+    attempt: integer('attempt').notNull(),
+    state: text('state').$type<'open' | 'done'>().notNull(),
+    targetIds: jsonb('target_ids').$type<string[]>().notNull(),
+    lastTarget: text('last_target').notNull(),
+    upstreamBatchId: text('upstream_batch_id'),
+    plan: jsonb('plan').$type<PlanEntry[]>(),
+    written: integer('written').notNull().default(0),
+    failed: integer('failed').notNull().default(0),
+    skipped: integer('skipped').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.changesetId, t.batchNo] }),
+    check('change_rollback_batch_state_check', sql`${t.state} IN ('open', 'done')`),
   ],
 );
 
@@ -329,7 +371,7 @@ export const notificationOutbox = pgTable(
     index('notification_outbox_due_idx').on(t.nextAttemptAt).where(sql`${t.state} = 'pending'`),
     check(
       'notification_outbox_kind_check',
-      sql`${t.kind} IN ('approval_requested', 'approval_decided', 'execution_finished')`,
+      sql`${t.kind} IN ('approval_requested', 'approval_decided', 'execution_finished', 'rollback_result')`,
     ),
     check('notification_outbox_state_check', sql`${t.state} IN ('pending', 'sent', 'failed')`),
   ],

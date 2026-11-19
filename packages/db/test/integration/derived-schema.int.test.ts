@@ -52,6 +52,14 @@ async function rejection(promise: Promise<unknown>): Promise<string> {
   throw new Error('expected the statement to be rejected');
 }
 
+/** The number of committed migrations after journal index `idx`: an upgrade applies all of them. */
+function migrationsAfter(idx: number): number {
+  const journal = JSON.parse(readFileSync(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as {
+    entries: { idx: number }[];
+  };
+  return journal.entries.filter((entry) => entry.idx > idx).length;
+}
+
 /** The committed migrations up to and including 0010, as the previous release shipped them. */
 function migrationsBefore0011(): string {
   const dir = mkdtempSync(join(tmpdir(), 'aiops-mig-'));
@@ -93,7 +101,7 @@ describe('CS-5 derived change-set storage', () => {
       rmSync(folder, { recursive: true, force: true });
     }
 
-    expect(await runMigrations(url)).toEqual({ applied: 1 });
+    expect(await runMigrations(url)).toEqual({ applied: migrationsAfter(10) });
 
     const after = new pg.Client({ connectionString: url });
     await after.connect();
