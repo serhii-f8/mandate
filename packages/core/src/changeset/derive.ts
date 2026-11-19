@@ -68,9 +68,10 @@ export async function deriveChangeSet(deps: DeriveDeps, req: DeriveRequest): Pro
   // 1. Unknown and foreign change-sets look the same (SEC-1).
   const source = await repository.get(req.sourceId);
   if (source?.requester !== caller.subject) return { ok: false, reason: 'not_found' };
+  // 2. An opaque change-set has no items to exclude (CS-5); after the requester check, so a foreign one stays not_found.
   if (!req.excludable(source.operation)) return { ok: false, reason: 'not_excludable' };
 
-  // 2. Lazy expiry (CS-6): a miss means someone else moved it first; it is past its expiry either way.
+  // 3. Lazy expiry (CS-6): a miss means someone else moved it first; it is past its expiry either way.
   const now = deps.now();
   if (isExpiryDue(source, now)) {
     await repository.transition(
@@ -90,18 +91,18 @@ export async function deriveChangeSet(deps: DeriveDeps, req: DeriveRequest): Pro
     return { ok: false, reason: 'expired' };
   }
 
-  // 3–4.
+  // 4–5.
   if (source.status !== 'prepared') return { ok: false, reason: 'not_prepared', status: source.status };
   if (source.hash !== req.hash) return { ok: false, reason: 'hash_mismatch' };
 
-  // 5–6.
+  // 6–7.
   if (req.exclude.length + req.include.length > MAX_DERIVE_TARGETS) return { ok: false, reason: 'invalid_request' };
   if (!req.exclude.every(isValidTargetId) || !req.include.every(isValidTargetId)) {
     return { ok: false, reason: 'invalid_request' };
   }
   if (req.exclude.length === 0 && req.include.length === 0) return { ok: false, reason: 'empty_request' };
 
-  // 7–8. No lock on the source: its items are immutable once it is prepared (CS-4, the update
+  // 8–9. No lock on the source: its items are immutable once it is prepared (CS-4, the update
   // trigger), so a concurrent submission of the source cannot change what is counted or copied (F17).
   const check = await repository.deriveCheck(source.id, req.exclude, req.include);
   if (check.unknown > 0) return { ok: false, reason: 'unknown_items', count: check.unknown };
