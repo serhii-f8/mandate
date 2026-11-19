@@ -31,6 +31,24 @@ describe('SEC-3 NFR-11 worker logger', () => {
     expect(line.service).toBe('worker');
   });
 
+  it('SEC-3 the worker logger redacts sensitive keys at the root and two levels down', () => {
+    const { lines, stream } = capture();
+    const logger = createWorkerLogger('info', stream);
+    logger.info(
+      {
+        token: 'SECRET-1', password: 'SECRET-2', secret: 'SECRET-3', client_secret: 'SECRET-4', authorization: 'SECRET-5',
+        access_token: 'SECRET-6', refresh_token: 'SECRET-7', id_token: 'SECRET-8',
+        upstream: { access_token: 'SECRET-9', refresh_token: 'SECRET-10', id_token: 'SECRET-11' },
+        call: { upstream: { token: 'SECRET-12', password: 'SECRET-13' } },
+      },
+      'probe',
+    );
+    expect(lines.join('')).not.toMatch(/SECRET-\d/);
+    const line = parse(lines[0]);
+    expect(line.token).toBe('[REDACTED]');
+    expect(line.password).toBe('[REDACTED]');
+  });
+
   it('NFR-11 worker log lines inside a span carry trace_id and span_id', async () => {
     const provider = new NodeTracerProvider();
     provider.register();
