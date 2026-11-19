@@ -42,6 +42,7 @@ import {
 } from '@aiops/temporal';
 import { Context } from '@temporalio/activity';
 import { ApplicationFailure } from '@temporalio/common';
+import { markActivitySpan, rollbackCorrelation } from '../telemetry/span-attributes.js';
 import { whileHeartbeating } from './heartbeat.js';
 import { executionSettings, type ExecutionSettings } from './settings.js';
 
@@ -65,11 +66,6 @@ const superseded = (): ApplicationFailure => ApplicationFailure.nonRetryable('ba
 
 function remaining(stats: ChangeSetStats): number {
   return stats.included - stats.written - stats.failed - stats.skipped;
-}
-
-/** EXE-4: a rollback's audit rows and transition run under the rollback request's correlation ID. */
-function rollbackCorrelation(cs: ChangeSetRecord): string {
-  return cs.rollbackRequest?.correlationId ?? cs.executionRequest?.correlationId ?? cs.correlationId;
 }
 
 /** The same write failure handling for execution and rollback batches (NFR-2, SEC-3). */
@@ -146,6 +142,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
   return {
     async inspect(changesetId) {
       const changeset = await load(changesetId);
+      markActivitySpan(changeset, 'prepare');
       const stats = await repository.stats(changesetId);
       return {
         status: changeset.status,
@@ -161,6 +158,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
     async prepare(changesetId) {
       const configuration = deps.configuration();
       const changeset = await load(changesetId);
+      markActivitySpan(changeset, 'prepare');
       if (changeset.status !== 'preparing') return { status: changeset.status };
       // The arguments were validated and authorized under the configuration the change-set names (EXE-1).
       if (changeset.configHash !== configuration.hash) {
@@ -200,6 +198,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
 
     async expire(changesetId) {
       const changeset = await load(changesetId);
+      markActivitySpan(changeset, 'prepare');
       if (!PRE_EXECUTION.includes(changeset.status)) return;
       // CAS from the status read, so the audited `from` is the one replaced; a lost race is a no-op.
       await repository.transition(
@@ -221,6 +220,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
     async beginExecution(changesetId, options) {
       const configuration = deps.configuration();
       const changeset = await load(changesetId);
+      markActivitySpan(changeset, 'execute');
       if (!options.verified) {
         const checked = await deps.guardFor(configuration).check(changeset);
         if (!checked.ok) return { ok: false, outcome: checked.outcome };
@@ -242,6 +242,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
     async executeBatch(changesetId, batchNo) {
       const configuration = deps.configuration();
       const changeset = await load(changesetId);
+      markActivitySpan(changeset, 'execute');
       const settings = settingsFor(configuration, changeset.operation);
       const attempt = Context.current().info.attempt;
 
@@ -292,6 +293,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
 
     async finishExecution(changesetId, outcome) {
       const changeset = await load(changesetId);
+      markActivitySpan(changeset, 'execute');
       const cancel = changeset.cancelRequest;
       // NTF-1: the requester role's result targets, in the transition's transaction; a retry after success inserts nothing (NTF-3).
       const notifications = resultNotifications(deps.configuration().notify, {
@@ -344,6 +346,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
 
     async openRollbackWindow(changesetId) {
       const changeset = await load(changesetId);
+      markActivitySpan(changeset, 'rollback');
       // Write-once (NFR-2): a window already opened is answered as stored.
       if (changeset.rollbackUntil !== undefined) return { untilMs: changeset.rollbackUntil.getTime() };
       const configuration = deps.configuration();
@@ -364,6 +367,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
 
     async beginRollback(changesetId) {
       const changeset = await load(changesetId);
+      markActivitySpan(changeset, 'rollback');
       if (changeset.status !== 'rolling_back') return { ok: false, outcome: 'executor_error' };
       // CS-4: the stored items still hash to the stored hash; one heartbeat per page keeps a long hash alive.
       const pages: Pick<ChangeSetRepository, 'itemsPage'> = {
@@ -387,6 +391,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
     async rollbackBatch(changesetId, batchNo) {
       const configuration = deps.configuration();
       const changeset = await load(changesetId);
+      markActivitySpan(changeset, 'rollback');
       const settings = settingsFor(configuration, changeset.operation);
       const attempt = Context.current().info.attempt;
 
@@ -434,6 +439,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
 
     async finishRollback(changesetId, outcome) {
       const changeset = await load(changesetId);
+      markActivitySpan(changeset, 'rollback');
       const terminal = rollbackTerminal(outcome);
       // NTF-1: the requester role's result targets, in the transition's transaction; a retry after success inserts nothing (NTF-3).
       const notifications = resultNotifications(deps.configuration().notify, {

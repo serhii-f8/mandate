@@ -155,6 +155,31 @@ describe('NFR-11 tracing through Temporal', () => {
     });
   }, 60_000);
 
+  it('NFR-11 activity spans carry the change-set ID and the correlation ID of their phase', async () => {
+    await withTracedWorker(async (worker) => {
+      const prepared = await preparedByWorkflow(infra, worker, ['t-0001'], { correlationId: 'corr-prepare' });
+      await startExecutionOf(infra.repository, prepared, { correlationId: 'corr-execute' });
+      await worker.executor.wake(prepared.id);
+      await vi.waitFor(
+        async () => {
+          expect(await statusOf(infra, prepared.id)).toBe('completed');
+          expect(finished().map((s) => s.name)).toContain('RunActivity:executeBatch');
+        },
+        { timeout: 30_000, interval: 100 },
+      );
+
+      const prepare = spanNamed('RunActivity:prepare');
+      expect(prepare.attributes['aiops.changeset_id']).toBe(prepared.id);
+      expect(prepare.attributes['aiops.correlation_id']).toBe('corr-prepare');
+      const batches = finished().filter((s) => s.name === 'RunActivity:executeBatch');
+      expect(batches.length).toBeGreaterThan(0);
+      for (const batch of batches) {
+        expect(batch.attributes['aiops.changeset_id']).toBe(prepared.id);
+        expect(batch.attributes['aiops.correlation_id']).toBe('corr-execute');
+      }
+    });
+  }, 60_000);
+
   it('NFR-11 the workflow span is exported when the workflow closes', async () => {
     await withTracedWorker(async (worker) => {
       const { result: prepared, traceId } = await underRoot(() => preparedByWorkflow(infra, worker, ['t-0001']));

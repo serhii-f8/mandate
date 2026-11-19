@@ -26,6 +26,8 @@ export interface CreatedOptions {
    * written through the repository (`createChangeSet` cannot expire sooner than a minute).
    */
   readonly expiresAt?: Date;
+  /** The preparation's correlation ID (default `corr-create`); used on the `createChangeSet` path only. */
+  readonly correlationId?: string;
 }
 
 /** Creates a change-set in `preparing` as the api does, under the current configuration's hash. */
@@ -43,7 +45,7 @@ export async function created(infra: Infra, skus: readonly string[], opts: Creat
       operation: { ...operation, manifest },
       args,
       caller: { subject: 'alice', groups: [EDITOR_GROUP] },
-      correlationId: 'corr-create',
+      correlationId: opts.correlationId ?? 'corr-create',
       configHash: infra.configuration.hash,
       expireAfterHours: 1,
     },
