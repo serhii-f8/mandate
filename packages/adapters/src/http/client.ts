@@ -11,7 +11,6 @@ import {
   type RequestSpan,
 } from '@aiops/connector-sdk';
 import type { HttpRequestSpec } from '../openapi/request.js';
-import { FORBIDDEN_HEADERS } from './headers.js';
 import { assertEgressAllowed, createGuardedLookup, EgressDeniedError } from './egress.js';
 import { clientCredentialsToken, clientSecretBasicValue, HEADER_SAFE } from './oauth.js';
 import { createScrubber, type Scrubber } from './scrub.js';
@@ -60,8 +59,6 @@ const realSleep = (ms: number): Promise<void> =>
     setTimeout(resolve, ms);
   });
 
-/** RFC 9110 field-name token, checked after lower-casing. */
-const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9a-z-]+$/;
 /**
  * A hook header value: visible ASCII with internal spaces allowed (a W3C `tracestate` member value
  * may contain one), never CR/LF, tab or other controls, never a leading or trailing space.
@@ -74,10 +71,13 @@ function isPlainRecord(v: unknown): v is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
+/** The only headers the request hook may add: W3C trace context (NFR-11). */
+const HOOK_HEADERS: ReadonlySet<string> = new Set(['traceparent', 'tracestate']);
+
 /**
- * The hook's headers that may be added to the request: valid names and values only, never a
- * forbidden header, the auth header or a header the request already carries (SEC-3). Throws only
- * if the hook's object does.
+ * The hook's headers that may be added to the request: `traceparent` and `tracestate` only (any
+ * case), with a valid value, never the auth header or a header the request already carries
+ * (SEC-3). Throws only if the hook's object does.
  */
 function hookHeaders(span: RequestSpan, taken: ReadonlySet<string>): Record<string, string> {
   const out: Record<string, string> = {};
@@ -86,8 +86,8 @@ function hookHeaders(span: RequestSpan, taken: ReadonlySet<string>): Record<stri
   if (!isPlainRecord(raw)) return out;
   for (const [rawName, value] of Object.entries(raw)) {
     const name = rawName.toLowerCase();
-    if (!HEADER_NAME.test(name) || typeof value !== 'string' || !HOOK_VALUE.test(value)) continue;
-    if (FORBIDDEN_HEADERS.has(name) || taken.has(name) || Object.hasOwn(out, name)) continue;
+    if (!HOOK_HEADERS.has(name) || typeof value !== 'string' || !HOOK_VALUE.test(value)) continue;
+    if (taken.has(name) || Object.hasOwn(out, name)) continue;
     out[name] = value;
   }
   return out;

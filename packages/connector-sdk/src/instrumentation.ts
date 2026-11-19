@@ -16,7 +16,7 @@ export interface RequestAttemptEnd {
 }
 
 export interface RequestSpan {
-  /** Extra request headers (trace context). Never replace connection, auth or forbidden headers. */
+  /** Extra request headers: only `traceparent` and `tracestate` (any case) are sent; never replace connection or auth headers. */
   readonly headers: Readonly<Record<string, string>>;
   end(result: RequestAttemptEnd): void;
 }

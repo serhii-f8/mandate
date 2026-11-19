@@ -648,6 +648,34 @@ describe('NFR-11 request instrumentation', () => {
     }
   });
 
+  it('SEC-3 NFR-11 only traceparent and tracestate are taken from the hook, in any case', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const c = createConnectionClient(settings(), {
+      instrumentation: recorder({ TraceParent: TRACEPARENT, TRACESTATE: 'vendor=x', baggage: 'user=jane', 'x-custom': 'v', 'x-forwarded-for': '10.0.0.1' }).hook,
+    });
+    expect(await c.send(get(), { retryable: false })).toMatchObject({ ok: true, status: 200 });
+    const h = up.requests[0]?.headers;
+    expect(h?.traceparent).toBe(TRACEPARENT);
+    expect(h?.tracestate).toBe('vendor=x');
+    expect(h?.baggage).toBeUndefined();
+    expect(h?.['x-custom']).toBeUndefined();
+    expect(h?.['x-forwarded-for']).toBeUndefined();
+  });
+
+  it('NFR-11 an allowed hook header with an invalid value is dropped', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    for (const tracestate of ['a\r\nset-cookie: x=1', ' v', 'v ', 'a\tb', '']) {
+      const c = createConnectionClient(settings(), { instrumentation: recorder({ tracestate, traceparent: TRACEPARENT }).hook });
+      expect(await c.send(get(), { retryable: false })).toMatchObject({ ok: true, status: 200 });
+    }
+    expect(up.requests).toHaveLength(5);
+    for (const req of up.requests) {
+      expect(req.headers.tracestate).toBeUndefined();
+      expect(req.headers['set-cookie']).toBeUndefined();
+      expect(req.headers.traceparent).toBe(TRACEPARENT);
+    }
+  });
+
   it('SEC-3 a hook header never replaces a header the request already carries', async () => {
     up.route('GET', '/items', () => ({ status: 200, body: {} }));
     const c = createConnectionClient(settings(), { instrumentation: recorder({ Accept: 'text/html' }).hook });
