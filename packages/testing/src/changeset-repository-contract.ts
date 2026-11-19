@@ -1546,6 +1546,8 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
               audit: rollbackRequestEvents({ newId: randomUUID, changeset: cs, request: req, channel: 'page', count: 1 }),
             });
           };
+          // PostgreSQL: each transaction checks out its own pooled connection (pg.Pool default max 10, the
+          // harness sets none lower), so the two requests really race on the row lock.
           const results = await Promise.all([ask('alice'), ask('bob')]);
           expect(results.filter((r) => r.ok)).toHaveLength(1);
           expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, reason: 'already_rolled_back' }]);

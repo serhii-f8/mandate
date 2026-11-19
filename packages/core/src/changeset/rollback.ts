@@ -37,10 +37,18 @@ export interface RollbackEligibilityDeps {
 
 const refuse = (reason: RollbackReason): RollbackEligibility => ({ ok: false, refusal: 'not_rollbackable', reason });
 
-/** A finished status a rollback may start from; `cancelled`/`failed` only when execution started. */
-function finishedRun(cs: Pick<ChangeSetRecord, 'status' | 'executionRequest'>): boolean {
+/** EXE-8: a finished status a rollback may start from; `cancelled`/`failed` only when execution started. */
+export function rollbackFromFinished(cs: Pick<ChangeSetRecord, 'status' | 'executionRequest'>): boolean {
   if (!ROLLBACK_FROM.includes(cs.status)) return false;
   return (cs.status !== 'cancelled' && cs.status !== 'failed') || executionStarted(cs);
+}
+
+/**
+ * EXE-8: a request is accepted strictly before `until − marginMs`. Written as `now < end` so an absent or
+ * invalid window end, clock or margin (NaN) closes the window instead of opening it.
+ */
+export function rollbackWindowOpen(until: Date | undefined, now: Date, marginMs: number): boolean {
+  return until !== undefined && now.getTime() < until.getTime() - marginMs;
 }
 
 /** The operation's rollback strategy in the current configuration allows a rollback. */
@@ -68,11 +76,10 @@ export async function rollbackEligibility(
   if (cs.status === 'rolling_back' || cs.status === 'rolled_back' || cs.rollbackRequest !== undefined) {
     return refuse('already_rolled_back');
   }
-  if (!finishedRun(cs)) return refuse('not_finished');
+  if (!rollbackFromFinished(cs)) return refuse('not_finished');
   if (!strategyAllows(deps.operations.find((o) => o.id === cs.operation))) return refuse('strategy_none');
   const until = cs.rollbackUntil;
-  // Written as `!(now < end)` so an invalid date (NaN) closes the window instead of opening it.
-  if (until === undefined || !(deps.now().getTime() < until.getTime() - ROLLBACK_REQUEST_MARGIN_MS)) {
+  if (until === undefined || !rollbackWindowOpen(until, deps.now(), ROLLBACK_REQUEST_MARGIN_MS)) {
     return refuse('window_closed');
   }
   const count = await deps.repository.rollbackableCount(cs.id);
@@ -95,7 +102,7 @@ export function rollbackWindowEnd(input: {
 }): Date | undefined {
   const { changeset: cs } = input;
   if (!(input.hours > 0) || input.rollbackable <= 0) return undefined;
-  if (!finishedRun(cs) || cs.rollbackRequest !== undefined || !strategyAllows(input.operation)) return undefined;
+  if (!rollbackFromFinished(cs) || cs.rollbackRequest !== undefined || !strategyAllows(input.operation)) return undefined;
   return new Date(input.now.getTime() + Math.round(input.hours * HOUR_MS));
 }
 

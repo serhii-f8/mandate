@@ -8,6 +8,8 @@ import {
   ROLLBACK_REQUEST_MARGIN_MS,
   rollbackEligibility,
   type RollbackEligibilityDeps,
+  rollbackFromFinished,
+  rollbackWindowOpen,
   type RollbackReads,
   rollbackRequestEvents,
   rollbackTerminal,
@@ -318,5 +320,31 @@ describe('EXE-8 rollback eligibility', () => {
       changesetId: ID,
       details: { phase: 'rollback', batchNo: 2, restored: 3, skipped: 1, failed: 0 },
     });
+  });
+});
+
+describe('EXE-8 shared rollback predicates', () => {
+  it('EXE-8 rollbackFromFinished admits finished runs only, cancelled/failed only once executed', () => {
+    const started = { actor: 'a', groups: [], correlationId: 'c', startedAt: UNTIL };
+    for (const status of ['completed', 'completed_with_errors'] as const) {
+      expect(rollbackFromFinished({ status })).toBe(true);
+    }
+    for (const status of ['cancelled', 'failed'] as const) {
+      expect(rollbackFromFinished({ status })).toBe(false);
+      expect(rollbackFromFinished({ status, executionRequest: started })).toBe(true);
+    }
+    for (const status of ['preparing', 'prepared', 'pending_approval', 'approved', 'executing', 'rejected', 'expired', 'rolling_back', 'rolled_back'] as const) {
+      expect(rollbackFromFinished({ status, executionRequest: started })).toBe(false);
+    }
+  });
+
+  it('EXE-8 rollbackWindowOpen is open strictly before until minus the margin and fails closed', () => {
+    const m = ROLLBACK_REQUEST_MARGIN_MS;
+    expect(rollbackWindowOpen(UNTIL, new Date(UNTIL.getTime() - m - 1), m)).toBe(true);
+    expect(rollbackWindowOpen(UNTIL, new Date(UNTIL.getTime() - m), m)).toBe(false);
+    expect(rollbackWindowOpen(undefined, new Date(0), m)).toBe(false);
+    expect(rollbackWindowOpen(new Date(Number.NaN), new Date(0), m)).toBe(false);
+    expect(rollbackWindowOpen(UNTIL, new Date(Number.NaN), m)).toBe(false);
+    expect(rollbackWindowOpen(UNTIL, new Date(0), Number.NaN)).toBe(false);
   });
 });

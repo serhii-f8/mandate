@@ -26,9 +26,9 @@ import {
   compareTargetIds,
   EMPTY_STATS,
   evaluateLimits,
-  executionStarted,
   isExpiryDue,
-  ROLLBACK_FROM,
+  rollbackFromFinished,
+  rollbackWindowOpen,
 } from '@aiops/core';
 import { createHash, randomUUID } from 'node:crypto';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
@@ -76,7 +76,7 @@ type RollbackRequestOf = Parameters<ChangeSetRepository['requestRollback']>[0];
 type RollbackResult = Awaited<ReturnType<ChangeSetRepository['requestRollback']>>;
 
 export interface InMemoryChangeSetRepositoryOptions {
-  /** The clock `requestRollback` judges the window on (PostgreSQL uses `now()`). */
+  /** The clock `requestRollback` judges the window on and stamps `updatedAt` with (PostgreSQL: `statement_timestamp()`). */
   readonly now?: () => Date;
 }
 
@@ -621,20 +621,14 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     if (record.status === 'rolling_back' || record.status === 'rolled_back' || record.rollbackRequest !== undefined) {
       return { ok: false, reason: 'already_rolled_back' };
     }
-    const finished =
-      ROLLBACK_FROM.includes(record.status) &&
-      ((record.status !== 'cancelled' && record.status !== 'failed') || executionStarted(record));
-    if (!finished) return { ok: false, reason: 'not_finished' };
-    const until = record.rollbackUntil;
-    // Written as `!(now < end)` so an invalid date or margin (NaN) closes the window.
-    if (until === undefined || !(this.now().getTime() < until.getTime() - req.marginMs)) {
-      return { ok: false, reason: 'window_closed' };
-    }
+    if (!rollbackFromFinished(record)) return { ok: false, reason: 'not_finished' };
+    const now = this.now();
+    if (!rollbackWindowOpen(record.rollbackUntil, now, req.marginMs)) return { ok: false, reason: 'window_closed' };
     const next: ChangeSetRecord = {
       ...record,
       status: 'rolling_back',
       rollbackRequest: structuredClone(req.request),
-      updatedAt: new Date(),
+      updatedAt: now,
     };
     await this.commit(entry, next, ...req.audit);
     return { ok: true, changeset: copyRecord(next) };

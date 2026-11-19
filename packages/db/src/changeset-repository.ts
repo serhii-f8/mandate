@@ -29,9 +29,9 @@ import {
   changesetTransitionEvent,
   EMPTY_STATS,
   evaluateLimits,
-  executionStarted,
   isExpiryDue,
-  ROLLBACK_FROM,
+  rollbackFromFinished,
+  rollbackWindowOpen,
 } from '@aiops/core';
 import { DrizzleAuditLog } from './audit-log.js';
 import { guarded, isUniqueViolation } from './errors.js';
@@ -989,18 +989,14 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
         if (record.status === 'rolling_back' || record.status === 'rolled_back' || row.rollbackRequestedAt !== null) {
           return { ok: false, reason: 'already_rolled_back' };
         }
-        const finished =
-          ROLLBACK_FROM.includes(record.status) &&
-          ((record.status !== 'cancelled' && record.status !== 'failed') || executionStarted(record));
-        if (!finished) return { ok: false, reason: 'not_finished' };
-        // SEC-8: judged again on the database clock, so an api clock ahead of or behind it does not open the window.
-        const clock = await tx.execute<{ ms: number }>(sql`SELECT (extract(epoch FROM now()) * 1000)::float8 AS ms`);
+        if (!rollbackFromFinished(record)) return { ok: false, reason: 'not_finished' };
+        // SEC-8: judged again on the database clock, read after the lock is held (statement_timestamp(), not the
+        // transaction start of now()), so neither an api clock nor a wait on the lock opens the window.
+        const clock = await tx.execute<{ ms: number }>(
+          sql`SELECT (extract(epoch FROM statement_timestamp()) * 1000)::float8 AS ms`,
+        );
         const now = new Date(clock.rows[0]?.ms ?? Number.NaN);
-        const until = record.rollbackUntil;
-        // Written as `!(now < end)` so an invalid date or margin (NaN) closes the window.
-        if (until === undefined || !(now.getTime() < until.getTime() - req.marginMs)) {
-          return { ok: false, reason: 'window_closed' };
-        }
+        if (!rollbackWindowOpen(record.rollbackUntil, now, req.marginMs)) return { ok: false, reason: 'window_closed' };
         const [updated] = await tx
           .update(changeSet)
           .set({
