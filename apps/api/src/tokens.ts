@@ -19,5 +19,7 @@ export const PAGE_CHECKS = Symbol('PageChecks');
 export const PAGE_SESSIONS = Symbol('SessionService');
 export const SUBMIT_SERVICE = Symbol('SubmitService');
 export const TEMPORAL = Symbol('Temporal');
+/** The tracer of the api's own spans (NFR-11). */
+export const TRACER = Symbol('Tracer');
 export const WIDGET_BUNDLES = Symbol('WidgetBundles');
 export const WORKFLOW_STARTER = Symbol('WorkflowStarter');

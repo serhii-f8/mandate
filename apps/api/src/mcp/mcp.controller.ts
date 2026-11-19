@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { All, Controller, Inject, Post, Req, Res } from '@nestjs/common';
+import { SpanKind, type Tracer } from '@opentelemetry/api';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import type { McpHttpHandler } from '@modelcontextprotocol/server';
 import type { Request, Response } from 'express';
@@ -8,7 +9,7 @@ import type { ApiEnv } from '@aiops/config';
 import type { AuditLog } from '@aiops/core';
 import type { BearerGate } from '../auth/bearer-gate.js';
 import { hostAllowed, originAllowed } from '../http/host-origin.js';
-import { API_ENV, AUDIT_LOG, BEARER_GATE, LOGGER, MCP_HANDLER } from '../tokens.js';
+import { API_ENV, AUDIT_LOG, BEARER_GATE, LOGGER, MCP_HANDLER, TRACER } from '../tokens.js';
 import { authInfoFor } from './mcp-server-factory.js';
 import { Public } from '../web/access.js';
 
@@ -30,6 +31,7 @@ export class McpController {
     @Inject(AUDIT_LOG) private readonly audit: AuditLog,
     @Inject(API_ENV) private readonly env: ApiEnv,
     @Inject(LOGGER) private readonly logger: Logger,
+    @Inject(TRACER) private readonly tracer: Tracer,
   ) {}
 
   @Post()
@@ -39,6 +41,17 @@ export class McpController {
       return;
     }
     const correlationId = randomUUID();
+    // NFR-11: one server span per request; its only attribute is the correlation ID (SEC-3).
+    await this.tracer.startActiveSpan('mcp.request', { kind: SpanKind.SERVER, attributes: { 'aiops.correlation_id': correlationId } }, async (span) => {
+      try {
+        await this.serve(req, res, correlationId);
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  private async serve(req: Request, res: Response, correlationId: string): Promise<void> {
     res.setHeader('x-correlation-id', correlationId);
 
     const auth = await this.gate.authenticate(req.headers.authorization);

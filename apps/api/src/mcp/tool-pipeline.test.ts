@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { ProtocolError, type CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import type { AuditEventInput, Caller, OperationDefinition, PolicyDecision, RateCounter, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
+import type { AuditEventInput, Caller, DenyReason, OperationDefinition, PolicyDecision, RateCounter, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
 import {
   FakeInvoker,
@@ -18,6 +19,7 @@ import { DECIDE_TOOL, decideChangesetTool } from './decide-tool.js';
 import { WidgetBundles, type WidgetCatalog, type WidgetKind } from './widget-bundles.js';
 import type { BuiltinTool } from './tool-catalog.js';
 import { callTool, linksChangeset, listTools, minuteWindow, snapshotOf, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
+import type { PipelineTelemetry, ToolCallOutcome } from './pipeline-telemetry.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 
 /** Narrows an answer to a plain tool result; these tests never ask for a task. */
@@ -738,5 +740,142 @@ describe('MCP-6 change-set results link the page', () => {
     }
     // The audit row is written before the link is added and never holds the URL.
     expect(JSON.stringify(audit.events)).not.toContain('/app/changesets/');
+  });
+});
+
+/** Records what the pipeline reports, in order. */
+class RecordingTelemetry implements PipelineTelemetry {
+  readonly spans: { tool: string; correlationId: string }[] = [];
+  readonly calls: [string, ToolCallOutcome][] = [];
+  readonly denials: DenyReason[] = [];
+  toolCall<T>(tool: string, correlationId: string, run: () => Promise<T>): Promise<T> {
+    this.spans.push({ tool, correlationId });
+    return run();
+  }
+  countToolCall(tool: string, outcome: ToolCallOutcome): void {
+    this.calls.push([tool, outcome]);
+  }
+  countDenial(reason: DenyReason): void {
+    this.denials.push(reason);
+  }
+}
+
+function withTelemetry<D extends PipelineDeps>(deps: D): { deps: D; telemetry: RecordingTelemetry } {
+  const telemetry = new RecordingTelemetry();
+  return { deps: { ...deps, telemetry }, telemetry };
+}
+
+describe('NFR-12 tool call metrics', () => {
+  it('NFR-12 an allowed call counts ok, a denied one denied with its reason, invalid arguments error', async () => {
+    const s = setup();
+    const { deps, telemetry } = withTelemetry(s.deps);
+    await callTool(deps, s.req(alice), 'catalog.search_products', { brand: 'acme', fields: ['name'] });
+    await callTool(deps, s.req(alice), 'catalog.search_products', { brand: 'initech', fields: [] });
+    await callTool(deps, s.req(alice), 'catalog.search_products', { brand: 5, fields: [] });
+    await callTool(deps, s.req(bob), 'ping', {});
+    expect(telemetry.calls).toEqual([
+      ['catalog.search_products', 'ok'],
+      ['catalog.search_products', 'denied'],
+      ['catalog.search_products', 'error'],
+      ['ping', 'ok'],
+    ]);
+    expect(telemetry.denials).toEqual(['out_of_scope']);
+    expect(telemetry.spans).toEqual([
+      { tool: 'catalog.search_products', correlationId: 'corr-1' },
+      { tool: 'catalog.search_products', correlationId: 'corr-1' },
+      { tool: 'catalog.search_products', correlationId: 'corr-1' },
+      { tool: 'ping', correlationId: 'corr-1' },
+    ]);
+  });
+
+  it('NFR-12 SEC-3 an unknown tool name counts under _unknown', async () => {
+    const s = setup();
+    const { deps, telemetry } = withTelemetry(s.deps);
+    const names = ['x'.repeat(5000), randomUUID(), randomUUID()];
+    for (const name of names) {
+      await expect(callTool(deps, s.req(bob), name, {})).rejects.toBeInstanceOf(ProtocolError);
+    }
+    expect(telemetry.calls).toEqual([
+      ['_unknown', 'denied'],
+      ['_unknown', 'denied'],
+      ['_unknown', 'denied'],
+    ]);
+    expect(telemetry.denials).toEqual(['unknown_tool', 'unknown_tool', 'unknown_tool']);
+    expect(telemetry.spans.map((sp) => sp.tool)).toEqual(['_unknown', '_unknown', '_unknown']);
+  });
+
+  it('NFR-12 a configured tool the caller is not granted counts under its name with reason no_grant', async () => {
+    const s = setup();
+    const { deps, telemetry } = withTelemetry(s.deps);
+    await expect(callTool(deps, s.req(bob), 'catalog.search_products', { brand: 'acme', fields: [] })).rejects.toBeInstanceOf(ProtocolError);
+    expect(telemetry.calls).toEqual([['catalog.search_products', 'denied']]);
+    expect(telemetry.denials).toEqual(['no_grant']);
+    expect(telemetry.spans).toEqual([{ tool: 'catalog.search_products', correlationId: 'corr-1' }]);
+  });
+
+  it('NFR-12 a built-in the caller does not see counts under its name with reason unknown_tool', async () => {
+    const s = widgetSetup();
+    const { deps, telemetry } = withTelemetry(s.deps);
+    await expect(callTool(deps, s.req(bob), DECIDE_TOOL, DECIDE_ARGS)).rejects.toBeInstanceOf(ProtocolError);
+    expect(telemetry.calls).toEqual([[DECIDE_TOOL, 'denied']]);
+    expect(telemetry.denials).toEqual(['unknown_tool']);
+  });
+
+  it('NFR-12 a rate-limited call counts denied with limit_exceeded', async () => {
+    const s = limitedSetup();
+    const { deps, telemetry } = withTelemetry(s.deps);
+    for (let i = 0; i < 3; i++) await callTool(deps, s.req(alice), 'catalog.search_products', SEARCH);
+    expect(telemetry.calls).toEqual([
+      ['catalog.search_products', 'ok'],
+      ['catalog.search_products', 'ok'],
+      ['catalog.search_products', 'denied'],
+    ]);
+    expect(telemetry.denials).toEqual(['limit_exceeded']);
+  });
+
+  it('NFR-12 an unavailable rate limit counts denied with limit_exceeded', async () => {
+    const s = limitedSetup({ hit: () => Promise.reject(new Error('db down')) });
+    const { deps, telemetry } = withTelemetry(s.deps);
+    await callTool(deps, s.req(alice), 'catalog.search_products', SEARCH);
+    expect(telemetry.calls).toEqual([['catalog.search_products', 'denied']]);
+    expect(telemetry.denials).toEqual(['limit_exceeded']);
+  });
+
+  it('NFR-12 an unaudited decision and a failing run count error; a task counts ok', async () => {
+    const s = setup();
+    const { deps, telemetry } = withTelemetry(s.deps);
+    const failing: PipelineDeps = { ...deps, audit: { append: () => Promise.reject(new Error('down')) } };
+    await callTool(failing, s.req(bob), 'ping', {});
+    s.invoker.failWith = new Error('upstream exploded');
+    await callTool(deps, s.req(alice), 'catalog.search_products', SEARCH);
+    const tasking: OperationInvoker = {
+      invoke: () =>
+        Promise.resolve({
+          text: '',
+          task: { taskId: '11111111-1111-4111-8111-111111111111', owner: 'alice-id', changesetId: 'cs-1', kind: 'prepare', tool: 'catalog.search_products', createdAt: new Date(0), ttlMs: 60_000 },
+        }),
+    };
+    await callTool({ ...deps, invokerFor: () => tasking }, { ...s.req(alice), tasks: true }, 'catalog.search_products', SEARCH);
+    expect(telemetry.calls).toEqual([
+      ['ping', 'error'],
+      ['catalog.search_products', 'error'],
+      ['catalog.search_products', 'ok'],
+    ]);
+    expect(telemetry.denials).toEqual([]);
+  });
+
+  it('POL-8 telemetry changes no audit row', async () => {
+    const plainRun = setup();
+    const observed = setup();
+    const { deps } = withTelemetry(observed.deps);
+    for (const [d, r] of [
+      [plainRun.deps, plainRun.req],
+      [deps, observed.req],
+    ] as const) {
+      await callTool(d, r(alice), 'catalog.search_products', { brand: 'acme', fields: ['name'] });
+      await callTool(d, r(alice), 'catalog.search_products', { brand: 'initech', fields: [] });
+    }
+    expect(actions(observed.audit.events)).toEqual(['policy.decision:allow', 'tool.call:ok', 'policy.decision:deny']);
+    expect(observed.audit.events).toEqual(plainRun.audit.events);
   });
 });

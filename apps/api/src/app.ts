@@ -5,6 +5,7 @@ import { Inject, Module, type DynamicModule, type INestApplication, type OnAppli
 import { APP_GUARD, NestFactory, Reflector } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { createMcpHandler, type McpHttpHandler } from '@modelcontextprotocol/server';
+import { trace } from '@opentelemetry/api';
 import { createRemoteJWKSet, type JWTVerifyGetKey } from 'jose';
 import type { Logger } from 'pino';
 import { createOpenApiAdapter } from '@aiops/adapters';
@@ -63,6 +64,7 @@ import {
   PAGE_SESSIONS,
   SUBMIT_SERVICE,
   TEMPORAL,
+  TRACER,
   WIDGET_BUNDLES,
   WORKFLOW_STARTER,
 } from './tokens.js';
@@ -181,6 +183,7 @@ class AppModule {
         { provide: LOGGER, useValue: logger },
         { provide: CONFIGURATION, useValue: configuration },
         { provide: ON_SHUTDOWN, useValue: overrides.onShutdown ?? null },
+        { provide: TRACER, useValue: trace.getTracer('aiops-api') },
         { provide: BEARER_GATE, useValue: createBearerGate({ verifier, resource: env.mcpResource }) },
         {
           provide: DATABASE,

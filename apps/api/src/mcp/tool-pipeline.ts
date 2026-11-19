@@ -13,6 +13,7 @@ import {
   toolCallAuditEvent,
   type AuditLog,
   type Caller,
+  type DenyReason,
   type OperationDefinition,
   type OperationInvoker,
   type PolicyDecision,
@@ -23,6 +24,7 @@ import { withPageLink } from '../changesets/links.js';
 import { toCallToolResult } from '../changesets/results.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
+import { NO_TELEMETRY, UNKNOWN_TOOL, type PipelineTelemetry, type ToolCallOutcome } from './pipeline-telemetry.js';
 import { deniedResult, recordDecision } from './policy-answers.js';
 import type { BuiltinTool } from './tool-catalog.js';
 import type { WidgetCatalog } from './widget-bundles.js';
@@ -53,6 +55,8 @@ export interface PipelineDeps {
   readonly widgets: WidgetCatalog;
   /** `AIOPS_PUBLIC_URL`, the base of the change-set page links (MCP-6). */
   readonly publicUrl: URL;
+  /** Spans and counters of tool calls (NFR-11, NFR-12); default `NO_TELEMETRY`. */
+  readonly telemetry?: PipelineTelemetry;
 }
 
 /** The start of the UTC minute containing `now`. */
@@ -146,7 +150,48 @@ export async function listTools(deps: PipelineDeps, req: PipelineRequest): Promi
   return tools;
 }
 
+/**
+ * The metric label and span attribute of a called name (NFR-12, SEC-3): the name itself when it is
+ * a built-in (visible to the caller or not) or a configured operation tool of the snapshot,
+ * `_unknown` otherwise, so a caller cannot grow the label set. Not taken from the caller's grants.
+ */
+function toolLabel(builtins: readonly BuiltinTool[], configuration: LoadedConfiguration, name: string): string {
+  const known = builtins.some((t) => t.name === name) || configuration.policy.operations.some((op) => op.toolName === name);
+  return known ? name : UNKNOWN_TOOL;
+}
+
+/** How one call ended, for the counters: an answer, or the lookup error that is thrown after counting. */
+type CallEnd =
+  | { readonly answer: ToolAnswer; readonly outcome: ToolCallOutcome; readonly denial?: DenyReason }
+  | { readonly thrown: ProtocolError; readonly denial: DenyReason };
+
+function answered(answer: ToolAnswer): CallEnd {
+  // A task handle is a successful answer (MCP-7); AUDIT_UNAVAILABLE and failures carry isError.
+  return { answer, outcome: !isTaskAnswer(answer) && answer.isError === true ? 'error' : 'ok' };
+}
+
 export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: string, rawArgs: unknown): Promise<ToolAnswer> {
+  const telemetry = deps.telemetry ?? NO_TELEMETRY;
+  const tool = toolLabel(deps.builtins, req.snapshot.configuration, name);
+  return telemetry.toolCall(tool, req.correlationId, async () => {
+    let end: CallEnd;
+    try {
+      end = await runCall(deps, req, name, rawArgs);
+    } catch (error) {
+      telemetry.countToolCall(tool, 'error');
+      throw error;
+    }
+    if (end.denial !== undefined) telemetry.countDenial(end.denial);
+    if ('thrown' in end) {
+      telemetry.countToolCall(tool, 'denied');
+      throw end.thrown;
+    }
+    telemetry.countToolCall(tool, end.outcome);
+    return end.answer;
+  });
+}
+
+async function runCall(deps: PipelineDeps, req: PipelineRequest, name: string, rawArgs: unknown): Promise<CallEnd> {
   const { configuration, engine } = req.snapshot;
   // A built-in the caller does not see is looked up like any unknown name.
   const builtin = visibleBuiltins(deps.builtins, req.caller, configuration).find((t) => t.name === name);
@@ -155,13 +200,14 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
   // 1. Lookup (MCP-2): unknown, not granted and not visible get the same answer, so the list does not leak.
   if (builtin === undefined && operation === undefined) {
     const exists = configuration.policy.operations.some((op) => op.toolName === name);
+    const reason: DenyReason = exists ? 'no_grant' : 'unknown_tool';
     await recordDecision(deps, req, name, {
       effect: 'deny',
       rule: 'default-deny',
-      reason: exists ? 'no_grant' : 'unknown_tool',
+      reason,
       roles: resolveRoles(req.caller.groups, configuration.policy.roleMapping),
     });
-    throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Tool ${name} not found`);
+    return { thrown: new ProtocolError(ProtocolErrorCode.InvalidParams, `Tool ${name} not found`), denial: reason };
   }
 
   const runDeps = {
@@ -200,7 +246,7 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
         }),
       )
       .catch(() => undefined);
-    return invalid;
+    return { answer: invalid, outcome: 'error' };
   }
   // The schema root is `type: object`, so validated arguments are an object.
   const validArgs = args as Readonly<Record<string, unknown>>;
@@ -232,13 +278,14 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
           { effect: 'deny', rule: `role:${role}/limit:calls_per_minute`, reason: 'limit_exceeded', detail: 'calls_per_minute_unavailable', roles: decision.roles },
           operation === undefined ? {} : { operation: operation.id },
         );
-        return RATE_LIMIT_UNAVAILABLE;
+        return { answer: RATE_LIMIT_UNAVAILABLE, outcome: 'denied', denial: 'limit_exceeded' };
       }
     }
   }
   const recorded = await recordDecision(deps, req, name, decision, operation === undefined ? {} : { operation: operation.id });
-  if (decision.effect === 'deny') return deniedResult(decision);
-  if (!recorded) return AUDIT_UNAVAILABLE;
+  // deniedResult answers a deny without a reason as no_grant; the counter does the same.
+  if (decision.effect === 'deny') return { answer: deniedResult(decision), outcome: 'denied', denial: decision.reason ?? 'no_grant' };
+  if (!recorded) return { answer: AUDIT_UNAVAILABLE, outcome: 'error' };
 
   // 4. Run (SEC-1: only after an allow decision of this request is on record).
   const answer = await auditedRun(
@@ -271,5 +318,5 @@ export async function callTool(deps: PipelineDeps, req: PipelineRequest, name: s
   // MCP-6: the tools linked to a widget answer with the page link too, bundle or not; added after
   // the tool.call row is written, so the audit never holds the URL.
   const linked = builtin !== undefined ? builtin.widget !== undefined : operation !== undefined && linksChangeset(operation);
-  return linked ? withPageLink(answer, deps.publicUrl) : answer;
+  return answered(linked ? withPageLink(answer, deps.publicUrl) : answer);
 }
