@@ -2,7 +2,6 @@ import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage 
 import { request as httpsRequest } from 'node:https';
 import type { LookupFunction } from 'node:net';
 import {
-  parseSecret,
   type ConnectionSettings,
   type CredentialSource,
   type ReadErrorCode,
@@ -12,8 +11,7 @@ import {
 } from '@aiops/connector-sdk';
 import type { HttpRequestSpec } from '../openapi/request.js';
 import { assertEgressAllowed, createGuardedLookup, EgressDeniedError } from './egress.js';
-import { clientCredentialsToken, clientSecretBasicValue, HEADER_SAFE } from './oauth.js';
-import { createScrubber, type Scrubber } from './scrub.js';
+import { prepareAuth } from './auth.js';
 import { semaphoreFor } from './semaphore.js';
 
 /** Response body limit (spec §4.5). */
@@ -232,84 +230,17 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
 
   async function send(req: HttpRequestSpec, opts: SendOptions): Promise<SendResult> {
     const start = now();
-    let scrubber: Scrubber = createScrubber([]);
+    const prepared = await prepareAuth(settings, opts.credential, { now, transport });
+    // Its message is already scrubbed: returned as is, with the time spent so far.
+    if (!prepared.ok) return { ...prepared, durationMs: Math.max(0, now() - start) };
+    const auth = prepared.auth;
     const fail = (code: ReadErrorCode, message: string, status?: number): SendResult => ({
       ok: false,
       code,
       ...(status === undefined ? {} : { status }),
       durationMs: Math.max(0, now() - start),
-      message: scrubber.text(message),
+      message: auth.scrubber.text(message),
     });
-
-    const auth = settings.auth;
-    const secrets: string[] = [];
-    let authHeader: [string, string] | undefined;
-    let oauth: { tokenUrl: string; clientId: string; clientSecret: string; scopes: readonly string[]; timeoutMs: number } | undefined;
-
-    if (auth) {
-      const credential = opts.credential;
-      if (!credential) return fail('credential_missing', `connection ${settings.id} has no credential`);
-      if (credential.scheme !== auth.scheme) return fail('credential_unusable', `credential scheme does not match connection ${settings.id}`);
-      let opened: Readonly<Record<string, string>>;
-      try {
-        opened = await credential.open();
-      } catch {
-        return fail('credential_unusable', `credential ${credential.ref} could not be opened`);
-      }
-      const parsed = parseSecret(auth.scheme, opened);
-      if (!parsed.ok) {
-        // Scrub whatever we were handed even though the material is unusable.
-        scrubber = createScrubber(Object.values(opened).filter((v): v is string => typeof v === 'string'));
-        return fail('credential_unusable', parsed.message);
-      }
-      const s = parsed.secret;
-      // A Basic user name is an identifier, not a secret: scrubbing it would redact ordinary
-      // response data ("admin"). The password and the encoded pair are scrubbed.
-      secrets.push(...Object.entries(s).filter(([k]) => !(auth.scheme === 'basic' && k === 'username')).map(([, v]) => v));
-      const unsendable = (): SendResult => fail('credential_unusable', `credential ${credential.ref} contains characters not allowed in a header`);
-      switch (auth.scheme) {
-        case 'bearer':
-          if (!HEADER_SAFE.test(s.token ?? '')) return unsendable();
-          authHeader = ['authorization', `Bearer ${s.token ?? ''}`];
-          break;
-        case 'api_key':
-          if (!HEADER_SAFE.test(s.key ?? '')) return unsendable();
-          authHeader = [auth.header.toLowerCase(), s.key ?? ''];
-          break;
-        case 'basic': {
-          const value = Buffer.from(`${s.username ?? ''}:${s.password ?? ''}`).toString('base64');
-          // Base64 is always visible ASCII; checked anyway so the rule is the same for every scheme.
-          if (!HEADER_SAFE.test(value)) return unsendable();
-          secrets.push(value);
-          authHeader = ['authorization', `Basic ${value}`];
-          break;
-        }
-        case 'oauth_client_credentials': {
-          const clientId = s.client_id ?? '';
-          const clientSecret = s.client_secret ?? '';
-          secrets.push(Buffer.from(`${clientId}:${clientSecret}`).toString('base64'));
-          // The exact value sent to the token endpoint (form-encoded id and secret, RFC 6749 §2.3.1).
-          secrets.push(clientSecretBasicValue(clientId, clientSecret));
-          oauth = { tokenUrl: auth.tokenUrl, clientId, clientSecret, scopes: auth.scopes, timeoutMs: settings.timeoutMs };
-          break;
-        }
-      }
-      scrubber = createScrubber(secrets);
-    }
-
-    let currentToken: string | undefined;
-    const useToken = async (rejectedToken?: string): Promise<SendResult | undefined> => {
-      if (!oauth) return undefined;
-      const t = await clientCredentialsToken(settings.id, oauth, rejectedToken === undefined ? { now } : { now, rejectedToken }, transport);
-      if (!t.ok) return fail(t.code, t.message, t.status);
-      secrets.push(t.accessToken);
-      scrubber = createScrubber(secrets);
-      currentToken = t.accessToken;
-      authHeader = ['authorization', `Bearer ${t.accessToken}`];
-      return undefined;
-    };
-    const tokenFailure = await useToken();
-    if (tokenFailure) return tokenFailure;
 
     const semaphore = semaphoreFor(settings.id, settings.maxConcurrency);
     const attemptOnce = async (): Promise<RawResult | 'busy'> => {
@@ -331,7 +262,8 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
           }
           if (span) {
             const taken = new Set(Object.keys(req.headers).map((n) => n.toLowerCase()));
-            if (authHeader) taken.add(authHeader[0].toLowerCase());
+            const authName = auth.header()?.[0];
+            if (authName !== undefined) taken.add(authName.toLowerCase());
             try {
               Object.assign(headers, hookHeaders(span, taken));
             } catch {
@@ -339,6 +271,7 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
             }
           }
         }
+        const authHeader = auth.header();
         if (authHeader) headers[authHeader[0]] = authHeader[1];
         let result: RawResult | undefined;
         try {
@@ -360,21 +293,18 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
     };
 
     const maxAttempts = opts.retryable ? Math.max(1, settings.retry.maxAttempts) : 1;
-    let refreshed = false;
     let retries = 0;
     for (;;) {
       const r = await attemptOnce();
       if (r === 'busy') return fail('busy', `connection ${settings.id} has no free slot within ${settings.timeoutMs} ms`);
       if (r.kind === 'response') {
-        return { ok: true, status: r.status, json: scrubber.deep(r.json), durationMs: Math.max(0, now() - start) };
+        return { ok: true, status: r.status, json: auth.scrubber.deep(r.json), durationMs: Math.max(0, now() - start) };
       }
-      if (r.kind === 'status' && r.status === 401 && oauth && !refreshed) {
-        // The cached token may have been revoked or expired early: refresh once (spec §4.5).
-        // Passing the rejected token lets a concurrent call that already refreshed win (no second fetch).
-        refreshed = true;
-        const refreshFailure = await useToken(currentToken);
-        if (refreshFailure) return refreshFailure;
-        continue;
+      if (r.kind === 'status' && r.status === 401) {
+        // OAuth only, once per send: the cached token may have been revoked or expired early.
+        const refresh = await auth.refreshAfter401();
+        if (refresh?.ok === true) continue;
+        if (refresh) return { ...refresh, durationMs: Math.max(0, now() - start) };
       }
       const failure =
         r.kind === 'status' ? fail('http_status', `upstream returned status ${r.status}`, r.status) : fail(r.code, r.message);
