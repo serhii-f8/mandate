@@ -184,7 +184,10 @@ describe('CFG-3 CFG-4 the api follows applied revisions', () => {
       expect(page.status).toBe(503);
       const health = await fetch(`${second.url}/healthz`);
       expect(health.status).toBe(200);
-      expect((await fetch(`${second.url}/readyz`)).status).toBe(200);
+      const ready = await fetch(`${second.url}/readyz`);
+      expect(ready.status).toBe(503);
+      expect(ready.headers.get('cache-control')).toBe('no-store');
+      expect(await ready.json()).toMatchObject({ database: 'ok', configuration: 'configuration_mismatch' });
 
       const rows = await auditRows(freshUrl, `action = 'config.load'`);
       expect(rows.map((r) => [r.outcome, r.details.code, r.details.trigger])).toEqual([['error', 'configuration_mismatch', 'start']]);

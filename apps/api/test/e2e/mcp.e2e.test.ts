@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import type { ConfigurationHolder } from '@aiops/config';
 import {
   auditRows,
   connectClient,
@@ -11,6 +12,7 @@ import {
   tokenFor,
   type RunningApi,
 } from './helpers.js';
+import { CONFIGURATION } from '../../src/tokens.js';
 
 let postgres: StartedPostgres;
 let databaseUrl: string;
@@ -135,8 +137,16 @@ describe('MCP endpoint HTTP edges', () => {
     expect((await rawPost(api.url, JSON.stringify({ pad: 'x'.repeat(4 * 1024 * 1024 + 1) }))).status).toBe(413);
   });
 
-  it('serves liveness and readiness without a token', async () => {
-    expect((await fetch(`${api.url}/healthz`)).status).toBe(200);
-    expect((await fetch(`${api.url}/readyz`)).status).toBe(200);
+  it('NFR-10 /readyz reports database, configuration revision and hash, and temporal unavailable with the executor replaced', async () => {
+    const health = await fetch(`${api.url}/healthz`);
+    expect(health.status).toBe(200);
+    expect(await health.json()).toEqual({ ok: true });
+    const ready = await fetch(`${api.url}/readyz`);
+    expect(ready.status).toBe(200);
+    expect(ready.headers.get('cache-control')).toBe('no-store');
+    const state = api.app.get<ConfigurationHolder>(CONFIGURATION).state();
+    expect(state.status).toBe('active');
+    const hash = state.status === 'active' ? state.hash : '';
+    expect(await ready.json()).toEqual({ database: 'ok', configuration: { revision: null, hash }, temporal: 'unavailable' });
   });
 });
