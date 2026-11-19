@@ -179,13 +179,8 @@ export async function startWorkerRuntime(
       logger.error({ err: error.message }, 'idle database connection failed');
     },
   });
-  const active = telemetry ?? startWorkerTelemetry({ register: false });
   // Shut down by close() and the start-failure cleanup only when the runtime started it (F10).
-  const ownTelemetry = active === telemetry ? undefined : active;
-  const { meter, spanProcessor, metricsHandler } = active;
-  registerChangeSetGauge(meter, () => countChangeSetsByStatus(database));
-  // One adapter: its resolver checks the specs of every revision loaded; it also runs the calls.
-  const adapter = createOpenApiAdapter({ instrumentation: createUpstreamInstrumentation({ meter }) });
+  let ownTelemetry: WorkerTelemetry | undefined;
   // Each is set as soon as its step returns; the cleanup closes only what was returned (a listener
   // whose LISTEN never settles is not covered: the start hangs there). Readiness reads holder and worker.
   let http: { close(): Promise<void> } | undefined;
@@ -196,6 +191,12 @@ export async function startWorkerRuntime(
   // Without a relay, e-mail rows fail with channel_unconfigured on the retry schedule (NTF-3).
   const email = env.smtpUrl === undefined ? undefined : createSmtpSender({ url: env.smtpUrl, from: env.mailFrom });
   try {
+    const active = telemetry ?? startWorkerTelemetry({ register: false });
+    if (active !== telemetry) ownTelemetry = active;
+    const { meter, spanProcessor, metricsHandler } = active;
+    registerChangeSetGauge(meter, () => countChangeSetsByStatus(database));
+    // One adapter: its resolver checks the specs of every revision loaded; it also runs the calls.
+    const adapter = createOpenApiAdapter({ instrumentation: createUpstreamInstrumentation({ meter }) });
     // Before the wait for an active configuration: a waiting worker is alive, not ready (NFR-10, R15).
     const server = await startWorkerHttpServer(env.httpPort, '0.0.0.0', {
       readiness: async (): Promise<ReadinessReport> => ({

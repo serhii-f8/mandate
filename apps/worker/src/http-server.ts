@@ -23,8 +23,9 @@ async function ready(deps: WorkerHttpDeps, res: ServerResponse): Promise<void> {
   try {
     report = await deps.readiness();
   } catch {
-    // The probe's own failure detail is not reported (SEC-3); the worker is simply not ready.
-    json(res, 503, { ready: false }, { 'cache-control': 'no-store' });
+    // Fail closed in the readiness body's shape; the failure detail is not reported (SEC-3).
+    const unready: ReadinessReport = { database: 'unavailable', configuration: 'none', temporal: 'unavailable' };
+    json(res, 503, unready, { 'cache-control': 'no-store' });
     return;
   }
   // The worker needs Temporal: a worker that does not poll is not ready (NFR-10).

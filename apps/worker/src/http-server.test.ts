@@ -111,6 +111,8 @@ describe('NFR-10 NFR-12 worker HTTP server', () => {
     const reply = await send(port, 'GET', '/readyz');
     expect(reply.status).toBe(503);
     expect(reply.headers['cache-control']).toBe('no-store');
+    // Fail closed, in the readiness body's shape (Global Constraints).
+    expect(JSON.parse(reply.body)).toEqual({ database: 'unavailable', configuration: 'none', temporal: 'unavailable' });
     expect(reply.body).not.toContain('secret-detail');
     // The server keeps answering.
     expect((await send(port, 'GET', '/healthz')).status).toBe(200);

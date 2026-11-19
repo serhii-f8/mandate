@@ -123,50 +123,62 @@ describe('NTF-3 worker runtime without a mail relay', () => {
 // Last in this file: the SIGTERM that ends `run()` also shuts the process-wide Temporal runtime down,
 // so both cases share one running worker and the SIGTERM comes in afterAll.
 describe('NTF-1 NFR-10 NFR-12 a running worker runtime', () => {
-  let temporal: TestWorkflowEnvironment;
-  let sink: Awaited<ReturnType<typeof startSmtpSink>>;
-  let configDir: string;
-  let database: ReturnType<typeof createDb>;
-  let runtime: Awaited<ReturnType<typeof startWorkerRuntime>>;
-  let running: Promise<void>;
+  // Each is undefined until its step in beforeAll succeeds, so afterAll cleans up only what exists
+  // and a failed beforeAll reports its own error.
+  let temporal: TestWorkflowEnvironment | undefined;
+  let sink: Awaited<ReturnType<typeof startSmtpSink>> | undefined;
+  let configDir: string | undefined;
+  let database: ReturnType<typeof createDb> | undefined;
+  let runtime: Awaited<ReturnType<typeof startWorkerRuntime>> | undefined;
+  let running: Promise<void> | undefined;
+
+  function started(): { database: ReturnType<typeof createDb>; sink: Awaited<ReturnType<typeof startSmtpSink>>; runtime: Awaited<ReturnType<typeof startWorkerRuntime>> } {
+    if (database === undefined || sink === undefined || runtime === undefined) throw new Error('the fixture did not start');
+    return { database, sink, runtime };
+  }
 
   beforeAll(async () => {
-    temporal = await TestWorkflowEnvironment.createLocal();
-    sink = await startSmtpSink();
-    configDir = await mkdtemp(join(tmpdir(), 'aiops-worker-notify-'));
+    const env0 = await TestWorkflowEnvironment.createLocal();
+    temporal = env0;
+    const smtp = await startSmtpSink();
+    sink = smtp;
+    const dir = await mkdtemp(join(tmpdir(), 'aiops-worker-notify-'));
+    configDir = dir;
     const url = await postgres.createDatabase();
     await runMigrations(url);
     database = createDb(url, { onError: () => undefined });
-    await writeFile(join(configDir, 'aiops.yaml'), NOTIFYING_CONFIG);
+    await writeFile(join(dir, 'aiops.yaml'), NOTIFYING_CONFIG);
     const env = parseWorkerEnv({
       DATABASE_URL: url,
-      TEMPORAL_ADDRESS: temporal.address,
+      TEMPORAL_ADDRESS: env0.address,
       TEMPORAL_TASK_QUEUE: `notify-${randomUUID()}`,
-      AIOPS_CONFIG_DIR: configDir,
+      AIOPS_CONFIG_DIR: dir,
       AIOPS_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
       AIOPS_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
-      AIOPS_SMTP_URL: sink.url,
+      AIOPS_SMTP_URL: smtp.url,
       AIOPS_WORKER_HTTP_PORT: '0',
     });
-    runtime = await startWorkerRuntime(env, pino({ level: 'silent' }), new EventEmitter());
-    running = runtime.run();
+    const rt = await startWorkerRuntime(env, pino({ level: 'silent' }), new EventEmitter());
+    runtime = rt;
+    running = rt.run();
   }, 120_000);
 
   afterAll(async () => {
     try {
       // Worker.run() resolves after a graceful shutdown on SIGTERM; nothing else in this process listens.
-      process.emit('SIGTERM');
+      if (running !== undefined) process.emit('SIGTERM');
       await running;
-      await runtime.close();
+      await runtime?.close();
     } finally {
-      await database.close();
-      await rm(configDir, { recursive: true, force: true });
-      await sink.close();
-      await temporal.teardown();
+      await database?.close();
+      if (configDir !== undefined) await rm(configDir, { recursive: true, force: true });
+      await sink?.close();
+      await temporal?.teardown();
     }
   }, 120_000);
 
   it('NTF-1 the worker runtime dispatches a queued notification', async () => {
+    const { database, sink } = started();
     const cs = await createPrepared(new PostgresChangeSetRepository(database.db), 1);
     await insertNotifications(database.db, cs.id, [{ kind: 'execution_finished', round: 0, step: 0, target: 'ops-mail' }], new Date());
     await vi.waitFor(
@@ -179,6 +191,7 @@ describe('NTF-1 NFR-10 NFR-12 a running worker runtime', () => {
   }, 60_000);
 
   it('NFR-10 NFR-12 the running worker is ready and serves its metrics', async () => {
+    const { database, runtime } = started();
     await createPrepared(new PostgresChangeSetRepository(database.db), 1);
     const base = `http://127.0.0.1:${String(runtime.httpPort)}`;
     const report = await vi.waitFor(
