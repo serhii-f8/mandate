@@ -25,8 +25,10 @@ const MAX_LIMIT = 100;
 const MAX_ACTOR = 255;
 const MAX_CORRELATION = 128;
 const MAX_BIGINT = 9223372036854775807n;
-// eslint-disable-next-line no-control-regex -- rejecting control characters is the point
-const CONTROL = /[\u0000-\u001f\u007f]/;
+/** C0, DEL and C1 control characters. */
+const CONTROL = /\p{Cc}/u;
+/** Four-digit years only: expanded years round-trip through Date but lie outside timestamptz. */
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 const fail = { ok: false } as const;
 
@@ -37,8 +39,9 @@ function boundedText(raw: string, max: number): string | undefined {
   return raw.length >= 1 && raw.length <= max && !CONTROL.test(raw) ? raw : undefined;
 }
 
-/** An instant written exactly as `toISOString` writes it. */
+/** An instant with a four-digit year, written exactly as `toISOString` writes it. */
 function isoDate(raw: string): Date | undefined {
+  if (!ISO_INSTANT.test(raw)) return undefined;
   const at = new Date(raw);
   return !Number.isNaN(at.getTime()) && at.toISOString() === raw ? at : undefined;
 }

@@ -1,37 +1,18 @@
 import type { AuditReader, AuditRecord, AuditSearchFilter } from '@aiops/core';
 import type pg from 'pg';
-import { CHAIN_COLUMNS, safeInteger } from './audit-chain.js';
+import { CHAIN_COLUMNS, chainFields, safeInteger } from './audit-chain.js';
 import { guarded } from './errors.js';
 
-function text(row: Record<string, unknown>, key: string): string {
-  const value = row[key];
-  if (typeof value !== 'string') throw new Error(`audit row column ${key} is not text`);
-  return value;
-}
-
-function nullableText(row: Record<string, unknown>, key: string): string | null {
-  const value = row[key];
-  return value === null ? null : text(row, key);
-}
-
+/** A row selected with `CHAIN_COLUMNS` as a search answers it: the chain fields plus `chainPos`. */
 function toRecord(row: Record<string, unknown>): AuditRecord {
-  const details = row.details;
+  const { details, ...fields } = chainFields(row);
   if (typeof details !== 'object' || details === null || Array.isArray(details)) {
     throw new Error('audit row column details is not an object');
   }
-  const pos = nullableText(row, 'pos');
+  const pos = row.pos;
+  if (pos !== null && typeof pos !== 'string') throw new Error('audit row column pos is not text');
   return {
-    seq: text(row, 'seq'),
-    id: text(row, 'id'),
-    ts: text(row, 'ts'),
-    actor: text(row, 'actor'),
-    clientId: nullableText(row, 'clientId'),
-    action: text(row, 'action'),
-    subject: nullableText(row, 'subject'),
-    decision: nullableText(row, 'decision'),
-    outcome: text(row, 'outcome'),
-    correlationId: text(row, 'correlationId'),
-    changesetId: nullableText(row, 'changesetId'),
+    ...fields,
     details: details as Record<string, unknown>,
     chainPos: pos === null ? null : safeInteger(pos, 'chain_pos'),
   };

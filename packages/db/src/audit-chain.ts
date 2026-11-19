@@ -59,8 +59,11 @@ export function safeInteger(value: string, what: string): number {
   return n;
 }
 
-/** The hashed fields except `pos`, plus `seq`, of a row selected with `CHAIN_COLUMNS`. */
-function chainFields(row: Record<string, unknown>): Omit<ChainRow, 'pos'> & { readonly seq: string } {
+/**
+ * The hashed fields except `pos`, plus `seq`, of a row selected with `CHAIN_COLUMNS`. Shared by the
+ * chain readers and the audit search reader.
+ */
+export function chainFields(row: Record<string, unknown>): Omit<ChainRow, 'pos'> & { readonly seq: string } {
   return {
     seq: text(row, 'seq'),
     id: text(row, 'id'),
