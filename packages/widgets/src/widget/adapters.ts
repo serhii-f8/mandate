@@ -85,7 +85,12 @@ export function fromGetChangeset(structured: unknown, filter?: ItemFilter): Chan
     ...(a.execution === undefined ? {} : { drift: a.execution.drift }),
     ...(cs.errorCode === undefined ? {} : { errorCode: cs.errorCode }),
     ...(a.derivedFrom === undefined ? {} : { derivedFrom: a.derivedFrom }),
-    rollback: { available: a.rollback?.available ?? false },
+    rollback: {
+      available: a.rollback?.available ?? false,
+      ...(a.rollback?.count === undefined ? {} : { count: a.rollback.count }),
+      ...(a.rollback?.until === undefined ? {} : { until: a.rollback.until }),
+      ...(a.rollback?.stats === undefined ? {} : { stats: a.rollback.stats }),
+    },
     ...(a.pageUrl === undefined ? {} : { pageUrl: a.pageUrl }),
     permissions: { canExclude: cs.status === 'prepared', canSubmit: cs.status === 'prepared', canCancel: cs.status === 'executing' },
   };

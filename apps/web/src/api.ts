@@ -97,7 +97,7 @@ export interface ChangeSetDetail {
   };
   /** Present once execution is summarised (UI-4). */
   drift?: number;
-  rollback: { available: boolean };
+  rollback: { available: boolean; count?: number; until?: string; reason?: string; stats?: { restored: number; skipped: number; failed: number } };
   viewer: ViewerBlock;
 }
 export interface ItemRow {
@@ -185,6 +185,8 @@ export function createApi(fetcher: typeof fetch = (input, init) => fetch(input, 
       const url = typeof approval === 'object' && approval !== null ? (approval as { url?: unknown }).url : undefined;
       return { ok: true, status: String(answer.status), ...(typeof url === 'string' ? { approvalUrl: url } : {}) };
     },
+    /** Rolls the finished change-set back by the hash the requester saw (EXE-8); the route needs a fresh login (SEC-8). */
+    rollback: (csrfToken: string, id: string, hash: string): Promise<DecideOutcome> => post(`${changesetUrl(id)}/rollback`, csrfToken, { hash }),
     /** Derives a new change-set with the edit; the source stays unchanged (CS-5). Empty lists are left out. */
     async exclude(csrfToken: string, id: string, edit: { hash: string; exclude: string[]; include: string[] }): Promise<ExcludeOutcome> {
       const body = {

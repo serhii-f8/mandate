@@ -157,6 +157,13 @@ describe('widget adapters', () => {
     expect(later?.approval?.steps[1]?.decision?.by).toBe('erin');
   });
 
+  it('UI-4 get_changeset rollback count, until and stats reach the model', () => {
+    const rollback = { available: true, count: 3, until: '2030-02-01T00:00:00.000Z', stats: { restored: 2, skipped: 0, failed: 1 } };
+    const model = fromGetChangeset({ ...completed.structuredContent, rollback });
+    expect(model?.rollback).toEqual(rollback);
+    expect(fromGetChangeset({ ...completed.structuredContent, rollback: { available: false, reason: 'window_closed' } })?.rollback).toEqual({ available: false });
+  });
+
   it('UI-4 the completed answer carries drift and rollback unavailable', () => {
     const model = fromGetChangeset(completed.structuredContent);
     expect(model).toMatchObject({

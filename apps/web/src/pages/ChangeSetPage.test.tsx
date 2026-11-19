@@ -182,6 +182,32 @@ describe('ChangeSetPage', () => {
       expect(screen.queryByRole('button', { name: /^Approve/ })).toBeNull();
     });
 
+    it('UI-4 SEC-8 the page posts the hash; reauthentication_required sends the browser to a fresh login back to the page', async () => {
+      const done: ChangeSetDetail = { ...prepared, status: 'completed', rollback: { available: true, count: 2, until: '2030-01-02T00:00:00.000Z' } };
+      const answers = (rollback: Answer): Record<string, Answer> => ({
+        ...requesterBase(),
+        [`GET /api/v1/changesets/${ID}`]: ok(done),
+        [`POST /api/v1/changesets/${ID}/rollback`]: rollback,
+      });
+      const stale = stubFetch(answers({ status: 403, body: { error: 'reauthentication_required' } }));
+      const first = render(<ChangeSetPage id={ID} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Roll back 2 items' }));
+      await waitFor(() => {
+        expect(assign).toHaveBeenCalledWith(`/auth/login?return_to=${RETURN_TO}&fresh=1`);
+      });
+      const init = posts(stale, `/api/v1/changesets/${ID}/rollback`)[0]?.[1];
+      expect(JSON.parse(init?.body as string)).toEqual({ hash: HASH });
+      expect((init?.headers as Record<string, string>)['x-csrf-token']).toBe('tok');
+      first.unmount();
+
+      const fine = stubFetch(answers(ok({ status: 'rolling_back' })));
+      render(<ChangeSetPage id={ID} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Roll back 2 items' }));
+      await waitFor(() => {
+        expect(fine.mock.calls.filter(([url]) => url === `/api/v1/changesets/${ID}`)).toHaveLength(2);
+      });
+    });
+
     it('CS-5 an exclusion moves the page to the new change-set', async () => {
       const replaceState = vi.spyOn(window.history, 'replaceState');
       const fetchMock = stubFetch({

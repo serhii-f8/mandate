@@ -3,6 +3,7 @@ import { ActionBar } from '../components/ActionBar.js';
 import { ItemTable } from '../components/ItemTable.js';
 import { Notice } from '../components/Notice.js';
 import { Pager } from '../components/Pager.js';
+import { RollbackCounts } from '../components/RollbackCounts.js';
 import { StatusBadge } from '../components/StatusBadge.js';
 import type { ChangeSetActions, ChangeSetViewModel, ItemsPageModel } from '../model.js';
 import { type ItemPages, useItemPages } from '../paging.js';
@@ -51,6 +52,7 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
         <StatusBadge status={data.status} />
       </header>
       <p className="counts">{summary(data)}</p>
+      <RollbackCounts stats={data.rollback.stats} />
       {data.errorCode === undefined ? null : <p className="error-code">{`Error: ${data.errorCode}`}</p>}
       <div role="tablist" aria-label="Items">
         {TABS.map(({ tab: t, label }) => (
@@ -87,10 +89,12 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
             type="button"
             disabled={action.busy}
             onClick={() => {
-              action.run('Not rolled back: ', rollback, onData);
+              action.run('Not rolled back: ', rollback, (next) => {
+                if (next !== undefined) onData(next);
+              });
             }}
           >
-            Roll back
+            {data.rollback.count === undefined ? 'Roll back' : `Roll back ${String(data.rollback.count)} items`}
           </button>
         </ActionBar>
       ) : null}

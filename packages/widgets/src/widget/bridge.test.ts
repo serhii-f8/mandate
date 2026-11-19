@@ -191,4 +191,15 @@ describe('widget bridge', () => {
     expect(bare).not.toHaveProperty('export');
     expect(bare).not.toHaveProperty('openPage');
   });
+
+  it('UI-4 MCP-5 the widget rollback opens the page and calls no tool', async () => {
+    const { app, openLink, callServerTool } = fakeApp();
+    const actions = changeSetActions(app, changeSetModel);
+    expect(await actions.rollback?.()).toEqual({ ok: true, value: undefined });
+    expect(openLink.mock.calls).toEqual([[{ url: PAGE_A }]]);
+    expect(callServerTool).not.toHaveBeenCalled();
+    const noPage = changeSetModel();
+    delete noPage.pageUrl;
+    expect(changeSetActions(app, () => noPage)).not.toHaveProperty('rollback');
+  });
 });

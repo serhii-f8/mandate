@@ -142,6 +142,8 @@ export function changeSetActions(app: WidgetApp, current: () => ChangeSetViewMod
   if (current().pageUrl !== undefined) {
     actions.export = () => toPage(app, current().pageUrl);
     actions.openPage = () => toPage(app, current().pageUrl);
+    // The rollback is confirmed on the page (SEC-8); the widget calls no tool for it.
+    actions.rollback = () => toPage(app, current().pageUrl);
   }
   return actions;
 }
