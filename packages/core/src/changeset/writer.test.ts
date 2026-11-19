@@ -10,6 +10,7 @@ import {
   POLL_GIVE_UP_MS,
   RetryableWriteError,
   UnsupportedWriter,
+  type WriteDirection,
   type WriteOutcomeCode,
 } from './writer.js';
 
@@ -156,7 +157,7 @@ const FIXED_CODES: readonly WriteOutcomeCode[] = [
   'write_mode_unsupported',
 ];
 
-function setup(op: OperationDefinition & { manifest: ManifestDefinition } = operation) {
+function setup(op: OperationDefinition & { manifest: ManifestDefinition } = operation, direction?: WriteDirection) {
   const events: string[] = [];
   const reader = new FakeReader(events);
   const bulk = new FakeBulk(events);
@@ -168,6 +169,7 @@ function setup(op: OperationDefinition & { manifest: ManifestDefinition } = oper
     readerFor: () => reader,
     bulkFor: () => bulk,
     clock,
+    ...(direction === undefined ? {} : { direction }),
   });
   return { events, reader, bulk, clock, batch, writer };
 }
@@ -738,5 +740,109 @@ describe('OPS-6 unsupported write mode', () => {
       { targetId: 'B', status: 'failed', error: 'write_mode_unsupported' },
     ]);
     expect(events).toEqual([]);
+  });
+});
+
+describe('EXE-8 ManifestBatchWriter reverse', () => {
+  const reverse = () => setup(operation, 'reverse');
+
+  it('EXE-8 reverse writes the before values of the items still at after and verifies them', async () => {
+    const { events, reader, bulk, batch, writer } = reverse();
+    reader.pages = [page(product('A', 'new', { status: 2 }), product('B', 'new')), page(product('A', 'old'), product('B', 'old'))];
+    bulk.statuses = [states('ok', 'ok')];
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(['A', 'B']), items: [item('A'), item('B')], batch });
+    expect(bulk.submitted).toEqual([
+      [
+        { sku: 'A', status: 2, description: 'old' },
+        { sku: 'B', description: 'old' },
+      ],
+    ]);
+    expect(batch.recorded).toEqual([
+      {
+        upstreamBatchId: 'u-1',
+        plan: [
+          { targetId: 'A', action: 'write' },
+          { targetId: 'B', action: 'write' },
+        ],
+      },
+    ]);
+    expect(events.indexOf('record')).toBeLessThan(events.indexOf('status'));
+    expect(reader.calls[0]?.args).toMatchObject({ fields: ['sku', 'description', 'brand', 'status'] });
+    expect(reader.calls[1]?.args).toMatchObject({ skus: ['A', 'B'], fields: ['sku', 'description'] });
+    expect(outcomes).toEqual([
+      { targetId: 'A', status: 'written' },
+      { targetId: 'B', status: 'written' },
+    ]);
+  });
+
+  it('EXE-8 CS-7 reverse skips drift and reports already_restored without submitting', async () => {
+    const { events, reader, bulk, batch, writer } = reverse();
+    reader.pages = [page(product('A', 'other'), product('B', 'old'))];
+    const outcomes = await writer.writeBatch({
+      changeset: changesetFor(['A', 'B', 'C']),
+      items: [item('A'), item('B'), item('C')],
+      batch,
+    });
+    expect(bulk.submitted).toEqual([]);
+    expect(batch.recorded).toEqual([]);
+    expect(events).toEqual(['read']);
+    expect(outcomes).toEqual([
+      { targetId: 'A', status: 'skipped', error: 'drift' },
+      { targetId: 'B', status: 'written', error: 'already_restored' },
+      { targetId: 'C', status: 'skipped', error: 'gone' },
+    ]);
+  });
+
+  it('EXE-4 reverse resumes a recorded submission without a second submit', async () => {
+    const { reader, bulk, batch, writer } = reverse();
+    const ids = ['A', 'B'];
+    reader.pages = [page(product('A', 'new'), product('B', 'old')), { ok: false, code: 'network' }, page(product('A', 'old'))];
+    bulk.statuses = [DONE];
+    const input = { changeset: changesetFor(ids), items: ids.map(item), batch };
+    await expect(writer.writeBatch(input)).rejects.toMatchObject({ name: 'RetryableWriteError', code: 'read_failed' });
+    expect(batch.submission).toBeDefined();
+    const outcomes = await writer.writeBatch(input);
+    expect(bulk.submitted).toEqual([[{ sku: 'A', description: 'old' }]]);
+    expect(batch.recorded).toHaveLength(1);
+    expect(reader.calls).toHaveLength(3);
+    expect(reader.calls[2]?.args).toMatchObject({ skus: ['A'] });
+    expect(outcomes).toEqual([
+      { targetId: 'A', status: 'written' },
+      { targetId: 'B', status: 'written', error: 'already_restored' },
+    ]);
+  });
+
+  it('EXE-8 a reverse verify that reads after again marks the item skipped drift', async () => {
+    const { reader, bulk, batch, writer } = reverse();
+    reader.pages = [page(product('A', 'new')), page(product('A', 'new'))];
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch });
+    expect(bulk.submitted).toEqual([[{ sku: 'A', description: 'old' }]]);
+    expect(outcomes).toEqual([{ targetId: 'A', status: 'skipped', error: 'drift' }]);
+  });
+
+  it('EXE-4 direction forward and omitted give identical submissions and outcomes', async () => {
+    const run = async (direction?: WriteDirection) => {
+      const s = setup(operation, direction);
+      s.reader.pages = [
+        page(product('A', 'old', { status: 2 }), product('B', 'new'), product('C', 'other')),
+        page(product('A', 'new', { status: 2 })),
+      ];
+      const outcomes = await s.writer.writeBatch({
+        changeset: changesetFor(['A', 'B', 'C', 'D']),
+        items: ['A', 'B', 'C', 'D'].map(item),
+        batch: s.batch,
+      });
+      return { outcomes, submitted: s.bulk.submitted, recorded: s.batch.recorded, reads: s.reader.calls, events: s.events };
+    };
+    const omitted = await run();
+    const forward = await run('forward');
+    expect(forward).toEqual(omitted);
+    expect(omitted.submitted).toEqual([[{ sku: 'A', status: 2, description: 'new' }]]);
+    expect(omitted.outcomes).toEqual([
+      { targetId: 'A', status: 'written' },
+      { targetId: 'B', status: 'written', error: 'already_applied' },
+      { targetId: 'C', status: 'skipped', error: 'drift' },
+      { targetId: 'D', status: 'skipped', error: 'gone' },
+    ]);
   });
 });

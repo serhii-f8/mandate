@@ -114,6 +114,7 @@ export { buildItems, inScope, touchedFields } from './changeset/items.js';
 export {
   type BulkItemState,
   type BulkWriter,
+  classifyForRollback,
   classifyForWrite,
   type Clock,
   ManifestBatchWriter,
@@ -124,8 +125,10 @@ export {
   POLL_MAX_MS,
   RetryableWriteError,
   type RetryableWriteCode,
+  type RollbackClassification,
   UnsupportedWriter,
   type WriteClassification,
+  type WriteDirection,
   type WriteOutcomeCode,
 } from './changeset/writer.js';
 export {

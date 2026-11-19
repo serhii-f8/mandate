@@ -7,6 +7,7 @@ import { resolveTemplates } from './prepare.js';
 
 export type WriteOutcomeCode =
   | 'already_applied'
+  | 'already_restored'
   | 'drift'
   | 'gone'
   | 'upstream_rejected'
@@ -53,6 +54,29 @@ export function classifyForWrite(input: {
   if (equals(before)) return { action: 'write' };
   return { action: 'outcome', status: 'skipped', error: 'drift' };
 }
+
+export type RollbackClassification =
+  | { readonly action: 'write' }
+  | {
+      readonly action: 'outcome';
+      readonly status: 'written' | 'skipped';
+      readonly error: 'already_restored' | 'drift' | 'gone';
+    };
+
+/** CS-7 on the way back: classifyForWrite with `before` and `after` swapped; `already_applied` reads `already_restored`. */
+export function classifyForRollback(input: Parameters<typeof classifyForWrite>[0]): RollbackClassification {
+  const c = classifyForWrite({ ...input, item: swapped(input.item) });
+  if (c.action === 'write') return c;
+  if (c.error === 'already_applied') return { action: 'outcome', status: c.status, error: 'already_restored' };
+  return { action: 'outcome', status: c.status, error: c.error };
+}
+
+function swapped<T extends Pick<ChangeItemRecord, 'before' | 'after'>>(item: T): T {
+  return { ...item, before: item.after, after: item.before };
+}
+
+/** Which way a batch is written: `forward` applies `after`; `reverse` restores `before` (EXE-8). */
+export type WriteDirection = 'forward' | 'reverse';
 
 /** Per-item state of an upstream bulk batch (core port of the SDK's `BulkItemState`). */
 export type BulkItemState = 'ok' | 'failed' | 'retriable' | 'open';
@@ -108,6 +132,8 @@ export interface ManifestBatchWriterDeps {
   readonly readerFor: (changeset: ChangeSetRecord) => UpstreamReader;
   readonly bulkFor: (changeset: ChangeSetRecord) => BulkWriter;
   readonly clock: Clock;
+  /** `reverse` writes the stored `before` back over the stored `after` (rollback, EXE-8). Default `forward`. */
+  readonly direction?: WriteDirection;
 }
 
 type WriteInput = Parameters<ChangeWriter['writeBatch']>[0];
@@ -128,7 +154,18 @@ export class ManifestBatchWriter implements ChangeWriter {
     this.manifest = deps.operation.manifest;
   }
 
+  /**
+   * Reverse (EXE-8, ruling R9): every item's `before` and `after` are swapped first, so the forward
+   * algorithm below reads, classifies, submits, records, polls and verifies toward the stored
+   * `before`; an `already_applied` outcome then reads `already_restored`.
+   */
   async writeBatch(input: WriteInput): Promise<readonly ItemOutcome[]> {
+    if (this.deps.direction !== 'reverse') return this.writeForward(input);
+    const outcomes = await this.writeForward({ ...input, items: input.items.map((i) => swapped(i)) });
+    return outcomes.map((o): ItemOutcome => (o.error === 'already_applied' ? { ...o, error: 'already_restored' } : o));
+  }
+
+  private async writeForward(input: WriteInput): Promise<readonly ItemOutcome[]> {
     const { changeset, items, batch } = input;
     // Resume (EXE-4): a recorded submission is never resubmitted and nothing is read before polling.
     if (batch.submission !== undefined) {
