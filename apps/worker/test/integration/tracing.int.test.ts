@@ -77,6 +77,41 @@ async function underRoot<T>(fn: () => Promise<T>): Promise<{ result: T; traceId:
   });
 }
 
+type HistoryEvent = Record<string, { header?: { fields?: Record<string, unknown> } } | undefined>;
+interface TracedHistory {
+  readonly json: unknown;
+  readonly events: HistoryEvent[];
+}
+
+/** The workflow's history in its proto JSON form (base64 payload fields). */
+async function historyOf(id: string): Promise<TracedHistory> {
+  const json: unknown = JSON.parse(historyToJSON(await handleOf(id).fetchHistory()));
+  return { json, events: (json as { events?: HistoryEvent[] }).events ?? [] };
+}
+
+/** The `_tracer-data` header of an event's `attributes` (undefined when absent). */
+const headerOf = (event: HistoryEvent | undefined, attributes: string): unknown => event?.[attributes]?.header?.fields?.[TRACE_HEADER];
+
+/** The `_tracer-data` header of every event that has `attributes`. */
+const headersOf = (history: TracedHistory, attributes: string): unknown[] =>
+  history.events.filter((e) => e[attributes] !== undefined).map((e) => headerOf(e, attributes));
+
+/** Each header is present, holds only W3C trace context and belongs to `traceId`. */
+function expectTraceContextOf(headers: readonly unknown[], traceId: string): void {
+  for (const header of headers) {
+    const context = traceContextOf(header);
+    expect(context, 'only traceparent/tracestate').toBeDefined();
+    expect(traceIdOf(context)).toBe(traceId);
+  }
+}
+
+/** Apart from the shape-checked SDK plaintext, every payload is `binary/encrypted` (SEC-4). */
+function expectEncryptedApartFromSdkPlaintext(history: unknown): void {
+  const encodings = payloadEncodings(history, isSdkPlaintext);
+  expect(encodings.length).toBeGreaterThan(0);
+  expect(new Set(encodings)).toEqual(new Set(['binary/encrypted']));
+}
+
 const finished = (): ReadableSpan[] => exporter.getFinishedSpans();
 
 /** The one finished span called `name`. */
@@ -142,27 +177,22 @@ describe('NFR-11 tracing through Temporal', () => {
   it('SEC-4 SEC-3 the trace header carries only W3C trace context and every other payload is encrypted', async () => {
     await withTracedWorker(async (worker) => {
       const { result: prepared, traceId } = await underRoot(() => preparedByWorkflow(infra, worker, ['t-0001']));
-      const history: unknown = JSON.parse(historyToJSON(await handleOf(prepared.id).fetchHistory()));
-      const events = (history as { events?: Record<string, { header?: { fields?: Record<string, unknown> } }>[] }).events ?? [];
-
-      const headers = [
-        events[0]?.workflowExecutionStartedEventAttributes?.header?.fields?.[TRACE_HEADER],
-        ...events.flatMap((e) => (e.activityTaskScheduledEventAttributes === undefined ? [] : [e.activityTaskScheduledEventAttributes.header?.fields?.[TRACE_HEADER]])),
-      ];
+      const parked = await historyOf(prepared.id);
+      const headers = [headerOf(parked.events[0], 'workflowExecutionStartedEventAttributes'), ...headersOf(parked, 'activityTaskScheduledEventAttributes')];
       // The start event and at least `inspect` and `prepare`.
       expect(headers.length).toBeGreaterThanOrEqual(3);
-      for (const header of headers) {
-        const context = traceContextOf(header);
-        expect(context, 'only traceparent/tracestate').toBeDefined();
-        expect(traceIdOf(context)).toBe(traceId);
-      }
+      expectTraceContextOf(headers, traceId);
+      expectEncryptedApartFromSdkPlaintext(parked.json);
 
-      const encodings = payloadEncodings(history, isSdkPlaintext);
-      expect(encodings.length).toBeGreaterThan(0);
-      expect(new Set(encodings)).toEqual(new Set(['binary/encrypted']));
-
-      await worker.executor.cancel({ changesetId: prepared.id, actor: 'alice', correlationId: 'corr-cleanup' });
+      // A signal (the cancel's wake) carries its own trace header into history.
+      const { traceId: cancelTraceId } = await underRoot(() => worker.executor.cancel({ changesetId: prepared.id, actor: 'alice', correlationId: 'corr-cancel' }));
       await expect(handleOf(prepared.id).result()).resolves.toEqual({ status: 'cancelled' });
+      const closed = await historyOf(prepared.id);
+      const signals = headersOf(closed, 'workflowExecutionSignaledEventAttributes');
+      expect(signals.length).toBeGreaterThanOrEqual(1);
+      expectTraceContextOf(signals, cancelTraceId);
+      expectTraceContextOf(headersOf(closed, 'activityTaskScheduledEventAttributes'), traceId);
+      expectEncryptedApartFromSdkPlaintext(closed.json);
     });
   }, 60_000);
 });

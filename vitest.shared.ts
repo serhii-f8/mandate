@@ -11,10 +11,11 @@ import { defineConfig, type ViteUserConfig } from 'vitest/config';
 import { defaultServerConditions, type PluginOption } from 'vite';
 
 /**
- * Vite's server conditions without `module`: Node loads the dependencies, and a package such as
- * `@opentelemetry/api` 1.9.1 maps `module` to an ESM build with extensionless imports that Node
- * cannot load ("Cannot find module .../build/esm/baggage/utils"). Its `default` (CommonJS) entry
- * is what Node itself resolves in production.
+ * Vite's server conditions without `module`, for every project (Node and `apps/web`'s jsdom) and
+ * for both externalized and Vite-inlined dependencies. `@opentelemetry/api` 1.9.1 maps `module` to
+ * an ESM build with extensionless imports that Node cannot load ("Cannot find module
+ * .../build/esm/baggage/utils"). Without `module`, packages resolve to the entry Node itself
+ * picks in production (here the CommonJS `default`).
  */
 const conditions = ['@aiops/source', ...defaultServerConditions.filter((c) => c !== 'module')];
 

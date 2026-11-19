@@ -162,9 +162,21 @@ describe('EXE-10 workflow replay gate', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('NFR-11 replay exports no workflow span', () => {
+  it('NFR-11 replay exports no workflow span', async () => {
+    // Self-contained (also under `-t`): replays one history that runs activities and closes.
+    const own = new InMemorySpanExporter();
+    const fixture = fixtures.find((f) => f.type === 'changesetWorkflow' && f.name === 'completed.json');
+    if (fixture === undefined) throw new Error('fixture changesetWorkflow/completed.json missing');
+    const plugins = [createTracingPlugin({ spanProcessor: new SimpleSpanProcessor(own), serviceName: 'aiops-worker' })];
+    await Worker.runReplayHistory(
+      { workflowsPath, bundlerOptions: workflowBundlerOptions(), plugins, dataConverter: workerDataConverter(parseTemporalKeys(TEST_TEMPORAL_KEYS)) },
+      JSON.parse(readFileSync(fixture.path, 'utf8')) as unknown,
+      fixture.name,
+    );
     // Sinks are not called during replay, so the workflow's spans never reach the processor.
-    const names = exporter.getFinishedSpans().map((s) => s.name);
-    expect(names.filter((n) => n.startsWith('RunWorkflow:') || n.startsWith('StartActivity:'))).toEqual([]);
+    for (const spans of [own.getFinishedSpans(), exporter.getFinishedSpans()]) {
+      const names = spans.map((s) => s.name);
+      expect(names.filter((n) => n.startsWith('RunWorkflow:') || n.startsWith('StartActivity:'))).toEqual([]);
+    }
   });
 });
