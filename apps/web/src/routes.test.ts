@@ -9,6 +9,8 @@ describe('UI-2 routes', () => {
     expect(route('/app')).toEqual({ kind: 'index' });
     expect(route('/app/credentials')).toEqual({ kind: 'credentials' });
     expect(route('/app/approvals')).toEqual({ kind: 'approvals' });
+    expect(route('/app/audit')).toEqual({ kind: 'audit' });
+    expect(route('/app/audit/')).toEqual({ kind: 'audit' });
     expect(route(`/app/changesets/${ID}`)).toEqual({ kind: 'changeset', id: ID });
     expect(route(`/app/changesets/${ID}/`)).toEqual({ kind: 'changeset', id: ID });
     expect(route('/app/changesets/x')).toEqual({ kind: 'not_found' });

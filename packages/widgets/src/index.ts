@@ -16,3 +16,4 @@ export * from "./views/ProgressView.js";
 export * from "./views/ResultView.js";
 export * from "./views/ChangeSetView.js";
 export * from "./views/ApprovalView.js";
+export * from "./views/AuditSearchView.js";

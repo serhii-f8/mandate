@@ -1,0 +1,38 @@
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { createApi } from '../api.js';
+
+/** Container of `/app`: links the pages; Audit only when the session says `viewAudit` (UI-2). The api enforces it regardless (SEC-1). */
+export function IndexPage(): ReactElement {
+  const api = useMemo(() => createApi(), []);
+  const [viewAudit, setViewAudit] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api.session().then(
+      (s) => {
+        if (live) setViewAudit(s.viewAudit);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [api]);
+  return (
+    <main>
+      <h1>AI Operations</h1>
+      <ul>
+        <li>
+          <a href="/app/approvals">Approvals</a>
+        </li>
+        <li>
+          <a href="/app/credentials">Credentials</a>
+        </li>
+        {viewAudit ? (
+          <li>
+            <a href="/app/audit">Audit</a>
+          </li>
+        ) : null}
+      </ul>
+    </main>
+  );
+}

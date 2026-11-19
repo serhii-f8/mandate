@@ -14,6 +14,7 @@ const session: Session = {
   authTime: '2030-01-01T00:00:00.000Z',
   fresh: true,
   expiresAt: '2030-01-01T08:00:00.000Z',
+  viewAudit: false,
 };
 const detail: ChangeSetDetail = {
   id: ID,
