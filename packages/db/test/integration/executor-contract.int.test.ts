@@ -4,6 +4,7 @@ import { afterAll, beforeAll } from 'vitest';
 import { EMPTY_STATS, type AuditEventInput, type ChangeSetRecord } from '@aiops/core';
 import {
   describeExecutorContract,
+  describeRollbackRun,
   EXECUTOR_CONTRACT_HASH,
   InMemoryExecutor,
   ScriptedWriter,
@@ -57,13 +58,18 @@ function event(changesetId: string, details: AuditEventInput['details'] = {}): A
   };
 }
 
-// One database for the whole suite (the audit table is append-only); every case uses fresh UUIDs.
-describeExecutorContract('postgres', () => {
+function harness(rollbackWriter?: ScriptedWriter) {
   const repository = new PostgresChangeSetRepository(database.db);
   const writer = new ScriptedWriter();
   const batchSize = 2;
   const failureThreshold = 0.5;
-  const executor = new InMemoryExecutor({ repository, writer, batchSizeOf: () => batchSize, failureThreshold });
+  const executor = new InMemoryExecutor({
+    repository,
+    writer,
+    ...(rollbackWriter === undefined ? {} : { rollbackWriter }),
+    batchSizeOf: () => batchSize,
+    failureThreshold,
+  });
   const prepared = async (
     items: number,
     opts: { expiresAt?: Date; requester?: string } = {},
@@ -102,13 +108,13 @@ describeExecutorContract('postgres', () => {
     if (record === undefined) throw new Error('preparation failed');
     return record;
   };
-  return Promise.resolve({
-    executor,
-    repository,
-    writer,
-    batchSize,
-    failureThreshold,
-    prepared,
-    auditEvents: allAuditEvents,
-  });
+  return { executor, repository, writer, batchSize, failureThreshold, prepared, auditEvents: allAuditEvents };
+}
+
+// One database for the whole suite (the audit table is append-only); every case uses fresh UUIDs.
+describeExecutorContract('postgres', () => Promise.resolve(harness()));
+
+describeRollbackRun('postgres', () => {
+  const rollbackWriter = new ScriptedWriter();
+  return Promise.resolve({ ...harness(rollbackWriter), rollbackWriter });
 });

@@ -1,7 +1,14 @@
-import { ExecutorUnavailable, type ChangeSetExecutor, type StartOutcome, type StartRequest } from '@aiops/core';
+import {
+  ExecutorUnavailable,
+  type ChangeSetExecutor,
+  type RollbackRequestInput,
+  type RollbackRequestOutcome,
+  type StartOutcome,
+  type StartRequest,
+} from '@aiops/core';
 import type { InMemoryExecutor } from '@aiops/testing';
 
-/** Wraps the in-memory executor; a test can make starts refuse or the executor unreachable. */
+/** Wraps the in-memory executor; a test can make starts refuse or the executor (starts and rollback requests) unreachable. */
 export class ToggleExecutor implements ChangeSetExecutor {
   refuseStarts = false;
   unavailable = false;
@@ -27,5 +34,10 @@ export class ToggleExecutor implements ChangeSetExecutor {
   // The in-memory run never waits for a signal, so its wake takes no argument.
   wake(): Promise<void> {
     return this.inner.wake();
+  }
+
+  requestRollback(req: RollbackRequestInput): Promise<RollbackRequestOutcome> {
+    if (this.unavailable) return Promise.reject(new ExecutorUnavailable());
+    return this.inner.requestRollback(req);
   }
 }

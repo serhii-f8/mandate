@@ -422,6 +422,24 @@ export interface ExecutionProgress {
 /** Alias of the progress shape for the workflow query result. */
 export type WorkflowProgress = ExecutionProgress;
 
+/** EXE-8: a rollback request for the executor; eligibility has been checked by the caller (design §2). */
+export interface RollbackRequestInput {
+  readonly changesetId: string;
+  readonly actor: string;
+  readonly clientId?: string;
+  readonly correlationId: string;
+  /** The rollbackable item count the caller's eligibility answered, for the request's audit row. */
+  readonly count: number;
+}
+
+export type RollbackRequestOutcome =
+  | { readonly ok: true; readonly status: 'rolling_back' | 'failed' }
+  | {
+      readonly ok: false;
+      readonly reason: 'not_found' | 'not_rollbackable';
+      readonly detail?: 'already_rolled_back' | 'not_finished' | 'window_closed';
+    };
+
 export type StartRefusal = 'not_found' | 'hash_mismatch' | 'expired' | 'not_executable' | 'limit_exceeded' | 'not_approved';
 
 /** Executor port (EXE-11). `cancel` may answer `{ ok: true, status: 'executing' }` while a run winds down. */
@@ -435,4 +453,6 @@ export interface ChangeSetExecutor {
   progress(changesetId: string): Promise<ExecutionProgress | undefined>;
   /** Nudges the change-set's run to re-read its status (an approval, a cancel). Best effort; resolves for an unknown change-set. */
   wake(changesetId: string): Promise<void>;
+  /** EXE-8: stores the request and wakes the run (eligibility is the caller's, design §2). Throws ExecutorUnavailable before any state change when the run cannot be described. */
+  requestRollback(req: RollbackRequestInput): Promise<RollbackRequestOutcome>;
 }

@@ -119,6 +119,10 @@ class SpyExecutor implements ChangeSetExecutor {
   wake(): Promise<void> {
     return Promise.resolve();
   }
+
+  requestRollback(): Promise<never> {
+    return Promise.reject(new Error('unused'));
+  }
 }
 
 async function setup(options: { steps?: readonly string[]; widget?: boolean } = {}) {

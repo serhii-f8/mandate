@@ -93,6 +93,8 @@ export type {
   RateCounter,
   ReadPage,
   RollbackItemOutcome,
+  RollbackRequestInput,
+  RollbackRequestOutcome,
   StartEvent,
   StartOutcome,
   StartRefusal,

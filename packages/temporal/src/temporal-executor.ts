@@ -2,12 +2,16 @@ import {
   CANCELLABLE,
   changesetTransitionEvent,
   ExecutorUnavailable,
+  ROLLBACK_REQUEST_MARGIN_MS,
+  rollbackRequestEvents,
   startEventFactory,
   type ChangeSetExecutor,
   type ChangeSetRecord,
   type ChangeSetRepository,
   type ChangeSetStatus,
   type ExecutionProgress,
+  type RollbackRequestInput,
+  type RollbackRequestOutcome,
   type StartOutcome,
   type StartRequest,
 } from '@aiops/core';
@@ -171,6 +175,68 @@ export class TemporalExecutor implements ChangeSetExecutor {
     // The waiting workflow re-reads the status and ends; without it, it would end at expiry.
     await this.wake(record.id);
     return { ok: true, status: 'cancelled' };
+  }
+
+  /**
+   * EXE-8: describe the run first, so an unreachable Temporal changes nothing (ExecutorUnavailable); a run
+   * that is not running has no window left to wake. Then the request and its audit rows in one compare-
+   * and-set transaction, which checks the window again on the database clock (SEC-8, AUD-1), and a
+   * data-free wake. A signal that finds the run closed (it closed after describe) fails the rollback
+   * instead of leaving it `rolling_back` with no run to do it.
+   */
+  async requestRollback(req: RollbackRequestInput): Promise<RollbackRequestOutcome> {
+    const record = await this.repository.get(req.changesetId);
+    if (record === undefined) return { ok: false, reason: 'not_found' };
+    const handle = this.client.workflow.getHandle(record.id);
+    try {
+      const description = await handle.describe();
+      if (description.status.name !== 'RUNNING') return { ok: false, reason: 'not_rollbackable', detail: 'window_closed' };
+    } catch (error) {
+      // NOT_FOUND from the server: no run was ever started for this change-set.
+      if (error instanceof WorkflowNotFoundError) return { ok: false, reason: 'not_rollbackable', detail: 'window_closed' };
+      throw new ExecutorUnavailable();
+    }
+    const request = {
+      actor: req.actor,
+      ...(req.clientId === undefined ? {} : { clientId: req.clientId }),
+      correlationId: req.correlationId,
+      requestedAt: this.now(),
+    };
+    const stored = await this.repository.requestRollback({
+      changesetId: record.id,
+      request,
+      marginMs: ROLLBACK_REQUEST_MARGIN_MS,
+      audit: rollbackRequestEvents({ newId: this.newId, changeset: record, request, channel: 'page', count: req.count }),
+    });
+    if (!stored.ok) {
+      return stored.reason === 'not_found' ? { ok: false, reason: 'not_found' } : { ok: false, reason: 'not_rollbackable', detail: stored.reason };
+    }
+    try {
+      await handle.signal(WAKE_SIGNAL);
+    } catch (error) {
+      // Any other failure (Temporal unreachable now): the stored request stands, and the run's next look
+      // after its window timer finds it.
+      if (!(error instanceof WorkflowNotFoundError)) return { ok: true, status: 'rolling_back' };
+      const errorCode = 'rollback_workflow_closed';
+      const failed = await this.repository.transition(
+        record.id,
+        ['rolling_back'],
+        'failed',
+        changesetTransitionEvent({
+          id: this.newId(),
+          actor: 'system',
+          changeset: stored.changeset,
+          from: 'rolling_back',
+          to: 'failed',
+          correlationId: req.correlationId,
+          details: { errorCode },
+        }),
+        { errorCode },
+      );
+      // A lost compare-and-set means a run did take the request on before it closed.
+      return { ok: true, status: failed === undefined ? 'rolling_back' : 'failed' };
+    }
+    return { ok: true, status: 'rolling_back' };
   }
 
   async progress(changesetId: string): Promise<ExecutionProgress | undefined> {

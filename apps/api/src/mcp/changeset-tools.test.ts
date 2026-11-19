@@ -48,6 +48,10 @@ class StubExecutor implements ChangeSetExecutor {
     return Promise.resolve();
   }
 
+  requestRollback(): Promise<never> {
+    return Promise.reject(new Error('unused'));
+  }
+
   progress(id: string): Promise<ExecutionProgress | undefined> {
     this.progressCalls.push(id);
     return this.progressAnswer === 'unavailable' ? Promise.reject(new ExecutorUnavailable()) : Promise.resolve(this.progressAnswer);

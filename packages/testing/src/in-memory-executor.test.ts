@@ -9,13 +9,18 @@ import {
   type ChangeSetRepository,
   BatchFenced,
 } from '@aiops/core';
-import { describeExecutorContract, EXECUTOR_CONTRACT_HASH } from './executor-contract.js';
+import { describeExecutorContract, describeRollbackRun, EXECUTOR_CONTRACT_HASH } from './executor-contract.js';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
 import { InMemoryChangeSetRepository } from './in-memory-changeset-repository.js';
 import { InMemoryExecutor, ScriptedWriter } from './in-memory-executor.js';
 
 function build(
-  opts: { batchSize?: number; wrap?: (r: InMemoryChangeSetRepository) => ChangeSetRepository; writer?: ScriptedWriter } = {},
+  opts: {
+    batchSize?: number;
+    wrap?: (r: InMemoryChangeSetRepository) => ChangeSetRepository;
+    writer?: ScriptedWriter;
+    rollbackWriter?: ScriptedWriter;
+  } = {},
 ) {
   const audit = new InMemoryAuditLog();
   const base = new InMemoryChangeSetRepository(audit);
@@ -23,7 +28,14 @@ function build(
   const writer = opts.writer ?? new ScriptedWriter();
   const batchSize = opts.batchSize ?? 2;
   const failureThreshold = 0.5;
-  const executor = new InMemoryExecutor({ repository, writer, batchSizeOf: () => batchSize, failureThreshold });
+  const rollbackWriter = opts.rollbackWriter;
+  const executor = new InMemoryExecutor({
+    repository,
+    writer,
+    ...(rollbackWriter === undefined ? {} : { rollbackWriter }),
+    batchSizeOf: () => batchSize,
+    failureThreshold,
+  });
   const prepared = async (items: number, o: { expiresAt?: Date; requester?: string } = {}): Promise<ChangeSetRecord> => {
     const id = randomUUID();
     const now = new Date();
@@ -68,6 +80,21 @@ describeExecutorContract('in-memory', () => {
     executor: h.executor,
     repository: h.repository,
     writer: h.writer,
+    batchSize: h.batchSize,
+    failureThreshold: h.failureThreshold,
+    prepared: h.prepared,
+    auditEvents: () => Promise.resolve([...h.audit.events]),
+  });
+});
+
+describeRollbackRun('in-memory', () => {
+  const rollbackWriter = new ScriptedWriter();
+  const h = build({ rollbackWriter });
+  return Promise.resolve({
+    executor: h.executor,
+    repository: h.repository,
+    writer: h.writer,
+    rollbackWriter,
     batchSize: h.batchSize,
     failureThreshold: h.failureThreshold,
     prepared: h.prepared,
