@@ -54,3 +54,10 @@ export { startSmtpSink, type SinkMessage, type SmtpSink } from './smtp-sink.js';
 export { installFakeMagentoCatalog, type FakeMagentoCatalog, type FakeMagentoProduct } from './fake-magento-catalog.js';
 export { recordApproval, submitChangeSet } from './approval-fixtures.js';
 export { describeApprovalRepositoryContract } from './approval-repository-contract.js';
+export {
+  startFakeMcpServer,
+  type FakeMcpServer,
+  type FakeMcpServerOptions,
+  type FakeMcpTool,
+  type RecordedMcpRequest,
+} from './fake-mcp-server.js';

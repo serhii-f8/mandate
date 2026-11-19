@@ -370,6 +370,12 @@ importers:
       '@aiops/core':
         specifier: workspace:*
         version: link:../core
+      '@modelcontextprotocol/node':
+        specifier: 2.1.2
+        version: 2.1.2(@modelcontextprotocol/server@2.4.0)
+      '@modelcontextprotocol/server':
+        specifier: 2.4.0
+        version: 2.4.0
       '@testcontainers/postgresql':
         specifier: 12.2.1
         version: 12.2.1(bare-buffer@3.7.2)(supports-color@8.1.1)
@@ -379,6 +385,10 @@ importers:
       testcontainers:
         specifier: 12.2.1
         version: 12.2.1(bare-buffer@3.7.2)(supports-color@8.1.1)
+    devDependencies:
+      '@modelcontextprotocol/client':
+        specifier: 2.4.0
+        version: 2.4.0
 
   packages/upstream:
     dependencies:
