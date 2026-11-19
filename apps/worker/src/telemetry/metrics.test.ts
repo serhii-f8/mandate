@@ -88,6 +88,20 @@ describe('NFR-12 worker metrics', () => {
     expect((await gauge()).prepared).toBe(3);
   });
 
+  it('NFR-12 nothing is observed until the first count succeeds', async () => {
+    let fail = true;
+    let t = 0;
+    registerChangeSetGauge(
+      provider.getMeter('t'),
+      () => (fail ? Promise.reject(new Error('db down')) : Promise.resolve(new Map([['prepared', 5]]))),
+      () => t,
+    );
+    expect(await gauge()).toEqual({});
+    fail = false;
+    t = 1;
+    expect((await gauge()).prepared).toBe(5);
+  });
+
   it('NFR-12 a hanging count query keeps the last values and starts no second query', async () => {
     let calls = 0;
     let hang = false;

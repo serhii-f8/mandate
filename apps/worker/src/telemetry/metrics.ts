@@ -85,6 +85,8 @@ export function registerChangeSetGauge(
         // Keep the last values (ruling F17).
       }
     }
+    // Before the first successful count an outage must not look like an empty system.
+    if (fetchedAt === undefined) return;
     for (const status of CHANGESET_STATUSES) result.observe(last.get(status) ?? 0, { status });
   });
 }
