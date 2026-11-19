@@ -670,6 +670,15 @@ describe('MCP-5 tools link their widget', () => {
     expect(tools.map((t) => t._meta)).toEqual([LINKED, LINKED]);
   });
 
+  it('MCP-5 an opaque operation tool links ui://aiops/changeset.html', async () => {
+    const opaque = operation('shop.post_note', 'write_opaque', false);
+    const destructive = operation('shop.purge', 'destructive', false);
+    expect([opaque, destructive].map(linksChangeset)).toEqual([true, true]);
+    const { deps, req } = linkSetup(catalog(), [opaque, destructive]);
+    const tools = await listTools(deps, req(alice));
+    expect(tools.map((t) => t._meta)).toEqual([LINKED, LINKED]);
+  });
+
   it('MCP-5 read operations and operations without a manifest link nothing', async () => {
     const ops = [operation('shop.get', 'read', false), operation('shop.read_with_manifest', 'read', true), operation('shop.write', 'write', false)];
     expect(ops.map(linksChangeset)).toEqual([false, false, false]);

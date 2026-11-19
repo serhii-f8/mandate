@@ -121,13 +121,13 @@ describe('MCP-4 read operations return structured results', () => {
     expect(upstream.requests[0]?.query.get('brand')).toBe('acme');
   });
 
-  it('MCP-4 a write_opaque operation is refused as not supported yet, without an upstream call', async () => {
-    const { result, correlationId } = await call(alice, 'catalog.update_product', { sku: 'acme-1' });
-    expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).toBe('catalog.update_product cannot run: write_opaque operations are not supported yet.');
+  it('CS-1 MCP-4 a write_opaque call prepares a change-set without an upstream call', async () => {
+    const { result } = await call(alice, 'catalog.update_product', { sku: 'acme-1' });
+    expect(result.isError).toBeUndefined();
+    const changeset = result.structuredContent?.changeset as { status?: string; stats?: { included?: number } } | undefined;
+    expect(changeset?.status).toBe('prepared');
+    expect(changeset?.stats?.included).toBe(1);
     expect(upstream.requests).toEqual([]);
-    const [row] = await auditRows(databaseUrl, "correlation_id = $1 and action = 'tool.call'", [correlationId]);
-    expect(row?.details).toMatchObject({ operation: 'catalog.update_product', connection: 'shop', errorCode: 'risk_not_supported' });
   });
 });
 

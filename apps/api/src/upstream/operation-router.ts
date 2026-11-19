@@ -1,13 +1,14 @@
 /**
  * Which path an allowed call takes, by risk class (SPEC section 2, design §4.1): reads run
- * directly, writes and destructive operations with a manifest create a change-set and start its workflow, everything else
- * is refused until a later phase supports it. Nothing writes upstream from here (CS-1).
+ * directly; opaque operations and writes or destructive operations with a manifest create a
+ * change-set and start its workflow; anything else is refused (fail closed). Nothing writes
+ * upstream from here (CS-1).
  */
 import type { LoadedConfiguration } from '@aiops/config';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { UpstreamToolView } from '@aiops/upstream';
 import type { ChangeSetRepository, InvocationRequest, InvocationResult, OperationInvoker, TaskRepository, WorkflowStarter } from '@aiops/core';
-import { ChangeSetInvoker, checkPrepareWait } from '../changesets/changeset-invoker.js';
+import { ChangeSetInvoker, checkPrepareWait, preparesChangeSet } from '../changesets/changeset-invoker.js';
 import type { PipelineDeps } from '../mcp/tool-pipeline.js';
 import { pinRefusal, usablePin } from './pin-refusal.js';
 import { DirectReadInvoker, type DirectReadInvokerDeps } from './read-invoker.js';
@@ -41,7 +42,7 @@ export class OperationRouter implements OperationInvoker {
       if (refusal !== undefined) return Promise.resolve(refusal);
     }
     if (operation.risk === 'read') return this.paths.read.invoke(request);
-    if ((operation.risk === 'write' || operation.risk === 'destructive') && operation.manifest !== undefined) return this.paths.changeset.invoke(request);
+    if (preparesChangeSet(operation)) return this.paths.changeset.invoke(request);
     return Promise.resolve(riskNotSupportedResult(operation));
   }
 }

@@ -21,6 +21,7 @@ import {
   type PolicyEngine,
   type RateCounter,
 } from '@aiops/core';
+import { preparesChangeSet } from '../changesets/changeset-invoker.js';
 import { withPageLink } from '../changesets/links.js';
 import { usablePin } from '../upstream/pin-refusal.js';
 import { toCallToolResult } from '../changesets/results.js';
@@ -94,9 +95,9 @@ export function snapshotOf(configuration: LoadedConfiguration): Snapshot {
   return { configuration, engine };
 }
 
-/** Write and destructive operations with a manifest prepare a change-set, so they link the change-set widget (MCP-5). */
+/** Operations that prepare a change-set (opaque ones included) link the change-set widget (MCP-5). */
 export function linksChangeset(op: OperationDefinition): boolean {
-  return (op.risk === 'write' || op.risk === 'destructive') && op.manifest !== undefined;
+  return preparesChangeSet(op);
 }
 
 /** `_meta` with the MCP Apps linkage: the nested form and the flat legacy key (MCP-5). */

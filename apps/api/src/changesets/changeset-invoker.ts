@@ -1,6 +1,7 @@
 /**
- * A call of an allowed `write` or `destructive` operation with a manifest creates a change-set in `preparing` and
- * starts its workflow (EXE-1); the workflow prepares it (design §4.1, CS-1), and nothing is
+ * A call of an allowed opaque operation, or of a `write` or `destructive` operation with a manifest,
+ * creates a change-set in `preparing` and starts its workflow (EXE-1); the workflow prepares it
+ * (design §4.1, phase 9 §3, CS-1), and nothing is
  * written upstream. A request that declared Tasks gets a task once its row is committed (MCP-7);
  * any other request waits a bounded time for preparation and answers with the result, or with
  * "being prepared" (MCP-1). Answers carry counts and IDs only (MCP-4, SEC-5).
@@ -9,12 +10,14 @@ import type { LoadedConfiguration } from '@aiops/config';
 import {
   changesetTransitionEvent,
   createChangeSet,
+  isOpaque,
   preparationErrorResult,
   TASK_TTL_MS,
   type ChangeSetRecord,
   type ChangeSetRepository,
   type InvocationRequest,
   type InvocationResult,
+  type OperationDefinition,
   type OperationInvoker,
   type TaskRepository,
   type WorkflowStarter,
@@ -50,21 +53,29 @@ export function checkPrepareWait(wait: Pick<PrepareWait, 'timeoutMs' | 'pollMs'>
   if (!(Number.isFinite(wait.timeoutMs) && wait.timeoutMs >= 0)) throw new Error('prepare wait: timeoutMs must not be negative');
 }
 
+/**
+ * The operations a call of which prepares a change-set: opaque ones (phase 9 §2) and writes or
+ * destructive operations with a manifest (CS-1). The router, this invoker and the widget link
+ * (MCP-5) share it; anything else is refused by risk (fail closed).
+ */
+export function preparesChangeSet(operation: OperationDefinition): boolean {
+  return isOpaque(operation) || ((operation.risk === 'write' || operation.risk === 'destructive') && operation.manifest !== undefined);
+}
+
 export class ChangeSetInvoker implements OperationInvoker {
   constructor(private readonly deps: ChangeSetInvokerDeps) {
     checkPrepareWait(deps.wait);
   }
 
   async invoke({ operation, args, caller, asTask, report }: InvocationRequest): Promise<InvocationResult> {
-    const { manifest } = operation;
-    if ((operation.risk !== 'write' && operation.risk !== 'destructive') || manifest === undefined) return riskNotSupportedResult(operation);
+    if (!preparesChangeSet(operation)) return riskNotSupportedResult(operation);
     const { configuration, repository, correlationId } = this.deps;
     const base: Details = { operation: operation.id, connection: operation.connection };
 
     const created = await createChangeSet(
       { repository, newId: this.deps.newId, now: this.deps.now },
       {
-        operation: { ...operation, manifest },
+        operation,
         args,
         caller,
         correlationId,

@@ -89,15 +89,22 @@ describe('MCP-4 CS-1 operation routing by risk', () => {
   it.each([
     ['write_opaque', undefined],
     ['destructive', undefined],
-  ] as const)('MCP-4 refuses %s operations (manifest %s) with a fixed text and runs nothing', async (risk, manifest) => {
+  ] as const)('CS-1 EXE-4 an opaque %s operation (manifest %s) takes the change-set path', async (risk, manifest) => {
     const { router, read, changeset } = setup();
-    const result = await router.invoke({ operation: operation(risk, manifest), args: {}, caller });
+    expect((await router.invoke({ operation: operation(risk, manifest), args: {}, caller })).text).toBe('changeset');
+    expect(changeset.seen).toEqual([`shop.${risk}`]);
+    expect(read.seen).toEqual([]);
+  });
+
+  it('MCP-4 a write operation without a manifest is refused with a fixed text and runs nothing (fail closed)', async () => {
+    const { router, read, changeset } = setup();
+    const result = await router.invoke({ operation: operation('write'), args: {}, caller });
     expect(result).toEqual({
       isError: true,
-      text: `shop.${risk} cannot run: ${risk} operations are not supported yet.`,
-      auditDetails: { operation: `shop.${risk}`, connection: 'shop', errorCode: 'risk_not_supported' },
+      text: 'shop.write cannot run: write operations are not supported yet.',
+      auditDetails: { operation: 'shop.write', connection: 'shop', errorCode: 'risk_not_supported' },
     });
-    expect(result).toEqual(riskNotSupportedResult(operation(risk, manifest)));
+    expect(result).toEqual(riskNotSupportedResult(operation('write')));
     expect([...read.seen, ...changeset.seen]).toEqual([]);
   });
 });
