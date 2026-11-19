@@ -1,9 +1,10 @@
 import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { context, propagation, trace } from '@opentelemetry/api';
-import { InMemorySpanExporter, NoopSpanProcessor, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { InMemorySpanExporter, NoopSpanProcessor, SimpleSpanProcessor, type SpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { describe, expect, it } from 'vitest';
-import { otlpTracesUrl, startWorkerTelemetry } from './telemetry.js';
+import { fanOutSpanProcessor, otlpTracesUrl, startWorkerTelemetry } from './telemetry.js';
 
 function get(port: number, path: string): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
@@ -101,5 +102,47 @@ describe('NFR-12 worker metrics', () => {
       await close(server);
       await telemetry.shutdown();
     }
+  });
+});
+
+describe('NFR-11 NFR-12 worker telemetry failures', () => {
+  it('NFR-11 shutdown resolves with an unreachable collector and still shuts the meter provider down', async () => {
+    // A port that was listening and is closed before use: the export is refused.
+    const gone = createServer();
+    const port = await listen(gone);
+    await close(gone);
+    const telemetry = startWorkerTelemetry({ otlpEndpoint: new URL(`http://127.0.0.1:${String(port)}`), register: true });
+    const metrics = createServer(telemetry.metricsHandler);
+    const metricsPort = await listen(metrics);
+    try {
+      trace.getTracer('probe').startSpan('pending').end();
+      await expect(telemetry.shutdown()).resolves.toBeUndefined();
+      await expect(telemetry.shutdown()).resolves.toBeUndefined();
+      const res = await get(metricsPort, '/metrics');
+      expect(res.body).toContain('MetricReader is shutdown');
+    } finally {
+      unregister();
+      await close(metrics);
+    }
+  });
+
+  it('NFR-11 a throwing processor does not keep the span from the other one, and flush and shutdown resolve', async () => {
+    const memory = new InMemorySpanExporter();
+    const throwing: SpanProcessor = {
+      onStart: () => {
+        throw new Error('onStart');
+      },
+      onEnd: () => {
+        throw new Error('onEnd');
+      },
+      forceFlush: () => Promise.reject(new Error('flush')),
+      shutdown: () => Promise.reject(new Error('shutdown')),
+    };
+    const fanOut = fanOutSpanProcessor([throwing, new SimpleSpanProcessor(memory)]);
+    const provider = new NodeTracerProvider({ spanProcessors: [fanOut] });
+    provider.getTracer('probe').startSpan('probe').end();
+    expect(memory.getFinishedSpans().map((s) => s.name)).toEqual(['probe']);
+    await expect(fanOut.forceFlush()).resolves.toBeUndefined();
+    await expect(provider.shutdown()).resolves.toBeUndefined();
   });
 });

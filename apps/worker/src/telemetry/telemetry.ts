@@ -6,8 +6,8 @@
  * trace context is propagated, never baggage (ruling R-prop).
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { Context, Meter } from '@opentelemetry/api';
-import { W3CTraceContextPropagator } from '@opentelemetry/core';
+import type { Context, Exception, Meter } from '@opentelemetry/api';
+import { globalErrorHandler, W3CTraceContextPropagator } from '@opentelemetry/core';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { Resource } from '@opentelemetry/resources';
@@ -40,25 +40,49 @@ export function otlpTracesUrl(endpoint: URL): string {
   return `${endpoint.origin}${endpoint.pathname.replace(/\/+$/, '')}/v1/traces`;
 }
 
-/** One processor over several, so the plugin's sink and the global provider share them. */
+/** Runs `fn`; a throw is reported to the OpenTelemetry error handler instead of propagating. */
+function isolated(fn: () => void): void {
+  try {
+    fn();
+  } catch (error) {
+    globalErrorHandler(error as Exception); // an unknown throw; the handler logs it through `diag`
+  }
+}
+
+/** Settles every promise; rejections are reported to the OpenTelemetry error handler, never thrown. */
+async function settled(promises: readonly Promise<unknown>[]): Promise<void> {
+  for (const result of await Promise.allSettled(promises)) {
+    if (result.status === 'rejected') globalErrorHandler(result.reason as Exception); // an unknown rejection; logged through `diag`
+  }
+}
+
+/**
+ * One processor over several, so the plugin's sink and the global provider share them. A failing
+ * processor does not keep a span from the others, and flush and shutdown never reject.
+ */
+export function fanOutSpanProcessor(processors: readonly SpanProcessor[]): SpanProcessor {
+  return {
+    onStart: (span: Span, parent: Context) => {
+      for (const p of processors) isolated(() => {
+          p.onStart(span, parent);
+        });
+    },
+    onEnd: (span: ReadableSpan) => {
+      for (const p of processors) isolated(() => {
+          p.onEnd(span);
+        });
+    },
+    // Each call runs in its own async function, so a synchronous throw becomes a rejection.
+    forceFlush: () => settled(processors.map(async (p) => p.forceFlush())),
+    shutdown: () => settled(processors.map(async (p) => p.shutdown())),
+  };
+}
+
 function combined(processors: readonly SpanProcessor[]): SpanProcessor {
   const [only] = processors;
   if (processors.length === 0) return new NoopSpanProcessor();
   if (processors.length === 1 && only !== undefined) return only;
-  return {
-    onStart: (span: Span, parent: Context) => {
-      for (const p of processors) p.onStart(span, parent);
-    },
-    onEnd: (span: ReadableSpan) => {
-      for (const p of processors) p.onEnd(span);
-    },
-    forceFlush: async () => {
-      await Promise.all(processors.map((p) => p.forceFlush()));
-    },
-    shutdown: async () => {
-      await Promise.all(processors.map((p) => p.shutdown()));
-    },
-  };
+  return fanOutSpanProcessor(processors);
 }
 
 export function startWorkerTelemetry(options: WorkerTelemetryOptions): WorkerTelemetry {
@@ -83,10 +107,8 @@ export function startWorkerTelemetry(options: WorkerTelemetryOptions): WorkerTel
       exporter.getMetricsRequestHandler(req, res);
     },
     shutdown: () => {
-      shutting ??= (async () => {
-        await tracerProvider.shutdown();
-        await meterProvider.shutdown();
-      })();
+      // Both providers shut down even when one fails (an unreachable collector); failures are reported, never thrown.
+      shutting ??= settled([tracerProvider.shutdown(), meterProvider.shutdown()]);
       return shutting;
     },
   };
