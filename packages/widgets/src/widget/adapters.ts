@@ -70,8 +70,11 @@ export function fromGetChangeset(structured: unknown, filter?: ItemFilter): Chan
   if (!parsed.success) return undefined;
   const a = parsed.data;
   const cs = a.changeset;
+  const kind = cs.kind ?? 'diff';
   return {
     id: cs.id,
+    kind,
+    ...(kind === 'opaque' && cs.args !== undefined ? { args: cs.args } : {}),
     operation: { id: cs.operation.id, ...(cs.operation.title === undefined ? {} : { title: cs.operation.title }) },
     status: cs.status,
     ...(cs.hash === undefined ? {} : { hash: cs.hash }),
@@ -92,7 +95,7 @@ export function fromGetChangeset(structured: unknown, filter?: ItemFilter): Chan
       ...(a.rollback?.stats === undefined ? {} : { stats: a.rollback.stats }),
     },
     ...(a.pageUrl === undefined ? {} : { pageUrl: a.pageUrl }),
-    permissions: { canExclude: cs.status === 'prepared', canSubmit: cs.status === 'prepared', canCancel: cs.status === 'executing' },
+    permissions: { canExclude: cs.status === 'prepared' && kind !== 'opaque', canSubmit: cs.status === 'prepared', canCancel: cs.status === 'executing' },
   };
 }
 
@@ -131,6 +134,7 @@ export function fromReviewChangeset(structured: unknown, filter?: ItemFilter): A
   const policy = detail.policy;
   return {
     id: detail.id,
+    kind: detail.kind ?? 'diff',
     status: detail.status,
     ...(detail.hash === undefined ? {} : { hash: detail.hash }),
     operation: {

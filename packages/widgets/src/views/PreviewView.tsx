@@ -2,6 +2,7 @@ import { type ReactElement, useCallback, useRef, useState } from 'react';
 import { ActionBar } from '../components/ActionBar.js';
 import { ItemTable } from '../components/ItemTable.js';
 import { Notice } from '../components/Notice.js';
+import { RawArguments } from '../components/RawArguments.js';
 import { Pager } from '../components/Pager.js';
 import { StatsSummary } from '../components/StatsSummary.js';
 import { StatusBadge } from '../components/StatusBadge.js';
@@ -78,7 +79,8 @@ export function PreviewView({ data, actions, onData }: ViewProps<ChangeSetViewMo
   const submit = actions.submit?.bind(actions);
   const exportItems = actions.export?.bind(actions);
   const openPage = actions.openPage?.bind(actions);
-  const canEdit = exclude !== undefined && data.permissions.canExclude;
+  const opaque = data.kind === 'opaque';
+  const canEdit = exclude !== undefined && data.permissions.canExclude && !opaque;
   const { hash } = data;
 
   const start = (): void => {
@@ -114,6 +116,8 @@ export function PreviewView({ data, actions, onData }: ViewProps<ChangeSetViewMo
         <span className="expires">{` Expires ${formatDateTime(data.expiresAt)}`}</span>
       </header>
       <StatsSummary stats={data.stats} {...(hash === undefined ? {} : { hash })} />
+      {opaque ? <RawArguments args={data.args ?? {}} /> : null}
+      {opaque ? null : (
       <div className="filters" role="group" aria-label="Show">
         {FILTERS.map(({ label, filter }) => (
           <button
@@ -129,6 +133,9 @@ export function PreviewView({ data, actions, onData }: ViewProps<ChangeSetViewMo
           </button>
         ))}
       </div>
+      )}
+      {opaque ? null : (
+      <>
       <ItemTable
         rows={pages.page.items}
         {...(canEdit
@@ -153,6 +160,8 @@ export function PreviewView({ data, actions, onData }: ViewProps<ChangeSetViewMo
           pages.next();
         }}
       />
+      </>
+      )}
       <ActionBar>
         {canEdit ? (
           <>
@@ -164,7 +173,7 @@ export function PreviewView({ data, actions, onData }: ViewProps<ChangeSetViewMo
             </button>
           </>
         ) : null}
-        {exportItems
+        {exportItems && !opaque
           ? (['csv', 'xlsx'] as const).map((format) => (
               <button
                 key={format}

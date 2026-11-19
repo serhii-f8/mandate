@@ -419,4 +419,16 @@ describe('ApprovalView', () => {
     resolve({ ok: false, message: 'x' });
     await flush();
   });
+
+  it('APR-6 the opaque approval view says Approve 1 call and hides sample and items', () => {
+    const data = detail({ kind: 'opaque', viewer: { channel: 'page', canDecide: true, reason: null, needsFreshLogin: false, canStart: false }, request: { ...detail().request, args: { text: HOSTILE } } });
+    const { container } = render(<ApprovalView data={data} actions={actionsWith()} onData={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Approve 1 call' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Raw arguments' })).toBeTruthy();
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toContain(HOSTILE);
+    expect(container.querySelector('[aria-label="Sample"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Items"]')).toBeNull();
+    expect(container.querySelector('table')).toBeNull();
+  });
 });

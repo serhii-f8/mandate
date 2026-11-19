@@ -43,6 +43,7 @@ describe('widget adapters', () => {
     if (fromPrepared.kind !== 'view') return;
     expect(fromPrepared.model).toEqual({
       id: A,
+      kind: 'diff',
       operation: { id: 'catalog.update_names' },
       status: 'prepared',
       hash: HASH_A,
@@ -188,6 +189,7 @@ describe('widget adapters', () => {
     if (trigger.kind !== 'view') return;
     expect(trigger.model).toEqual({
       id: A,
+      kind: 'diff',
       status: 'pending_approval',
       hash: HASH_A,
       operation: { id: 'catalog.update_names', title: 'Update names', description: 'Sets the name of catalog products.', risk: 'medium' },
@@ -229,5 +231,20 @@ describe('widget adapters', () => {
     expect(
       parseApprovalTrigger({ content: [{ type: 'text', text: 'z' }], structuredContent: { ...review.structuredContent, detail: { viewer: 1 } } }),
     ).toEqual({ kind: 'text', text: 'z', pageUrl: PAGE_A });
+  });
+
+  it('UI-2 APR-5 kind and args of an opaque answer reach both models; canExclude is off', () => {
+    const args = { text: 'hello' };
+    const structured = <T,>(o: T): T => structuredClone(o);
+    const get = structured(getPrepared.structuredContent) as { changeset: Record<string, unknown> };
+    expect(fromGetChangeset(get)).toMatchObject({ kind: 'diff', permissions: { canExclude: true } });
+    get.changeset.kind = 'opaque';
+    get.changeset.args = args;
+    const model = fromGetChangeset(get);
+    expect(model).toMatchObject({ kind: 'opaque', args, permissions: { canExclude: false, canSubmit: true } });
+    const rev = structured(review.structuredContent) as { detail: Record<string, unknown> };
+    expect(fromReviewChangeset(rev)?.kind).toBe('diff');
+    rev.detail.kind = 'opaque';
+    expect(fromReviewChangeset(rev)?.kind).toBe('opaque');
   });
 });

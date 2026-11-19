@@ -51,6 +51,8 @@ export const changeSetAnswerSchema = z.object({
     createdAt: z.string(),
     expiresAt: z.string(),
     errorCode: z.string().optional(),
+    kind: z.enum(['opaque', 'diff']).optional(),
+    args: z.record(z.string(), z.unknown()).optional(),
   }),
   progress: progressSchema.optional(),
   approval: z
@@ -89,6 +91,7 @@ const detailSchema = z.object({
   id: uuidSchema,
   status: z.string(),
   hash: z.string().optional(),
+  kind: z.enum(['opaque', 'diff']).optional(),
   operation: z.object({ id: z.string(), title: z.string().optional(), description: z.string().optional(), risk: z.string().optional() }),
   request: z.object({
     args: z.record(z.string(), z.unknown()),
