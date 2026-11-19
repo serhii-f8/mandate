@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import type { ReadAdapter, ReadOutcome, ScopeReport } from '@aiops/connector-sdk';
+import { mcpToolHash, type McpToolAdapter, type McpToolDefinition, type ReadAdapter, type ReadOutcome, type ScopeReport, type ToolListOutcome } from '@aiops/connector-sdk';
 import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
 import { InMemoryAuditLog } from '@aiops/testing';
 import { ConnectionTestService } from './connection-test.js';
@@ -56,6 +56,7 @@ class MemoryVault implements CredentialVault {
   }
 }
 
+const NOT_DETECTABLE_REPORT: ScopeReport = { detectable: false, source: 'none', values: [] };
 const JWT_SCOPES: ScopeReport = { detectable: true, source: 'jwt_claims', values: ['catalog:read'] };
 
 class FakeAdapter implements ReadAdapter {
@@ -222,5 +223,142 @@ describe('CONN-7 connection test service', () => {
     const report = await service.run('magento', 'carol-id', 'aiops-web', 'corr-7');
     expect(JSON.stringify(report)).not.toContain(TOKEN);
     expect(JSON.stringify(audit.events)).not.toContain(TOKEN);
+  });
+});
+
+const LOOKUP: McpToolDefinition = { name: 'lookup', description: 'Look up a record.', inputSchema: { type: 'object', properties: { key: { type: 'string' } } } };
+const OTHER: McpToolDefinition = { name: 'other', inputSchema: { type: 'object' } };
+const LOOKUP_PIN = mcpToolHash(LOOKUP);
+
+const MCP_SOURCES = {
+  'connections.yaml': `version: 1
+connections:
+  - id: tools
+    adapter: mcp
+    mcp_url: https://tools.example.test/mcp
+    credential_ref: tools-token
+    auth: { scheme: bearer }
+    test: { operation: tools.lookup, args: { key: k1 } }
+`,
+  'operations.yaml': `version: 1
+operations:
+  - id: tools.lookup
+    connection: tools
+    risk: read
+    description: Look up a record by key.
+    upstream: { tool: lookup, pin: ${LOOKUP_PIN} }
+`,
+};
+
+const mcpLoaded = await loadConfigurationSources(Object.entries(MCP_SOURCES).map(([file, text]) => ({ file, text })));
+if (!mcpLoaded.ok) throw new Error(JSON.stringify(mcpLoaded.issues));
+const MCP_CONFIG: LoadedConfiguration = mcpLoaded.configuration;
+
+const listed = (...tools: McpToolDefinition[]): ToolListOutcome => ({ ok: true, tools: tools.map((definition) => ({ definition, hash: mcpToolHash(definition) })), dropped: 0, durationMs: 4 });
+const CALLED: ReadOutcome = { ok: true, status: 200, durationMs: 6, value: { structured: { found: true }, text: ['found k1'], omitted: 0 }, truncated: false };
+
+class FakeMcpAdapter extends FakeAdapter implements McpToolAdapter {
+  readonly lists: Parameters<McpToolAdapter['listTools']>[0][] = [];
+  readonly calls: Parameters<McpToolAdapter['callTool']>[0][] = [];
+  constructor(
+    private readonly list: ToolListOutcome,
+    private readonly called: ReadOutcome = CALLED,
+  ) {
+    super(OK);
+  }
+  listTools(input: Parameters<McpToolAdapter['listTools']>[0]): Promise<ToolListOutcome> {
+    this.lists.push(input);
+    return Promise.resolve(this.list);
+  }
+  callTool(input: Parameters<McpToolAdapter['callTool']>[0]): Promise<ReadOutcome> {
+    this.calls.push(input);
+    return Promise.resolve(this.called);
+  }
+}
+
+async function setupMcp(list: ToolListOutcome, called: ReadOutcome = CALLED) {
+  const vault = new MemoryVault();
+  await vault.put({ ref: 'tools-token', scheme: 'bearer', secret: { token: TOKEN }, actor: 'setup' });
+  const adapter = new FakeMcpAdapter(list, called);
+  const audit = new InMemoryAuditLog();
+  const service = new ConnectionTestService({ configuration: () => MCP_CONFIG, vault, adapter, audit, newId: () => 'id-1' });
+  return { adapter, audit, service };
+}
+
+describe('CONN-7 connection test of an mcp connection', () => {
+  it('CONN-7 lists the tools and calls the test operation with the stored credential, reporting the listed tool count', async () => {
+    const { adapter, service, audit } = await setupMcp(listed(LOOKUP, OTHER));
+    const report = await service.run('tools', 'carol-id', 'aiops-web', 'corr-m1');
+    expect(report).toEqual({ ok: true, operation: 'tools.lookup', status: 200, durationMs: 10, itemCount: 2, scopes: NOT_DETECTABLE_REPORT });
+    expect(adapter.lists).toHaveLength(1);
+    expect(adapter.lists[0]?.connection.id).toBe('tools');
+    expect(await adapter.lists[0]?.credential?.open()).toEqual({ token: TOKEN });
+    expect(adapter.calls).toHaveLength(1);
+    expect(adapter.calls[0]).toMatchObject({ tool: 'lookup', args: { key: 'k1' }, retryable: true });
+    expect(await adapter.calls[0]?.credential?.open()).toEqual({ token: TOKEN });
+    expect(adapter.reads).toEqual([]);
+    expect(audit.events).toEqual([
+      {
+        id: 'id-1',
+        actor: 'carol-id',
+        clientId: 'aiops-web',
+        action: 'connection.test',
+        subject: 'tools',
+        outcome: 'ok',
+        correlationId: 'corr-m1',
+        details: { connection: 'tools', ok: true, status: 200, scopesDetectable: false },
+      },
+    ]);
+  });
+
+  it('CONN-7 a failed tool list is reported with its code and nothing is called', async () => {
+    const { adapter, service, audit } = await setupMcp({ ok: false, code: 'http_status', status: 401, durationMs: 3, message: 'upstream tool list failed (http_status)' });
+    const report = await service.run('tools', 'cli', 'cli', 'corr-m2');
+    expect(report).toEqual({
+      ok: false,
+      operation: 'tools.lookup',
+      status: 401,
+      durationMs: 3,
+      code: 'http_status',
+      message: 'upstream tool list failed (http_status)',
+      scopes: NOT_DETECTABLE_REPORT,
+    });
+    expect(adapter.calls).toEqual([]);
+    expect(audit.events[0]).toMatchObject({ outcome: 'error', details: { connection: 'tools', ok: false, status: 401, code: 'http_status', scopesDetectable: false } });
+  });
+
+  it('CONN-7 a failed tool call is reported with its code', async () => {
+    const { adapter, service, audit } = await setupMcp(listed(LOOKUP), { ok: false, code: 'upstream_error', durationMs: 2, message: 'upstream tool reported an error' });
+    const report = await service.run('tools', 'cli', 'cli', 'corr-m3');
+    expect(report).toEqual({
+      ok: false,
+      operation: 'tools.lookup',
+      durationMs: 6,
+      code: 'upstream_error',
+      message: 'upstream tool reported an error',
+      scopes: NOT_DETECTABLE_REPORT,
+    });
+    expect(adapter.calls).toHaveLength(1);
+    expect(audit.events[0]).toMatchObject({ outcome: 'error', details: { connection: 'tools', ok: false, code: 'upstream_error', scopesDetectable: false } });
+  });
+
+  it.each<[string, ToolListOutcome]>([
+    ['changed', listed({ ...LOOKUP, description: 'Look up and delete a record.' })],
+    ['missing', listed(OTHER)],
+  ])('CONN-4 CONN-7 a test operation whose upstream tool is %s against its pin is reported as mapping and not called', async (_state, list) => {
+    const { adapter, service, audit } = await setupMcp(list);
+    const report = await service.run('tools', 'cli', 'cli', 'corr-m4');
+    expect(report).toMatchObject({ ok: false, operation: 'tools.lookup', code: 'mapping', message: "the test operation's upstream tool does not match its pin", scopes: NOT_DETECTABLE_REPORT });
+    expect(adapter.calls).toEqual([]);
+    expect(audit.events[0]).toMatchObject({ outcome: 'error', details: { connection: 'tools', ok: false, code: 'mapping', scopesDetectable: false } });
+  });
+
+  it('SEC-7 scopes are not detectable for an mcp connection', async () => {
+    const { adapter, service } = await setupMcp(listed(LOOKUP));
+    const report = await service.run('tools', 'cli', 'cli', 'corr-m5');
+    expect(report.ok).toBe(true);
+    expect(report.scopes).toEqual({ detectable: false, source: 'none', values: [] });
+    expect(adapter.detections).toEqual([]);
+    expect(JSON.stringify(report)).not.toContain(TOKEN);
   });
 });

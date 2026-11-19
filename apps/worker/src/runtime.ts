@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { createOpenApiAdapter } from '@aiops/adapters';
+import { createAdapters, type OpenApiAdapter, type UpstreamAdapters } from '@aiops/adapters';
 import {
   ConfigurationError,
   ConfigurationHolder,
@@ -31,10 +31,12 @@ import { parseTemporalKeys, workerDataConverter, type ActivityTuning } from '@ai
 import {
   assertFullyChecked,
   configurationLoadOptions,
+  connectionCredential,
   createUpstreamInstrumentation,
   createUpstreamReader,
   type UpstreamCallLog,
 } from '@aiops/upstream';
+import type { McpToolAdapter } from '@aiops/connector-sdk';
 import { heartbeat } from '@temporalio/activity';
 import { NativeConnection, type Worker } from '@temporalio/worker';
 import type { Logger } from 'pino';
@@ -72,7 +74,7 @@ const READINESS_PROBE_MS = 2000;
 /** What the activities are bound to. */
 interface RuntimeStores {
   readonly configuration: ConfigurationHolder;
-  readonly adapter: ReturnType<typeof createOpenApiAdapter>;
+  readonly adapter: UpstreamAdapters;
   readonly repository: PostgresChangeSetRepository;
   readonly audit: DrizzleAuditLog;
   readonly vault: PostgresCredentialVault;
@@ -125,7 +127,8 @@ function activitiesFor(stores: RuntimeStores): WorkerActivities {
 export async function startRuntimeConfiguration(input: {
   env: WorkerEnv;
   database: Database;
-  adapter: ReturnType<typeof createOpenApiAdapter>;
+  /** Typed structurally (ruling F5): the MCP methods are optional, so an OpenAPI-only adapter still loads. */
+  adapter: OpenApiAdapter & Partial<McpToolAdapter>;
   logger: Logger;
   signals: Pick<NodeJS.EventEmitter, 'on' | 'off'>;
 }): Promise<{ readonly holder: ConfigurationHolder; readonly sync: ConfigurationSync }> {
@@ -195,8 +198,18 @@ export async function startWorkerRuntime(
     if (active !== telemetry) ownTelemetry = active;
     const { meter, spanProcessor, metricsHandler } = active;
     registerChangeSetGauge(meter, () => countChangeSetsByStatus(database));
-    // One adapter: its resolver checks the specs of every revision loaded; it also runs the calls.
-    const adapter = createOpenApiAdapter({ instrumentation: createUpstreamInstrumentation({ meter }) });
+    // Before the configuration load: the tool list of an mcp connection uses its stored credential (R10).
+    const vault = new PostgresCredentialVault(database.db, masterKeys);
+    // One composite adapter (CONN-1): its resolver checks the specs and lists the tools of every
+    // revision loaded; it also runs the calls. The pin monitor runs in api only (R13).
+    const adapter = createAdapters({
+      instrumentation: createUpstreamInstrumentation({ meter }),
+      credentialFor: async (ref) => {
+        const credential = await connectionCredential(vault, ref);
+        // An unknown scheme lists without a credential; the read path refuses it as credential_unusable.
+        return credential === 'unusable' ? undefined : credential;
+      },
+    });
     // Before the wait for an active configuration: a waiting worker is alive, not ready (NFR-10, R15).
     const server = await startWorkerHttpServer(env.httpPort, '0.0.0.0', {
       readiness: async (): Promise<ReadinessReport> => ({
@@ -224,7 +237,6 @@ export async function startWorkerRuntime(
       logger.warn('AIOPS_SMTP_URL is not set: email notifications fail with channel_unconfigured');
     }
     const repository = new PostgresChangeSetRepository(database.db);
-    const vault = new PostgresCredentialVault(database.db, masterKeys);
     // Preset sensitive fields are covered: the configuration was loaded with the preset directories (AUD-4).
     const audit = new DrizzleAuditLog(database.db, { sensitiveKeys: () => configuration.current.sensitiveFields });
     // The two batch activities record aiops_batch_duration_seconds (NFR-12).

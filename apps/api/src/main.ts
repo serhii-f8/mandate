@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { createOpenApiAdapter } from '@aiops/adapters';
+import { createAdapters } from '@aiops/adapters';
 import { ConfigurationError, ConfigurationHolder, formatIssue, parseApiEnv, startConfigurationSync } from '@aiops/config';
-import { createDb, DrizzleAuditLog, PostgresConfigRevisionStore, runMigrations } from '@aiops/db';
+import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresConfigRevisionStore, PostgresCredentialVault, runMigrations } from '@aiops/db';
 import { createApp } from './app.js';
 import { createLogger } from './logger.js';
 import { enableShutdown } from './shutdown.js';
 import { startApiTelemetry } from './telemetry.js';
-import { configurationLoadOptions, createUpstreamInstrumentation } from '@aiops/upstream';
+import { configurationLoadOptions, connectionCredential, createUpstreamInstrumentation } from '@aiops/upstream';
 
 /**
  * Process entry: parse env, apply migrations (NFR-5), load the active configuration revision
@@ -20,8 +20,8 @@ async function main(): Promise<void> {
   const logger = createLogger(env.logLevel);
   // Registered globally: the context manager carries the active span, and the Temporal interceptor uses the global tracer.
   const telemetry = startApiTelemetry({ serviceName: 'aiops-api', register: true, ...(env.otlpEndpoint === undefined ? {} : { otlpEndpoint: env.otlpEndpoint }) });
-  // One adapter: its resolver checks the specs of every revision loaded; it also runs the reads.
-  const adapter = createOpenApiAdapter({ instrumentation: createUpstreamInstrumentation({ meter: telemetry.meter }) });
+  // Parsed before any pool, so a malformed key set stops the start; messages name no key material.
+  const masterKeys = parseMasterKeys(env.masterKeys);
   const { applied } = await runMigrations(env.databaseUrl);
   logger.info({ applied }, 'database migrations applied');
   // The configuration's own handle: it is closed after the app's pool, once the sync has stopped.
@@ -31,6 +31,18 @@ async function main(): Promise<void> {
     },
   });
   const store = new PostgresConfigRevisionStore(configDb.db, { databaseUrl: env.databaseUrl });
+  // Before the holder: the load-time tool list of an mcp connection uses its stored credential (R10).
+  const vault = new PostgresCredentialVault(configDb.db, masterKeys);
+  // One composite adapter (CONN-1): its resolver checks the specs and lists the tools of every
+  // revision loaded; it also runs the reads and tool calls, and its listTools drives the pin monitor.
+  const adapter = createAdapters({
+    instrumentation: createUpstreamInstrumentation({ meter: telemetry.meter }),
+    credentialFor: async (ref) => {
+      const credential = await connectionCredential(vault, ref);
+      // An unknown scheme lists without a credential; the read path refuses it as credential_unusable.
+      return credential === 'unusable' ? undefined : credential;
+    },
+  });
   let configuration: ConfigurationHolder;
   try {
     configuration = await ConfigurationHolder.fromRevisions({

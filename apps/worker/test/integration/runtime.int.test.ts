@@ -4,13 +4,16 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createAdapters } from '@aiops/adapters';
 import { parseWorkerEnv } from '@aiops/config';
-import { createDb, insertNotifications, PostgresChangeSetRepository, runMigrations } from '@aiops/db';
-import { startPostgres, startSmtpSink, type StartedPostgres } from '@aiops/testing';
+import { mcpToolHash } from '@aiops/connector-sdk';
+import { createDb, insertNotifications, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, runMigrations } from '@aiops/db';
+import { startFakeMcpServer, startPostgres, startSmtpSink, type StartedPostgres } from '@aiops/testing';
+import { connectionCredential } from '@aiops/upstream';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { pino } from 'pino';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { startWorkerRuntime } from '../../src/runtime.js';
+import { startRuntimeConfiguration, startWorkerRuntime } from '../../src/runtime.js';
 import { createPrepared } from '../support/changesets.js';
 
 let postgres: StartedPostgres;
@@ -116,6 +119,80 @@ describe('NTF-3 worker runtime without a mail relay', () => {
       expect(warnings).toContain('AIOPS_SMTP_URL is not set: email notifications fail with channel_unconfigured');
     } finally {
       await rm(configDir, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+const MCP_MASTER_KEYS = '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=';
+const MCP_TOKEN = 'int-only-mcp-bearer-value-0123456789';
+const LOOKUP_TOOL = { name: 'lookup', description: 'Look up a record by key.', inputSchema: { type: 'object', properties: { key: { type: 'string' } } } };
+
+/** One mcp connection with a bearer credential and one pinned read; the URL and pin are filled in. */
+const mcpConfig = (url: string, pin: string): string => `version: 1
+connections:
+  - id: tools
+    adapter: mcp
+    mcp_url: ${url}
+    allow_private_network: true
+    credential_ref: tools-token
+    auth: { scheme: bearer }
+    retry: { max_attempts: 1 }
+operations:
+  - id: tools.lookup
+    connection: tools
+    risk: read
+    description: Look up a record by key.
+    upstream: { tool: lookup, pin: ${pin} }
+roles:
+  - id: reader
+    grants: [{ operation: tools.lookup }]
+`;
+
+describe('CONN-1 worker runtime with an mcp connection', () => {
+  it('CONN-1 the worker loads a configuration with an mcp connection and lists its tools at load', async () => {
+    const fake = await startFakeMcpServer({ tools: [LOOKUP_TOOL], mode: 'stateless' });
+    const configDir = await mkdtemp(join(tmpdir(), 'aiops-worker-mcp-'));
+    const url = await postgres.createDatabase();
+    await runMigrations(url);
+    const database = createDb(url, { onError: () => undefined });
+    try {
+      await writeFile(join(configDir, 'aiops.yaml'), mcpConfig(fake.url, mcpToolHash(LOOKUP_TOOL)));
+      const vault = new PostgresCredentialVault(database.db, parseMasterKeys(MCP_MASTER_KEYS));
+      await vault.put({ ref: 'tools-token', scheme: 'bearer', secret: { token: MCP_TOKEN }, actor: 'int' });
+      const env = parseWorkerEnv({
+        DATABASE_URL: url,
+        // Nothing listens here: the start fails at the connect, after the configuration was loaded and checked.
+        TEMPORAL_ADDRESS: '127.0.0.1:1',
+        AIOPS_CONFIG_DIR: configDir,
+        AIOPS_MASTER_KEYS: MCP_MASTER_KEYS,
+        AIOPS_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
+        AIOPS_WORKER_HTTP_PORT: '0',
+      });
+      // Ruling F10: the holder is only reachable through startRuntimeConfiguration; the adapter reads the vault as the runtime's does (R10).
+      const adapter = createAdapters({
+        credentialFor: async (ref) => {
+          const credential = await connectionCredential(vault, ref);
+          return credential === 'unusable' ? undefined : credential;
+        },
+      });
+      const { holder, sync } = await startRuntimeConfiguration({ env, database, adapter, logger: pino({ level: 'silent' }), signals: new EventEmitter() });
+      try {
+        const catalog = holder.current.mcpCatalogs.get('tools');
+        expect(catalog?.status).toBe('listed');
+        expect(catalog?.status === 'listed' ? catalog.tools.map((t) => t.name) : []).toEqual(['lookup']);
+      } finally {
+        await sync.close();
+      }
+      // The runtime's own adapter lists with the stored credential (R10) and passes the full-check gate.
+      const before = fake.requests.length;
+      await expect(startWorkerRuntime(env, pino({ level: 'silent' }), new EventEmitter())).rejects.toThrow(/ConnectionRefused/);
+      const listed = fake.requests.slice(before).filter((r) => r.rpcMethod === 'tools/list');
+      expect(listed.length).toBeGreaterThan(0);
+      expect(listed.every((r) => r.headers.authorization === `Bearer ${MCP_TOKEN}`)).toBe(true);
+    } finally {
+      await database.close();
+      await rm(configDir, { recursive: true, force: true });
+      await fake.close();
     }
   }, 60_000);
 });

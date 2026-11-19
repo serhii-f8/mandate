@@ -19,7 +19,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { createOpenApiAdapter, type OpenApiAdapter } from '@aiops/adapters';
+import { createAdapters, type OpenApiAdapter } from '@aiops/adapters';
+import type { McpToolAdapter } from '@aiops/connector-sdk';
 import {
   diffConfigurations,
   diffCounts,
@@ -82,9 +83,16 @@ export interface StoreInput {
   readonly sensitiveKeys?: ReadonlySet<string>;
 }
 
+/** What the CLI needs of an adapter: the OpenAPI parts, and the MCP tool methods when present. */
+export type CliAdapter = OpenApiAdapter & Partial<McpToolAdapter>;
+
 export interface CliDeps {
   readonly env: Readonly<Record<string, string | undefined>>;
-  readonly adapter?: OpenApiAdapter;
+  /**
+   * The upstream adapter; defaults to `createAdapters()` without a credential lookup, so an `mcp`
+   * connection with a credential may load `unlisted` (R10). The MCP methods are optional (ruling F5).
+   */
+  readonly adapter?: CliAdapter;
   /** Opens the database and vault; the default connects to PostgreSQL (already migrated). */
   readonly openStore?: (input: StoreInput) => Promise<CliStore>;
   /** Opens the database for the audit commands; the default connects to PostgreSQL (already migrated). */
@@ -139,7 +147,7 @@ function presetDirsOf(flagged: readonly string[], env: Readonly<Record<string, s
 async function loadChecked(
   dir: string,
   presetDirs: string[] | undefined,
-  adapter: OpenApiAdapter,
+  adapter: CliAdapter,
   out: (line: string) => void,
 ): Promise<Extract<LoadResult, { ok: true }>['configuration'] | undefined> {
   const result = await loadConfigurationDirectory(dir, { resolver: adapter.resolver, ...(presetDirs === undefined ? {} : { presetDirs }) });
@@ -173,7 +181,7 @@ async function validate(args: readonly string[], out: (line: string) => void, de
     out(USAGE);
     return 2;
   }
-  const configuration = await loadChecked(parsed.dir, presetDirsOf(parsed.presetDirs, deps.env, deps), deps.adapter ?? createOpenApiAdapter(), out);
+  const configuration = await loadChecked(parsed.dir, presetDirsOf(parsed.presetDirs, deps.env, deps), deps.adapter ?? createAdapters(), out);
   if (configuration === undefined) return 1;
   const { policy, connections } = configuration;
   out(`Configuration valid: ${String(connections.length)} connections, ${String(policy.operations.length)} operations, ${String(policy.roles.length)} roles`);
@@ -329,7 +337,7 @@ async function testConnection(args: readonly string[], out: (line: string) => vo
     return 2;
   }
   const env = parseEnv({ AIOPS_CONFIG_DIR: nonEmpty, DATABASE_URL: postgresUrl, AIOPS_MASTER_KEYS: nonEmpty }, deps.env);
-  const adapter = deps.adapter ?? createOpenApiAdapter();
+  const adapter = deps.adapter ?? createAdapters();
   const configuration = await loadChecked(env.AIOPS_CONFIG_DIR, presetDirsOf([], deps.env, deps), adapter, out);
   if (configuration === undefined) return 1;
   return withStore(deps, env, configuration.sensitiveFields, async (store) => {
@@ -454,7 +462,7 @@ async function configChange(kind: 'diff' | 'apply', args: readonly string[], out
   }
   const env = parseEnv({ DATABASE_URL: postgresUrl }, deps.env);
   const actor = applyActor(parsed.actor, deps.env);
-  const adapter = deps.adapter ?? createOpenApiAdapter();
+  const adapter = deps.adapter ?? createAdapters();
   const presetDirs = presetDirsOf(parsed.presetDirs, deps.env, deps);
   const configuration = await loadChecked(parsed.dir, presetDirs, adapter, out);
   if (configuration === undefined) return 1;
@@ -543,7 +551,7 @@ function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
 /** The adapter's resolver and the preset directories of `AIOPS_PRESET_DIRS` or the default, for loading the active revision. */
 function activeLoadOptions(deps: CliDeps): LoadOptions {
   const presetDirs = presetDirsOf([], deps.env, deps);
-  return { resolver: (deps.adapter ?? createOpenApiAdapter()).resolver, ...(presetDirs === undefined ? {} : { presetDirs }) };
+  return { resolver: (deps.adapter ?? createAdapters()).resolver, ...(presetDirs === undefined ? {} : { presetDirs }) };
 }
 
 /**
