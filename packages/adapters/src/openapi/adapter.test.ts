@@ -1,4 +1,4 @@
-import type { ConnectionSettings, CredentialSource, UpstreamMapping } from '@aiops/connector-sdk';
+import type { ConnectionSettings, CredentialSource, RequestAttempt, RequestInstrumentation, UpstreamMapping } from '@aiops/connector-sdk';
 import { startFakeUpstream, type FakeUpstream } from '@aiops/testing';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -363,5 +363,33 @@ describe('SEC-7 detectable scopes', () => {
     const conn = settings({ auth: { scheme: 'oauth_client_credentials', tokenUrl: `${up.url}/token`, scopes: [] } });
     const r = await createOpenApiAdapter().detectScopes({ connection: conn, credential: cred('oauth_client_credentials', { client_id: 'id', client_secret: 'sec' }) });
     expect(r).toEqual({ detectable: false, source: 'none', values: [] });
+  });
+});
+
+describe('NFR-11 instrumentation through the adapter', () => {
+  it('NFR-11 the default client passes the hook to reads and to the spec fetch', async () => {
+    const doc: unknown = JSON.parse(await (await import('node:fs/promises')).readFile(fixture('oas30-mini.json'), 'utf8'));
+    up.route('GET', '/spec.json', () => ({ status: 200, body: doc }));
+    up.route('GET', '/rest/default/V1/products', () => ({ status: 200, body: magentoBody }));
+    const starts: RequestAttempt[] = [];
+    const instrumentation: RequestInstrumentation = {
+      start(attempt) {
+        starts.push(attempt);
+        return { headers: { traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01' }, end: () => undefined };
+      },
+    };
+    const adapter = createOpenApiAdapter({ instrumentation });
+    const conn = settings({ auth: { scheme: 'bearer' } });
+    expect((await adapter.resolver.resolveSpec({ connection: conn, spec: { url: `${up.url}/spec.json` } })).ok).toBe(true);
+    const r = await adapter.read({ connection: conn, mapping: searchMapping, args: { q: 'bag' }, credential: cred('bearer', { token: 'opaque-token-1' }) });
+    expect(r.ok).toBe(true);
+    expect(starts).toEqual([
+      { connection: conn.id, method: 'GET', host: '127.0.0.1' },
+      { connection: conn.id, method: 'GET', host: '127.0.0.1' },
+    ]);
+    expect(up.requests.map((q) => q.headers.traceparent)).toEqual([
+      '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+      '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    ]);
   });
 });

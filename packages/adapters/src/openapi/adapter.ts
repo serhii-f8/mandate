@@ -12,6 +12,7 @@ import {
   type HttpMethod,
   type ReadAdapter,
   type ReadOutcome,
+  type RequestInstrumentation,
   type ScopeReport,
   type SpecIssue,
   type UpstreamMapping,
@@ -35,6 +36,8 @@ export interface OpenApiAdapterDeps {
   clientFor?: (settings: ConnectionSettings) => ConnectionClient;
   /** Transport for the OAuth token fetch of `detectScopes`; defaults to the guarded transport. */
   transportFor?: (settings: ConnectionSettings) => Transport;
+  /** Hook around each upstream attempt of the default client, also for the spec fetch (NFR-11). With a custom `clientFor` the caller wires it. */
+  readonly instrumentation?: RequestInstrumentation;
 }
 
 export type OpenApiAdapter = ReadAdapter & WriteAdapter & { resolver: UpstreamResolver };
@@ -117,7 +120,9 @@ async function openSecret(
 }
 
 export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdapter {
-  const clientFor = deps.clientFor ?? ((s: ConnectionSettings) => createConnectionClient(s));
+  const instrumentation = deps.instrumentation;
+  const clientFor =
+    deps.clientFor ?? ((s: ConnectionSettings) => createConnectionClient(s, instrumentation === undefined ? {} : { instrumentation }));
   const transportFor = deps.transportFor ?? ((s: ConnectionSettings) => createTransport(s, createGuardedLookup(s)));
   // One client per settings object: a reloaded configuration yields new settings and new clients;
   // the semaphore and token cache are per connection id inside the client modules.

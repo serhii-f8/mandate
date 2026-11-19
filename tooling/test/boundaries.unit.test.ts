@@ -61,6 +61,12 @@ describe('package boundaries (CLAUDE.md engineering conventions)', () => {
     expect(await restrictedImportErrors('packages/adapters/src/probe.ts', '@aiops/connector-sdk')).toBe(0);
   });
 
+  it('NFR-11 adapters and their tests import no OpenTelemetry package', async () => {
+    expect(await restrictedImportErrors('packages/adapters/src/probe.ts', '@opentelemetry/api')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/src/http/probe.test.ts', '@opentelemetry/api')).toBe(1);
+    expect(await restrictedImportErrors('packages/upstream/src/probe.ts', '@opentelemetry/api')).toBe(0);
+  });
+
   it('adapter tests may also use the shared fakes, production code may not', async () => {
     expect(await restrictedImportErrors('packages/adapters/src/probe.ts', '@aiops/testing')).toBe(1);
     expect(await restrictedImportErrors('packages/adapters/src/http/probe.test.ts', '@aiops/testing')).toBe(0);

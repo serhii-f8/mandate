@@ -1,9 +1,18 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { CONNECTOR_SDK_VERSION, CREDENTIAL_SCHEMES, type BulkMapping, type ReadErrorCode, type UpstreamMapping, type WriteErrorCode } from './index.js';
+import {
+  CONNECTOR_SDK_VERSION,
+  CREDENTIAL_SCHEMES,
+  type BulkMapping,
+  type ReadErrorCode,
+  type RequestAttempt,
+  type RequestInstrumentation,
+  type UpstreamMapping,
+  type WriteErrorCode,
+} from './index.js';
 
-describe('NFR-18 connector SDK 0.4.0 is additive', () => {
-  it('NFR-18 reports version 0.4.0', () => {
-    expect(CONNECTOR_SDK_VERSION).toBe('0.4.0');
+describe('NFR-18 connector SDK 0.5.0 is additive', () => {
+  it('NFR-18 reports version 0.5.0', () => {
+    expect(CONNECTOR_SDK_VERSION).toBe('0.5.0');
   });
   it('NFR-18 SEC-2 webhook_url is appended to the credential schemes, old order kept', () => {
     expect(CREDENTIAL_SCHEMES).toEqual(['bearer', 'api_key', 'basic', 'oauth_client_credentials', 'webhook_url']);
@@ -12,5 +21,9 @@ describe('NFR-18 connector SDK 0.4.0 is additive', () => {
     expectTypeOf<UpstreamMapping['bulk']>().toEqualTypeOf<BulkMapping | undefined>();
     expectTypeOf<ReadErrorCode>().toExtend<WriteErrorCode>();
     expectTypeOf<'rejected'>().toExtend<WriteErrorCode>();
+  });
+  it('NFR-18 NFR-11 RequestInstrumentation is exported and optional in no existing type', () => {
+    expectTypeOf<RequestInstrumentation['start']>().parameters.toEqualTypeOf<[RequestAttempt]>();
+    expectTypeOf<RequestAttempt>().toEqualTypeOf<{ readonly connection: string; readonly method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; readonly host: string }>();
   });
 });

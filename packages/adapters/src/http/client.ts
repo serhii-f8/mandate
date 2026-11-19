@@ -1,8 +1,17 @@
 import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { LookupFunction } from 'node:net';
-import { parseSecret, type ConnectionSettings, type CredentialSource, type ReadErrorCode } from '@aiops/connector-sdk';
+import {
+  parseSecret,
+  type ConnectionSettings,
+  type CredentialSource,
+  type ReadErrorCode,
+  type RequestAttemptEnd,
+  type RequestInstrumentation,
+  type RequestSpan,
+} from '@aiops/connector-sdk';
 import type { HttpRequestSpec } from '../openapi/request.js';
+import { FORBIDDEN_HEADERS } from './headers.js';
 import { assertEgressAllowed, createGuardedLookup, EgressDeniedError } from './egress.js';
 import { clientCredentialsToken, clientSecretBasicValue, HEADER_SAFE } from './oauth.js';
 import { createScrubber, type Scrubber } from './scrub.js';
@@ -42,12 +51,37 @@ export interface ConnectionClientDeps {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
+  /** Optional hook around each upstream attempt (NFR-11); never around the OAuth token fetch. */
+  readonly instrumentation?: RequestInstrumentation;
 }
 
 const realSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+
+/** RFC 9110 field-name token, checked after lower-casing. */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9a-z-]+$/;
+
+/**
+ * The hook's headers that may be added to the request: valid names and values only, never a
+ * forbidden header, the auth header or a header the request already carries (SEC-3). Throws only
+ * if the hook's object does.
+ */
+function hookHeaders(span: RequestSpan, taken: ReadonlySet<string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [rawName, value] of Object.entries(span.headers)) {
+    const name = rawName.toLowerCase();
+    if (!HEADER_NAME.test(name) || typeof value !== 'string' || !HEADER_SAFE.test(value)) continue;
+    if (FORBIDDEN_HEADERS.has(name) || taken.has(name) || Object.hasOwn(out, name)) continue;
+    out[name] = value;
+  }
+  return out;
+}
+
+function endOf(r: RawResult): RequestAttemptEnd {
+  return r.kind === 'error' ? { errorCode: r.code } : { status: r.status };
+}
 
 function isJsonContentType(value: string | undefined): boolean {
   const ct = (value ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
@@ -179,6 +213,7 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? realSleep;
   const random = deps.random ?? Math.random;
+  const instrumentation = deps.instrumentation;
   const transport = createTransport(settings, deps.lookup ?? createGuardedLookup(settings));
 
   async function send(req: HttpRequestSpec, opts: SendOptions): Promise<SendResult> {
@@ -271,8 +306,40 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
         // Waiting for the slot counts against the timeout (CONN-6).
         const remaining = Math.max(1, settings.timeoutMs - Math.max(0, now() - waitStart));
         const headers: Record<string, string> = { ...req.headers };
+        let span: RequestSpan | undefined;
+        if (instrumentation) {
+          // A failing hook leaves the request exactly as without one: a throwing `start` gives no
+          // headers and no `end`; unreadable span headers give no headers, and the span still ends.
+          try {
+            span = instrumentation.start({ connection: settings.id, method: req.method, host: req.url.hostname });
+          } catch {
+            span = undefined;
+          }
+          if (span) {
+            const taken = new Set(Object.keys(req.headers).map((n) => n.toLowerCase()));
+            if (authHeader) taken.add(authHeader[0].toLowerCase());
+            try {
+              Object.assign(headers, hookHeaders(span, taken));
+            } catch {
+              // No extra headers.
+            }
+          }
+        }
         if (authHeader) headers[authHeader[0]] = authHeader[1];
-        return await transport({ ...req, headers }, remaining);
+        let result: RawResult | undefined;
+        try {
+          result = await transport({ ...req, headers }, remaining);
+          return result;
+        } finally {
+          if (span) {
+            try {
+              // A transport that rejected (it never should) still ends the span, as a network error.
+              span.end(result ? endOf(result) : { errorCode: 'network' });
+            } catch {
+              // An instrumentation failure never changes the request's outcome.
+            }
+          }
+        }
       } finally {
         release();
       }
