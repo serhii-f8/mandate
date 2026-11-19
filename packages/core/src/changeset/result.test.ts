@@ -61,6 +61,7 @@ describe('MCP-4 SEC-5 prepared result', () => {
     expect(s.changeset).toEqual({
       id: 'cs-1',
       operation: 'catalog.update_content',
+      kind: 'diff',
       status: 'prepared',
       hash: 'sha256:abc',
       stats: record.stats,
@@ -71,6 +72,21 @@ describe('MCP-4 SEC-5 prepared result', () => {
     expect(s.nextCursor).toBe('cursor-1');
     expect(r.dataText).toBe(JSON.stringify(r.structured));
     expect('nextCursor' in (preparedResult(record, []).structured ?? {})).toBe(false);
+  });
+});
+
+describe('APR-5 prepared result kind', () => {
+  it('APR-5 an opaque prepared result carries kind and the stored args; a diff one carries no args', () => {
+    const opaque = preparedResult(record, items.slice(0, 1), undefined, 'opaque');
+    const s = opaque.structured as { changeset: Record<string, unknown> };
+    expect(s.changeset.kind).toBe('opaque');
+    expect(s.changeset.args).toEqual(record.args);
+    expect(opaque.dataText).toBe(JSON.stringify(opaque.structured));
+    // The text stays counts only (SEC-5).
+    expect(opaque.text).not.toContain('SECRET-VALUE');
+    const diff = preparedResult(record, [], undefined, 'diff').structured as { changeset: Record<string, unknown> };
+    expect(diff.changeset.kind).toBe('diff');
+    expect('args' in diff.changeset).toBe(false);
   });
 });
 

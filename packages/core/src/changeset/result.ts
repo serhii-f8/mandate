@@ -1,6 +1,7 @@
 import type { InvocationResult } from '../operation-invoker.js';
 import { READ_RESULT_TEXT, readErrorResult } from '../read-result.js';
 import type { ChangeItemRecord, ChangeSetRecord, ExclusionReason } from './model.js';
+import type { ChangeSetKind } from './opaque.js';
 
 const EXCLUSION_ORDER: readonly ExclusionReason[] = ['not_found', 'out_of_scope', 'missing_data', 'no_change', 'requester'];
 
@@ -34,6 +35,7 @@ export function preparedResult(
   cs: ChangeSetRecord,
   items: readonly ChangeItemRecord[],
   nextCursor?: string,
+  kind: ChangeSetKind = 'diff',
 ): InvocationResult {
   const reasons = EXCLUSION_ORDER.flatMap((r) => {
     const n = cs.stats.excluded[r] ?? 0;
@@ -49,11 +51,14 @@ export function preparedResult(
     changeset: {
       id: cs.id,
       operation: cs.operation,
+      kind,
       status: cs.status,
       hash: cs.hash,
       stats: cs.stats,
       createdAt: cs.createdAt.toISOString(),
       expiresAt: cs.expiresAt.toISOString(),
+      // APR-5: the raw arguments are all an opaque call has to review; stored data, never in the text (SEC-5).
+      ...(kind === 'opaque' ? { args: cs.args } : {}),
     },
     items: items.slice(0, 20),
     ...(nextCursor !== undefined ? { nextCursor } : {}),

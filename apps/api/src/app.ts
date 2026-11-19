@@ -12,6 +12,7 @@ import { createAdapters } from '@aiops/adapters';
 import type { McpToolAdapter, ReadAdapter } from '@aiops/connector-sdk';
 import { createSchemaCompiler, type ApiEnv, type ConfigurationHolder } from '@aiops/config';
 import {
+  changesetKind,
   resolveRoles,
   type AuditLog,
   type ChangeSetExecutor,
@@ -373,7 +374,15 @@ class AppModule {
                   telemetry: pipelineTelemetry,
                   ...(upstreamTools === undefined ? {} : { upstreamTools }),
                 },
-                { tasks, repository: changesets, executor, audit, newId: randomUUID, publicUrl: env.publicUrl },
+                {
+                  tasks,
+                  repository: changesets,
+                  executor,
+                  audit,
+                  newId: randomUUID,
+                  publicUrl: env.publicUrl,
+                  kindOf: (operationId) => changesetKind(configuration.current.policy.operations.find((op) => op.id === operationId)),
+                },
               ),
               {
                 legacy: 'stateless',

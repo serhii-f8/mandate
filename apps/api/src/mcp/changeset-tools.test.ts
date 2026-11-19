@@ -72,9 +72,9 @@ class StubExecutor implements ChangeSetExecutor {
   }
 }
 
-function stubSnapshot(effect: PolicyDecision['effect'] = 'allow'): Snapshot {
-  // Only `manifest.rollback.strategy` is read from the definition.
-  const operation = { id: 'shop.update_content', manifest: { rollback: { strategy: 'replay_previous_state' } } } as unknown as OperationDefinition;
+function stubSnapshot(effect: PolicyDecision['effect'] = 'allow', risk: 'write' | 'write_opaque' = 'write'): Snapshot {
+  // Only `risk` and `manifest.rollback.strategy` are read from the definition.
+  const operation = { id: 'shop.update_content', risk, manifest: { rollback: { strategy: 'replay_previous_state' } } } as unknown as OperationDefinition;
   const engine: PolicyEngine = { grantedOperations: () => [], evaluate: () => ({ effect, rule: 'test', roles: [] }) };
   // Only `policy.operations` is read from the configuration.
   return { configuration: { policy: { operations: [operation] } } as unknown as LoadedConfiguration, engine };
@@ -289,6 +289,21 @@ describe('MCP-8 CS-6 built-in change-set tools', () => {
     expect(derived.derivedFrom).toBe(ID);
     const source = plain(await get.handler({ changeset_id: ID }, ctx(alice))).structuredContent as Record<string, unknown>;
     expect('derivedFrom' in source).toBe(false);
+  });
+
+  it('UI-2 get_changeset of an opaque change-set carries kind and args', async () => {
+    const { get, ctx, repository } = await setup();
+    const stored = await repository.get(ID);
+    expect(stored).toBeDefined();
+    const snapshot = stubSnapshot('allow', 'write_opaque');
+    const opaque = plain(await get.handler({ changeset_id: ID }, ctx(alice, snapshot)));
+    const o = opaque.structuredContent as { changeset: Record<string, unknown> };
+    expect(o.changeset.kind).toBe('opaque');
+    expect(o.changeset.args).toEqual(stored?.args);
+    const diff = plain(await get.handler({ changeset_id: ID }, ctx(alice)));
+    const d = diff.structuredContent as { changeset: Record<string, unknown> };
+    expect(d.changeset.kind).toBe('diff');
+    expect('args' in d.changeset).toBe(false);
   });
 
   it('MCP-4 the text and the existing fields are unchanged', async () => {

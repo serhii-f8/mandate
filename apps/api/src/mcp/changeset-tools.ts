@@ -4,6 +4,7 @@ import {
   ExecutorUnavailable,
   READ_RESULT_TEXT,
   changesetTransitionEvent,
+  changesetKind,
   encodeCursor,
   isExpiryDue,
   type Caller,
@@ -148,10 +149,12 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
       const summary = drift === undefined ? '' : ` ${executionSummaryText(record.status, record.stats, drift)}`;
       const approval = await approvalView(deps, record);
       const rollback = await rollbackBlock({ repository: deps.repository, snapshot, now: deps.now }, record, caller);
+      const kind = changesetKind(snapshot.configuration.policy.operations.find((op) => op.id === record.operation));
       const structured: Record<string, unknown> = {
         changeset: {
           id: record.id,
           operation: record.operation,
+          kind,
           status: record.status,
           ...(record.hash === undefined ? {} : { hash: record.hash }),
           stats: record.stats,
@@ -159,6 +162,8 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
           expiresAt: record.expiresAt.toISOString(),
           ...(record.preparedAt === undefined ? {} : { preparedAt: record.preparedAt.toISOString() }),
           ...(record.errorCode === undefined ? {} : { errorCode: record.errorCode }),
+          // APR-5: the stored arguments of an opaque call; the one item holds the same.
+          ...(kind === 'opaque' ? { args: record.args } : {}),
         },
         ...(progress === undefined ? {} : { progress: { total: progress.total, done: progress.done, failed: progress.failed, skipped: progress.skipped } }),
         ...(approval === undefined ? {} : { approval }),

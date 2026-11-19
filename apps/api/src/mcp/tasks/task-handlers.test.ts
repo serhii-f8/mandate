@@ -5,6 +5,7 @@ import {
   TASK_TTL_MS,
   type Caller,
   type ChangeSetExecutor,
+  type ChangeSetKind,
   type ChangeSetStatus,
   type ExecutionProgress,
   type TaskKind,
@@ -55,7 +56,7 @@ class StubExecutor implements ChangeSetExecutor {
 
 type Stage = 'preparing' | 'prepared' | 'executing' | 'completed';
 
-async function setup(kind: TaskKind, stage: Stage) {
+async function setup(kind: TaskKind, stage: Stage, changesetKind: ChangeSetKind = 'diff') {
   const repository = new InMemoryChangeSetRepository();
   const tasks = new InMemoryTaskRepository();
   const audit = new InMemoryAuditLog();
@@ -84,7 +85,7 @@ async function setup(kind: TaskKind, stage: Stage) {
   const createdAt = new Date('2026-01-01T12:00:01.000Z');
   await tasks.create({ taskId: TASK, owner: 'alice', changesetId: CS, kind, tool: 'shop.update_content', createdAt, ttlMs: TASK_TTL_MS });
   let n = 0;
-  const handlers = createTaskHandlers({ tasks, repository, executor, audit, newId: () => `audit-${String(++n)}`, publicUrl: PUBLIC });
+  const handlers = createTaskHandlers({ tasks, repository, executor, audit, newId: () => `audit-${String(++n)}`, publicUrl: PUBLIC, kindOf: () => changesetKind });
   const ctx = (caller: Caller, declared = true): TaskRequestContext => ({ caller, correlationId: 'corr-7', declared });
   return { repository, tasks, audit, executor, handlers, ctx, createdAt };
 }
@@ -165,6 +166,16 @@ describe('MCP-7 SEC-1 AUD-1 task handlers', () => {
     expect(structured.changeset.hash).toBe('sha256:x');
     expect(structured.items.length).toBeLessThanOrEqual(20);
     expect(result).not.toHaveProperty('isError');
+  });
+
+  it('MCP-7 the prepared task result of an opaque change-set carries kind opaque', async () => {
+    const { handlers, ctx } = await setup('prepare', 'prepared', 'opaque');
+    const answer = await handlers.get({ taskId: TASK }, ctx(alice));
+    const structured = answer.result?.structuredContent as { changeset: { kind?: string; args?: unknown } };
+    expect(structured.changeset.kind).toBe('opaque');
+    expect(structured.changeset).toHaveProperty('args', {});
+    const diff = await (await setup('prepare', 'prepared')).handlers.get({ taskId: TASK }, ctx(alice));
+    expect((diff.result?.structuredContent as { changeset: { kind?: string } }).changeset.kind).toBe('diff');
   });
 
   it('MCP-7 EXE-6 a working execute task reports progress in statusMessage', async () => {

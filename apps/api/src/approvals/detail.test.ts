@@ -205,6 +205,30 @@ describe('changesetDetail', () => {
   });
 });
 
+describe('APR-5 UI-3 detail kind', () => {
+  const OPAQUE: OperationDefinition = { ...OPERATION, id: 'shop.post_note', risk: 'write_opaque' };
+
+  it('APR-5 UI-3 an opaque detail has kind opaque, the stored args and canExclude false', () => {
+    const cs = { ...prepared(), operation: 'shop.post_note' };
+    const d = changesetDetail({ changeset: cs, approvals: [], operation: OPAQUE, viewer: alice, now: NOW, rollback: NO_ROLLBACK });
+    expect(d.kind).toBe('opaque');
+    expect(d.request.args).toStrictEqual(ARGS);
+    expect(d.viewer.canExclude).toBe(false);
+    expect(d.viewer.canSubmit).toBe(true);
+    const widget = changesetDetailWith({ changeset: cs, approvals: [], operation: OPAQUE, viewer: { ...widgetViewerBlock(cs, [], toApprover(alice), NOW), canExclude: true }, rollback: NO_ROLLBACK });
+    expect(widget.kind).toBe('opaque');
+    expect(widget.viewer.canExclude).toBe(false);
+  });
+
+  it('APR-5 UI-3 a diff detail, or one whose operation left the configuration, has kind diff and keeps canExclude', () => {
+    const d = changesetDetail({ changeset: prepared(), approvals: [], operation: OPERATION, viewer: alice, now: NOW, rollback: NO_ROLLBACK });
+    expect(d.kind).toBe('diff');
+    expect(d.viewer.canExclude).toBe(true);
+    const gone = changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, rollback: NO_ROLLBACK });
+    expect(gone.kind).toBe('diff');
+  });
+});
+
 describe('detail additions', () => {
   it('CS-5 the detail carries derivedFrom of a derived change-set', () => {
     const src = '22222222-2222-4222-8222-222222222222';

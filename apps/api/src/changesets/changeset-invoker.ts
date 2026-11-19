@@ -10,9 +10,11 @@ import type { LoadedConfiguration } from '@aiops/config';
 import {
   changesetTransitionEvent,
   createChangeSet,
+  changesetKind,
   isOpaque,
   preparationErrorResult,
   TASK_TTL_MS,
+  type ChangeSetKind,
   type ChangeSetRecord,
   type ChangeSetRepository,
   type InvocationRequest,
@@ -136,7 +138,7 @@ export class ChangeSetInvoker implements OperationInvoker {
 
     const finished = await this.waitForPreparation(changeset.id);
     if (finished === undefined) return { ...preparingAnswer(changeset.id), auditDetails: withId };
-    return this.answer(finished, withId);
+    return this.answer(finished, withId, changesetKind(operation));
   }
 
   /** The change-set once it left `preparing`, or undefined when the wait ran out (NFR-3: state is read, not held). */
@@ -155,11 +157,11 @@ export class ChangeSetInvoker implements OperationInvoker {
   }
 
   /** One state, one answer: the same derivation the Tasks handlers use. */
-  private async answer(record: ChangeSetRecord, withId: Details): Promise<InvocationResult> {
+  private async answer(record: ChangeSetRecord, withId: Details, kind: ChangeSetKind): Promise<InvocationResult> {
     const state = deriveTaskState('prepare', record);
     if (state.status === 'completed' && state.answer === 'prepared') {
       const excluded = Object.values(record.stats.excluded).reduce((sum, n) => sum + n, 0);
-      return { ...(await preparedAnswer(this.deps.repository, record)), auditDetails: { ...withId, included: record.stats.included, excluded } };
+      return { ...(await preparedAnswer(this.deps.repository, record, kind)), auditDetails: { ...withId, included: record.stats.included, excluded } };
     }
     if (state.status === 'completed' && state.answer === 'expired') {
       return { ...expiredDuringPreparationAnswer(record), auditDetails: { ...withId, errorCode: 'expired' } };
