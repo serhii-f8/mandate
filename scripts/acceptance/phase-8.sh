@@ -4,7 +4,9 @@
 #   group 1, rollback on the trusted page (EXE-8, UI-4, SEC-8, MCP-8): rb-prepare,
 #   rb-approved-executed, rb-tool-eligible, rb-page-rollback, rb-rolled-back, rb-restored-upstream,
 #   rb-second-refused, rb-audit;
-#   groups 2-4 (audit, configuration, observability) are appended by the later Phase 8 plans.
+#   group 2, audit chain (AUD-3, AUD-5): audit-sealed, audit-verify-ok, audit-tamper,
+#   audit-verify-fails, audit-restore; it needs group 1's flows (at least 10 audit rows);
+#   groups 3-4 (configuration, observability) are appended by the later Phase 8 plans.
 # AIOPS_ACCEPT8_GROUPS selects the groups (default "1 2 3 4"); a selected group that is not
 # defined is a FAIL (ADR 0043).
 # Tests the committed HEAD (a fresh clone sees only commits), with a Compose override that joins
@@ -315,6 +317,81 @@ group_1() {
 }
 
 # --- Groups 2–4 (audit, configuration, observability plans) are defined below this line. ---
+
+# ---- Group 2: audit chain (AUD-3, AUD-5) ----------------------------------------------------------
+# Runs after group 1's flows, which leave the audit table well above 10 rows.
+
+audit_verify() { compose exec -T api node dist/cli.js audit verify 2>&1; }
+# Runs one statement as the superuser with triggers off (session_replication_role = replica): the
+# only way to alter an audit row, which the append-only trigger otherwise refuses (AUD-3).
+# Its output is joined into one line, as are the refusals, so each check stays one PASS/FAIL line.
+psql_replica() { compose exec -T postgres psql -U postgres -d aiops -v ON_ERROR_STOP=1 -c "SET session_replication_role = replica; $1" 2>&1 | tr '\n' ' '; }
+
+group_2() {
+  local deadline sealed out code p orig denied tampered restored
+
+  # 1. The worker's sealer chains the rows group 1 wrote (bounded).
+  deadline=$((SECONDS + 60))
+  while :; do
+    sealed="$(psql_q "SELECT count(*) FROM audit_event WHERE chain_pos IS NOT NULL" 2>&1 || true)"
+    [[ "$sealed" =~ ^[0-9]+$ ]] && ((sealed >= 10)) && break
+    ((SECONDS >= deadline)) && break
+    sleep 2
+  done
+  if [[ "$sealed" =~ ^[0-9]+$ ]] && ((sealed >= 10)); then
+    pass audit-sealed "sealed rows: $sealed"
+  else
+    fail audit-sealed "sealed rows after 60 s: $sealed"
+    return 0
+  fi
+
+  # 2. The intact chain verifies.
+  code=0
+  out="$(audit_verify)" || code=$?
+  if [[ "$code" == 0 && "$out" =~ ^ok\ sealed=[0-9]+\ unsealed=[0-9]+\ from=[0-9]+\ head=[0-9]+:sha256:[0-9a-f]{64}$ ]]; then
+    pass audit-verify-ok "aiops audit verify → exit $code: $out"
+  else
+    fail audit-verify-ok "exit $code: $out"
+    return 0
+  fi
+
+  # 3. One sealed row is altered. The application role cannot (append-only); the superuser with
+  #    triggers off can, which is the tampering verification must detect.
+  p="$(psql_q "SELECT chain_pos FROM audit_event WHERE chain_pos IS NOT NULL ORDER BY chain_pos OFFSET 5 LIMIT 1" 2>&1 || true)"
+  if [[ ! "$p" =~ ^[0-9]+$ ]]; then
+    fail audit-tamper "no sealed position at offset 5: $p"
+    return 0
+  fi
+  orig="$(psql_q "SELECT actor FROM audit_event WHERE chain_pos = $p" 2>&1 || true)"
+  denied="$(psql_q "UPDATE audit_event SET actor = actor || '-tampered' WHERE chain_pos = $p" 2>&1 | tr '\n' ' ' || true)"
+  tampered="$(psql_replica "UPDATE audit_event SET actor = actor || '-tampered' WHERE chain_pos = $p" || true)"
+  if [[ "$denied" == *append-only* && "$tampered" == *"UPDATE 1"* &&
+    "$(psql_q "SELECT actor FROM audit_event WHERE chain_pos = $p" 2>&1 || true)" == "$orig-tampered" ]]; then
+    pass audit-tamper "chain_pos=$p actor '$orig' → '$orig-tampered'; as aiops: $denied; as superuser with replica: $tampered"
+  else
+    fail audit-tamper "chain_pos=$p as aiops: $denied; as superuser: $tampered"
+    return 0
+  fi
+
+  # 4. Verification fails at exactly that position (the acceptance criterion).
+  code=0
+  out="$(audit_verify)" || code=$?
+  if [[ "$code" == 1 && "$out" == "failed chain_pos=$p reason=hash_mismatch" ]]; then
+    pass audit-verify-fails "aiops audit verify → exit $code: $out"
+  else
+    fail audit-verify-fails "exit $code: $out (expected: failed chain_pos=$p reason=hash_mismatch)"
+  fi
+
+  # 5. The row is restored the same way, so later groups start from an intact chain.
+  restored="$(psql_replica "UPDATE audit_event SET actor = '${orig//\'/\'\'}' WHERE chain_pos = $p" || true)"
+  code=0
+  out="$(audit_verify)" || code=$?
+  if [[ "$restored" == *"UPDATE 1"* && "$code" == 0 && "$out" == ok\ * ]]; then
+    pass audit-restore "actor of chain_pos=$p back to '$orig'; aiops audit verify → exit $code: $out"
+  else
+    fail audit-restore "restore: $restored; verify exit $code: $out"
+  fi
+}
 
 # Not GROUPS: bash ignores assignments to its own GROUPS array (the user's group IDs).
 RUN_GROUPS="${AIOPS_ACCEPT8_GROUPS:-1 2 3 4}"
