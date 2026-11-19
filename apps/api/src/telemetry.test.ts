@@ -1,6 +1,7 @@
-import { request } from 'node:http';
+import { createServer, request } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { trace } from '@opentelemetry/api';
-import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
+import { InMemorySpanExporter, SimpleSpanProcessor, type ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { describe, expect, it } from 'vitest';
 import { otlpTracesUrl, startApiTelemetry, traceMixin } from './telemetry.js';
 
@@ -30,6 +31,34 @@ describe('NFR-11 api tracing', () => {
     expect(otlpTracesUrl(new URL('http://c:4318/otel/'))).toBe('http://c:4318/otel/v1/traces');
   });
 
+  it('NFR-11 otlpTracesUrl drops query and fragment', () => {
+    expect(otlpTracesUrl(new URL('http://x/?a=b#f'))).toBe('http://x/v1/traces');
+    expect(otlpTracesUrl(new URL('http://x:4318/otel/?a=b'))).toBe('http://x:4318/otel/v1/traces');
+  });
+
+  it('NFR-11 with an endpoint set, spans carry the resource service.name', async () => {
+    const memory = new InMemorySpanExporter();
+    // A local sink, so the OTLP flush at shutdown has somewhere to go.
+    const sink = createServer((_req, res) => {
+      res.writeHead(200).end('{}');
+    });
+    await new Promise<void>((ok) => sink.listen(0, '127.0.0.1', ok));
+    const telemetry = startApiTelemetry({
+      serviceName: 'aiops-api',
+      otlpEndpoint: new URL(`http://127.0.0.1:${(sink.address() as AddressInfo).port}`),
+      spanProcessor: new SimpleSpanProcessor(memory),
+      register: false,
+    });
+    try {
+      telemetry.tracer.startSpan('probe').end();
+      expect(memory.getFinishedSpans()[0]?.resource.attributes['service.name']).toBe('aiops-api');
+    } finally {
+      await telemetry.shutdown();
+      sink.closeAllConnections();
+      await new Promise((ok) => sink.close(ok));
+    }
+  });
+
   it('NFR-11 without an endpoint nothing is exported and spans still carry attributes', async () => {
     const telemetry = startApiTelemetry({ serviceName: 'aiops-api', register: false });
     try {
@@ -49,6 +78,14 @@ describe('NFR-11 api tracing', () => {
 });
 
 describe('NFR-12 api metrics endpoint', () => {
+  it('NFR-12 closing the metrics server twice is harmless', async () => {
+    const telemetry = startApiTelemetry({ serviceName: 'aiops-api', register: false });
+    const server = await telemetry.startMetricsServer(0, '127.0.0.1');
+    await server.close();
+    await expect(server.close()).resolves.toBeUndefined();
+    await telemetry.shutdown();
+  });
+
   it('NFR-12 the metrics server answers /metrics and 404 elsewhere', async () => {
     const telemetry = startApiTelemetry({ serviceName: 'aiops-api', register: false });
     const server = await telemetry.startMetricsServer(0, '127.0.0.1');

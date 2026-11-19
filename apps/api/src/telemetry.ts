@@ -34,7 +34,7 @@ export interface ApiTelemetry {
 
 /** The OTLP/HTTP traces URL for an endpoint: the endpoint without a trailing `/` plus `/v1/traces` (ruling R9). */
 export function otlpTracesUrl(endpoint: URL): string {
-  return `${endpoint.href.replace(/\/+$/, '')}/v1/traces`;
+  return `${endpoint.origin}${endpoint.pathname.replace(/\/+$/, '')}/v1/traces`;
 }
 
 /** pino mixin: `{ trace_id, span_id }` inside a valid active span, `{}` otherwise. */
@@ -78,16 +78,19 @@ export function startApiTelemetry(options: TelemetryOptions): ApiTelemetry {
         server.once('error', reject);
         server.listen(port, host, () => {
           server.off('error', reject);
+          let closing: Promise<void> | undefined;
           resolve({
             port: (server.address() as AddressInfo).port, // listening on a TCP port, so the address is an AddressInfo
-            close: () =>
-              new Promise<void>((done, fail) => {
+            close: () => {
+              closing ??= new Promise<void>((done, fail) => {
                 server.close((err) => {
                   if (err === undefined) done();
                   else fail(err);
                 });
                 server.closeAllConnections();
-              }),
+              });
+              return closing;
+            },
           });
         });
       }),
