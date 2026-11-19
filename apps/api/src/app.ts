@@ -29,6 +29,7 @@ import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
 import { HealthController } from './health/health.controller.js';
 import { bodyErrorHandler } from './http/body-errors.js';
+import { configurationGate } from './config/configuration-gate.js';
 import { createLogger, PinoNestLogger } from './logger.js';
 import { ApprovalService } from './approvals/approval-service.js';
 import { AuditController } from './audit/audit.controller.js';
@@ -57,6 +58,7 @@ import {
   LOGGER,
   MCP_HANDLER,
   OIDC_CLIENT,
+  ON_SHUTDOWN,
   PAGE_CHECKS,
   PAGE_SESSIONS,
   SUBMIT_SERVICE,
@@ -95,6 +97,8 @@ export interface AppOverrides {
   readonly tasks?: TaskRepository;
   /** Rate-limit counters; defaults to `PostgresRateCounter` on the api database (POL-4, NFR-3). */
   readonly rateCounter?: RateCounter;
+  /** Runs after the api's own resources closed; `main.ts` stops the configuration sync and its database here. */
+  readonly onShutdown?: () => Promise<void>;
 }
 
 interface UpstreamIo {
@@ -130,18 +134,20 @@ function invokerFactory(
   });
 }
 
-/** Closes the per-process resources when the application shuts down. */
+/** Closes the per-process resources when the application shuts down, then runs the caller's `onShutdown`. */
 class Resources implements OnApplicationShutdown {
   constructor(
     @Inject(DATABASE) private readonly database: Database,
     @Inject(MCP_HANDLER) private readonly handler: McpHttpHandler,
     @Inject(TEMPORAL) private readonly temporal: TemporalHandle | null,
+    @Inject(ON_SHUTDOWN) private readonly onShutdown: (() => Promise<void>) | null,
   ) {}
 
   async onApplicationShutdown(): Promise<void> {
     await this.handler.close();
     await this.temporal?.connection.close();
     await this.database.close();
+    await this.onShutdown?.();
   }
 }
 
@@ -174,6 +180,7 @@ class AppModule {
         { provide: API_ENV, useValue: env },
         { provide: LOGGER, useValue: logger },
         { provide: CONFIGURATION, useValue: configuration },
+        { provide: ON_SHUTDOWN, useValue: overrides.onShutdown ?? null },
         { provide: BEARER_GATE, useValue: createBearerGate({ verifier, resource: env.mcpResource }) },
         {
           provide: DATABASE,
@@ -354,8 +361,9 @@ export interface CreateAppOptions {
 
 /** Builds the api application without listening (used by `main.ts` and the e2e tests). */
 export async function createApp(options: CreateAppOptions): Promise<INestApplication> {
-  // The api checks fully: specs resolved and presets loaded (CONN-2, ADR 0021).
-  assertFullyChecked(options.configuration.current);
+  // The api checks fully: specs resolved and presets loaded (CONN-2, ADR 0021). Without an active
+  // configuration there is nothing to check; the gate below answers 503 until one is (CFG-2).
+  if (options.configuration.state().status === 'active') assertFullyChecked(options.configuration.current);
   const logger = options.logger ?? createLogger(options.env.logLevel);
   const app = await NestFactory.create<NestExpressApplication>(
     AppModule.forRoot(options.env, logger, options.configuration, options.overrides ?? {}),
@@ -367,5 +375,7 @@ export async function createApp(options: CreateAppOptions): Promise<INestApplica
   app.useBodyParser('json', { limit: '4mb' });
   // Directly after the parser: its errors quote the body, so they get fixed bodies (SEC-3).
   app.use(bodyErrorHandler);
+  // CFG-2, SEC-1: no request reaches a route that reads the configuration while none is active.
+  app.use(configurationGate(options.configuration));
   return app;
 }

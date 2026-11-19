@@ -13,6 +13,8 @@ export const DATABASE = Symbol('Database');
 export const MCP_HANDLER = Symbol('McpHttpHandler');
 export const LOGGER = Symbol('Logger');
 export const OIDC_CLIENT = Symbol('OidcClient');
+/** The caller's shutdown step, run after the api's own resources closed (`AppOverrides.onShutdown`). */
+export const ON_SHUTDOWN = Symbol('OnShutdown');
 export const PAGE_CHECKS = Symbol('PageChecks');
 export const PAGE_SESSIONS = Symbol('SessionService');
 export const SUBMIT_SERVICE = Symbol('SubmitService');
