@@ -9,8 +9,10 @@
  *   aiops audit retention --now                    runs the audit retention job once (AUD-7)
  *   aiops config diff <dir> [--preset-dir <dir>]...                 compares <dir> with the active revision (CFG-3)
  *   aiops config apply <dir> [--preset-dir <dir>]... [--actor <n>]  stores <dir> as the new active revision (CFG-3, CFG-4)
+ *   aiops config explain --operation <id> --groups <g,...> [--subject <s>] [--args <json>] [--records <n>]
+ *                                                  dry policy evaluation against the active revision (POL-7)
  *
- * Exit codes: 0 success, 1 failed or invalid, 2 usage or environment. Each command parses
+ * Exit codes: 0 success (explain: allow), 1 failed, invalid or denied, 2 usage or environment. Each command parses
  * only the environment it needs; errors name variables, never values (SEC-3).
  */
 import { randomUUID } from 'node:crypto';
@@ -47,6 +49,7 @@ import {
   verifyAuditChain,
 } from '@aiops/db';
 import type pg from 'pg';
+import { explainCall, formatExplain, type ExplainInput } from './config/explain.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
 
 const USAGE = [
@@ -57,6 +60,7 @@ const USAGE = [
   '       aiops audit retention --now',
   '       aiops config diff <dir> [--preset-dir <dir>]...',
   '       aiops config apply <dir> [--preset-dir <dir>]... [--actor <name>]',
+  '       aiops config explain --operation <id> --groups <g1,g2,...> [--subject <s>] [--args <json>] [--records <n>]',
 ].join('\n');
 
 /** The actor and client the CLI audits as. */
@@ -501,6 +505,70 @@ async function configChange(kind: 'diff' | 'apply', args: readonly string[], out
   });
 }
 
+const EXPLAIN_FLAGS = ['--operation', '--groups', '--subject', '--args', '--records'] as const;
+const MAX_RECORDS = 1_000_000;
+const NO_ACTIVE_CONFIGURATION = 'no active configuration: start the api once or run aiops config apply';
+
+/** `--operation <id> --groups <g1,...> [--subject <s>] [--args <json>] [--records <n>]`; undefined is a usage error. */
+function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
+  const values = new Map<string, string>();
+  for (let i = 0; i < args.length; i += 2) {
+    const flag = args[i];
+    const value = args[i + 1];
+    if (flag === undefined || !(EXPLAIN_FLAGS as readonly string[]).includes(flag) || value === undefined || value === '' || values.has(flag)) return undefined;
+    values.set(flag, value);
+  }
+  const operationId = values.get('--operation');
+  const groups = (values.get('--groups') ?? '').split(',').map((g) => g.trim()).filter((g) => g.length > 0);
+  if (operationId === undefined || groups.length === 0) return undefined;
+
+  // Neither message quotes the value: it is operator input of unknown content (SEC-3).
+  let parsedArgs: unknown = {};
+  const rawArgs = values.get('--args');
+  if (rawArgs !== undefined) {
+    try {
+      parsedArgs = JSON.parse(rawArgs);
+    } catch {
+      parsedArgs = undefined;
+    }
+    if (typeof parsedArgs !== 'object' || parsedArgs === null || Array.isArray(parsedArgs)) throw new CliError('--args: must be a JSON object', 2);
+  }
+  const rawRecords = values.get('--records') ?? '1';
+  const records = /^[0-9]{1,7}$/.test(rawRecords) ? Number(rawRecords) : Number.NaN;
+  if (!(records >= 1 && records <= MAX_RECORDS)) throw new CliError(`--records: must be an integer from 1 to ${String(MAX_RECORDS)}`, 2);
+
+  const subject = values.get('--subject');
+  return { operationId, groups, args: parsedArgs as Record<string, unknown>, records, ...(subject === undefined ? {} : { subject }) };
+}
+
+/** `aiops config explain`: evaluates one call against the active revision; writes nothing (POL-7). */
+async function configExplain(args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
+  const input = parseExplainArgs(args);
+  if (input === undefined) {
+    out(USAGE);
+    return 2;
+  }
+  const env = parseEnv({ DATABASE_URL: postgresUrl }, deps.env);
+  const adapter = deps.adapter ?? createOpenApiAdapter();
+  const presetDirs = presetDirsOf([], deps.env, deps);
+  const options: LoadOptions = { resolver: adapter.resolver, ...(presetDirs === undefined ? {} : { presetDirs }) };
+  return withConfigStore(deps, env.DATABASE_URL, async (store) => {
+    const active = await store.active();
+    if (active === undefined) throw new CliError(NO_ACTIVE_CONFIGURATION, 2);
+    let result: LoadResult;
+    try {
+      result = await loadConfigurationFiles(active.files, options);
+    } catch {
+      throw new CliError(`active revision ${active.id} cannot be loaded here (unavailable)`, 2);
+    }
+    if (!result.ok) throw new CliError(`active revision ${active.id} cannot be loaded here (invalid)`, 2);
+    if (result.configuration.hash !== active.hash) throw new CliError('configuration_mismatch', 2);
+    const explained = explainCall(result.configuration, input);
+    for (const line of formatExplain(explained)) out(line);
+    return explained.kind === 'decision' && explained.decision.effect === 'allow' ? 0 : 1;
+  });
+}
+
 export async function runApiCli(argv: readonly string[], out: (line: string) => void, deps: CliDeps = { env: process.env }): Promise<number> {
   const [command, ...rest] = argv;
   try {
@@ -509,6 +577,7 @@ export async function runApiCli(argv: readonly string[], out: (line: string) => 
     if (command === 'credentials' && rest[0] === 'rotate') return await rotate(rest.slice(1), out, deps);
     if (command === 'audit') return await audit(rest, out, deps);
     if (command === 'config' && (rest[0] === 'diff' || rest[0] === 'apply')) return await configChange(rest[0], rest.slice(1), out, deps);
+    if (command === 'config' && rest[0] === 'explain') return await configExplain(rest.slice(1), out, deps);
     out(USAGE);
     return 2;
   } catch (error) {

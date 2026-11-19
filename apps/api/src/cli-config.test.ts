@@ -289,3 +289,75 @@ describe('CFG-3 CFG-4 aiops config diff and apply', () => {
     expect(audit.events).toEqual([]);
   });
 });
+
+describe('CFG-3 POL-7 aiops config explain', () => {
+  const explain = (...flags: string[]): string[] => ['config', 'explain', ...flags];
+
+  it('CFG-3 POL-7 config explain exits 0 for allow, 1 for deny, 2 for usage', async () => {
+    const { store } = fixture();
+    await bootstrap(store, await configDir());
+    const allowed = await run(explain('--operation', 'shop.list_items', '--groups', 'other,viewers', '--subject', 'alice'), store);
+    expect(allowed.lines).toEqual(['effect: allow', 'rule: role:viewer/grant:0', 'roles: viewer', 'reason: -', 'detail: -']);
+    expect(allowed.code).toBe(0);
+    expect(allowed.closed).toBe(1);
+
+    const denied = await run(explain('--operation', 'shop.get_item', '--groups', 'viewers', '--args', '{"sku":"A-1"}'), store);
+    expect(denied.lines).toEqual(['effect: deny', 'rule: default-deny', 'roles: viewer', 'reason: no_grant', 'detail: -']);
+    expect(denied.code).toBe(1);
+
+    const invalid = await run(explain('--operation', 'shop.get_item', '--groups', 'viewers'), store);
+    expect(invalid.lines[0]).toBe('effect: invalid_arguments');
+    expect(invalid.code).toBe(1);
+
+    const usage: string[][] = [
+      explain('--groups', 'viewers'),
+      explain('--operation', 'shop.list_items'),
+      explain('--operation', 'shop.list_items', '--groups', ''),
+      explain('--operation', 'shop.list_items', '--groups'),
+      explain('--operation', 'shop.list_items', '--groups', 'viewers', '--args', '[1]'),
+      explain('--operation', 'shop.list_items', '--groups', 'viewers', '--args', 'null'),
+      explain('--operation', 'shop.list_items', '--groups', 'viewers', '--args', '{not json'),
+      explain('--operation', 'shop.list_items', '--groups', 'viewers', '--records', '0'),
+      explain('--operation', 'shop.list_items', '--groups', 'viewers', '--records', '1.5'),
+      explain('--operation', 'shop.list_items', '--groups', 'viewers', '--records', '1000001'),
+      explain('--operation', 'shop.list_items', '--groups', 'viewers', '--records', '1e3'),
+      explain('--operation', 'shop.list_items', '--groups', 'viewers', '--foo', 'x'),
+      explain('--operation', 'shop.list_items', '--operation', 'shop.get_item', '--groups', 'viewers'),
+      explain('shop.list_items', '--groups', 'viewers'),
+    ];
+    for (const argv of usage) {
+      const result = await run(argv, store);
+      expect(result.code, argv.join(' ')).toBe(2);
+      expect(result.closed, argv.join(' ')).toBe(0);
+    }
+    expect((await run(explain('--operation', 'shop.list_items', '--groups', 'viewers', '--records', '1000000'), store)).code).toBe(0);
+    const secret = await run(explain('--operation', 'shop.list_items', '--groups', 'viewers', '--args', '{"secret-value"'), store);
+    expect(secret.lines.join('\n')).not.toContain('secret-value');
+  });
+
+  it('CFG-3 POL-7 config explain writes no audit row and no revision', async () => {
+    const { store, audit } = fixture();
+    await bootstrap(store, await configDir());
+    await run(explain('--operation', 'shop.list_items', '--groups', 'viewers'), store);
+    await run(explain('--operation', 'shop.list_items', '--groups', 'nobody'), store);
+    await run(explain('--operation', 'shop.get_item', '--groups', 'viewers'), store);
+    expect(audit.events).toEqual([]);
+    expect(await store.activeSeq()).toBe(1);
+  });
+
+  it('CFG-3 config explain without an active revision exits 2', async () => {
+    const empty = fixture();
+    const none = await run(explain('--operation', 'shop.list_items', '--groups', 'viewers'), empty.store);
+    expect(none.lines).toEqual(['no active configuration: start the api once or run aiops config apply']);
+    expect(none.code).toBe(2);
+    expect(none.closed).toBe(1);
+
+    const other = fixture();
+    await other.store.bootstrap({ id: '00000000-0000-4000-8000-000000000009', hash: 'a'.repeat(64), files: { 'config.yaml': 'version: 1\n' }, summary: { connections: 0, operations: 0, roles: 0, notifications: 0 } });
+    const mismatch = await run(explain('--operation', 'shop.list_items', '--groups', 'viewers'), other.store);
+    expect(mismatch.lines).toEqual(['configuration_mismatch']);
+    expect(mismatch.code).toBe(2);
+
+    expect((await run(explain('--operation', 'shop.list_items', '--groups', 'viewers'), empty.store, {})).code).toBe(2);
+  });
+});
