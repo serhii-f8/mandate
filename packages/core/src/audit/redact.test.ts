@@ -3,7 +3,7 @@ import { ANONYMOUS_CALLER } from '../caller.js';
 import { changesetTransitionEvent } from '../changeset/audit.js';
 import { policyDecisionAuditEvent } from '../policy-audit.js';
 import { toolCallAuditEvent } from '../tool-call-audit.js';
-import { REDACTED, redactAuditDetails } from './redact.js';
+import { AuditRedactionError, REDACTED, redactAuditDetails } from './redact.js';
 
 const none: ReadonlySet<string> = new Set();
 
@@ -114,5 +114,24 @@ describe('AUD-4 SEC-3 audit redaction', () => {
     const out = redactAuditDetails({ date, bare }, none);
     expect(out.date).toBe(date);
     expect(out.bare).toEqual({ secret: REDACTED });
+  });
+
+  it('AUD-4 a cycle throws AuditRedactionError, a shared reference does not', () => {
+    const loop: Record<string, unknown> = { a: 1 };
+    loop.self = { back: loop };
+    expect(() => redactAuditDetails(loop, none)).toThrow(AuditRedactionError);
+    const ring: unknown[] = [];
+    ring.push(ring);
+    expect(() => redactAuditDetails({ ring }, none)).toThrow(expect.objectContaining({ name: 'AuditRedactionError', reason: 'cycle' }));
+    const shared = { token: 't', keep: 1 };
+    expect(redactAuditDetails({ x: shared, y: [shared] }, none)).toEqual({ x: { token: REDACTED, keep: 1 }, y: [{ token: REDACTED, keep: 1 }] });
+  });
+
+  it('AUD-4 a __proto__ key is kept as an own key and walked', () => {
+    const input = JSON.parse('{"__proto__":{"x":"Bearer a"},"k":1}') as Record<string, unknown>;
+    const out = redactAuditDetails(input, none);
+    expect(Object.keys(out)).toEqual(['__proto__', 'k']);
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(JSON.stringify(out)).toBe('{"__proto__":{"x":"[redacted]"},"k":1}');
   });
 });
