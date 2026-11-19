@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FakeResolver, fakeCatalogEntry } from '@aiops/testing';
 import { formatIssue, type ConfigIssue } from './issues.js';
+import type { CatalogEntry } from '@aiops/connector-sdk';
 import type { HttpOperationBinding } from './registry.js';
 import { loadConfigurationDirectory, loadConfigurationSources, type LoadedConfiguration, type LoadOptions, type LoadResult } from './load.js';
 
@@ -596,6 +597,30 @@ ${upstream}
   it('OPS-1 a destructive operation without a manifest cannot have bulk', async () => {
     const found = issues(await sources({ 'send.yaml': opaque('destructive', `${POST}\n${BULK}`) }));
     expect(found).toEqual([expect.objectContaining({ path: 'operations[0].upstream.bulk', message: 'requires a manifest' })]);
+  });
+
+  it('EXE-4 SEC-2 idempotency cannot take the connection api_key header', async () => {
+    const apiKey = BASE.replace('auth: { scheme: bearer }', 'auth: { scheme: api_key, header: X-Api-Key }');
+    const found = issues(await sources({ 'base.yaml': apiKey, 'send.yaml': opaque('write_opaque', `${POST}\n      idempotency: { header: x-api-key }`) }));
+    expect(found).toEqual([expect.objectContaining({ file: 'send.yaml', path: 'operations[0].upstream.idempotency.header', message: 'is set by the platform' })]);
+    ok(await sources({ 'base.yaml': apiKey, 'send.yaml': opaque('write_opaque', `${POST}\n      idempotency: { header: Idempotency-Key }`) }));
+  });
+
+  it('EXE-4 idempotency cannot name a header parameter derived from the spec', async () => {
+    const withHeader = (entry: CatalogEntry): CatalogEntry =>
+      entry.operationId === 'deleteItem' ? { ...entry, defaultMapping: { ...entry.defaultMapping, headers: { 'Idempotency-Key': { arg: 'key' } } } } : entry;
+    const headed = new FakeResolver({ shop: shopCatalog().map(withHeader) });
+    const derivedText = await readFile(join(FIXTURES, 'derived', 'config.yaml'), 'utf8');
+    const config = (header: string): Promise<string> =>
+      fixture('derived', {
+        'config.yaml': derivedText.replace('risk: read\n    description: Get one item.', 'risk: write_opaque\n    description: Delete one item.').replace(
+          'upstream: { operation: getItem }',
+          `upstream: { operation: deleteItem, idempotency: { header: ${header} } }`,
+        ),
+      });
+    const found = issues(await loadConfigurationDirectory(await config('idempotency-key'), { resolver: headed }));
+    expect(found).toEqual([expect.objectContaining({ path: 'operations[1].upstream.idempotency.header', message: 'is already declared in headers' })]);
+    ok(await loadConfigurationDirectory(await config('X-Request-Key'), { resolver: headed }));
   });
 
   it('EXE-4 idempotency is allowed only on opaque operations', async () => {

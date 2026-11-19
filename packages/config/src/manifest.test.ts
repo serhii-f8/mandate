@@ -397,6 +397,17 @@ describe('OPS-6 bulk binding configuration', () => {
       },
     });
   });
+  it('OPS-6 a destructive operation with a manifest can have bulk', async () => {
+    const destructive = withBulk(WRITE).replace('risk: write', 'risk: destructive');
+    ok(await load({ 'write.yaml': destructive, 'roles.yaml': ROLES.replace('{ required: never }', '{ required: never, steps: [{ role: content_manager }] }') }));
+  });
+  it('EXE-4 idempotency is refused on a write operation with a manifest', async () => {
+    const text = WRITE.replace('upstream: { method: POST, path: /async/bulk/V1/products }', 'upstream: { method: POST, path: /async/bulk/V1/products, idempotency: { header: Idempotency-Key } }');
+    const found = issues(await load({ 'write.yaml': text }));
+    expect(found).toEqual([
+      expect.objectContaining({ path: 'operations[0].upstream.idempotency', message: 'is allowed only on write_opaque operations and destructive operations without a manifest' }),
+    ]);
+  });
   it('OPS-6 a write operation without bulk still loads (Phase 4 configuration stays valid)', async () => {
     expect(httpBinding(ok(await load()), 'catalog.update_content').mapping.bulk).toBeUndefined();
   });

@@ -13,7 +13,7 @@ import { createSchemaCompiler, type ArgumentValidator } from './argument-validat
 import { pathToString, type ConfigIssue } from './issues.js';
 import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN, DEFAULT_ROLLBACK_WINDOW_HOURS } from './manifest.js';
 import { readSpecFile, resolvePreset, type LoadedPreset } from './presets.js';
-import { toMcpCatalog, type McpCatalogState } from './mcp.js';
+import { isMcpUpstream, toMcpCatalog, type McpCatalogState } from './mcp.js';
 import { buildRegistry, propertiesOf, sentArguments, type CatalogState, type Located, type OperationBinding, type OperationSource } from './registry.js';
 import {
   configDocumentSchema,
@@ -375,6 +375,17 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     compile,
     at,
   });
+
+  // EXE-4 SEC-2: the idempotency key must not take the connection's api_key header, which the
+  // credential overwrites last, so the key would be lost without an error.
+  for (const { located } of registry.all.values()) {
+    const u = located.value.upstream;
+    if (isMcpUpstream(u) || u.idempotency === undefined) continue;
+    const auth = states.get(located.connection)?.auth;
+    if (auth?.scheme === 'api_key' && auth.header.toLowerCase() === u.idempotency.header.toLowerCase()) {
+      at(located.source, [...located.path, 'upstream', 'idempotency', 'header'], 'is set by the platform');
+    }
+  }
 
   // Manifests (OPS-2, OPS-3, OPS-4): need the registry's enabled operations and final schemas.
   checkManifests({ all: registry.all, operationsIncomplete, at });

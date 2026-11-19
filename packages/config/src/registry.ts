@@ -276,6 +276,11 @@ export function buildRegistry(input: RegistryInput): Registry {
     if (u.idempotency !== undefined && !opaque) {
       upstreamAt(['idempotency'], 'is allowed only on write_opaque operations and destructive operations without a manifest');
     }
+    // R9: the key header must not collide with a header the binding sends, spec-derived ones included.
+    const keyHeader = u.idempotency?.header.toLowerCase();
+    if (keyHeader !== undefined && Object.keys(binding?.mapping.headers ?? {}).some((name) => name.toLowerCase() === keyHeader)) {
+      upstreamAt(['idempotency', 'header'], 'is already declared in headers');
+    }
     if (u.bulk !== undefined) {
       if (op.risk !== 'write' && op.risk !== 'destructive') upstreamAt(['bulk'], 'is allowed on write and destructive operations only');
       // A bulk binding writes per record, which needs the manifest's items (OPS-6).
