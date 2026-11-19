@@ -1,8 +1,10 @@
 import { desc, sql } from 'drizzle-orm';
+import pg from 'pg';
 import type {
   ApplyRevisionResult,
   AuditEventInput,
   ConfigListener,
+  ConfigListenerHandlers,
   ConfigRevision,
   ConfigRevisionStore,
   NewConfigRevision,
@@ -15,6 +17,15 @@ import { configRevision } from './schema.js';
 
 /** The LISTEN/NOTIFY channel of applied revisions (CFG-3); the payload is the new `seq` as text. */
 export const CONFIG_CHANNEL = 'aiops_config';
+
+/** The listener's `application_name`, so operators and tests can find its backend. */
+export const CONFIG_LISTENER_APPLICATION_NAME = 'aiops-config-listener';
+
+/** The only text `onError` and a failed first `listen` carry: driver errors may quote the host or user (SEC-3). */
+const LISTENER_FAILED = 'configuration listener connection failed';
+
+const DEFAULT_BACKOFF = { initialMs: 1_000, maxMs: 30_000 } as const;
+const LISTENER_CONNECT_TIMEOUT_MS = 5_000;
 
 export interface PostgresConfigRevisionStoreOptions {
   readonly databaseUrl: string;
@@ -106,9 +117,105 @@ export class PostgresConfigRevisionStore implements ConfigRevisionStore {
     );
   }
 
-  /** The dedicated-client listener on `options.databaseUrl` follows in Task 4. */
-  listen(): Promise<ConfigListener> {
-    return Promise.reject(new Error('not implemented'));
+  /**
+   * CFG-3: one dedicated `pg.Client` on `options.databaseUrl` (not a pool connection) runs
+   * `LISTEN aiops_config`. Resolves once the first LISTEN succeeded and rejects when it fails.
+   * On `error` or `end` it reports `onError` and reconnects after the back-off delay, doubling up
+   * to the maximum; a successful LISTEN resets the delay and reports `onReconnect`.
+   */
+  async listen(handlers: ConfigListenerHandlers): Promise<ConfigListener> {
+    const listener = new ConfigChannelListener(this.options.databaseUrl, this.options.backoff ?? DEFAULT_BACKOFF, handlers);
+    await listener.start();
+    return listener;
+  }
+}
+
+class ConfigChannelListener implements ConfigListener {
+  /** The client whose LISTEN succeeded and has not failed yet; its first error or end schedules one reconnect. */
+  private live: pg.Client | undefined;
+  private timer: NodeJS.Timeout | undefined;
+  private delayMs: number;
+  private closed = false;
+
+  constructor(
+    private readonly databaseUrl: string,
+    private readonly backoff: { readonly initialMs: number; readonly maxMs: number },
+    private readonly handlers: ConfigListenerHandlers,
+  ) {
+    this.delayMs = backoff.initialMs;
+  }
+
+  async start(): Promise<void> {
+    if (!(await this.connect())) throw new Error(LISTENER_FAILED);
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    const client = this.live;
+    this.live = undefined;
+    if (client !== undefined) await client.end().catch(() => undefined);
+  }
+
+  /** One attempt: true when LISTEN succeeded and the client is live. */
+  private async connect(): Promise<boolean> {
+    const client = new pg.Client({
+      connectionString: this.databaseUrl,
+      application_name: CONFIG_LISTENER_APPLICATION_NAME,
+      connectionTimeoutMillis: LISTENER_CONNECT_TIMEOUT_MS,
+      keepAlive: true,
+    });
+    // Always attached: an 'error' without a listener would crash the process.
+    client.on('error', () => { this.failed(client); });
+    client.on('end', () => { this.failed(client); });
+    client.on('notification', (message) => {
+      if (this.live === client && message.channel === CONFIG_CHANNEL) this.handlers.onChange();
+    });
+    try {
+      await client.connect();
+      await client.query(`LISTEN ${CONFIG_CHANNEL}`);
+    } catch {
+      await client.end().catch(() => undefined);
+      return false;
+    }
+    if (this.closed) {
+      await client.end().catch(() => undefined);
+      return false;
+    }
+    this.live = client;
+    this.delayMs = this.backoff.initialMs;
+    return true;
+  }
+
+  /** The live client broke: report once, drop it and schedule one reconnect, however many events it emits. */
+  private failed(client: pg.Client): void {
+    if (this.closed || this.live !== client) return;
+    this.live = undefined;
+    client.end().catch(() => undefined);
+    this.handlers.onError(LISTENER_FAILED);
+    this.schedule();
+  }
+
+  private schedule(): void {
+    if (this.closed) return;
+    const delay = this.delayMs;
+    this.delayMs = Math.min(this.delayMs * 2, this.backoff.maxMs);
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.reconnect();
+    }, delay);
+    this.timer.unref();
+  }
+
+  private async reconnect(): Promise<void> {
+    if (await this.connect()) {
+      this.handlers.onReconnect();
+      return;
+    }
+    if (this.closed) return;
+    this.handlers.onError(LISTENER_FAILED);
+    this.schedule();
   }
 }
 

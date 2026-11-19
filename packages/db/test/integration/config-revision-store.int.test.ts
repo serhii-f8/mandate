@@ -70,6 +70,7 @@ async function waitFor(check: () => Promise<boolean>): Promise<void> {
  */
 async function underHeldLock<T>(database: Database, waiters: number, race: () => Promise<T>): Promise<T> {
   const holder = await database.pool.connect();
+  let committed = false;
   try {
     await holder.query('BEGIN');
     await holder.query('SELECT pg_advisory_xact_lock($1::bigint)', [CONFIG_LOCK_KEY.toString()]);
@@ -84,19 +85,19 @@ async function underHeldLock<T>(database: Database, waiters: number, race: () =>
         )) === waiters,
     );
     await holder.query('COMMIT');
+    committed = true;
     return await running;
   } finally {
-    holder.release();
+    // A failure before COMMIT would return a connection still holding the lock to the pool:
+    // destroy it instead, which ends its transaction and releases the lock.
+    holder.release(!committed);
   }
 }
 
-describeConfigRevisionStoreContract(
-  async () => {
-    const { database, store } = open(await freshUrl());
-    return { store, auditRows: () => auditRowsOf(database) };
-  },
-  { listener: false },
-);
+describeConfigRevisionStoreContract(async () => {
+  const { database, store } = open(await freshUrl());
+  return { store, auditRows: () => auditRowsOf(database) };
+});
 
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);

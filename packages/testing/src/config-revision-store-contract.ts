@@ -8,11 +8,6 @@ export interface ConfigRevisionStoreHarness {
   readonly auditRows: () => Promise<readonly AuditEventInput[]>;
 }
 
-export interface ConfigRevisionStoreContractOptions {
-  /** Run the listener case (default true). An implementation without `listen` yet passes false. */
-  readonly listener?: boolean;
-}
-
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 const HASH_C = 'c'.repeat(64);
@@ -41,10 +36,7 @@ async function waitFor(check: () => boolean): Promise<void> {
 }
 
 /** Behaviour every ConfigRevisionStore implementation must have (CFG-4, CFG-3). */
-export function describeConfigRevisionStoreContract(
-  make: () => Promise<ConfigRevisionStoreHarness>,
-  options: ConfigRevisionStoreContractOptions = {},
-): void {
+export function describeConfigRevisionStoreContract(make: () => Promise<ConfigRevisionStoreHarness>): void {
   describe('CFG-4 configuration revision store', () => {
     it('CFG-4 active is undefined on an empty store', async () => {
       const { store } = await make();
@@ -144,20 +136,22 @@ export function describeConfigRevisionStoreContract(
       expect(active?.summary).toEqual({ connections: 1, operations: 2, roles: 3, notifications: 0 });
     });
 
-    if (options.listener ?? true) {
-      it('CFG-3 a listener is told about an apply', async () => {
-        const { store } = await make();
-        let changes = 0;
-        const listener = await store.listen({ onChange: () => { changes += 1; }, onReconnect: () => undefined, onError: () => undefined });
-        try {
-          const result = await store.apply(revision(HASH_A), auditEvent('config.apply'), null);
-          expect(result.ok).toBe(true);
-          await waitFor(() => changes >= 1);
-          expect(changes).toBe(1);
-        } finally {
-          await listener.close();
-        }
-      });
-    }
+    it('CFG-3 a listener is told about each apply once', async () => {
+      const { store } = await make();
+      let changes = 0;
+      const listener = await store.listen({ onChange: () => { changes += 1; }, onReconnect: () => undefined, onError: () => undefined });
+      try {
+        const first = await store.apply(revision(HASH_A), auditEvent('config.apply'), null);
+        expect(first.ok).toBe(true);
+        // Barrier: notifications arrive in commit order, so once the second apply is heard a
+        // duplicate of the first would already have been counted.
+        const second = await store.apply(revision(HASH_B), auditEvent('config.apply'), HASH_A);
+        expect(second.ok).toBe(true);
+        await waitFor(() => changes >= 2);
+        expect(changes).toBe(2);
+      } finally {
+        await listener.close();
+      }
+    });
   });
 }
