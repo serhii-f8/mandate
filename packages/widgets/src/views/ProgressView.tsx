@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import { ActionBar } from '../components/ActionBar.js';
 import { Notice } from '../components/Notice.js';
+import { RollbackCounts } from '../components/RollbackCounts.js';
 import { StatusBadge } from '../components/StatusBadge.js';
 import type { ChangeSetActions, ChangeSetViewModel, ProgressModel } from '../model.js';
 import type { ViewProps } from './PreviewView.js';
@@ -29,6 +30,7 @@ export function ProgressView({ data, actions, onData }: ViewProps<ChangeSetViewM
       </header>
       <progress max={total} value={done + failed + skipped} />
       <p className="counts">{counts}</p>
+      <RollbackCounts stats={data.rollback.stats} />
       {canCancel ? (
         <ActionBar>
           <button

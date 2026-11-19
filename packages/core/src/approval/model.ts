@@ -81,7 +81,7 @@ export interface Approver {
   readonly authTime?: Date;
 }
 
-export type NotificationKind = 'approval_requested' | 'approval_decided' | 'execution_finished';
+export type NotificationKind = 'approval_requested' | 'approval_decided' | 'execution_finished' | 'rollback_result';
 
 export interface NewNotification {
   readonly kind: NotificationKind;

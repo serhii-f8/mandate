@@ -85,6 +85,27 @@
       "when": 1795007621263,
       "tag": "0011_derived_change_sets",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795079609204,
+      "tag": "0012_rollback",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795086809447,
+      "tag": "0013_audit_chain",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795091260974,
+      "tag": "0014_config_revision",
+      "breakpoints": true
     }
   ]
 }

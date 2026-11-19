@@ -3,10 +3,15 @@ import {
   BatchFenced,
   CANCELLABLE,
   changesetBatchEvent,
+  changesetRollbackBatchEvent,
   changesetTransitionEvent,
   coverBatch,
   executionTerminal,
   failureThresholdExceeded,
+  ROLLBACK_REQUEST_MARGIN_MS,
+  rollbackOutcome,
+  rollbackRequestEvents,
+  rollbackTerminal,
   startEventFactory,
   type BatchContext,
   type ChangeItemRecord,
@@ -18,6 +23,9 @@ import {
   type ExecutionProgress,
   type FinishOutcome,
   type ItemOutcome,
+  type RollbackOutcome,
+  type RollbackRequestInput,
+  type RollbackRequestOutcome,
   type StartOutcome,
   type StartRequest,
 } from '@aiops/core';
@@ -25,6 +33,8 @@ import {
 export interface InMemoryExecutorDeps {
   readonly repository: ChangeSetRepository;
   readonly writer: ChangeWriter;
+  /** Restores items on a rollback (EXE-8). Default: `writer`. */
+  readonly rollbackWriter?: ChangeWriter;
   readonly batchSizeOf: (operation: string) => number;
   /** Stop remaining batches when failed / processed exceeds this (EXE-5). Default 0.5. */
   readonly failureThreshold?: number;
@@ -39,12 +49,14 @@ const ATTEMPT = 1;
  * In-process executor (EXE-11) on the same repository port as the durable one: the start checks
  * and limits run in `startExecution` (POL-4, POL-6), batches are claimed and completed through the
  * fenced batch rows (EXE-3), a stored cancel request ends the run after the current batch (EXE-7),
- * and the failure threshold stops remaining batches (EXE-5).
+ * and the failure threshold stops remaining batches (EXE-5). A rollback request runs at once in
+ * fenced rollback batches (EXE-8); it never opens a window itself, so tests open one in the store.
  */
 export class InMemoryExecutor implements ChangeSetExecutor {
   private readonly runs = new Map<string, Promise<void>>();
   private readonly repository: ChangeSetRepository;
   private readonly writer: ChangeWriter;
+  private readonly rollbackWriter: ChangeWriter;
   private readonly batchSizeOf: (operation: string) => number;
   private readonly failureThreshold: number;
   private readonly now: () => Date;
@@ -53,6 +65,7 @@ export class InMemoryExecutor implements ChangeSetExecutor {
   constructor(deps: InMemoryExecutorDeps) {
     this.repository = deps.repository;
     this.writer = deps.writer;
+    this.rollbackWriter = deps.rollbackWriter ?? deps.writer;
     this.batchSizeOf = deps.batchSizeOf;
     this.failureThreshold = deps.failureThreshold ?? 0.5;
     this.now = deps.now ?? (() => new Date());
@@ -220,6 +233,109 @@ export class InMemoryExecutor implements ChangeSetExecutor {
       }),
     );
     return cancelled === undefined ? { ok: false, reason: 'not_cancellable' } : { ok: true, status: 'cancelled' };
+  }
+
+  /**
+   * EXE-8: one compare-and-set transaction for the request and its audit rows (the window is checked on the
+   * store's clock), then a background rollback run tracked like an execution run (`settled` awaits it).
+   */
+  async requestRollback(req: RollbackRequestInput): Promise<RollbackRequestOutcome> {
+    const record = await this.repository.get(req.changesetId);
+    if (record === undefined) return { ok: false, reason: 'not_found' };
+    const request = {
+      actor: req.actor,
+      ...(req.clientId === undefined ? {} : { clientId: req.clientId }),
+      correlationId: req.correlationId,
+      requestedAt: this.now(),
+    };
+    const stored = await this.repository.requestRollback({
+      changesetId: record.id,
+      request,
+      marginMs: ROLLBACK_REQUEST_MARGIN_MS,
+      audit: rollbackRequestEvents({ newId: this.newId, changeset: record, request, channel: 'page', count: req.count }),
+    });
+    if (!stored.ok) {
+      return stored.reason === 'not_found' ? { ok: false, reason: 'not_found' } : { ok: false, reason: 'not_rollbackable', detail: stored.reason };
+    }
+    const id = record.id;
+    // Registered before the run's first await, so `settled` right after the request finds it.
+    this.runs.set(
+      id,
+      this.rollback(stored.changeset, req.correlationId).finally(() => this.runs.delete(id)),
+    );
+    return { ok: true, status: 'rolling_back' };
+  }
+
+  private async rollback(changeset: ChangeSetRecord, correlationId: string): Promise<void> {
+    try {
+      const size = this.batchSizeOf(changeset.operation);
+      if (!Number.isInteger(size) || size < 1) throw new Error('invalid batch size');
+      const outcome = await this.rollbackBatches(changeset.id, size, correlationId);
+      await this.finishRollback(changeset.id, outcome, correlationId);
+    } catch {
+      // Unexpected error: best effort to leave a terminal state, as for an execution run.
+      try {
+        await this.finishRollback(changeset.id, 'executor_error', correlationId);
+      } catch {
+        // Nothing more can be done; the change-set stays `rolling_back` for inspection.
+      }
+    }
+  }
+
+  /** Restores rollbackable items batch by batch until none is left; a throwing writer ends it (EXE-8). */
+  private async rollbackBatches(changesetId: string, size: number, correlationId: string): Promise<RollbackOutcome> {
+    for (let batchNo = await this.repository.nextRollbackBatch(changesetId); ; batchNo++) {
+      const current = await this.repository.get(changesetId);
+      if (current === undefined) throw new Error('change-set vanished');
+      const claim = await this.repository.claimRollbackBatch(changesetId, batchNo, ATTEMPT, size);
+      if (claim.kind === 'empty') return 'done';
+      if (claim.kind === 'done') continue;
+      if (claim.kind === 'fenced') throw new Error('rollback batch fenced');
+      const batch: BatchContext = {
+        // Rollback batches are their own sequence: the key never collides with an execution batch's.
+        key: `${changesetId}:rollback:${String(batchNo)}`,
+        ...(claim.batch.submission === undefined ? {} : { submission: claim.batch.submission }),
+        recordSubmission: async (submission) => {
+          if (!(await this.repository.recordRollbackSubmission(changesetId, batchNo, ATTEMPT, submission))) {
+            throw new BatchFenced();
+          }
+        },
+        heartbeat: () => undefined,
+      };
+      let outcomes: readonly ItemOutcome[];
+      try {
+        outcomes = await this.rollbackWriter.writeBatch({ changeset: current, items: claim.items, batch });
+      } catch (error) {
+        if (error instanceof BatchFenced) throw error;
+        return 'writer_error';
+      }
+      const covered = coverBatch(claim.items, outcomes).map(rollbackOutcome);
+      // Claimed items are rollbackable, so these are exactly the counts completeRollbackBatch applies.
+      const counts = { restored: 0, skipped: 0, failed: 0 };
+      for (const o of covered) counts[o.status] += 1;
+      const completed = await this.repository.completeRollbackBatch(
+        changesetId,
+        batchNo,
+        ATTEMPT,
+        covered,
+        changesetRollbackBatchEvent({ id: this.newId(), changeset: current, batchNo, counts, correlationId }),
+      );
+      if (!completed.ok) throw new Error('rollback batch fenced');
+    }
+  }
+
+  /** Terminal transition of a rollback (ruling R4), under the request's correlation ID. */
+  private async finishRollback(changesetId: string, outcome: RollbackOutcome, correlationId: string): Promise<void> {
+    const record = await this.repository.get(changesetId);
+    if (record === undefined) return;
+    const terminal = rollbackTerminal(outcome);
+    await this.repository.transition(
+      changesetId,
+      ['rolling_back'],
+      terminal.status,
+      changesetTransitionEvent({ id: this.newId(), actor: 'system', changeset: record, from: 'rolling_back', to: terminal.status, correlationId }),
+      terminal.status === 'failed' ? { errorCode: terminal.errorCode } : undefined,
+    );
   }
 
   /** Runs are in-process and never wait for a signal: nothing to wake. */

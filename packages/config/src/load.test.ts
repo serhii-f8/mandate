@@ -233,10 +233,10 @@ describe('EXE-5 EXE-9 changesets in the loaded configuration', () => {
   it('EXE-5 EXE-9 the loaded configuration carries both values and the single-document rule still applies', async () => {
     const defaults = await load();
     if (!defaults.ok) throw new Error('expected ok');
-    expect(defaults.configuration.changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.5, itemsPerWorkflowRun: 2000 });
+    expect(defaults.configuration.changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.5, itemsPerWorkflowRun: 2000, rollbackWindowHours: 168 });
     const set = await load({ 'cs.yaml': 'version: 1\nchangesets: { failure_threshold: 0.25, items_per_workflow_run: 300 }\n' });
     if (!set.ok) throw new Error('expected ok');
-    expect(set.configuration.changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.25, itemsPerWorkflowRun: 300 });
+    expect(set.configuration.changesets).toEqual({ expireAfterHours: 72, failureThreshold: 0.25, itemsPerWorkflowRun: 300, rollbackWindowHours: 168 });
     const twice = issues(await load({ 'cs.yaml': 'version: 1\nchangesets: { failure_threshold: 0.25 }\n', 'cs2.yaml': 'version: 1\nchangesets: { items_per_workflow_run: 300 }\n' }));
     expect(twice).toEqual([expect.objectContaining({ path: 'changesets' })]);
   });
@@ -286,5 +286,27 @@ describe('CFG-2 APR-3 POL-5 approval configuration', () => {
   it('approver_role is no longer accepted', async () => {
     const found = issues(await load({ 'roles.yaml': withApproval('{ approver_role: content_manager }') }));
     expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval' }));
+  });
+});
+
+describe('AUD-7 SEC-1 audit configuration in the loaded configuration', () => {
+  it('AUD-7 audit settings come from one document only', async () => {
+    const none = await load();
+    if (!none.ok) throw new Error(JSON.stringify(none.issues));
+    expect(none.configuration.audit).toEqual({});
+    const set = await load({ 'a.yaml': 'version: 1\naudit: { retention_days: 90 }\n' });
+    if (!set.ok) throw new Error(JSON.stringify(set.issues));
+    expect(set.configuration.audit).toEqual({ retentionDays: 90 });
+    const twice = issues(await load({ 'a.yaml': 'version: 1\naudit: { retention_days: 90 }\n', 'b.yaml': 'version: 1\naudit: { retention_days: 30 }\n' }));
+    expect(twice).toEqual([expect.objectContaining({ path: 'audit', message: 'may be set in one document only; first set in a.yaml' })]);
+  });
+
+  it('SEC-1 view_audit defaults to false and fills auditViewers', async () => {
+    const result = await load({ 'auditor.yaml': 'version: 1\nroles:\n  - id: auditor\n    grants: []\n    view_audit: true\n' });
+    if (!result.ok) throw new Error(JSON.stringify(result.issues));
+    expect([...result.configuration.auditViewers]).toEqual(['auditor']);
+    const plain = await load();
+    if (!plain.ok) throw new Error(JSON.stringify(plain.issues));
+    expect(plain.configuration.auditViewers.size).toBe(0);
   });
 });

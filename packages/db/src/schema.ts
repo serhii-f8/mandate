@@ -22,12 +22,15 @@ import type {
   ApprovalPlan,
   ChangeSetStats,
   ChangeSetStatus,
+  ConfigRevisionSource,
+  ConfigRevisionSummary,
   ExclusionReason,
   ItemStatus,
   NotificationError,
   NotificationKind,
   NotificationState,
   PlanEntry,
+  RollbackItemStatus,
   TaskKind,
 } from '@aiops/core';
 
@@ -48,8 +51,11 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
 
 /**
  * Audit base table (AUD-1). Append-only: a trigger added by migration
- * `0001_audit_event_append_only` rejects UPDATE, DELETE and TRUNCATE (AUD-3).
- * `prev_hash` and `hash` are filled by the hash chain of Phase 8.
+ * `0001_audit_event_append_only` rejects UPDATE, DELETE and TRUNCATE (AUD-3), except the two
+ * sanctioned paths migration `0013_audit_chain` adds, each behind a transaction-local setting:
+ * the sealer (`aiops.audit_seal = on`) may fill `chain_pos`, `prev_hash` and `hash` of an
+ * unsealed row once, and retention (`aiops.audit_retention = on`, AUD-7) may delete sealed rows
+ * at or below the newest `audit_anchor`. TRUNCATE is always refused.
  */
 export const auditEvent = pgTable(
   'audit_event',
@@ -68,13 +74,30 @@ export const auditEvent = pgTable(
     details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
     prevHash: text('prev_hash'),
     hash: text('hash'),
+    chainPos: bigint('chain_pos', { mode: 'number' }).unique(),
   },
   (t) => [
     index('audit_event_ts_idx').on(t.ts),
     index('audit_event_correlation_id_idx').on(t.correlationId),
     index('audit_event_changeset_id_idx').on(t.changesetId),
+    index('audit_event_actor_seq_idx').on(t.actor, t.seq),
+    index('audit_event_action_seq_idx').on(t.action, t.seq),
   ],
 );
+
+/**
+ * Retention anchors (AUD-7): one row per archived range, naming the last archived chain position,
+ * its hash, the archive file and its digest. Verification after retention starts from the newest
+ * anchor. Append-only: migration `0013_audit_chain` rejects UPDATE, DELETE and TRUNCATE.
+ */
+export const auditAnchor = pgTable('audit_anchor', {
+  chainPos: bigint('chain_pos', { mode: 'number' }).primaryKey(),
+  hash: text('hash').notNull(),
+  archive: text('archive').notNull(),
+  sha256: text('sha256').notNull(),
+  count: bigint('count', { mode: 'number' }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * Envelope-encrypted upstream credentials (SEC-2, ADR 0019). Plaintext and data keys are
@@ -164,6 +187,13 @@ export const changeSet = pgTable(
     // CS-5: the source of a derived change-set, set on insert and fixed by the identity-column
     // guard of migration `0011_derived_change_sets`; NULL for a change-set prepared by a tool call.
     derivedFrom: uuid('derived_from').references((): AnyPgColumn => changeSet.id),
+    // EXE-8 rollback (migration `0012_rollback`): the window is written once by the workflow; the
+    // request columns are written once, together with the move into `rolling_back`.
+    rollbackUntil: timestamp('rollback_until', { withTimezone: true }),
+    rollbackRequestedAt: timestamp('rollback_requested_at', { withTimezone: true }),
+    rollbackActor: text('rollback_actor'),
+    rollbackCorrelationId: text('rollback_correlation_id'),
+    rollbackClientId: text('rollback_client_id'),
   },
   (t) => [
     index('change_set_requester_created_at_idx').on(t.requester, t.createdAt),
@@ -194,11 +224,18 @@ export const changeItem = pgTable(
     before: jsonb('before').$type<unknown>().notNull(),
     after: jsonb('after').$type<unknown>().notNull(),
     error: text('error'),
+    // EXE-8: the rollback outcome of an item this run wrote, written once (migration `0012_rollback`).
+    rollbackStatus: text('rollback_status').$type<RollbackItemStatus>(),
+    rollbackError: text('rollback_error'),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.changesetId, t.targetId] }),
     check('change_item_status_check', sql`${t.status} IN ('pending', 'excluded', 'written', 'failed', 'skipped')`),
+    check(
+      'change_item_rollback_status_check',
+      sql`${t.rollbackStatus} IS NULL OR ${t.rollbackStatus} IN ('restored', 'skipped', 'failed')`,
+    ),
   ],
 );
 
@@ -229,6 +266,33 @@ export const changeBatch = pgTable(
   (t) => [
     primaryKey({ columns: [t.changesetId, t.batchNo] }),
     check('change_batch_state_check', sql`${t.state} IN ('open', 'done')`),
+  ],
+);
+
+// EXE-3, EXE-8: the batches of a rollback run, with the columns and guards of `change_batch`
+// (migration `0012_rollback`).
+export const changeRollbackBatch = pgTable(
+  'change_rollback_batch',
+  {
+    changesetId: uuid('changeset_id')
+      .notNull()
+      .references(() => changeSet.id),
+    batchNo: integer('batch_no').notNull(),
+    attempt: integer('attempt').notNull(),
+    state: text('state').$type<'open' | 'done'>().notNull(),
+    targetIds: jsonb('target_ids').$type<string[]>().notNull(),
+    lastTarget: text('last_target').notNull(),
+    upstreamBatchId: text('upstream_batch_id'),
+    plan: jsonb('plan').$type<PlanEntry[]>(),
+    written: integer('written').notNull().default(0),
+    failed: integer('failed').notNull().default(0),
+    skipped: integer('skipped').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.changesetId, t.batchNo] }),
+    check('change_rollback_batch_state_check', sql`${t.state} IN ('open', 'done')`),
   ],
 );
 
@@ -329,8 +393,33 @@ export const notificationOutbox = pgTable(
     index('notification_outbox_due_idx').on(t.nextAttemptAt).where(sql`${t.state} = 'pending'`),
     check(
       'notification_outbox_kind_check',
-      sql`${t.kind} IN ('approval_requested', 'approval_decided', 'execution_finished')`,
+      sql`${t.kind} IN ('approval_requested', 'approval_decided', 'execution_finished', 'rollback_result')`,
     ),
     check('notification_outbox_state_check', sql`${t.state} IN ('pending', 'sent', 'failed')`),
+  ],
+);
+
+/**
+ * Configuration revisions (CFG-4), added by migration `0014_config_revision`. One row per applied
+ * or bootstrapped configuration; the active revision is the row with the highest `seq`. `files`
+ * maps a path relative to the configuration directory (with `/`) to its text, and `hash` is the
+ * hex configuration hash without prefix. Append-only: the migration's triggers reject UPDATE,
+ * DELETE and TRUNCATE.
+ */
+export const configRevision = pgTable(
+  'config_revision',
+  {
+    seq: bigint('seq', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    id: uuid('id').notNull().unique(),
+    hash: text('hash').notNull(),
+    files: jsonb('files').$type<Record<string, string>>().notNull(),
+    source: text('source').$type<ConfigRevisionSource>().notNull(),
+    actor: text('actor').notNull(),
+    appliedAt: timestamp('applied_at', { withTimezone: true }).notNull().defaultNow(),
+    summary: jsonb('summary').$type<ConfigRevisionSummary>().notNull(),
+  },
+  (t) => [
+    check('config_revision_hash_check', sql`${t.hash} ~ '^[0-9a-f]{64}$'`),
+    check('config_revision_source_check', sql`${t.source} IN ('apply', 'bootstrap')`),
   ],
 );

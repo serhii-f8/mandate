@@ -16,6 +16,7 @@ import {
 } from '@aiops/core';
 import { decodeCursor } from '../approvals/page-query.js';
 import { executionSummaryText } from '../changesets/results.js';
+import { rollbackBlock } from '../changesets/rollback.js';
 import type { BuiltinTool } from './tool-catalog.js';
 
 export interface ChangesetToolDeps {
@@ -119,7 +120,7 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
     inputSchema: GET_SCHEMA,
     widget: 'changeset',
     validate: compile(GET_SCHEMA),
-    async handler(args, { caller, correlationId }) {
+    async handler(args, { caller, correlationId, snapshot }) {
       // `validate` guarantees the shape.
       const id = args.changeset_id as string;
       let after: string | undefined;
@@ -146,6 +147,7 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
       const drift = summarised ? ((await deps.repository.errorCounts(id)).drift ?? 0) : undefined;
       const summary = drift === undefined ? '' : ` ${executionSummaryText(record.status, record.stats, drift)}`;
       const approval = await approvalView(deps, record);
+      const rollback = await rollbackBlock({ repository: deps.repository, snapshot, now: deps.now }, record, caller);
       const structured: Record<string, unknown> = {
         changeset: {
           id: record.id,
@@ -163,8 +165,8 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
         items,
         ...(nextCursor === undefined ? {} : { nextCursor }),
         ...(record.derivedFrom === undefined ? {} : { derivedFrom: record.derivedFrom }),
-        // Rollback is not offered yet (UI-4); the widget shows no rollback control.
-        rollback: { available: false },
+        // UI-4: whether the requester can roll it back now; the rollback itself is confirmed on the page.
+        rollback,
         ...(drift === undefined ? {} : { execution: { drift } }),
       };
       const text =

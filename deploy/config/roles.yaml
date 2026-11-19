@@ -19,6 +19,7 @@ roles:
     description: Enters and rotates upstream credentials on the trusted credential page (SEC-1, UI-5).
     grants: []
     manage_credentials: [magento-integration]
+    view_audit: true
   - id: content_lead
     description: Approves content changes (APR-1).
     grants: []

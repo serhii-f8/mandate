@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, gt, inArray, lt, lte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, sql, type SQL } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
 import type {
   ApprovalRecord,
@@ -20,22 +20,32 @@ import type {
   ItemsPageQuery,
   NewChangeSet,
   NewNotification,
+  RollbackCounts,
+  RollbackItemOutcome,
+  RollbackItemStatus,
   Submission,
 } from '@aiops/core';
-import { changesetTransitionEvent, EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
+import {
+  changesetTransitionEvent,
+  EMPTY_STATS,
+  evaluateLimits,
+  isExpiryDue,
+  rollbackFromFinished,
+  rollbackWindowOpen,
+} from '@aiops/core';
 import { DrizzleAuditLog } from './audit-log.js';
 import { guarded, isUniqueViolation } from './errors.js';
 import type { Db, DbExecutor } from './client.js';
+import { START_LOCK_NAMESPACE } from './locks.js';
 import { insertNotifications } from './notification-outbox.js';
-import { approval, changeBatch, changeItem, changeSet, type StoredSubmission } from './schema.js';
+import { approval, changeBatch, changeItem, changeRollbackBatch, changeSet, type StoredSubmission } from './schema.js';
 
 const MAX_PAGE = 500;
 const MAX_BATCH = 1000;
 const DAY_MS = 24 * 3_600_000;
-/** First key of the two-key advisory lock `startExecution` takes per requester ('aex1'). */
-const START_LOCK_NAMESPACE = 0x6165_7831;
 const OUTCOMES_REFUSED = 'item outcomes rejected: change-set is not executing';
 const BATCH_REFUSED = 'batch outcomes rejected: change-set is not executing';
+const ROLLBACK_BATCH_REFUSED = 'rollback batch outcomes rejected: change-set is not rolling back';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** CTEs `ex` and `inc` of distinct target IDs, passed as one jsonb parameter each (never a text array). */
@@ -48,6 +58,8 @@ function targetLists(exclude: readonly string[], include: readonly string[]): SQ
 const excludes = sql`(ci.status = 'pending' AND ci.target_id IN (SELECT t FROM ex))`;
 const includes = sql`(ci.status = 'excluded' AND ci.reason = 'requester'
   AND ci.target_id IN (SELECT t FROM inc) AND ci.target_id NOT IN (SELECT t FROM ex))`;
+/** EXE-8: an item this run wrote itself (no `already_applied`) that has no rollback outcome yet. */
+const rollbackable = sql`${changeItem.status} = 'written' AND ${changeItem.error} IS NULL AND ${changeItem.rollbackStatus} IS NULL`;
 const derivedStatus = sql`(CASE WHEN ${excludes} THEN 'excluded' WHEN ${includes} THEN 'pending' ELSE ci.status END)`;
 
 export interface PostgresChangeSetRepositoryOptions {
@@ -58,6 +70,7 @@ export interface PostgresChangeSetRepositoryOptions {
 type ChangeSetRow = typeof changeSet.$inferSelect;
 type ChangeItemRow = typeof changeItem.$inferSelect;
 type ChangeBatchRow = typeof changeBatch.$inferSelect;
+type ChangeRollbackBatchRow = typeof changeRollbackBatch.$inferSelect;
 type ApprovalRow = typeof approval.$inferSelect;
 type SubmitRequest = Parameters<ChangeSetRepository['submitForApproval']>[0];
 type SubmitResult = Awaited<ReturnType<ChangeSetRepository['submitForApproval']>>;
@@ -68,6 +81,10 @@ type StartResult = Awaited<ReturnType<ChangeSetRepository['startExecution']>>;
 type ClaimResult = Awaited<ReturnType<ChangeSetRepository['claimBatch']>>;
 type CancelResult = Awaited<ReturnType<ChangeSetRepository['requestCancel']>>;
 type CompleteResult = Awaited<ReturnType<ChangeSetRepository['completeBatch']>>;
+type RollbackRequestOf = Parameters<ChangeSetRepository['requestRollback']>[0];
+type RollbackResult = Awaited<ReturnType<ChangeSetRepository['requestRollback']>>;
+type RollbackClaimResult = Awaited<ReturnType<ChangeSetRepository['claimRollbackBatch']>>;
+type RollbackCompleteResult = Awaited<ReturnType<ChangeSetRepository['completeRollbackBatch']>>;
 
 function toRecord(row: ChangeSetRow): ChangeSetRecord {
   return {
@@ -114,6 +131,17 @@ function toRecord(row: ChangeSetRow): ChangeSetRecord {
             actor: row.cancelRequestedBy,
             correlationId: row.cancelCorrelationId,
             requestedAt: row.cancelRequestedAt,
+          },
+        }),
+    ...(row.rollbackUntil === null ? {} : { rollbackUntil: row.rollbackUntil }),
+    ...(row.rollbackRequestedAt === null || row.rollbackActor === null || row.rollbackCorrelationId === null
+      ? {}
+      : {
+          rollbackRequest: {
+            actor: row.rollbackActor,
+            ...(row.rollbackClientId === null ? {} : { clientId: row.rollbackClientId }),
+            correlationId: row.rollbackCorrelationId,
+            requestedAt: row.rollbackRequestedAt,
           },
         }),
   };
@@ -165,7 +193,7 @@ function toApproval(row: ApprovalRow): ApprovalRecord {
   };
 }
 
-function toBatch(row: ChangeBatchRow): BatchRecord {
+function toBatch(row: ChangeBatchRow | ChangeRollbackBatchRow): BatchRecord {
   return {
     changesetId: row.changesetId,
     batchNo: row.batchNo,
@@ -181,6 +209,16 @@ function countsOf(row: ChangeBatchRow): BatchCounts {
   return { written: row.written, failed: row.failed, skipped: row.skipped };
 }
 
+/** A rollback batch keeps its restored count in the `written` column. */
+function rollbackCountsOf(row: ChangeRollbackBatchRow): RollbackCounts {
+  return { restored: row.written, skipped: row.skipped, failed: row.failed };
+}
+
+/** `column IN` the target IDs, passed as one jsonb parameter (never a text array). */
+function inTargets(column: typeof changeItem.targetId, ids: readonly string[]): SQL {
+  return sql`${column} IN (SELECT jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb))`;
+}
+
 function toItem(row: ChangeItemRow): ChangeItemRecord {
   return {
     targetId: row.targetId,
@@ -189,6 +227,8 @@ function toItem(row: ChangeItemRow): ChangeItemRecord {
     before: row.before,
     after: row.after,
     ...(row.error === null ? {} : { error: row.error }),
+    ...(row.rollbackStatus === null ? {} : { rollbackStatus: row.rollbackStatus }),
+    ...(row.rollbackError === null ? {} : { rollbackError: row.rollbackError }),
   };
 }
 
@@ -905,6 +945,265 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     );
   }
 
+  async rollbackableCount(changesetId: string): Promise<number> {
+    if (!UUID.test(changesetId)) return 0;
+    const [row] = await guarded('rollbackable count', () =>
+      this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(changeItem)
+        .where(and(eq(changeItem.changesetId, changesetId), rollbackable)),
+    );
+    return row?.n ?? 0;
+  }
+
+  async openRollbackWindow(changesetId: string, until: Date): Promise<Date | undefined> {
+    if (Number.isNaN(until.getTime())) throw new Error('invalid rollback window');
+    if (!UUID.test(changesetId)) return undefined;
+    return guarded('rollback window', () =>
+      this.db.transaction(async (tx) => {
+        // Write-once (the trigger refuses a change too): a later call answers the stored window.
+        const [set] = await tx
+          .update(changeSet)
+          .set({ rollbackUntil: until })
+          .where(and(eq(changeSet.id, changesetId), isNull(changeSet.rollbackUntil)))
+          .returning({ until: changeSet.rollbackUntil });
+        if (set !== undefined) return set.until ?? undefined;
+        const [row] = await tx
+          .select({ until: changeSet.rollbackUntil })
+          .from(changeSet)
+          .where(eq(changeSet.id, changesetId));
+        return row?.until ?? undefined;
+      }),
+    );
+  }
+
+  async requestRollback(req: RollbackRequestOf): Promise<RollbackResult> {
+    if (!UUID.test(req.changesetId)) return { ok: false, reason: 'not_found' };
+    return guarded('rollback request', () =>
+      this.db.transaction(async (tx): Promise<RollbackResult> => {
+        // The row lock serializes requests: a second one finds the first one's status and request.
+        const [row] = await tx.select().from(changeSet).where(eq(changeSet.id, req.changesetId)).for('update');
+        if (row === undefined) return { ok: false, reason: 'not_found' };
+        const record = toRecord(row);
+        if (record.status === 'rolling_back' || record.status === 'rolled_back' || row.rollbackRequestedAt !== null) {
+          return { ok: false, reason: 'already_rolled_back' };
+        }
+        if (!rollbackFromFinished(record)) return { ok: false, reason: 'not_finished' };
+        // SEC-8: judged again on the database clock, read after the lock is held (statement_timestamp(), not the
+        // transaction start of now()), so neither an api clock nor a wait on the lock opens the window.
+        const clock = await tx.execute<{ ms: number }>(
+          sql`SELECT (extract(epoch FROM statement_timestamp()) * 1000)::float8 AS ms`,
+        );
+        const now = new Date(clock.rows[0]?.ms ?? Number.NaN);
+        if (!rollbackWindowOpen(record.rollbackUntil, now, req.marginMs)) return { ok: false, reason: 'window_closed' };
+        const [updated] = await tx
+          .update(changeSet)
+          .set({
+            status: 'rolling_back',
+            rollbackRequestedAt: req.request.requestedAt,
+            rollbackActor: req.request.actor,
+            rollbackClientId: req.request.clientId ?? null,
+            rollbackCorrelationId: req.request.correlationId,
+            updatedAt: sql`now()`,
+          })
+          .where(and(eq(changeSet.id, req.changesetId), eq(changeSet.status, record.status)))
+          .returning();
+        if (updated === undefined) throw new Error('rollback request update returned no row');
+        const audit = this.auditFor(tx);
+        for (const event of req.audit) await audit.append(event);
+        return { ok: true, changeset: toRecord(updated) };
+      }),
+    );
+  }
+
+  async nextRollbackBatch(changesetId: string): Promise<number> {
+    if (!UUID.test(changesetId)) return 1;
+    const [row] = await guarded('rollback batch number', () =>
+      this.db
+        .select({
+          next: sql<number>`coalesce(
+            min(${changeRollbackBatch.batchNo}) filter (where ${changeRollbackBatch.state} = 'open'),
+            max(${changeRollbackBatch.batchNo}) filter (where ${changeRollbackBatch.state} = 'done') + 1,
+            1)::int`,
+        })
+        .from(changeRollbackBatch)
+        .where(eq(changeRollbackBatch.changesetId, changesetId)),
+    );
+    return row?.next ?? 1;
+  }
+
+  async claimRollbackBatch(changesetId: string, batchNo: number, attempt: number, size: number): Promise<RollbackClaimResult> {
+    if (!Number.isInteger(size) || size < 1 || size > MAX_BATCH) {
+      throw new Error(`batch size must be between 1 and ${MAX_BATCH}`);
+    }
+    if (!UUID.test(changesetId)) return { kind: 'empty' };
+    return guarded('rollback batch claim', () =>
+      this.db.transaction(async (tx): Promise<RollbackClaimResult> => {
+        // As claimBatch: the change-set row lock serializes claims and completions, and holds off a
+        // status change until this claim commits, so no batch is claimed after it left rolling_back.
+        const [parent] = await tx
+          .select({ status: changeSet.status })
+          .from(changeSet)
+          .where(eq(changeSet.id, changesetId))
+          .for('update');
+        if (parent === undefined) return { kind: 'empty' };
+        const rollingBack = parent.status === 'rolling_back';
+        let row = await readRollbackBatch(tx, changesetId, batchNo);
+        if (row === undefined) {
+          if (!rollingBack) return { kind: 'fenced' };
+          // Continue after the last target of the highest existing rollback batch.
+          const [highest] = await tx
+            .select({ lastTarget: changeRollbackBatch.lastTarget })
+            .from(changeRollbackBatch)
+            .where(eq(changeRollbackBatch.changesetId, changesetId))
+            .orderBy(desc(changeRollbackBatch.batchNo))
+            .limit(1);
+          const conditions: SQL[] = [eq(changeItem.changesetId, changesetId), rollbackable];
+          if (highest !== undefined) conditions.push(gt(changeItem.targetId, highest.lastTarget));
+          const items = await tx
+            .select()
+            .from(changeItem)
+            .where(and(...conditions))
+            .orderBy(asc(changeItem.targetId))
+            .limit(size);
+          const last = items[items.length - 1];
+          if (last === undefined) return { kind: 'empty' };
+          const [inserted] = await tx
+            .insert(changeRollbackBatch)
+            .values({
+              changesetId,
+              batchNo,
+              attempt,
+              state: 'open',
+              targetIds: items.map((i) => i.targetId),
+              lastTarget: last.targetId,
+            })
+            .onConflictDoNothing()
+            .returning();
+          if (inserted !== undefined) return { kind: 'claimed', batch: toBatch(inserted), items: items.map(toItem) };
+          // Another claim inserted it first: answer as for an existing batch.
+          row = await readRollbackBatch(tx, changesetId, batchNo);
+          if (row === undefined) throw new Error('rollback batch claim found no row after a conflict');
+        }
+        if (row.state === 'done') return { kind: 'done', counts: rollbackCountsOf(row) };
+        if (!rollingBack || row.attempt >= attempt) return { kind: 'fenced' };
+        const [taken] = await tx
+          .update(changeRollbackBatch)
+          .set({ attempt, updatedAt: sql`now()` })
+          .where(
+            and(
+              eq(changeRollbackBatch.changesetId, changesetId),
+              eq(changeRollbackBatch.batchNo, batchNo),
+              lt(changeRollbackBatch.attempt, attempt),
+              eq(changeRollbackBatch.state, 'open'),
+            ),
+          )
+          .returning();
+        if (taken === undefined) {
+          // Lost to a completion or a newer attempt between the read and the update.
+          const current = await readRollbackBatch(tx, changesetId, batchNo);
+          return current?.state === 'done' ? { kind: 'done', counts: rollbackCountsOf(current) } : { kind: 'fenced' };
+        }
+        const items = await tx
+          .select()
+          .from(changeItem)
+          .where(and(eq(changeItem.changesetId, changesetId), inTargets(changeItem.targetId, taken.targetIds)))
+          .orderBy(asc(changeItem.targetId));
+        return { kind: 'claimed', batch: toBatch(taken), items: items.map(toItem) };
+      }),
+    );
+  }
+
+  async recordRollbackSubmission(
+    changesetId: string,
+    batchNo: number,
+    attempt: number,
+    submission: BatchSubmission,
+  ): Promise<boolean> {
+    if (!UUID.test(changesetId)) return false;
+    const rows = await guarded('rollback batch submission record', () =>
+      this.db
+        .update(changeRollbackBatch)
+        .set({ upstreamBatchId: submission.upstreamBatchId, plan: [...submission.plan], updatedAt: sql`now()` })
+        .where(
+          and(
+            eq(changeRollbackBatch.changesetId, changesetId),
+            eq(changeRollbackBatch.batchNo, batchNo),
+            eq(changeRollbackBatch.attempt, attempt),
+            eq(changeRollbackBatch.state, 'open'),
+          ),
+        )
+        .returning({ batchNo: changeRollbackBatch.batchNo }),
+    );
+    return rows.length > 0;
+  }
+
+  async completeRollbackBatch(
+    changesetId: string,
+    batchNo: number,
+    attempt: number,
+    outcomes: readonly RollbackItemOutcome[],
+    audit: AuditEventInput,
+  ): Promise<RollbackCompleteResult> {
+    if (!UUID.test(changesetId)) return { ok: false };
+    return guarded('rollback batch complete', () =>
+      this.db.transaction(async (tx): Promise<RollbackCompleteResult> => {
+        // Same lock order as claimRollbackBatch: the change-set row, then the batch row.
+        const [parent] = await tx
+          .select({ status: changeSet.status })
+          .from(changeSet)
+          .where(eq(changeSet.id, changesetId))
+          .for('update');
+        if (parent === undefined) return { ok: false };
+        const [row] = await tx
+          .select()
+          .from(changeRollbackBatch)
+          .where(and(eq(changeRollbackBatch.changesetId, changesetId), eq(changeRollbackBatch.batchNo, batchNo)))
+          .for('update');
+        if (row?.attempt !== attempt || row.state !== 'open') return { ok: false };
+        if (parent.status !== 'rolling_back') throw new Error(ROLLBACK_BATCH_REFUSED);
+        // The first outcome per target of this batch; outcomes for other targets are ignored.
+        const inBatch = new Set(row.targetIds);
+        const seen = new Set<string>();
+        const rows: Record<string, unknown>[] = [];
+        for (const o of outcomes) {
+          if (!inBatch.has(o.targetId) || seen.has(o.targetId)) continue;
+          seen.add(o.targetId);
+          rows.push({ target_id: o.targetId, status: o.status, error: o.error ?? null });
+        }
+        const counts: { -readonly [K in keyof RollbackCounts]: number } = { restored: 0, skipped: 0, failed: 0 };
+        if (rows.length > 0) {
+          // Only rollbackable items change (an item this run wrote, no outcome yet), and only those count.
+          const applied = await tx.execute<{ rollback_status: RollbackItemStatus }>(sql`
+            UPDATE change_item AS ci
+            SET rollback_status = o.status, rollback_error = o.error, updated_at = now()
+            FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS o(target_id text, status text, error text)
+            WHERE ci.changeset_id = ${changesetId}::uuid
+              AND ci.target_id = o.target_id
+              AND ci.status = 'written'
+              AND ci.error IS NULL
+              AND ci.rollback_status IS NULL
+            RETURNING ci.rollback_status`);
+          for (const r of applied.rows) counts[r.rollback_status] += 1;
+        }
+        const stats = await computeStats(tx, changesetId);
+        await tx.update(changeSet).set({ stats, updatedAt: sql`now()` }).where(eq(changeSet.id, changesetId));
+        await tx
+          .update(changeRollbackBatch)
+          .set({
+            state: 'done',
+            written: counts.restored,
+            skipped: counts.skipped,
+            failed: counts.failed,
+            updatedAt: sql`now()`,
+          })
+          .where(and(eq(changeRollbackBatch.changesetId, changesetId), eq(changeRollbackBatch.batchNo, batchNo)));
+        await this.auditFor(tx).append(audit);
+        return { ok: true, counts };
+      }),
+    );
+  }
+
   /** Compare-and-set on status; no matching row writes no audit event and returns undefined. */
   private async compareAndSet(
     changesetId: string,
@@ -964,6 +1263,18 @@ async function approvalsCover(db: DbExecutor, record: ChangeSetRecord, hash: str
   return plan.steps.every((_, i) => steps.has(i + 1));
 }
 
+async function readRollbackBatch(
+  db: DbExecutor,
+  changesetId: string,
+  batchNo: number,
+): Promise<ChangeRollbackBatchRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(changeRollbackBatch)
+    .where(and(eq(changeRollbackBatch.changesetId, changesetId), eq(changeRollbackBatch.batchNo, batchNo)));
+  return row;
+}
+
 async function readBatch(db: DbExecutor, changesetId: string, batchNo: number): Promise<ChangeBatchRow | undefined> {
   const [row] = await db
     .select()
@@ -992,18 +1303,28 @@ async function usageOf(db: Db | DbExecutor, requester: string, since: Date): Pro
 
 async function computeStats(db: Db | DbExecutor, changesetId: string): Promise<ChangeSetStats> {
   const rows = await db
-    .select({ status: changeItem.status, reason: changeItem.reason, n: sql<number>`count(*)::int` })
+    .select({
+      status: changeItem.status,
+      reason: changeItem.reason,
+      rollbackStatus: changeItem.rollbackStatus,
+      n: sql<number>`count(*)::int`,
+    })
     .from(changeItem)
     .where(eq(changeItem.changesetId, changesetId))
-    .groupBy(changeItem.status, changeItem.reason);
+    .groupBy(changeItem.status, changeItem.reason, changeItem.rollbackStatus);
   const excluded: Partial<Record<ExclusionReason, number>> = {};
   let total = 0;
   let included = 0;
   let written = 0;
   let failed = 0;
   let skipped = 0;
-  for (const { status, reason, n } of rows) {
+  let rollback: { -readonly [K in keyof RollbackCounts]: number } | undefined;
+  for (const { status, reason, rollbackStatus, n } of rows) {
     total += n;
+    if (rollbackStatus !== null) {
+      rollback ??= { restored: 0, skipped: 0, failed: 0 };
+      rollback[rollbackStatus] += n;
+    }
     if (status === 'excluded') {
       if (reason !== null) excluded[reason] = (excluded[reason] ?? 0) + n;
       continue;
@@ -1013,5 +1334,5 @@ async function computeStats(db: Db | DbExecutor, changesetId: string): Promise<C
     else if (status === 'failed') failed += n;
     else if (status === 'skipped') skipped += n;
   }
-  return { total, included, excluded, written, failed, skipped };
+  return { total, included, excluded, written, failed, skipped, ...(rollback === undefined ? {} : { rollback }) };
 }

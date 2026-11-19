@@ -77,6 +77,8 @@ export interface StartApiOptions {
   readonly prepareDelayMs?: number;
   /** `AIOPS_PREPARE_WAIT_MS`; 20000 by default, as in production. */
   readonly prepareWaitMs?: number;
+  /** The configuration holder, e.g. one backed by revisions (CFG-4); a directory holder on `configDir` by default. */
+  readonly configuration?: ConfigurationHolder;
 }
 
 /** Obviously fake Temporal payload key, same format as the master keys (never reaches Temporal here). */
@@ -114,6 +116,7 @@ export function testApiEnv(
     taskQueue: 'aiops-operations',
     temporalKeys: TEST_TEMPORAL_KEYS,
     prepareWaitMs: options.prepareWaitMs ?? 20_000,
+    metricsPort: 0,
   };
 }
 
@@ -124,7 +127,7 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
   const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
   const adapter = options.adapter ?? createOpenApiAdapter();
   // Loaded as `main.ts` loads it: with the adapter's spec resolver and the preset directories.
-  const configuration = await ConfigurationHolder.load(env.configDir, configurationLoadOptions(adapter, env));
+  const configuration = options.configuration ?? (await ConfigurationHolder.load(env.configDir, configurationLoadOptions(adapter, env)));
   // The test-side execution stack has its own pool on the api database: what the worker would do.
   // An idle connection dropped by a test (e.g. a stopped container) is not a test failure.
   const database = createDb(databaseUrl, { onError: () => undefined });

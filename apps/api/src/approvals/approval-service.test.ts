@@ -140,6 +140,10 @@ class SpyExecutor implements ChangeSetExecutor {
     this.wakes.push(id);
     return this.inner.wake();
   }
+
+  requestRollback(): Promise<never> {
+    return Promise.reject(new Error('unused'));
+  }
 }
 
 async function setup(

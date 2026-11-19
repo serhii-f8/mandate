@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ManifestDefinition } from '../policy-model.js';
-import { classifyForWrite } from './writer.js';
+import { classifyForRollback, classifyForWrite } from './writer.js';
 
 const manifest: ManifestDefinition = {
   idField: 'sku',
@@ -77,5 +77,26 @@ describe('CS-7 NFR-2 classifyForWrite', () => {
       outcome('written', 'already_applied'),
     );
     expect(classify({ ...base, description: { y: 2, x: 1 } }, { args: o, item: objs })).toEqual(WRITE);
+  });
+});
+
+describe('CS-7 EXE-8 rollback classification', () => {
+  const back = (
+    current: Record<string, unknown> | undefined,
+    over: { item?: { before: unknown; after: unknown } } = {},
+  ) => classifyForRollback({ manifest, args, item: over.item ?? item, current });
+
+  it('EXE-8 CS-7 current at after is a write, at before is already_restored, gone is gone, anything else is drift', () => {
+    expect(back({ ...base, description: 'new' })).toEqual(WRITE);
+    expect(back({ ...base, description: 'old' })).toEqual(outcome('written', 'already_restored'));
+    expect(back(undefined)).toEqual(outcome('skipped', 'gone'));
+    expect(back({ ...base, description: 'other' })).toEqual(outcome('skipped', 'drift'));
+    // Absent and null are the same value on the way back too.
+    expect(back(base, { item: { before: { description: 'old' }, after: { description: null } } })).toEqual(WRITE);
+    expect(back(base, { item: { before: { description: null }, after: { description: 'new' } } })).toEqual(
+      outcome('written', 'already_restored'),
+    );
+    // A record that left the change-set's scope is gone, whatever its value.
+    expect(back({ ...base, brand: 'globex', description: 'new' })).toEqual(outcome('skipped', 'gone'));
   });
 });

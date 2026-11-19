@@ -10,6 +10,7 @@
 //   page-api.mjs <api-base-url> approvals [after] | changeset <id> | items <id> [after]
 //   page-api.mjs <api-base-url> decide <id> <approve|reject|return> <hash> <count> [comment] | start <id>
 //                                                         → {"status":<n>,"body":<json>} (APR-7)
+//   page-api.mjs <api-base-url> rollback <id> <hash>      → {"status":<n>,"body":<json>} (EXE-8, UI-4; needs a fresh login)
 //   page-api.mjs <api-base-url> export <id> <csv|xlsx> <outfile>
 //                                                         → {"status":200,"contentType":…,"disposition":…,"bytes":<n>}, body in <outfile> (CS-8);
 //                                                           any other status → {"status":<n>,"body":<json>}
@@ -21,7 +22,7 @@ import { writeFile } from 'node:fs/promises';
 const [base, command, ...args] = process.argv.slice(2);
 const cookie = process.env.AIOPS_PAGE_COOKIE;
 const USAGE =
-  'usage: page-api.mjs <api-base-url> session | put-credential <ref> | test <connection-id> | approvals [after] | changeset <id> | items <id> [after] | decide <id> <approve|reject|return> <hash> <count> [comment] | start <id> | export <id> <csv|xlsx> <outfile>';
+  'usage: page-api.mjs <api-base-url> session | put-credential <ref> | test <connection-id> | approvals [after] | changeset <id> | items <id> [after] | decide <id> <approve|reject|return> <hash> <count> [comment] | start <id> | rollback <id> <hash> | export <id> <csv|xlsx> <outfile>';
 // Required and optional argument counts per subcommand.
 const ARITY = {
   session: [0, 0],
@@ -32,6 +33,7 @@ const ARITY = {
   items: [1, 2],
   decide: [4, 5],
   start: [1, 1],
+  rollback: [2, 2],
   export: [3, 3],
 };
 const arity = Object.hasOwn(ARITY, command ?? '') ? ARITY[command] : undefined;
@@ -105,6 +107,13 @@ if (command === 'put-credential') {
     method: 'POST',
     headers: { ...headers, 'content-type': 'application/json' },
     body: JSON.stringify({ decision, hash, count, ...(comment === undefined ? {} : { comment }) }),
+  });
+  await printResponse(response);
+} else if (command === 'rollback') {
+  const response = await fetch(new URL(`/api/v1/changesets/${id}/rollback`, api), {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ hash: args[1] }),
   });
   await printResponse(response);
 } else if (command === 'export') {

@@ -11,7 +11,7 @@ import type { ConnectionSettings, CredentialScheme, SpecIssue, UpstreamResolver 
 import type { DisabledOperation, GrantDefinition, PolicyConfiguration, RoleApprovalRule, RoleDefinition, RoleNotifyTargets } from '@aiops/core';
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
 import { pathToString, type ConfigIssue } from './issues.js';
-import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN } from './manifest.js';
+import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN, DEFAULT_ROLLBACK_WINDOW_HOURS } from './manifest.js';
 import { readSpecFile, resolvePreset, type LoadedPreset } from './presets.js';
 import { buildRegistry, propertiesOf, sentArguments, type CatalogState, type Located, type OperationBinding, type OperationSource } from './registry.js';
 import {
@@ -78,9 +78,21 @@ export interface LoadedConfiguration {
   /** True when specs were declared but not resolved because no resolver was given. */
   readonly specChecksSkipped: boolean;
   /** CS-6: hours after which a prepared change-set expires. */
-  readonly changesets: { readonly expireAfterHours: number; readonly failureThreshold: number; readonly itemsPerWorkflowRun: number };
+  /** AUD-7: absent = keep forever. */
+  readonly audit: { readonly retentionDays?: number };
+  /** SEC-1, AUD-6: role IDs with view_audit: true. */
+  readonly auditViewers: ReadonlySet<string>;
+  /** AUD-4: union of every loaded manifest's sensitive_fields (presets included). */
+  readonly sensitiveFields: ReadonlySet<string>;
+  readonly changesets: { readonly expireAfterHours: number; readonly failureThreshold: number; readonly itemsPerWorkflowRun: number; readonly rollbackWindowHours: number };
   /** SHA-256 over the sorted files, the preset files and the spec files (CFG-4 records it from Phase 8). */
   readonly hash: string;
+  /**
+   * Every configuration file and every connection-owned spec file (not presets), keyed
+   * relative to the configuration directory with `/` separators. A revision stores these
+   * (CFG-4); an outside spec gives a key starting with `../`.
+   */
+  readonly sourceFiles: ReadonlyMap<string, string>;
 }
 
 export type LoadResult =
@@ -189,11 +201,18 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     return byId;
   };
   // CS-6: change-set settings come from at most one document.
-  let changesets: Located<{ expire_after_hours: number; failure_threshold: number; items_per_workflow_run: number }> | undefined;
+  let changesets: Located<{ expire_after_hours: number; failure_threshold: number; items_per_workflow_run: number; rollback_window_hours: number }> | undefined;
   for (const { source, doc } of documents) {
     if (doc.changesets === undefined) continue;
     if (changesets === undefined) changesets = { value: doc.changesets, source, path: ['changesets'] };
     else at(source, ['changesets'], `may be set in one document only; first set in ${changesets.source.file}`);
+  }
+  // AUD-7: audit settings come from at most one document.
+  let audit: Located<{ retention_days?: number | undefined }> | undefined;
+  for (const { source, doc } of documents) {
+    if (doc.audit === undefined) continue;
+    if (audit === undefined) audit = { value: doc.audit, source, path: ['audit'] };
+    else at(source, ['audit'], `may be set in one document only; first set in ${audit.source.file}`);
   }
 
   const connectionById = indexById(connections);
@@ -494,12 +513,17 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       credentialManagers,
       specChecksSkipped,
       presetChecksSkipped,
+      audit: audit?.value.retention_days === undefined ? {} : { retentionDays: audit.value.retention_days },
+      auditViewers: new Set(roles.filter(({ value }) => value.view_audit).map(({ value }) => value.id)),
+      sensitiveFields: new Set([...registry.all.values()].flatMap((op) => op.located.value.manifest?.sensitive_fields ?? [])),
       changesets: {
         expireAfterHours: changesets?.value.expire_after_hours ?? DEFAULT_EXPIRE_AFTER_HOURS,
         failureThreshold: changesets?.value.failure_threshold ?? DEFAULT_FAILURE_THRESHOLD,
         itemsPerWorkflowRun: changesets?.value.items_per_workflow_run ?? DEFAULT_ITEMS_PER_WORKFLOW_RUN,
+        rollbackWindowHours: changesets?.value.rollback_window_hours ?? DEFAULT_ROLLBACK_WINDOW_HOURS,
       },
       hash: hash.digest('hex'),
+      sourceFiles: new Map([...sorted, ...specTexts.map(({ file, text }) => ({ file: file.split(sep).join('/'), text }))].map(({ file, text }) => [file, text] as const)),
     },
   };
 }

@@ -86,6 +86,8 @@ const role = z.strictObject({
   approval: approval.optional(),
   /** Credential references the role may set and test on the trusted page; `*` for all. */
   manage_credentials: z.array(z.union([z.literal('*'), credentialRef])).optional(),
+  /** SEC-1, AUD-6: may read the audit trail on the trusted page. */
+  view_audit: z.boolean().default(false),
   /** NTF-1: notification IDs told when an approval step of this role becomes current, and of results. */
   notify: z.strictObject({ approval_requests: z.array(id).default([]), results: z.array(id).default([]) }).optional(),
 });
@@ -120,6 +122,8 @@ export const configDocumentSchema = z.strictObject({
   overrides: z.array(override).optional(),
   /** CS-6: at most one document may set it. */
   changesets: changesetsSchema.optional(),
+  /** AUD-7: at most one document may set it; absent retention keeps the trail forever. */
+  audit: z.strictObject({ retention_days: z.number().int().min(1).max(36500).optional() }).optional(),
 });
 
 export type ConfigDocument = z.output<typeof configDocumentSchema>;

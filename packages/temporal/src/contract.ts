@@ -4,9 +4,9 @@
  * type-only imports, so the workflow bundle pulls in nothing non-deterministic (EXE-10).
  * Workflow code imports the core types it needs from here, never from `@aiops/core`.
  */
-import type { ChangeSetStatus, FinishOutcome } from '@aiops/core';
+import type { ChangeSetStatus, FinishOutcome, RollbackCounts, RollbackOutcome } from '@aiops/core';
 
-export type { ChangeSetStatus, FinishOutcome } from '@aiops/core';
+export type { ChangeSetStatus, FinishOutcome, RollbackCounts, RollbackOutcome } from '@aiops/core';
 
 export const CHANGESET_WORKFLOW = 'changesetWorkflow';
 export const DEFAULT_TASK_QUEUE = 'aiops-operations';
@@ -89,6 +89,21 @@ export interface BatchResult {
   readonly thresholdExceeded: boolean;
 }
 
+/** EXE-8: the end of the rollback window in epoch milliseconds, or null when none opens. */
+export interface RollbackWindow {
+  readonly untilMs: number | null;
+}
+
+export type BeginRollbackResult =
+  | { readonly ok: true; readonly nextBatch: number; readonly itemsPerRun: number }
+  | { readonly ok: false; readonly outcome: 'hash_mismatch' | 'executor_error' };
+
+/** Counts of one rollback batch; `remaining` is the rollbackable count after it, `empty` an empty claim. */
+export interface RollbackBatchResult extends RollbackCounts {
+  readonly remaining: number;
+  readonly empty: boolean;
+}
+
 export interface ChangesetActivities {
   inspect(changesetId: string): Promise<InspectResult>;
   prepare(changesetId: string): Promise<{ status: ChangeSetStatus }>;
@@ -96,4 +111,8 @@ export interface ChangesetActivities {
   beginExecution(changesetId: string, options: { verified: boolean }): Promise<BeginResult>;
   executeBatch(changesetId: string, batchNo: number): Promise<BatchResult>;
   finishExecution(changesetId: string, outcome: FinishOutcome): Promise<{ status: ChangeSetStatus }>;
+  openRollbackWindow(changesetId: string): Promise<RollbackWindow>;
+  beginRollback(changesetId: string): Promise<BeginRollbackResult>;
+  rollbackBatch(changesetId: string, batchNo: number): Promise<RollbackBatchResult>;
+  finishRollback(changesetId: string, outcome: RollbackOutcome): Promise<{ status: ChangeSetStatus }>;
 }

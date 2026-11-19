@@ -72,7 +72,14 @@ export const changeSetAnswerSchema = z.object({
   items: z.array(itemSchema),
   nextCursor: z.string().optional(),
   derivedFrom: z.string().optional(),
-  rollback: z.object({ available: z.boolean() }).optional(),
+  rollback: z
+    .object({
+      available: z.boolean(),
+      count: z.number().int().optional(),
+      until: z.string().optional(),
+      stats: z.object({ restored: z.number(), skipped: z.number(), failed: z.number() }).optional(),
+    })
+    .optional(),
   execution: z.object({ drift: z.number() }).optional(),
   pageUrl: pageUrlSchema,
 });

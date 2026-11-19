@@ -1,8 +1,10 @@
 import { StrictMode, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ApprovalsPage } from './pages/ApprovalsPage.js';
+import { AuditPage } from './pages/AuditPage.js';
 import { ChangeSetPage } from './pages/ChangeSetPage.js';
 import { CredentialsPage } from './pages/CredentialsPage.js';
+import { IndexPage } from './pages/IndexPage.js';
 import { route } from './routes.js';
 import '@aiops/widgets/styles.css';
 import './styles.css';
@@ -12,19 +14,7 @@ function Page(): ReactElement {
   const r = route(window.location.pathname);
   switch (r.kind) {
     case 'index':
-      return (
-        <main>
-          <h1>AI Operations</h1>
-          <ul>
-            <li>
-              <a href="/app/approvals">Approvals</a>
-            </li>
-            <li>
-              <a href="/app/credentials">Credentials</a>
-            </li>
-          </ul>
-        </main>
-      );
+      return <IndexPage />;
     case 'credentials':
       return (
         <>
@@ -34,6 +24,8 @@ function Page(): ReactElement {
       );
     case 'approvals':
       return <ApprovalsPage />;
+    case 'audit':
+      return <AuditPage />;
     case 'changeset':
       return <ChangeSetPage id={r.id} />;
     case 'not_found':

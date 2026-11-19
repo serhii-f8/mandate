@@ -57,6 +57,7 @@ const unusedExecutor: ChangeSetExecutor = {
   cancel: () => Promise.reject(new Error('not used')),
   progress: () => Promise.reject(new Error('not used')),
   wake: () => Promise.resolve(),
+  requestRollback: () => Promise.reject(new Error('unused')),
 };
 
 const CHANGESET_HTML = '<!doctype html><title>changeset widget</title>';

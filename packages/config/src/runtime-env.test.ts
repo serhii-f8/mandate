@@ -39,6 +39,7 @@ describe('api runtime environment', () => {
       taskQueue: 'aiops-operations',
       temporalKeys: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
       prepareWaitMs: 20_000,
+      metricsPort: 9464,
     });
   });
 
@@ -219,6 +220,7 @@ describe('worker runtime environment', () => {
       activityTuning: { prepareTimeoutMs: 3_600_000, batchHeartbeatMs: 30_000, batchTimeoutMs: 900_000, batchMaxAttempts: 10, retryInitialMs: 1_000, retryMaxMs: 30_000 },
       mailFrom: 'aiops@localhost',
       publicUrl: new URL('http://localhost:8400/'),
+      httpPort: 8081,
     });
   });
 
@@ -404,6 +406,80 @@ describe('NTF-1 worker notification environment', () => {
   it('NTF-1 the worker AIOPS_PUBLIC_URL must be an origin, as in api', () => {
     for (const bad of ['not a url', 'http://localhost:8400/app', 'http://localhost:8400/?a=1', 'http://localhost:8400/#x', 'ftp://x']) {
       expect(() => parseWorkerEnv({ ...WORKER, AIOPS_PUBLIC_URL: bad })).toThrow(/AIOPS_PUBLIC_URL/);
+    }
+  });
+});
+
+describe('AUD-7 worker audit archive environment', () => {
+  it('AUD-7 AIOPS_AUDIT_ARCHIVE_DIR is optional and must be absolute', () => {
+    const unset = parseWorkerEnv(WORKER);
+    expect('auditArchiveDir' in unset).toBe(false);
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_AUDIT_ARCHIVE_DIR: '/var/lib/aiops/audit-archive' }).auditArchiveDir).toBe(
+      '/var/lib/aiops/audit-archive',
+    );
+    for (const bad of ['', 'relative/dir', './archive', ' ']) {
+      const error = workerEnvError({ ...WORKER, AIOPS_AUDIT_ARCHIVE_DIR: bad });
+      expect(error.issues.map((i) => i.variable)).toEqual(['AIOPS_AUDIT_ARCHIVE_DIR']);
+    }
+  });
+});
+
+describe('AUD-7 api audit archive environment', () => {
+  it('AUD-7 the api parses AIOPS_AUDIT_ARCHIVE_DIR: optional, absolute', () => {
+    expect('auditArchiveDir' in parseApiEnv(API)).toBe(false);
+    expect(parseApiEnv({ ...API, AIOPS_AUDIT_ARCHIVE_DIR: '/var/lib/aiops/audit-archive' }).auditArchiveDir).toBe('/var/lib/aiops/audit-archive');
+    expect(() => parseApiEnv({ ...API, AIOPS_AUDIT_ARCHIVE_DIR: 'relative/dir' })).toThrow(EnvError);
+  });
+});
+
+describe('telemetry environment', () => {
+  it('NFR-11 OTEL_EXPORTER_OTLP_ENDPOINT is optional and empty means unset', () => {
+    for (const parse of [(e: Record<string, string>) => parseApiEnv({ ...API, ...e }), (e: Record<string, string>) => parseWorkerEnv({ ...WORKER, ...e })]) {
+      expect('otlpEndpoint' in parse({})).toBe(false);
+      expect('otlpEndpoint' in parse({ OTEL_EXPORTER_OTLP_ENDPOINT: '' })).toBe(false);
+      expect('otlpEndpoint' in parse({ OTEL_EXPORTER_OTLP_ENDPOINT: '  ' })).toBe(false);
+      expect(parse({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4318' }).otlpEndpoint?.href).toBe(new URL('http://jaeger:4318').href);
+      for (const bad of ['ftp://x', 'not a url']) {
+        let error: unknown;
+        try {
+          parse({ OTEL_EXPORTER_OTLP_ENDPOINT: bad });
+        } catch (e) {
+          error = e;
+        }
+        expect(error).toBeInstanceOf(EnvError);
+        expect((error as EnvError).message).toContain('OTEL_EXPORTER_OTLP_ENDPOINT');
+        expect((error as EnvError).message).not.toContain(bad);
+      }
+    }
+  });
+
+  it('NFR-12 AIOPS_METRICS_PORT defaults to 9464 and accepts 0', () => {
+    expect(parseApiEnv(API).metricsPort).toBe(9464);
+    expect(parseApiEnv({ ...API, AIOPS_METRICS_PORT: '0' }).metricsPort).toBe(0);
+    expect(parseApiEnv({ ...API, AIOPS_METRICS_PORT: '9100' }).metricsPort).toBe(9100);
+    for (const bad of ['65536', '-1']) expect(() => parseApiEnv({ ...API, AIOPS_METRICS_PORT: bad })).toThrow(/AIOPS_METRICS_PORT/);
+  });
+
+  it('NFR-10 AIOPS_WORKER_HTTP_PORT defaults to 8081 and accepts 0', () => {
+    expect(parseWorkerEnv(WORKER).httpPort).toBe(8081);
+    expect(parseWorkerEnv({ ...WORKER, AIOPS_WORKER_HTTP_PORT: '0' }).httpPort).toBe(0);
+    for (const bad of ['65536', '-1']) expect(() => parseWorkerEnv({ ...WORKER, AIOPS_WORKER_HTTP_PORT: bad })).toThrow(/AIOPS_WORKER_HTTP_PORT/);
+  });
+});
+
+describe('telemetry port environment edge cases', () => {
+  it('NFR-12 NFR-10 an empty or blank port variable means the default; non-integers are refused', () => {
+    const cases: [string, (e: Record<string, string>) => number, number][] = [
+      ['AIOPS_METRICS_PORT', (e) => parseApiEnv({ ...API, ...e }).metricsPort, 9464],
+      ['AIOPS_WORKER_HTTP_PORT', (e) => parseWorkerEnv({ ...WORKER, ...e }).httpPort, 8081],
+    ];
+    for (const [variable, read, fallback] of cases) {
+      expect(read({ [variable]: '' })).toBe(fallback);
+      expect(read({ [variable]: '  ' })).toBe(fallback);
+      for (const bad of ['abc', '1.5']) {
+        expect(() => read({ [variable]: bad })).toThrow(EnvError);
+        expect(() => read({ [variable]: bad })).toThrow(new RegExp(variable));
+      }
     }
   });
 });

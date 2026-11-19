@@ -1,5 +1,10 @@
 /** Shared test fakes and fixtures. */
 export { InMemoryAuditLog } from './in-memory-audit-log.js';
+export { InMemoryConfigRevisionStore } from './in-memory-config-revision-store.js';
+export {
+  describeConfigRevisionStoreContract,
+  type ConfigRevisionStoreHarness,
+} from './config-revision-store-contract.js';
 export { InMemoryChangeSetRepository } from './in-memory-changeset-repository.js';
 export { describeChangeSetRepositoryContract, type ChangeSetRepositoryHarness } from './changeset-repository-contract.js';
 export { InMemoryNotificationOutbox } from './in-memory-notification-outbox.js';
@@ -9,7 +14,13 @@ export { describeTaskRepositoryContract, type TaskRepositoryHarness } from './ta
 export { InMemoryRateCounter } from './in-memory-rate-counter.js';
 export { describeRateCounterContract, type RateCounterHarness } from './rate-counter-contract.js';
 export { InMemoryExecutor, ScriptedWriter, type InMemoryExecutorDeps, type ScriptedWriterOptions } from './in-memory-executor.js';
-export { describeExecutorContract, EXECUTOR_CONTRACT_HASH, type ExecutorHarness } from './executor-contract.js';
+export {
+  describeExecutorContract,
+  describeRollbackRun,
+  EXECUTOR_CONTRACT_HASH,
+  type ExecutorHarness,
+  type RollbackHarness,
+} from './executor-contract.js';
 export { allowAllGuard } from './allow-all-guard.js';
 export { POSTGRES_IMAGE, startPostgres, type StartedPostgres } from './postgres.js';
 export {

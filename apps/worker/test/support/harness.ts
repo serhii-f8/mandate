@@ -17,10 +17,10 @@ import {
   type ChangesetActivities,
 } from '@aiops/temporal';
 import { ScriptedWriter } from '@aiops/testing';
-import { Client } from '@temporalio/client';
+import { Client, type ClientInterceptors } from '@temporalio/client';
 import type { Duration } from '@temporalio/common';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
-import { DefaultLogger, Runtime, type NativeConnection, type Worker } from '@temporalio/worker';
+import { DefaultLogger, Runtime, type NativeConnection, type Worker, type WorkerPlugin } from '@temporalio/worker';
 import { createActivities, createExecutionGuard, echo, type ActivityDeps, type ExecutionSettings } from '../../src/activities/index.js';
 import { createWorker } from '../../src/worker.js';
 import { testConfiguration } from './configuration.js';
@@ -50,6 +50,8 @@ export function quietTemporalLogs(): void {
 export interface InfraOptions {
   /** The client's Temporal identity. Default: the SDK's (`<pid>@<hostname>`). */
   readonly identity?: string;
+  /** The client's interceptors, e.g. the OpenTelemetry client interceptor (NFR-11). */
+  readonly clientInterceptors?: ClientInterceptors;
 }
 
 export async function startInfrastructure(opts: InfraOptions = {}): Promise<Infra> {
@@ -64,6 +66,7 @@ export async function startInfrastructure(opts: InfraOptions = {}): Promise<Infr
       namespace: 'default',
       dataConverter: clientDataConverter(parseTemporalKeys(TEST_TEMPORAL_KEYS)),
       ...(opts.identity === undefined ? {} : { identity: opts.identity }),
+      ...(opts.clientInterceptors === undefined ? {} : { interceptors: opts.clientInterceptors }),
     });
     return {
       env: started,
@@ -97,12 +100,17 @@ export const FAST_TUNING: ActivityTuning = {
   retryMaxMs: 200,
 };
 
-export const TEST_SETTINGS: ExecutionSettings = { batchSize: 2, failureThreshold: 0.5, itemsPerRun: 2000 };
+/** `rollbackWindowHours: 0` (ruling R7): no window opens, so a test awaiting the workflow result still sees it close. */
+export const TEST_SETTINGS: ExecutionSettings = { batchSize: 2, failureThreshold: 0.5, itemsPerRun: 2000, rollbackWindowHours: 0 };
 
 export interface TestWorkerOptions {
   readonly writer?: ChangeWriter;
   /** Replaces the writer factory (default: `writer` for every operation), e.g. the production `createWriterFor`. */
   readonly writerFor?: ActivityDeps['writerFor'];
+  /** The rollback writer for every operation (default: `writer`). */
+  readonly rollbackWriter?: ChangeWriter;
+  /** Replaces the rollback writer factory, e.g. the production `createRollbackWriterFor` or one answering undefined. */
+  readonly rollbackWriterFor?: ActivityDeps['rollbackWriterFor'];
   readonly reader?: UpstreamReader;
   /**
    * Replaces the reader factory, e.g. to fail every preparation before any read (an infrastructure
@@ -131,6 +139,8 @@ export interface TestWorkerOptions {
   readonly identity?: string;
   /** Called with the activity name before every activity invocation; the activity waits for a returned promise. */
   readonly spy?: (activity: string) => unknown;
+  /** Worker plugins, e.g. the tracing plugin (NFR-11). */
+  readonly plugins?: readonly WorkerPlugin[];
 }
 
 export interface TestWorker {
@@ -160,6 +170,10 @@ function spied(a: ChangesetActivities, spy: ((activity: string) => unknown) | un
     beginExecution: async (id, options) => (await before('beginExecution'), a.beginExecution(id, options)),
     executeBatch: async (id, batchNo) => (await before('executeBatch'), a.executeBatch(id, batchNo)),
     finishExecution: async (id, outcome) => (await before('finishExecution'), a.finishExecution(id, outcome)),
+    openRollbackWindow: async (id) => (await before('openRollbackWindow'), a.openRollbackWindow(id)),
+    beginRollback: async (id) => (await before('beginRollback'), a.beginRollback(id)),
+    rollbackBatch: async (id, batchNo) => (await before('rollbackBatch'), a.rollbackBatch(id, batchNo)),
+    finishRollback: async (id, outcome) => (await before('finishRollback'), a.finishRollback(id, outcome)),
   };
 }
 
@@ -168,6 +182,7 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
   const taskQueue = opts.taskQueue ?? `test-${randomUUID()}`;
   const settings: ExecutionSettings = { ...TEST_SETTINGS, ...opts.settings };
   const writer = opts.writer ?? new ScriptedWriter();
+  const rollbackWriter = opts.rollbackWriter ?? writer;
   const reader = opts.reader ?? noReads;
   const { guard } = opts;
   const guardFor = guard === undefined ? createExecutionGuard({ repository: infra.repository, audit: infra.audit, newId: randomUUID }) : () => guard;
@@ -176,6 +191,7 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
     repository: infra.repository,
     configuration: () => configuration,
     writerFor: opts.writerFor ?? (() => writer),
+    rollbackWriterFor: opts.rollbackWriterFor ?? (() => rollbackWriter),
     readerFor: opts.readerFor ?? (() => reader),
     guardFor,
     settingsFor: () => settings,
@@ -192,6 +208,7 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
     ...(opts.shutdownForceTime === undefined ? {} : { shutdownForceTime: opts.shutdownForceTime }),
     ...(opts.maxCachedWorkflows === undefined ? {} : { maxCachedWorkflows: opts.maxCachedWorkflows }),
     ...(opts.identity === undefined ? {} : { identity: opts.identity }),
+    ...(opts.plugins === undefined ? {} : { plugins: opts.plugins }),
   });
   const running = worker.run();
   // A failed run is reported by stop(); until then it must not count as an unhandled rejection.

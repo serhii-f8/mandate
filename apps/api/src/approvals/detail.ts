@@ -22,6 +22,7 @@ import {
   type OperationDefinition,
   type RiskClass,
 } from '@aiops/core';
+import type { RollbackBlock } from '../changesets/rollback.js';
 
 export interface PageViewer {
   subject: string;
@@ -108,8 +109,8 @@ export interface ChangeSetDetail {
   };
   /** Present once execution is summarised (UI-4). */
   drift?: number;
-  /** Rollback is not offered in this phase (UI-4). */
-  rollback: { available: false };
+  /** Rollback availability for this viewer and, once present, its counts (UI-4, EXE-8). */
+  rollback: RollbackBlock;
   viewer: ViewerBlock;
 }
 
@@ -220,6 +221,7 @@ export function changesetDetail(input: {
   viewer: PageViewer;
   now: Date;
   drift?: number;
+  rollback: RollbackBlock;
 }): ChangeSetDetail {
   const { viewer, now, ...rest } = input;
   return changesetDetailWith({ ...rest, viewer: viewerBlock(input.changeset, input.approvals, viewer, now) });
@@ -233,6 +235,7 @@ export function changesetDetailWith(input: {
   progress?: ExecutionProgress;
   viewer: ViewerBlock;
   drift?: number;
+  rollback: RollbackBlock;
 }): ChangeSetDetail {
   const { changeset: cs, approvals, progress } = input;
   const submission = cs.submission;
@@ -277,7 +280,7 @@ export function changesetDetailWith(input: {
     ...(cs.errorCode === undefined ? {} : { errorCode: cs.errorCode }),
     ...(approval === undefined ? {} : { approval }),
     ...(input.drift === undefined ? {} : { drift: input.drift }),
-    rollback: { available: false },
+    rollback: input.rollback,
     viewer: input.viewer,
   };
 }

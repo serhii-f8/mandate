@@ -1,4 +1,4 @@
-import type { ConnectionSettings, CredentialSource } from '@aiops/connector-sdk';
+import type { ConnectionSettings, CredentialSource, RequestAttempt, RequestAttemptEnd, RequestInstrumentation } from '@aiops/connector-sdk';
 import { startFakeUpstream, type FakeUpstream } from '@aiops/testing';
 import { createServer, type Server } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -550,5 +550,222 @@ describe('CONN-6 truncated responses', () => {
     const base = `http://127.0.0.1:${port}`;
     const r = await createConnectionClient(settings({ baseUrl: base })).send(get('/items', base), { retryable: false });
     expect(r).toMatchObject({ ok: false, code: 'network' });
+  });
+});
+
+describe('NFR-11 request instrumentation', () => {
+  const TRACEPARENT = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
+
+  /** A hook that records every call and returns `headers` as the span's extra headers. */
+  function recorder(headers: Record<string, string> = {}): { hook: RequestInstrumentation; starts: RequestAttempt[]; ends: RequestAttemptEnd[] } {
+    const starts: RequestAttempt[] = [];
+    const ends: RequestAttemptEnd[] = [];
+    const hook: RequestInstrumentation = {
+      start(attempt) {
+        starts.push(attempt);
+        return {
+          headers,
+          end(result) {
+            ends.push(result);
+          },
+        };
+      },
+    };
+    return { hook, starts, ends };
+  }
+
+  it('NFR-11 start is called once per attempt with connection, method and host, and end with the status', async () => {
+    let n = 0;
+    up.route('GET', '/items', () => {
+      n += 1;
+      return n === 1 ? { status: 503, body: {} } : { status: 200, body: { ok: 1 } };
+    });
+    const { hook, starts, ends } = recorder();
+    const c = createConnectionClient(settings({ id: 'c1' }), { ...noSleep, instrumentation: hook });
+    expect(await c.send(get(), { retryable: true })).toMatchObject({ ok: true, status: 200 });
+    expect(starts).toEqual([
+      { connection: 'c1', method: 'GET', host: '127.0.0.1' },
+      { connection: 'c1', method: 'GET', host: '127.0.0.1' },
+    ]);
+    expect(ends).toEqual([{ status: 503 }, { status: 200 }]);
+  });
+
+  it('NFR-11 end gets the error code when no response arrived', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {}, delayMs: 500 }));
+    const { hook, ends } = recorder();
+    const c = createConnectionClient(settings({ timeoutMs: 100 }), { instrumentation: hook });
+    expect(await c.send(get(), { retryable: false })).toMatchObject({ ok: false, code: 'timeout' });
+    expect(ends).toEqual([{ errorCode: 'timeout' }]);
+  });
+
+  it('NFR-11 no slot means no span: a busy attempt neither starts nor ends', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const s = settings({ maxConcurrency: 1, timeoutMs: 60 });
+    const held = await semaphoreFor(s.id, 1).acquire(1000);
+    const { hook, starts, ends } = recorder();
+    const r = await createConnectionClient(s, { instrumentation: hook }).send(get(), { retryable: false });
+    held?.();
+    expect(r).toMatchObject({ ok: false, code: 'busy' });
+    expect(starts).toHaveLength(0);
+    expect(ends).toHaveLength(0);
+  });
+
+  it('NFR-11 the hook headers reach the upstream', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const { hook } = recorder({ traceparent: TRACEPARENT });
+    const c = createConnectionClient(settings(), { instrumentation: hook });
+    expect((await c.send(get(), { retryable: false })).ok).toBe(true);
+    expect(up.requests[0]?.headers.traceparent).toBe(TRACEPARENT);
+  });
+
+  const hostile = {
+    authorization: 'Bearer hook',
+    Authorization: 'Bearer hook2',
+    'x-api-key': 'hook-key',
+    host: 'evil.example',
+    cookie: 'session=hook',
+    'content-length': '999',
+    traceparent: TRACEPARENT,
+  };
+
+  it('SEC-3 hook headers never replace the auth or a forbidden header', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const bearer = createConnectionClient(settings({ auth: { scheme: 'bearer' } }), { instrumentation: recorder(hostile).hook });
+    expect((await bearer.send(get(), { credential: cred('bearer', { token: 'tok-1' }), retryable: false })).ok).toBe(true);
+    const apiKey = createConnectionClient(settings({ auth: { scheme: 'api_key', header: 'X-Api-Key' } }), { instrumentation: recorder(hostile).hook });
+    expect((await apiKey.send(get(), { credential: cred('api_key', { key: 'key-1' }), retryable: false })).ok).toBe(true);
+
+    const [viaBearer, viaKey] = up.requests;
+    expect(viaBearer?.headers.authorization).toBe('Bearer tok-1');
+    expect(viaKey?.headers['x-api-key']).toBe('key-1');
+    expect(viaKey?.headers.authorization).toBeUndefined();
+    for (const h of [viaBearer?.headers, viaKey?.headers]) {
+      expect(h?.host).not.toBe('evil.example');
+      expect(h?.cookie).toBeUndefined();
+      expect(h?.['content-length']).toBeUndefined();
+      // The allowed header still arrives: only the reserved names were dropped.
+      expect(h?.traceparent).toBe(TRACEPARENT);
+    }
+  });
+
+  it('SEC-3 NFR-11 only traceparent and tracestate are taken from the hook, in any case', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const c = createConnectionClient(settings(), {
+      instrumentation: recorder({ TraceParent: TRACEPARENT, TRACESTATE: 'vendor=x', baggage: 'user=jane', 'x-custom': 'v', 'x-forwarded-for': '10.0.0.1' }).hook,
+    });
+    expect(await c.send(get(), { retryable: false })).toMatchObject({ ok: true, status: 200 });
+    const h = up.requests[0]?.headers;
+    expect(h?.traceparent).toBe(TRACEPARENT);
+    expect(h?.tracestate).toBe('vendor=x');
+    expect(h?.baggage).toBeUndefined();
+    expect(h?.['x-custom']).toBeUndefined();
+    expect(h?.['x-forwarded-for']).toBeUndefined();
+  });
+
+  it('NFR-11 an allowed hook header with an invalid value is dropped', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    for (const tracestate of ['a\r\nset-cookie: x=1', ' v', 'v ', 'a\tb', '']) {
+      const c = createConnectionClient(settings(), { instrumentation: recorder({ tracestate, traceparent: TRACEPARENT }).hook });
+      expect(await c.send(get(), { retryable: false })).toMatchObject({ ok: true, status: 200 });
+    }
+    expect(up.requests).toHaveLength(5);
+    for (const req of up.requests) {
+      expect(req.headers.tracestate).toBeUndefined();
+      expect(req.headers['set-cookie']).toBeUndefined();
+      expect(req.headers.traceparent).toBe(TRACEPARENT);
+    }
+  });
+
+  it('SEC-3 a hook header never replaces a header the request already carries', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const c = createConnectionClient(settings(), { instrumentation: recorder({ Accept: 'text/html' }).hook });
+    expect((await c.send(get(), { retryable: false })).ok).toBe(true);
+    expect(up.requests[0]?.headers.accept).toBe('application/json');
+  });
+
+  it('NFR-11 a hook header value with CR/LF is dropped and the request succeeds', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const c = createConnectionClient(settings(), {
+      instrumentation: recorder({ 'x-injected': 'a\r\nset-cookie: x=1', 'bad name': 'v', 'x-\u00e9': 'v', traceparent: TRACEPARENT }).hook,
+    });
+    expect(await c.send(get(), { retryable: false })).toMatchObject({ ok: true, status: 200 });
+    const h = up.requests[0]?.headers;
+    expect(h?.['x-injected']).toBeUndefined();
+    expect(h?.['set-cookie']).toBeUndefined();
+    expect(h?.traceparent).toBe(TRACEPARENT);
+  });
+
+  it('NFR-11 a tracestate with an internal space in a member value is forwarded', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const tracestate = 'vendor=a b,other=c';
+    const c = createConnectionClient(settings(), {
+      instrumentation: recorder({ tracestate, 'x-lead': ' v', 'x-trail': 'v ', 'x-tab': 'a\tb' }).hook,
+    });
+    expect(await c.send(get(), { retryable: false })).toMatchObject({ ok: true, status: 200 });
+    const h = up.requests[0]?.headers;
+    expect(h?.tracestate).toBe(tracestate);
+    expect(h?.['x-lead']).toBeUndefined();
+    expect(h?.['x-trail']).toBeUndefined();
+    expect(h?.['x-tab']).toBeUndefined();
+  });
+
+  it('NFR-11 hook headers that are not a plain object are ignored', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    for (const headers of ['ab', ['v0', 'v1'], null, new Map([['traceparent', TRACEPARENT]])]) {
+      const ends: RequestAttemptEnd[] = [];
+      const hook: RequestInstrumentation = {
+        // The hook's declared type is bypassed on purpose: a hostile or buggy hook may return anything.
+        start: () => ({ headers: headers as unknown as Record<string, string>, end: (r) => ends.push(r) }),
+      };
+      const r = await createConnectionClient(settings(), { instrumentation: hook }).send(get(), { retryable: false });
+      expect(r).toMatchObject({ ok: true, status: 200 });
+      expect(ends).toEqual([{ status: 200 }]);
+    }
+    expect(up.requests).toHaveLength(4);
+    for (const req of up.requests) {
+      expect(Object.keys(req.headers).filter((n) => /^\d+$/.test(n))).toEqual([]);
+      expect(req.headers.traceparent).toBeUndefined();
+    }
+  });
+
+  it('NFR-11 a throwing hook never fails the request', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: { ok: 1 } }));
+    const throwingStart: RequestInstrumentation = {
+      start() {
+        throw new Error('hook broke');
+      },
+    };
+    const throwingEnd: RequestInstrumentation = {
+      start: () => ({
+        headers: { traceparent: TRACEPARENT },
+        end() {
+          throw new Error('end broke');
+        },
+      }),
+    };
+    const badHeaderEnds: RequestAttemptEnd[] = [];
+    const badHeaders: RequestInstrumentation = {
+      start: () => ({
+        get headers(): Record<string, string> {
+          throw new Error('headers broke');
+        },
+        end: (result) => {
+          badHeaderEnds.push(result);
+        },
+      }),
+    };
+    for (const instrumentation of [throwingStart, throwingEnd, badHeaders]) {
+      const c = createConnectionClient(settings({ auth: { scheme: 'bearer' } }), { instrumentation });
+      const r = await c.send(get(), { credential: cred('bearer', { token: 'tok-1' }), retryable: false });
+      expect(r).toMatchObject({ ok: true, status: 200, json: { ok: 1 } });
+    }
+    expect(up.requests).toHaveLength(3);
+    for (const req of up.requests) {
+      expect(req.headers.authorization).toBe('Bearer tok-1');
+      expect(req.headers.accept).toBe('application/json');
+    }
+    expect(up.requests[0]?.headers.traceparent).toBeUndefined();
+    // A span whose headers cannot be read is still ended, so it never leaks.
+    expect(badHeaderEnds).toEqual([{ status: 200 }]);
   });
 });

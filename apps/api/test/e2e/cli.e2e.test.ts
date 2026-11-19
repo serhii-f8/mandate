@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, parseMasterKeys, PostgresCredentialVault } from '@aiops/db';
+import pg from 'pg';
+import { createDb, parseMasterKeys, PostgresConfigRevisionStore, PostgresCredentialVault } from '@aiops/db';
 import { startFakeUpstream, type FakeUpstream, type StartedPostgres } from '@aiops/testing';
 import { runApiCli } from '../../src/cli.js';
 import { auditRows, startDatabase } from './helpers.js';
@@ -114,5 +115,64 @@ describe('SEC-2 key rotation from the CLI', () => {
     expect(code).toBe(2);
     expect(lines.join('\n')).toContain('AIOPS_MASTER_KEYS');
     expect(lines.join('\n')).not.toContain('not-a-key-list-secret');
+  });
+});
+
+describe('CFG-3 CFG-4 aiops config apply against PostgreSQL', () => {
+  it('CFG-3 CFG-4 config apply against PostgreSQL stores the revision, audits it and notifies a listener', async () => {
+    const database = createDb(databaseUrl, { onError: () => undefined });
+    const store = new PostgresConfigRevisionStore(database.db, { databaseUrl });
+    const notifications: (() => void)[] = [];
+    const changed = new Promise<void>((resolve) => notifications.push(resolve));
+    const listener = await store.listen({
+      onChange: () => {
+        for (const resolve of notifications) resolve();
+      },
+      onReconnect: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      const { code, lines } = await cli(['config', 'apply', configDir, '--actor', 'e2e-operator'], `1:${KEY_1}`);
+      expect(code).toBe(0);
+      expect(lines).toContain('+ role support_agent');
+      expect(lines.at(-2)).toMatch(/^hash none -> [0-9a-f]{64}$/);
+      expect(lines.at(-1)).toMatch(/^applied revision [0-9a-f-]{36} \(seq \d+\)$/);
+      await changed;
+
+      const client = new pg.Client({ connectionString: databaseUrl });
+      await client.connect();
+      let revisions: { id: string; hash: string; source: string; actor: string; files: Record<string, string> }[];
+      try {
+        revisions = (await client.query<{ id: string; hash: string; source: string; actor: string; files: Record<string, string> }>('select id, hash, source, actor, files from config_revision order by seq')).rows;
+      } finally {
+        await client.end();
+      }
+      expect(revisions).toHaveLength(1);
+      const [revision] = revisions;
+      expect(revision).toMatchObject({ source: 'apply', actor: 'cli:e2e-operator' });
+      expect(Object.keys(revision?.files ?? {}).sort()).toEqual(['connections.yaml', 'operations.yaml', 'roles.yaml']);
+      expect(lines.at(-1)).toContain(String(revision?.id));
+
+      const rows = await auditRows(databaseUrl, "action = 'config.apply'");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        actor: 'cli:e2e-operator',
+        outcome: 'ok',
+        details: { revision: revision?.id, hash: revision?.hash, previousHash: null, removed: 0, changed: 0 },
+      });
+
+      const again = await cli(['config', 'apply', configDir, '--actor', 'e2e-operator'], `1:${KEY_1}`);
+      expect(again).toEqual({ code: 0, lines: ['No changes'] });
+    } finally {
+      await listener.close();
+      await database.close();
+    }
+  });
+
+  it('CFG-3 config diff against a database without the migrations is refused with a clear message', async () => {
+    const empty = await postgres.createDatabase();
+    const { code, lines } = await cli(['config', 'diff', configDir], `1:${KEY_1}`, empty);
+    expect(code).toBe(1);
+    expect(lines).toEqual(['cannot read the config_revision table: check DATABASE_URL, and start the api once so it applies the migrations']);
   });
 });

@@ -152,6 +152,18 @@ export function ChangeSetPage(props: { id: string }): ReactElement {
           async () => (await reload()).model as ChangeSetViewModel,
         );
       },
+      rollback() {
+        const s = ready();
+        return mutate(
+          async () => {
+            const outcome = await api.rollback(s.session.csrfToken, s.id, s.shown.model.hash ?? '');
+            // A stale login is answered by a fresh one, back to this page (SEC-8).
+            if (!outcome.ok && outcome.error === 'reauthentication_required') return toLogin(pathRef.current, true);
+            return outcome;
+          },
+          async () => (await reload()).model as ChangeSetViewModel,
+        );
+      },
       export(format) {
         window.location.assign(api.exportUrl(ready().id, format));
         return Promise.resolve({ ok: true, value: undefined });

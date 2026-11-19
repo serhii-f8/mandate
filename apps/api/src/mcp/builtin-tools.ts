@@ -6,6 +6,7 @@ import { decideChangesetTool } from './decide-tool.js';
 import { excludeChangesetItemsTool } from './exclude-tool.js';
 import { listMyOperationsTool } from './operations-tool.js';
 import { reviewChangesetTool } from './review-tool.js';
+import { rollbackChangesetTool } from './rollback-tool.js';
 import { submitForApprovalTool } from './submit-tool.js';
 import type { BuiltinTool } from './tool-catalog.js';
 
@@ -62,6 +63,7 @@ export function createBuiltinTools(deps: BuiltinToolDeps, exclusion: ExclusionWi
     ...createChangesetTools(deps),
     submitForApprovalTool(deps),
     excludeChangesetItemsTool({ repository: deps.repository, newId: deps.newId, now: deps.now, ...exclusion }),
+    rollbackChangesetTool({ repository: deps.repository, now: deps.now, publicUrl: deps.publicUrl }),
     decideChangesetTool(deps),
     reviewChangesetTool(deps),
   ];

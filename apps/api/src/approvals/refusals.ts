@@ -25,7 +25,8 @@ export type PageRefusal =
   | 'empty_request'
   | 'unknown_items'
   | 'nothing_left'
-  | 'policy_denied';
+  | 'policy_denied'
+  | 'not_rollbackable';
 
 export const REFUSAL_STATUS: Readonly<Record<PageRefusal, 400 | 403 | 404 | 409>> = {
   not_found: 404,
@@ -56,6 +57,7 @@ export const REFUSAL_STATUS: Readonly<Record<PageRefusal, 400 | 403 | 404 | 409>
   unknown_items: 409,
   nothing_left: 409,
   policy_denied: 403,
+  not_rollbackable: 409,
 };
 
 /** Non-sensitive fields a refusal answer adds beside `error`, e.g. a count or a limit name (SEC-3). */

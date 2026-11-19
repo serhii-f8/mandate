@@ -1,0 +1,51 @@
+version: 1
+changesets:
+  expire_after_hours: 72
+operations:
+  - id: shop.get_products
+    connection: shop
+    risk: read
+    description: Products by SKU.
+    upstream:
+      method: GET
+      path: /V1/products
+      query: { skus: { arg: skus, join: ',' }, brand: { arg: brand } }
+      response: { items: items, total: total_count, fields_from_arg: fields }
+    input_schema:
+      type: object
+      properties:
+        skus: { type: array, items: { type: string } }
+        brand: { type: string }
+        fields: { type: array, items: { type: string } }
+      required: [skus, fields]
+      additionalProperties: false
+    fields_arg: fields
+  - id: shop.update_content
+    connection: shop
+    risk: write
+    title: Update product content
+    description: Change product names and descriptions.
+    upstream: { method: POST, path: /V1/products/bulk }
+    input_schema:
+      type: object
+      properties:
+        brand: { type: string }
+        skus: { type: array, items: { type: string } }
+        changes:
+          type: object
+          properties: { name: { type: string }, description: { type: string } }
+          additionalProperties: false
+          minProperties: 1
+      required: [brand, changes]
+      additionalProperties: false
+    manifest:
+      id_field: sku
+      ids_arg: skus
+      values_arg: changes
+      fields: [name, description]
+      scope_args: { brand: brand }
+      read_before:
+        operation: shop.get_products
+        ids_arg: skus
+        args: { brand: { arg: brand } }
+      rollback: { strategy: replay_previous_state }

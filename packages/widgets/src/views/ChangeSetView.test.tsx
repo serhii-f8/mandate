@@ -167,6 +167,39 @@ describe('ChangeSetView', () => {
     expect(onData).toHaveBeenCalledWith(changeSetModel({ status: 'rolling_back' }));
   });
 
+  it('UI-4 Roll back N items shows the count and calls the action once', async () => {
+    const rollback = vi.fn<NonNullable<ChangeSetActions['rollback']>>().mockResolvedValue({ ok: true, value: undefined });
+    const { onData } = setup(
+      changeSetModel({ status: 'completed', stats: finished, rollback: { available: true, count: 7, until: '2030-02-01T00:00:00.000Z' } }),
+      actionsWith({ rollback }),
+    );
+    await flush();
+    const button = screen.getByRole('button', { name: 'Roll back 7 items' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await flush();
+    expect(rollback).toHaveBeenCalledTimes(1);
+    // A result without a value (the widget opened the page) leaves the view as it is.
+    expect(onData).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Roll back 7 items' })).toBeTruthy();
+  });
+
+  it('UI-4 a rolled back change-set shows the rollback counts', async () => {
+    const { container } = setup(
+      changeSetModel({ status: 'rolled_back', stats: finished, rollback: { available: false, stats: { restored: 5, skipped: 1, failed: 2 } } }),
+    );
+    await flush();
+    expect(container.textContent).toContain('5 restored · 1 skipped · 2 failed');
+  });
+
+  it('UI-4 rolling_back shows progress with rollback counts', () => {
+    const { container } = setup(
+      changeSetModel({ status: 'rolling_back', stats: finished, rollback: { available: false, stats: { restored: 3, skipped: 0, failed: 1 } } }),
+    );
+    expect(screen.getByRole('progressbar')).toBeTruthy();
+    expect(container.textContent).toContain('3 restored · 0 skipped · 1 failed');
+  });
+
   it('SEC-5 an approver comment on a rejected change-set renders as text', () => {
     const { container } = setup(
       changeSetModel({

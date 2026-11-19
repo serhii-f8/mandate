@@ -1,3 +1,4 @@
+import type { AuditEventModel, AuditFilters } from '@aiops/widgets';
 import type { ConnectionTestReport, CredentialRow, SaveResult } from './views/CredentialsView.js';
 
 export interface Session {
@@ -11,6 +12,8 @@ export interface Session {
   fresh: boolean;
   /** ISO 8601 time the page session ends. */
   expiresAt: string;
+  /** The role may open the audit page; the api enforces it again on every request (SEC-1). */
+  viewAudit: boolean;
 }
 
 export interface CredentialListEntry extends CredentialRow {
@@ -29,6 +32,26 @@ export class NotFound extends Error {
   constructor() {
     super('not found');
   }
+}
+
+/** Thrown when the api answers 400 to an audit query: the filter values are malformed. */
+export class BadQuery extends Error {
+  constructor() {
+    super('bad query');
+  }
+}
+
+export interface AuditPage {
+  events: AuditEventModel[];
+  nextCursor?: string;
+}
+
+/** Query string of the non-empty filters (and the cursor), through URLSearchParams. */
+function auditQuery(filters: AuditFilters & { cursor?: string }): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) if (typeof value === 'string' && value !== '') params.set(key, value);
+  const query = params.toString();
+  return query === '' ? '' : `?${query}`;
 }
 
 /** Login URL that returns to `returnTo`; `fresh` asks for a new authentication (SEC-8, AUTH-6). */
@@ -97,7 +120,7 @@ export interface ChangeSetDetail {
   };
   /** Present once execution is summarised (UI-4). */
   drift?: number;
-  rollback: { available: boolean };
+  rollback: { available: boolean; count?: number; until?: string; reason?: string; stats?: { restored: number; skipped: number; failed: number } };
   viewer: ViewerBlock;
 }
 export interface ItemRow {
@@ -185,6 +208,8 @@ export function createApi(fetcher: typeof fetch = (input, init) => fetch(input, 
       const url = typeof approval === 'object' && approval !== null ? (approval as { url?: unknown }).url : undefined;
       return { ok: true, status: String(answer.status), ...(typeof url === 'string' ? { approvalUrl: url } : {}) };
     },
+    /** Rolls the finished change-set back by the hash the requester saw (EXE-8); the route needs a fresh login (SEC-8). */
+    rollback: (csrfToken: string, id: string, hash: string): Promise<DecideOutcome> => post(`${changesetUrl(id)}/rollback`, csrfToken, { hash }),
     /** Derives a new change-set with the edit; the source stays unchanged (CS-5). Empty lists are left out. */
     async exclude(csrfToken: string, id: string, edit: { hash: string; exclude: string[]; include: string[] }): Promise<ExcludeOutcome> {
       const body = {
@@ -199,6 +224,14 @@ export function createApi(fetcher: typeof fetch = (input, init) => fetch(input, 
     },
     /** The download address of the items (CS-8); the browser navigates to it with the session cookie. */
     exportUrl: (id: string, format: 'csv' | 'xlsx'): string => `${changesetUrl(id)}/export?format=${format}`,
+    async audit(query: AuditFilters & { cursor?: string }): Promise<AuditPage> {
+      const response = await fetcher(`/api/v1/audit${auditQuery(query)}`, { credentials: 'same-origin' });
+      if (response.status === 400) throw new BadQuery();
+      if (!response.ok && response.status !== 401) throw new Error(`audit: HTTP ${String(response.status)}`);
+      return (await json(response)) as AuditPage;
+    },
+    /** The download address of the JSON Lines export of the filtered events (AUD-6). */
+    auditExportUrl: (filters: AuditFilters): string => `/api/v1/audit/export${auditQuery(filters)}`,
     async session(): Promise<Session> {
       const response = await fetcher('/api/v1/session', { credentials: 'same-origin' });
       if (!response.ok && response.status !== 401) throw new Error(`session: HTTP ${String(response.status)}`);

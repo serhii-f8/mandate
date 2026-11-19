@@ -9,6 +9,9 @@ import type {
   ChangeSetStatus,
   ExecutionRequest,
   ItemStatus,
+  RollbackCounts,
+  RollbackItemStatus,
+  RollbackRequest,
 } from './model.js';
 
 export type PrepareFailure = 'targets_missing' | 'too_many_targets' | 'incomplete_read' | 'cancelled' | (string & {});
@@ -37,6 +40,13 @@ export interface ItemsPageQuery {
 export interface ItemOutcome {
   readonly targetId: string;
   readonly status: 'written' | 'failed' | 'skipped';
+  readonly error?: string;
+}
+
+/** EXE-8: the rollback outcome of one item of a rollback batch. */
+export interface RollbackItemOutcome {
+  readonly targetId: string;
+  readonly status: RollbackItemStatus;
   readonly error?: string;
 }
 
@@ -206,6 +216,62 @@ export interface ChangeSetRepository {
     outcomes: readonly ItemOutcome[],
     audit: AuditEventInput,
   ): Promise<{ ok: true; counts: BatchCounts } | { ok: false }>;
+  /** EXE-8: items with status `written`, no error and no rollback status; 0 for an unknown or non-UUID ID. */
+  rollbackableCount(changesetId: string): Promise<number>;
+  /** EXE-8: sets `rollback_until = until` only while it is NULL (write-once) and answers the stored value; undefined for an unknown or non-UUID ID. */
+  openRollbackWindow(changesetId: string, until: Date): Promise<Date | undefined>;
+  /**
+   * EXE-8, SEC-8: one transaction. Locks the change-set FOR UPDATE and reads the database clock; refuses
+   * `not_found`; `already_rolled_back` (status rolling_back/rolled_back, or a request stored); `not_finished`
+   * (status not in ROLLBACK_FROM, or cancelled/failed without execution); `window_closed` (rollback_until NULL or
+   * `now() >= rollback_until − marginMs`). Then sets status `rolling_back` with the four request columns and
+   * `updated_at`, appends `audit` in order, and answers the record. A refusal writes nothing.
+   */
+  requestRollback(req: {
+    readonly changesetId: string;
+    readonly request: RollbackRequest;
+    readonly marginMs: number;
+    readonly audit: readonly AuditEventInput[];
+  }): Promise<
+    | { ok: true; changeset: ChangeSetRecord }
+    | { ok: false; reason: 'not_found' | 'already_rolled_back' | 'not_finished' | 'window_closed' }
+  >;
+  /**
+   * EXE-8: the open rollback batch's number, else the highest done batch + 1, else 1 (ruling R12); 1 for an
+   * unknown or non-UUID ID.
+   */
+  nextRollbackBatch(changesetId: string): Promise<number>;
+  /**
+   * EXE-8, EXE-3: like claimBatch, over rollbackable items (`written`, no error, no rollback status) after the
+   * highest existing rollback batch's last target; a new claim or takeover only while `rolling_back`. Rollback
+   * batches are their own sequence (`change_rollback_batch`), apart from the execution batches.
+   */
+  claimRollbackBatch(
+    changesetId: string,
+    batchNo: number,
+    attempt: number,
+    size: number,
+  ): Promise<
+    | { kind: 'claimed'; batch: BatchRecord; items: readonly ChangeItemRecord[] }
+    | { kind: 'done'; counts: RollbackCounts }
+    | { kind: 'fenced' }
+    | { kind: 'empty' }
+  >;
+  /** Like recordSubmission, for the owning attempt of an open rollback batch; false when fenced (NFR-2, EXE-4). */
+  recordRollbackSubmission(changesetId: string, batchNo: number, attempt: number, submission: BatchSubmission): Promise<boolean>;
+  /**
+   * One transaction for the owning attempt of an open rollback batch: the first outcome per target of the batch
+   * is applied to items whose rollback status is NULL (rejected unless `rolling_back`), stats recomputed (with
+   * `stats.rollback`), batch `done` with `restored/skipped/failed` counts stored in its `written/skipped/failed`
+   * columns (`written` = restored), `audit` appended. Fenced → `{ ok: false }`, nothing written.
+   */
+  completeRollbackBatch(
+    changesetId: string,
+    batchNo: number,
+    attempt: number,
+    outcomes: readonly RollbackItemOutcome[],
+    audit: AuditEventInput,
+  ): Promise<{ ok: true; counts: RollbackCounts } | { ok: false }>;
 }
 
 /** A claimed write batch (EXE-3). */
@@ -356,6 +422,24 @@ export interface ExecutionProgress {
 /** Alias of the progress shape for the workflow query result. */
 export type WorkflowProgress = ExecutionProgress;
 
+/** EXE-8: a rollback request for the executor; eligibility has been checked by the caller (design §2). */
+export interface RollbackRequestInput {
+  readonly changesetId: string;
+  readonly actor: string;
+  readonly clientId?: string;
+  readonly correlationId: string;
+  /** The rollbackable item count the caller's eligibility answered, for the request's audit row. */
+  readonly count: number;
+}
+
+export type RollbackRequestOutcome =
+  | { readonly ok: true; readonly status: 'rolling_back' | 'failed' }
+  | {
+      readonly ok: false;
+      readonly reason: 'not_found' | 'not_rollbackable';
+      readonly detail?: 'already_rolled_back' | 'not_finished' | 'window_closed';
+    };
+
 export type StartRefusal = 'not_found' | 'hash_mismatch' | 'expired' | 'not_executable' | 'limit_exceeded' | 'not_approved';
 
 /** Executor port (EXE-11). `cancel` may answer `{ ok: true, status: 'executing' }` while a run winds down. */
@@ -369,4 +453,6 @@ export interface ChangeSetExecutor {
   progress(changesetId: string): Promise<ExecutionProgress | undefined>;
   /** Nudges the change-set's run to re-read its status (an approval, a cancel). Best effort; resolves for an unknown change-set. */
   wake(changesetId: string): Promise<void>;
+  /** EXE-8: stores the request and wakes the run (eligibility is the caller's, design §2). Throws ExecutorUnavailable before any state change when the run cannot be described. */
+  requestRollback(req: RollbackRequestInput): Promise<RollbackRequestOutcome>;
 }

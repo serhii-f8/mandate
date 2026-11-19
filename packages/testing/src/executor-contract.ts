@@ -623,5 +623,149 @@ export function describeExecutorContract(label: string, setup: () => Promise<Exe
         expect(h.writer.batches).toHaveLength(1);
       });
     });
+
+    describe('EXE-8 EXE-11 rollback request', () => {
+      const request = (h: ExecutorHarness, changesetId: string) =>
+        h.executor.requestRollback({ changesetId, actor: 'alice', correlationId: 'corr-rollback', count: 1 });
+
+      it('EXE-8 EXE-11 a request on an unknown change-set is not_found', async () => {
+        await withExec(async (h) => {
+          expect(await request(h, randomUUID())).toEqual({ ok: false, reason: 'not_found' });
+        });
+      });
+
+      // In-memory: no window was opened (the executor never opens one). Temporal: the harness's window is
+      // 0 hours, so the workflow has closed after execution.
+      it('EXE-8 EXE-11 a request without an open window is not_rollbackable window_closed and changes nothing', async () => {
+        await withExec(async (h) => {
+          const cs = await h.prepared(2);
+          await start(h, cs.id);
+          await h.executor.settled(cs.id);
+          expect(await status(h, cs.id)).toBe('completed');
+          const before = (await h.auditEvents()).filter((e) => e.changesetId === cs.id).length;
+          expect(await request(h, cs.id)).toEqual({ ok: false, reason: 'not_rollbackable', detail: 'window_closed' });
+          const record = await h.repository.get(cs.id);
+          expect(record?.status).toBe('completed');
+          expect(record?.rollbackRequest).toBeUndefined();
+          expect((await h.auditEvents()).filter((e) => e.changesetId === cs.id)).toHaveLength(before);
+        });
+      });
+    });
+  });
+}
+
+/** A harness whose executor runs a rollback itself as soon as it is requested (the in-memory executor). */
+export interface RollbackHarness extends ExecutorHarness {
+  /** The writer the executor restores items with; fresh per harness and distinct from `writer`. */
+  readonly rollbackWriter: ScriptedWriter;
+}
+
+/**
+ * EXE-8 rollback runs of an executor that rolls back in-process. A case opens the window itself
+ * (`repository.openRollbackWindow`), since such an executor never opens one (ruling R14). The durable
+ * executor proves the same path in the worker's integration tests (ruling T10/F1).
+ */
+export function describeRollbackRun(label: string, setup: () => Promise<RollbackHarness>): void {
+  describe(`EXE-8 EXE-11 rollback run: ${label}`, () => {
+    async function withExec(body: (h: RollbackHarness) => Promise<void>): Promise<void> {
+      const h = await setup();
+      try {
+        await body(h);
+      } finally {
+        await h.close?.();
+      }
+    }
+    /** A change-set of `items` items, executed to `completed`, with a window open for an hour. */
+    const completed = async (h: RollbackHarness, items: number): Promise<ChangeSetRecord> => {
+      const cs = await h.prepared(items);
+      expect(
+        await h.executor.start({ changesetId: cs.id, expectedHash: EXECUTOR_CONTRACT_HASH, actor: 'alice', correlationId: 'corr-exec' }),
+      ).toEqual({ ok: true });
+      await h.executor.settled(cs.id);
+      expect((await h.repository.get(cs.id))?.status).toBe('completed');
+      expect(await h.repository.openRollbackWindow(cs.id, new Date(Date.now() + 3_600_000))).toBeDefined();
+      return cs;
+    };
+    const request = (h: RollbackHarness, changesetId: string, count: number) =>
+      h.executor.requestRollback({ changesetId, actor: 'alice', clientId: 'cl-alice', correlationId: 'corr-rollback', count });
+
+    it('EXE-8 EXE-11 a request on a completed change-set ends rolled_back with every written item restored', async () => {
+      await withExec(async (h) => {
+        const n = h.batchSize * 2 + 1;
+        const cs = await completed(h, n);
+        expect(await request(h, cs.id, n)).toEqual({ ok: true, status: 'rolling_back' });
+        await h.executor.settled(cs.id);
+        const record = await h.repository.get(cs.id);
+        expect(record?.status).toBe('rolled_back');
+        expect(record?.errorCode).toBeUndefined();
+        expect(record?.rollbackRequest).toMatchObject({ actor: 'alice', clientId: 'cl-alice', correlationId: 'corr-rollback' });
+        expect(record?.stats.rollback).toEqual({ restored: n, skipped: 0, failed: 0 });
+        const items = await h.repository.itemsPage(cs.id, { limit: 500 });
+        expect(items.map((i) => i.rollbackStatus)).toEqual(Array.from({ length: n }, () => 'restored'));
+        expect(await h.repository.rollbackableCount(cs.id)).toBe(0);
+        // Each written item is restored once, in batches no larger than the configured size.
+        expect(h.rollbackWriter.batches.flat()).toEqual(items.map((i) => i.targetId));
+        expect(Math.max(...h.rollbackWriter.batches.map((b) => b.length))).toBeLessThanOrEqual(h.batchSize);
+
+        const events = (await h.auditEvents()).filter(
+          (e) => e.changesetId === cs.id && ['changeset.transition', 'changeset.rollback', 'changeset.batch'].includes(e.action),
+        );
+        const after = events.slice(events.findIndex((e) => e.details.to === 'rolling_back'));
+        expect(after.map((e) => [e.action, e.actor, e.correlationId, e.details])).toEqual([
+          ['changeset.transition', 'alice', 'corr-rollback', { from: 'completed', to: 'rolling_back', operation: cs.operation }],
+          ['changeset.rollback', 'alice', 'corr-rollback', { channel: 'page', count: n }],
+          ['changeset.batch', 'system', 'corr-rollback', { phase: 'rollback', batchNo: 1, restored: 2, skipped: 0, failed: 0 }],
+          ['changeset.batch', 'system', 'corr-rollback', { phase: 'rollback', batchNo: 2, restored: 2, skipped: 0, failed: 0 }],
+          ['changeset.batch', 'system', 'corr-rollback', { phase: 'rollback', batchNo: 3, restored: 1, skipped: 0, failed: 0 }],
+          ['changeset.transition', 'system', 'corr-rollback', { from: 'rolling_back', to: 'rolled_back', operation: cs.operation }],
+        ]);
+      });
+    });
+
+    it('EXE-8 EXE-11 a second request is not_rollbackable already_rolled_back', async () => {
+      await withExec(async (h) => {
+        const cs = await completed(h, 2);
+        expect(await request(h, cs.id, 2)).toEqual({ ok: true, status: 'rolling_back' });
+        expect(await request(h, cs.id, 2)).toEqual({ ok: false, reason: 'not_rollbackable', detail: 'already_rolled_back' });
+        await h.executor.settled(cs.id);
+        expect(await request(h, cs.id, 2)).toEqual({ ok: false, reason: 'not_rollbackable', detail: 'already_rolled_back' });
+        expect((await h.repository.get(cs.id))?.status).toBe('rolled_back');
+        expect(h.rollbackWriter.batches.flat()).toEqual(['t-0001', 't-0002']);
+        const requests = (await h.auditEvents()).filter((e) => e.changesetId === cs.id && e.action === 'changeset.rollback');
+        expect(requests).toHaveLength(1);
+      });
+    });
+
+    it('EXE-8 a rollback restores with the rollback writer and counts its skipped and failed outcomes', async () => {
+      await withExec(async (h) => {
+        const cs = await completed(h, 3);
+        h.rollbackWriter.setOutcome('t-0002', 'skipped');
+        h.rollbackWriter.setOutcome('t-0003', 'failed');
+        const written = h.writer.batches.flat().length;
+        expect(await request(h, cs.id, 3)).toEqual({ ok: true, status: 'rolling_back' });
+        await h.executor.settled(cs.id);
+        const items = await h.repository.itemsPage(cs.id, { limit: 10 });
+        expect(items.map((i) => i.rollbackStatus)).toEqual(['restored', 'skipped', 'failed']);
+        expect((await h.repository.get(cs.id))?.stats.rollback).toEqual({ restored: 1, skipped: 1, failed: 1 });
+        // The execution writer wrote nothing more.
+        expect(h.writer.batches.flat()).toHaveLength(written);
+      });
+    });
+
+    it('EXE-8 a rollback whose writer throws ends failed with rollback_writer_error', async () => {
+      await withExec(async (h) => {
+        const cs = await completed(h, h.batchSize * 2);
+        h.rollbackWriter.throwAt(1);
+        expect(await request(h, cs.id, h.batchSize * 2)).toEqual({ ok: true, status: 'rolling_back' });
+        await h.executor.settled(cs.id);
+        const record = await h.repository.get(cs.id);
+        expect(record?.status).toBe('failed');
+        expect(record?.errorCode).toBe('rollback_writer_error');
+        expect(record?.stats.rollback).toEqual({ restored: h.batchSize, skipped: 0, failed: 0 });
+        // A failed rollback keeps its request: it is never retried (Review Focus 4).
+        expect(record?.rollbackRequest).toBeDefined();
+        expect(await request(h, cs.id, 1)).toEqual({ ok: false, reason: 'not_rollbackable', detail: 'already_rolled_back' });
+      });
+    });
   });
 }

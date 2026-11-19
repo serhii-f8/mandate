@@ -1,7 +1,15 @@
 import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { LookupFunction } from 'node:net';
-import { parseSecret, type ConnectionSettings, type CredentialSource, type ReadErrorCode } from '@aiops/connector-sdk';
+import {
+  parseSecret,
+  type ConnectionSettings,
+  type CredentialSource,
+  type ReadErrorCode,
+  type RequestAttemptEnd,
+  type RequestInstrumentation,
+  type RequestSpan,
+} from '@aiops/connector-sdk';
 import type { HttpRequestSpec } from '../openapi/request.js';
 import { assertEgressAllowed, createGuardedLookup, EgressDeniedError } from './egress.js';
 import { clientCredentialsToken, clientSecretBasicValue, HEADER_SAFE } from './oauth.js';
@@ -42,12 +50,52 @@ export interface ConnectionClientDeps {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
+  /** Optional hook around each upstream attempt (NFR-11); never around the OAuth token fetch. */
+  readonly instrumentation?: RequestInstrumentation;
 }
 
 const realSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+
+/**
+ * A hook header value: visible ASCII with internal spaces allowed (a W3C `tracestate` member value
+ * may contain one), never CR/LF, tab or other controls, never a leading or trailing space.
+ */
+const HOOK_VALUE = /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/;
+
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  if (typeof v !== 'object' || v === null) return false;
+  const proto: unknown = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+/** The only headers the request hook may add: W3C trace context (NFR-11). */
+const HOOK_HEADERS: ReadonlySet<string> = new Set(['traceparent', 'tracestate']);
+
+/**
+ * The hook's headers that may be added to the request: `traceparent` and `tracestate` only (any
+ * case), with a valid value, never the auth header or a header the request already carries
+ * (SEC-3). Throws only if the hook's object does.
+ */
+function hookHeaders(span: RequestSpan, taken: ReadonlySet<string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  const raw: unknown = span.headers;
+  // A string or array would yield index names ('0', '1', ...): only a plain object is read.
+  if (!isPlainRecord(raw)) return out;
+  for (const [rawName, value] of Object.entries(raw)) {
+    const name = rawName.toLowerCase();
+    if (!HOOK_HEADERS.has(name) || typeof value !== 'string' || !HOOK_VALUE.test(value)) continue;
+    if (taken.has(name) || Object.hasOwn(out, name)) continue;
+    out[name] = value;
+  }
+  return out;
+}
+
+function endOf(r: RawResult): RequestAttemptEnd {
+  return r.kind === 'error' ? { errorCode: r.code } : { status: r.status };
+}
 
 function isJsonContentType(value: string | undefined): boolean {
   const ct = (value ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
@@ -179,6 +227,7 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? realSleep;
   const random = deps.random ?? Math.random;
+  const instrumentation = deps.instrumentation;
   const transport = createTransport(settings, deps.lookup ?? createGuardedLookup(settings));
 
   async function send(req: HttpRequestSpec, opts: SendOptions): Promise<SendResult> {
@@ -271,8 +320,40 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
         // Waiting for the slot counts against the timeout (CONN-6).
         const remaining = Math.max(1, settings.timeoutMs - Math.max(0, now() - waitStart));
         const headers: Record<string, string> = { ...req.headers };
+        let span: RequestSpan | undefined;
+        if (instrumentation) {
+          // A failing hook leaves the request exactly as without one: a throwing `start` gives no
+          // headers and no `end`; unreadable span headers give no headers, and the span still ends.
+          try {
+            span = instrumentation.start({ connection: settings.id, method: req.method, host: req.url.hostname });
+          } catch {
+            span = undefined;
+          }
+          if (span) {
+            const taken = new Set(Object.keys(req.headers).map((n) => n.toLowerCase()));
+            if (authHeader) taken.add(authHeader[0].toLowerCase());
+            try {
+              Object.assign(headers, hookHeaders(span, taken));
+            } catch {
+              // No extra headers.
+            }
+          }
+        }
         if (authHeader) headers[authHeader[0]] = authHeader[1];
-        return await transport({ ...req, headers }, remaining);
+        let result: RawResult | undefined;
+        try {
+          result = await transport({ ...req, headers }, remaining);
+          return result;
+        } finally {
+          if (span) {
+            try {
+              // A transport that rejected (it never should) still ends the span, as a network error.
+              span.end(result ? endOf(result) : { errorCode: 'network' });
+            } catch {
+              // An instrumentation failure never changes the request's outcome.
+            }
+          }
+        }
       } finally {
         release();
       }

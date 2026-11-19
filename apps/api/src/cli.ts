@@ -5,8 +5,14 @@
  *   aiops validate <dir> [--preset-dir <dir>]...   full check: specs resolved, presets loaded
  *   aiops test-connection <connection>             runs the connection's declared test read
  *   aiops credentials rotate                       re-wraps credential data keys under the newest master key
+ *   aiops audit verify [--archive <file>]          checks the audit hash chain, or one retention archive (AUD-5)
+ *   aiops audit retention --now                    runs the audit retention job once with the active revision (AUD-7, CFG-3)
+ *   aiops config diff <dir> [--preset-dir <dir>]...                 compares <dir> with the active revision (CFG-3)
+ *   aiops config apply <dir> [--preset-dir <dir>]... [--actor <n>]  stores <dir> as the new active revision (CFG-3, CFG-4)
+ *   aiops config explain --operation <id> --groups <g,...> [--subject <s>] [--args <json>] [--records <n>]
+ *                                                  dry policy evaluation against the active revision (POL-7)
  *
- * Exit codes: 0 success, 1 failed or invalid, 2 usage or environment. Each command parses
+ * Exit codes: 0 success (explain: allow), 1 failed, invalid or denied, 2 usage or environment. Each command parses
  * only the environment it needs; errors name variables, never values (SEC-3).
  */
 import { randomUUID } from 'node:crypto';
@@ -14,15 +20,47 @@ import { existsSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { createOpenApiAdapter, type OpenApiAdapter } from '@aiops/adapters';
-import { formatIssue, loadConfigurationDirectory, type LoadResult } from '@aiops/config';
-import type { AuditLog, CredentialVault } from '@aiops/core';
-import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresCredentialVault } from '@aiops/db';
+import {
+  diffConfigurations,
+  diffCounts,
+  formatDiff,
+  formatIssue,
+  loadConfigurationDirectory,
+  loadConfigurationFiles,
+  revisionFilesOf,
+  revisionSummary,
+  type LoadedConfiguration,
+  type LoadOptions,
+  type LoadResult,
+} from '@aiops/config';
+import type { AuditLog, ConfigRevision, ConfigRevisionStore, CredentialVault } from '@aiops/core';
+import {
+  createDb,
+  type Db,
+  DrizzleAuditLog,
+  formatArchiveReport,
+  formatVerifyReport,
+  parseMasterKeys,
+  PostgresConfigRevisionStore,
+  PostgresCredentialVault,
+  PostgresRateCounter,
+  runAuditRetention,
+  verifyAuditArchive,
+  verifyAuditChain,
+} from '@aiops/db';
+import type pg from 'pg';
+import { explainCall, formatExplain, type ExplainInput } from './config/explain.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
 
 const USAGE = [
   'usage: aiops validate <dir> [--preset-dir <dir>]...',
   '       aiops test-connection <connection>',
   '       aiops credentials rotate',
+  '       aiops audit verify [--archive <file>]',
+  '       aiops audit retention --now',
+  '       aiops config diff <dir> [--preset-dir <dir>]...',
+  '       aiops config apply <dir> [--preset-dir <dir>]... [--actor <name>]',
+  '       aiops config explain --operation <id> --groups <g1,g2,...> [--subject <s>] [--args <json>] [--records <n>]',
 ].join('\n');
 
 /** The actor and client the CLI audits as. */
@@ -37,11 +75,22 @@ export interface CliStore {
   close(): Promise<void>;
 }
 
+export interface StoreInput {
+  readonly databaseUrl: string;
+  readonly masterKeys: string;
+  /** The loaded configuration's `sensitive_fields` for the store's audit log (AUD-4); absent when the command loads none. */
+  readonly sensitiveKeys?: ReadonlySet<string>;
+}
+
 export interface CliDeps {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly adapter?: OpenApiAdapter;
   /** Opens the database and vault; the default connects to PostgreSQL (already migrated). */
-  readonly openStore?: (input: { databaseUrl: string; masterKeys: string }) => Promise<CliStore>;
+  readonly openStore?: (input: StoreInput) => Promise<CliStore>;
+  /** Opens the database for the audit commands; the default connects to PostgreSQL (already migrated). */
+  readonly openPool?: (databaseUrl: string) => Promise<{ pool: pg.Pool; db: Db; close(): Promise<void> }>;
+  /** Opens the configuration revision store for `config diff` and `config apply`; the default connects to PostgreSQL (already migrated). */
+  readonly openConfigStore?: (input: { databaseUrl: string }) => Promise<{ store: ConfigRevisionStore; close(): Promise<void> }>;
   readonly newId?: () => string;
   /** Preset directory used when none is given and presets are declared; `null` for none. Defaults to `presets/` of the repository, when it exists next to the package. */
   readonly defaultPresetDir?: string | null;
@@ -131,7 +180,7 @@ async function validate(args: readonly string[], out: (line: string) => void, de
   return 0;
 }
 
-async function openStoreDefault(input: { databaseUrl: string; masterKeys: string }): Promise<CliStore> {
+async function openStoreDefault(input: StoreInput): Promise<CliStore> {
   const keys = parseMasterKeys(input.masterKeys);
   const database = createDb(input.databaseUrl, { onError: () => undefined });
   try {
@@ -142,7 +191,8 @@ async function openStoreDefault(input: { databaseUrl: string; masterKeys: string
     throw new CliError('cannot read the credential table: check DATABASE_URL, and start the api once so it applies the migrations', 1);
   }
   const vault = new PostgresCredentialVault(database.db, keys);
-  const audit = new DrizzleAuditLog(database.db);
+  const { sensitiveKeys } = input;
+  const audit = new DrizzleAuditLog(database.db, sensitiveKeys === undefined ? {} : { sensitiveKeys: () => sensitiveKeys });
   return {
     vault,
     audit,
@@ -151,10 +201,16 @@ async function openStoreDefault(input: { databaseUrl: string; masterKeys: string
   };
 }
 
-async function withStore<T>(deps: CliDeps, env: { DATABASE_URL: string; AIOPS_MASTER_KEYS: string }, action: (store: CliStore) => Promise<T>): Promise<T> {
+async function withStore<T>(
+  deps: CliDeps,
+  env: { DATABASE_URL: string; AIOPS_MASTER_KEYS: string },
+  sensitiveKeys: ReadonlySet<string> | undefined,
+  action: (store: CliStore) => Promise<T>,
+): Promise<T> {
   let store: CliStore;
   try {
-    store = await (deps.openStore ?? openStoreDefault)({ databaseUrl: env.DATABASE_URL, masterKeys: env.AIOPS_MASTER_KEYS });
+    const input = { databaseUrl: env.DATABASE_URL, masterKeys: env.AIOPS_MASTER_KEYS };
+    store = await (deps.openStore ?? openStoreDefault)(sensitiveKeys === undefined ? input : { ...input, sensitiveKeys });
   } catch (error) {
     if (error instanceof CliError) throw error;
     // parseMasterKeys errors carry the variable and an entry index only; anything else is unexpected.
@@ -168,6 +224,104 @@ async function withStore<T>(deps: CliDeps, env: { DATABASE_URL: string; AIOPS_MA
   }
 }
 
+/** Opens the audit commands' database; any failure is a fixed message (SEC-3). */
+async function withPool<T>(deps: CliDeps, databaseUrl: string, action: (database: { pool: pg.Pool; db: Db }) => Promise<T>): Promise<T> {
+  let database: Awaited<ReturnType<NonNullable<CliDeps['openPool']>>>;
+  try {
+    database = await (deps.openPool ?? ((url) => Promise.resolve(createDb(url, { onError: () => undefined }))))(databaseUrl);
+  } catch {
+    throw new CliError('cannot open the database', 1);
+  }
+  try {
+    return await action(database);
+  } finally {
+    await database.close();
+  }
+}
+
+type AuditArgs = { kind: 'verify'; archive: string | undefined } | { kind: 'retention' };
+
+function parseAuditArgs(args: readonly string[]): AuditArgs | undefined {
+  const [sub, ...rest] = args;
+  if (sub === 'verify') {
+    if (rest.length === 0) return { kind: 'verify', archive: undefined };
+    const [flag, file, ...extra] = rest;
+    if (flag !== '--archive' || file === undefined || file === '' || extra.length > 0) return undefined;
+    return { kind: 'verify', archive: file };
+  }
+  if (sub === 'retention' && rest.length === 1 && rest[0] === '--now') return { kind: 'retention' };
+  return undefined;
+}
+
+async function audit(args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
+  const parsed = parseAuditArgs(args);
+  if (parsed === undefined) {
+    out(USAGE);
+    return 2;
+  }
+  if (parsed.kind === 'verify') {
+    const env = parseEnv({ DATABASE_URL: postgresUrl }, deps.env);
+    return withPool(deps, env.DATABASE_URL, async ({ pool }) => {
+      try {
+        const { archive } = parsed;
+        if (archive === undefined) {
+          const report = await verifyAuditChain(pool);
+          out(formatVerifyReport(report));
+          return report.ok ? 0 : 1;
+        }
+        const report = await verifyAuditArchive(pool, archive);
+        out(formatArchiveReport(report));
+        return report.ok ? 0 : 1;
+      } catch {
+        // Verification can throw on tampered columns; the message must carry no row content (SEC-3).
+        out('audit verification could not run');
+        return 1;
+      }
+    });
+  }
+  const env = parseEnv(
+    {
+      DATABASE_URL: postgresUrl,
+      AIOPS_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
+    },
+    deps.env,
+  );
+  // The worker's job reads the active revision, so the one-off run does too: files in AIOPS_CONFIG_DIR may be stale (CFG-3).
+  const configuration = await withConfigStore(deps, env.DATABASE_URL, (store) => loadActiveChecked(store, activeLoadOptions(deps)));
+  const sensitiveKeys = configuration.sensitiveFields;
+  return withPool(deps, env.DATABASE_URL, async ({ pool, db }) => {
+    const newId = deps.newId ?? randomUUID;
+    const report = await runAuditRetention({
+      pool,
+      audit: new DrizzleAuditLog(db, { sensitiveKeys: () => sensitiveKeys }),
+      rateCounter: new PostgresRateCounter(db),
+      retentionDays: configuration.audit.retentionDays,
+      archiveDir: env.AIOPS_AUDIT_ARCHIVE_DIR,
+      actor: CLI_ACTOR,
+      now: () => new Date(),
+      newId,
+    });
+    // `locked` writes no audit row and has no logger here: the printed line is the log (ruling T8/F16, R6).
+    switch (report.kind) {
+      case 'archived':
+        out(`archived first=${String(report.first)} last=${String(report.last)} count=${String(report.count)} archive=${report.archive}`);
+        return 0;
+      case 'nothing_due':
+        out('nothing due');
+        return 0;
+      case 'not_configured':
+        out('nothing due (audit.retention_days is not set)');
+        return 0;
+      case 'refused':
+        out(`refused reason=${report.reason}`);
+        return 1;
+      case 'locked':
+        out('refused reason=locked');
+        return 1;
+    }
+  });
+}
+
 async function testConnection(args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
   const [connectionId, ...extra] = args;
   if (connectionId === undefined || extra.length > 0) {
@@ -178,7 +332,7 @@ async function testConnection(args: readonly string[], out: (line: string) => vo
   const adapter = deps.adapter ?? createOpenApiAdapter();
   const configuration = await loadChecked(env.AIOPS_CONFIG_DIR, presetDirsOf([], deps.env, deps), adapter, out);
   if (configuration === undefined) return 1;
-  return withStore(deps, env, async (store) => {
+  return withStore(deps, env, configuration.sensitiveFields, async (store) => {
     const newId = deps.newId ?? randomUUID;
     const service = new ConnectionTestService({ configuration: () => configuration, vault: store.vault, adapter, audit: store.audit, newId });
     const report = await service.run(connectionId, CLI_ACTOR, CLI_ACTOR, newId());
@@ -198,12 +352,231 @@ async function rotate(args: readonly string[], out: (line: string) => void, deps
     return 2;
   }
   const env = parseEnv({ DATABASE_URL: postgresUrl, AIOPS_MASTER_KEYS: nonEmpty }, deps.env);
-  return withStore(deps, env, async (store) => {
+  return withStore(deps, env, undefined, async (store) => {
     const result = await store.rotate(CLI_ACTOR, (deps.newId ?? randomUUID)());
     out(`rewrapped=${String(result.rewrapped)} on_old_versions=${String(result.onOldVersions)}`);
     // Refs are identifiers, not secrets. A row that cannot be opened with the configured keys needs the operator.
     for (const ref of result.failed) out(`unreadable credential: ${ref}`);
     return result.failed.length > 0 ? 1 : 0;
+  });
+}
+
+/** `--actor` and `$USER` values usable in the actor `cli:<name>` (CFG-4). */
+const ACTOR_NAME = /^[A-Za-z0-9._@-]{1,64}$/;
+const CONCURRENT_APPLY = 'concurrent_apply: another revision was applied meanwhile; run diff again';
+
+async function openConfigStoreDefault(input: { databaseUrl: string }): Promise<{ store: ConfigRevisionStore; close(): Promise<void> }> {
+  const database = createDb(input.databaseUrl, { onError: () => undefined });
+  try {
+    // The CLI never migrates: the api does that on start (NFR-5).
+    await database.pool.query('SELECT 1 FROM config_revision LIMIT 1');
+  } catch {
+    await database.close();
+    throw new CliError('cannot read the config_revision table: check DATABASE_URL, and start the api once so it applies the migrations', 1);
+  }
+  return { store: new PostgresConfigRevisionStore(database.db, { databaseUrl: input.databaseUrl }), close: () => database.close() };
+}
+
+/** Opens the revision store; any failure other than a CliError is a fixed message (SEC-3). */
+async function withConfigStore<T>(deps: CliDeps, databaseUrl: string, action: (store: ConfigRevisionStore) => Promise<T>): Promise<T> {
+  let opened: Awaited<ReturnType<NonNullable<CliDeps['openConfigStore']>>>;
+  try {
+    opened = await (deps.openConfigStore ?? openConfigStoreDefault)({ databaseUrl });
+  } catch (error) {
+    if (error instanceof CliError) throw error;
+    throw new CliError('cannot open the database', 1);
+  }
+  try {
+    return await action(opened.store);
+  } finally {
+    await opened.close();
+  }
+}
+
+interface ConfigArgs {
+  readonly dir: string;
+  readonly presetDirs: string[];
+  readonly actor: string | undefined;
+}
+
+/** `<dir> [--preset-dir <dir>]...`, plus `[--actor <name>]` for apply; undefined is a usage error. */
+function parseConfigArgs(args: readonly string[], allowActor: boolean): ConfigArgs | undefined {
+  const [dir, ...rest] = args;
+  if (dir === undefined || dir.startsWith('--')) return undefined;
+  const presetDirs: string[] = [];
+  let actor: string | undefined;
+  for (let i = 0; i < rest.length; i += 2) {
+    const flag = rest[i];
+    const value = rest[i + 1];
+    if (value === undefined) return undefined;
+    if (flag === '--preset-dir' && value !== '') presetDirs.push(value);
+    else if (flag === '--actor' && allowActor && actor === undefined) {
+      // The value is not printed: it is operator input of unknown content.
+      if (!ACTOR_NAME.test(value)) throw new CliError('--actor: must be 1 to 64 characters of A-Z a-z 0-9 . _ @ -', 2);
+      actor = value;
+    } else return undefined;
+  }
+  return { dir, presetDirs, actor };
+}
+
+/** `cli:<name>` from `--actor`, else `cli:$USER` when usable, else `cli` (CFG-4). */
+function applyActor(flagged: string | undefined, env: Readonly<Record<string, string | undefined>>): string {
+  if (flagged !== undefined) return `${CLI_ACTOR}:${flagged}`;
+  const user = env.USER;
+  return user !== undefined && ACTOR_NAME.test(user) ? `${CLI_ACTOR}:${user}` : CLI_ACTOR;
+}
+
+/**
+ * Loads the active revision with the options `<dir>` was loaded with. One that cannot be
+ * loaded on this machine (invalid, another hash, or not writable locally) is reported and
+ * compared as absent, so every entity shows as added.
+ */
+async function loadActive(active: ConfigRevision | undefined, options: LoadOptions, out: (line: string) => void): Promise<LoadedConfiguration | undefined> {
+  if (active === undefined) return undefined;
+  let code: 'invalid' | 'configuration_mismatch' | 'unavailable';
+  try {
+    const result = await loadConfigurationFiles(active.files, options);
+    if (result.ok && result.configuration.hash === active.hash) return result.configuration;
+    code = result.ok ? 'configuration_mismatch' : 'invalid';
+  } catch {
+    code = 'unavailable';
+  }
+  out(`active revision ${active.id} cannot be loaded here (${code}); every entity is shown as added`);
+  return undefined;
+}
+
+/** `aiops config diff` and `aiops config apply` (CFG-3, CFG-4). */
+async function configChange(kind: 'diff' | 'apply', args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
+  const parsed = parseConfigArgs(args, kind === 'apply');
+  if (parsed === undefined) {
+    out(USAGE);
+    return 2;
+  }
+  const env = parseEnv({ DATABASE_URL: postgresUrl }, deps.env);
+  const actor = applyActor(parsed.actor, deps.env);
+  const adapter = deps.adapter ?? createOpenApiAdapter();
+  const presetDirs = presetDirsOf(parsed.presetDirs, deps.env, deps);
+  const configuration = await loadChecked(parsed.dir, presetDirs, adapter, out);
+  if (configuration === undefined) return 1;
+  let files: Readonly<Record<string, string>> = {};
+  if (kind === 'apply') {
+    const collected = revisionFilesOf(configuration);
+    if (!collected.ok) {
+      for (const issue of collected.issues) out(formatIssue(issue));
+      return 1;
+    }
+    files = collected.files;
+  }
+  const options: LoadOptions = { resolver: adapter.resolver, ...(presetDirs === undefined ? {} : { presetDirs }) };
+  return withConfigStore(deps, env.DATABASE_URL, async (store) => {
+    const active = await store.active();
+    const before = await loadActive(active, options, out);
+    // The stored hash, also when the active revision could not be loaded here: apply commits only if it is still active.
+    const diff = { ...diffConfigurations(before, configuration), previousHash: active?.hash ?? null };
+    for (const line of formatDiff(diff)) out(line);
+    if (kind === 'diff' || diff.previousHash === diff.hash) return 0;
+
+    const newId = deps.newId ?? randomUUID;
+    const revision = newId();
+    const result = await store.apply(
+      { id: revision, hash: configuration.hash, files, actor, summary: revisionSummary(configuration) },
+      {
+        id: newId(),
+        actor,
+        clientId: CLI_ACTOR,
+        action: 'config.apply',
+        outcome: 'ok',
+        correlationId: newId(),
+        details: { revision, hash: configuration.hash, previousHash: diff.previousHash, ...diffCounts(diff) },
+      },
+      diff.previousHash,
+    );
+    if (result.ok) {
+      out(`applied revision ${result.revision.id} (seq ${String(result.revision.seq)})`);
+      return 0;
+    }
+    if (result.reason === 'unchanged') {
+      out('No changes');
+      return 0;
+    }
+    out(CONCURRENT_APPLY);
+    return 1;
+  });
+}
+
+const EXPLAIN_FLAGS = ['--operation', '--groups', '--subject', '--args', '--records'] as const;
+const MAX_RECORDS = 1_000_000;
+const NO_ACTIVE_CONFIGURATION = 'no active configuration: start the api once or run aiops config apply';
+
+/** `--operation <id> --groups <g1,...> [--subject <s>] [--args <json>] [--records <n>]`; undefined is a usage error. */
+function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
+  const values = new Map<string, string>();
+  for (let i = 0; i < args.length; i += 2) {
+    const flag = args[i];
+    const value = args[i + 1];
+    if (flag === undefined || !(EXPLAIN_FLAGS as readonly string[]).includes(flag) || value === undefined || value === '' || values.has(flag)) return undefined;
+    values.set(flag, value);
+  }
+  const operationId = values.get('--operation');
+  const groups = (values.get('--groups') ?? '').split(',').map((g) => g.trim()).filter((g) => g.length > 0);
+  if (operationId === undefined || groups.length === 0) return undefined;
+
+  // Neither message quotes the value: it is operator input of unknown content (SEC-3).
+  let parsedArgs: unknown = {};
+  const rawArgs = values.get('--args');
+  if (rawArgs !== undefined) {
+    try {
+      parsedArgs = JSON.parse(rawArgs);
+    } catch {
+      parsedArgs = undefined;
+    }
+    if (typeof parsedArgs !== 'object' || parsedArgs === null || Array.isArray(parsedArgs)) throw new CliError('--args: must be a JSON object', 2);
+  }
+  const rawRecords = values.get('--records') ?? '1';
+  const records = /^[0-9]{1,7}$/.test(rawRecords) ? Number(rawRecords) : Number.NaN;
+  if (!(records >= 1 && records <= MAX_RECORDS)) throw new CliError(`--records: must be an integer from 1 to ${String(MAX_RECORDS)}`, 2);
+
+  const subject = values.get('--subject');
+  return { operationId, groups, args: parsedArgs as Record<string, unknown>, records, ...(subject === undefined ? {} : { subject }) };
+}
+
+/** The adapter's resolver and the preset directories of `AIOPS_PRESET_DIRS` or the default, for loading the active revision. */
+function activeLoadOptions(deps: CliDeps): LoadOptions {
+  const presetDirs = presetDirsOf([], deps.env, deps);
+  return { resolver: (deps.adapter ?? createOpenApiAdapter()).resolver, ...(presetDirs === undefined ? {} : { presetDirs }) };
+}
+
+/**
+ * The active revision, loaded and hash-checked as the running system holds it (CFG-3). No active
+ * revision, one that cannot be loaded here, or another hash is an environment error (exit 2).
+ */
+async function loadActiveChecked(store: ConfigRevisionStore, options: LoadOptions): Promise<LoadedConfiguration> {
+  const active = await store.active();
+  if (active === undefined) throw new CliError(NO_ACTIVE_CONFIGURATION, 2);
+  let result: LoadResult;
+  try {
+    result = await loadConfigurationFiles(active.files, options);
+  } catch {
+    throw new CliError(`active revision ${active.id} cannot be loaded here (unavailable)`, 2);
+  }
+  if (!result.ok) throw new CliError(`active revision ${active.id} cannot be loaded here (invalid)`, 2);
+  if (result.configuration.hash !== active.hash) throw new CliError('configuration_mismatch', 2);
+  return result.configuration;
+}
+
+/** `aiops config explain`: evaluates one call against the active revision; writes nothing (POL-7). */
+async function configExplain(args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
+  const input = parseExplainArgs(args);
+  if (input === undefined) {
+    out(USAGE);
+    return 2;
+  }
+  const env = parseEnv({ DATABASE_URL: postgresUrl }, deps.env);
+  return withConfigStore(deps, env.DATABASE_URL, async (store) => {
+    const configuration = await loadActiveChecked(store, activeLoadOptions(deps));
+    const explained = explainCall(configuration, input);
+    for (const line of formatExplain(explained)) out(line);
+    return explained.kind === 'decision' && explained.decision.effect === 'allow' ? 0 : 1;
   });
 }
 
@@ -213,6 +586,9 @@ export async function runApiCli(argv: readonly string[], out: (line: string) => 
     if (command === 'validate') return await validate(rest, out, deps);
     if (command === 'test-connection') return await testConnection(rest, out, deps);
     if (command === 'credentials' && rest[0] === 'rotate') return await rotate(rest.slice(1), out, deps);
+    if (command === 'audit') return await audit(rest, out, deps);
+    if (command === 'config' && (rest[0] === 'diff' || rest[0] === 'apply')) return await configChange(rest[0], rest.slice(1), out, deps);
+    if (command === 'config' && rest[0] === 'explain') return await configExplain(rest.slice(1), out, deps);
     out(USAGE);
     return 2;
   } catch (error) {

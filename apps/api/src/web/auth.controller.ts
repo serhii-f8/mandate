@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { Controller, Get, Inject, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { Logger } from 'pino';
-import type { ApiEnv } from '@aiops/config';
+import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
 import type { AuditLog } from '@aiops/core';
-import { API_ENV, AUDIT_LOG, LOGGER, OIDC_CLIENT, PAGE_CHECKS, PAGE_SESSIONS } from '../tokens.js';
+import { mayViewAudit } from '../audit/access.js';
+import { API_ENV, AUDIT_LOG, CONFIGURATION, LOGGER, OIDC_CLIENT, PAGE_CHECKS, PAGE_SESSIONS } from '../tokens.js';
 import { PageAccess, pageDenial, pageOf, Public, type PageChecks, type PageRequest } from './access.js';
 import { pageCorrelation } from './correlation.js';
 import type { OidcClient } from './oidc-client.js';
@@ -161,7 +162,10 @@ export class AuthController {
 /** The page session as the trusted pages see it (AUTH-5). */
 @Controller('api/v1')
 export class SessionController {
-  constructor(@Inject(PAGE_CHECKS) private readonly checks: PageChecks) {}
+  constructor(
+    @Inject(PAGE_CHECKS) private readonly checks: PageChecks,
+    @Inject(CONFIGURATION) private readonly configuration: ConfigurationHolder,
+  ) {}
 
   @Get('session')
   @PageAccess()
@@ -177,6 +181,8 @@ export class SessionController {
       // SEC-8: the same rule the credential change applies, so the page can re-authenticate first.
       fresh: pageDenial(req.headers, session, { fresh: true }, this.checks) === undefined,
       expiresAt: session.expiresAt.toISOString(),
+      // UI-2: whether the page shows the audit link; the audit routes check the flag themselves (SEC-1).
+      viewAudit: mayViewAudit(this.configuration.current, roles),
     });
   }
 }

@@ -1,0 +1,3 @@
+# Audit e2e: rows older than one day are archived by `aiops audit retention --now` (AUD-7).
+version: 1
+audit: { retention_days: 1 }

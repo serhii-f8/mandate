@@ -54,7 +54,7 @@ export interface ChangeSetViewModel {
   drift?: number;
   errorCode?: string;
   derivedFrom?: string;
-  rollback: { available: boolean };
+  rollback: { available: boolean; count?: number; until?: string; stats?: { restored: number; skipped: number; failed: number } };
   pageUrl?: string;
   permissions: { canExclude: boolean; canSubmit: boolean; canCancel: boolean };
 }
@@ -105,7 +105,8 @@ export interface ChangeSetActions {
   export?(format: 'csv' | 'xlsx'): Promise<ActionResult>;
   cancel?(): Promise<ActionResult<ChangeSetViewModel>>;
   openPage?(): Promise<ActionResult>;
-  rollback?(): Promise<ActionResult<ChangeSetViewModel>>;
+  /** A value replaces the shown data; none (the widget opened the page) leaves the view as it is. */
+  rollback?(): Promise<ActionResult<ChangeSetViewModel | undefined>>;
 }
 export interface ApprovalActions {
   loadItems(q: { after?: string; status?: ItemFilter }): Promise<ActionResult<ItemsPageModel>>;

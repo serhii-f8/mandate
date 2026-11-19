@@ -72,7 +72,12 @@ export function toChangeSetModel(detail: ChangeSetDetail, items: ItemsPage, filt
     ...(detail.drift === undefined ? {} : { drift: detail.drift }),
     ...(detail.errorCode === undefined ? {} : { errorCode: detail.errorCode }),
     ...(detail.derivedFrom === undefined ? {} : { derivedFrom: detail.derivedFrom }),
-    rollback: { available: detail.rollback.available },
+    rollback: {
+      available: detail.rollback.available,
+      ...(detail.rollback.count === undefined ? {} : { count: detail.rollback.count }),
+      ...(detail.rollback.until === undefined ? {} : { until: detail.rollback.until }),
+      ...(detail.rollback.stats === undefined ? {} : { stats: detail.rollback.stats }),
+    },
     permissions: { canExclude: detail.viewer.canExclude, canSubmit: detail.viewer.canSubmit, canCancel: false },
   };
 }

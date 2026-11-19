@@ -96,6 +96,7 @@ describe('NTF-3 notification delivery on PostgreSQL', () => {
       repository,
       configuration: () => configuration,
       writerFor: () => new ScriptedWriter(),
+      rollbackWriterFor: () => undefined,
       readerFor: () => {
         throw new Error('no reads in this test');
       },

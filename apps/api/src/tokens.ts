@@ -2,6 +2,7 @@
 export const API_ENV = Symbol('ApiEnv');
 export const APPROVAL_SERVICE = Symbol('ApprovalService');
 export const AUDIT_LOG = Symbol('AuditLog');
+export const AUDIT_READER = Symbol('AuditReader');
 export const BEARER_GATE = Symbol('BearerGate');
 export const CHANGESET_EXECUTOR = Symbol('ChangeSetExecutor');
 export const CHANGESET_REPOSITORY = Symbol('ChangeSetRepository');
@@ -12,9 +13,15 @@ export const DATABASE = Symbol('Database');
 export const MCP_HANDLER = Symbol('McpHttpHandler');
 export const LOGGER = Symbol('Logger');
 export const OIDC_CLIENT = Symbol('OidcClient');
+/** The caller's shutdown step, run after the api's own resources closed (`AppOverrides.onShutdown`). */
+export const ON_SHUTDOWN = Symbol('OnShutdown');
 export const PAGE_CHECKS = Symbol('PageChecks');
 export const PAGE_SESSIONS = Symbol('SessionService');
 export const SUBMIT_SERVICE = Symbol('SubmitService');
+/** The api's telemetry, or `null` without one; shut down after everything else (NFR-11). */
+export const TELEMETRY = Symbol('Telemetry');
 export const TEMPORAL = Symbol('Temporal');
+/** The tracer of the api's own spans (NFR-11). */
+export const TRACER = Symbol('Tracer');
 export const WIDGET_BUNDLES = Symbol('WidgetBundles');
 export const WORKFLOW_STARTER = Symbol('WorkflowStarter');

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
 import { pageLogin, recordApproval, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@aiops/testing';
-import { seedPending, seedPrepared } from './approval-seed.js';
+import { seedExecuted, seedPending, seedPrepared } from './approval-seed.js';
 import { startApi, startDatabase, type RunningApi } from './helpers.js';
 
 const CONFIG = fileURLToPath(new URL('./fixtures/approvals-pages-config', import.meta.url));
@@ -223,6 +223,19 @@ describe('APR-5 the detail is built from storage', () => {
     const own = await get(await login(ALICE), `/api/v1/changesets/${seeded.id}`);
     expect(own.status).toBe(200);
     expect(own.body).toMatchObject({ status: 'prepared', rollback: { available: false }, viewer: { canSubmit: true, canExclude: true } });
+  });
+
+  it('UI-4 the page detail carries the requester\'s rollback block', async () => {
+    // Whole seconds survive the round trip through timestamptz.
+    const until = new Date(Math.floor((Date.now() + 86_400_000) / 1000) * 1000);
+    const open = await seedExecuted(repo, { requester: ALICE.sub, items: 2, rollbackUntil: until });
+    const closed = await seedExecuted(repo, { requester: ALICE.sub, items: 2 });
+    const page = await login(ALICE);
+    expect((await get(page, `/api/v1/changesets/${open.id}`)).body).toMatchObject({
+      status: 'completed',
+      rollback: { available: true, count: 2, until: until.toISOString() },
+    });
+    expect((await get(page, `/api/v1/changesets/${closed.id}`)).body).toMatchObject({ rollback: { available: false, reason: 'window_closed' } });
   });
 
   it('APR-5 the sample is deterministic per seed, included items only, and re-sampling draws a new seed', async () => {

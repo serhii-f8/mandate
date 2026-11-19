@@ -32,6 +32,8 @@ RUN cp -r apps/web/dist /out/web \
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
+# Audit archive directory (AUD-7), owned by node so a fresh named volume mounted here inherits it.
+RUN mkdir -p /var/lib/aiops/audit-archive && chown node:node /var/lib/aiops/audit-archive
 USER node
 
 FROM runtime AS api

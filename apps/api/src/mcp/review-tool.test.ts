@@ -200,6 +200,7 @@ describe('APR-8 review_changeset approver tool', () => {
         approvals,
         ...(operation === undefined ? {} : { operation }),
         viewer: widgetViewerBlock(cs, approvals, { subject: 'dave', roles: ['lead'], clientId: 'aiops-mcp' }, NOW),
+        rollback: { available: false },
       }),
     );
     expect(a.items).toHaveLength(50);
@@ -282,5 +283,15 @@ describe('APR-8 review_changeset approver tool', () => {
     const s = await setup({ widget: false });
     await s.call(dave);
     expect(s.reports).toEqual([{ canDecide: false }]);
+  });
+
+  it('UI-4 review_changeset reports the caller\'s rollback block, as get_changeset does (T11/F3)', async () => {
+    const s = await setup();
+    const alice: Caller = { subject: 'alice', groups: ['content', 'leads'] };
+    const blockOf = (r: CallToolResult): unknown => (r.structuredContent as { detail: { rollback: unknown } }).detail.rollback;
+    // The requester may view it here too: the one eligibility function answers for her.
+    expect(blockOf(await s.call(alice))).toStrictEqual({ available: false, reason: 'not_finished' });
+    // An approver is never offered the rollback, nor told why.
+    expect(blockOf(await s.call(dave))).toStrictEqual({ available: false });
   });
 });

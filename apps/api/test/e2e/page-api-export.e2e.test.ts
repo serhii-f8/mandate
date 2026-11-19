@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
 import { InMemoryExecutor, pageLogin, ScriptedWriter, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@aiops/testing';
-import { seedPending } from './approval-seed.js';
+import { seedExecuted, seedPending } from './approval-seed.js';
 import { startApi, startDatabase, type RunningApi } from './helpers.js';
 import { ToggleExecutor } from './toggle-executor.js';
 
@@ -92,5 +92,15 @@ describe('CS-8 page-api.mjs export', () => {
     expect(JSON.parse(refused.stdout.trim())).toMatchObject({ status: 404 });
 
     await expect(run(process.execPath, [PAGE_API, api.url, 'export', seeded.id, 'pdf', join(outDir, 'x')], { env })).rejects.toMatchObject({ code: 2 });
+  });
+});
+
+describe('UI-4 SEC-8 page-api.mjs rollback', () => {
+  it('UI-4 SEC-8 page-api.mjs rollback posts the hash with the session, CSRF and Origin', async () => {
+    const seeded = await seedExecuted(repo, { requester: ALICE.sub, items: 2, rollbackUntil: new Date(Date.now() + 3_600_000) });
+    executor.started.push(seeded.id);
+    const alice = await login(ALICE);
+    const { stdout } = await run(process.execPath, [PAGE_API, api.url, 'rollback', seeded.id, seeded.hash], { env: { ...process.env, AIOPS_PAGE_COOKIE: alice.cookie } });
+    expect(JSON.parse(stdout.trim())).toEqual({ status: 200, body: { status: 'rolling_back' } });
   });
 });

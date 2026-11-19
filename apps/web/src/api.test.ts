@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createApi, loginUrl, NotFound, Unauthenticated } from './api.js';
+import { BadQuery, createApi, loginUrl, NotFound, Unauthenticated } from './api.js';
 
 const ID = '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b';
 const HASH = `sha256:${'a'.repeat(64)}`;
@@ -102,5 +102,20 @@ describe('web api client', () => {
     const { api } = fake(200, {});
     expect(api.exportUrl(ID, 'csv')).toBe(`/api/v1/changesets/${ID}/export?format=csv`);
     expect(api.exportUrl('a/b c', 'xlsx')).toBe('/api/v1/changesets/a%2Fb%20c/export?format=xlsx');
+  });
+
+  it('UI-2 AUD-6 audit leaves empty filters out and passes the cursor', async () => {
+    const { calls, api } = fake(200, { events: [] });
+    await api.audit({ actor: 'bob', action: '', cursor: 'c1' });
+    expect(calls[0]?.url).toBe('/api/v1/audit?actor=bob&cursor=c1');
+    await api.audit({});
+    expect(calls[1]?.url).toBe('/api/v1/audit');
+    expect(api.auditExportUrl({ outcome: 'denied', from: '' })).toBe('/api/v1/audit/export?outcome=denied');
+    expect(api.auditExportUrl({})).toBe('/api/v1/audit/export');
+  });
+
+  it('UI-2 audit: a 400 throws BadQuery, a 401 throws Unauthenticated', async () => {
+    await expect(fake(400, {}).api.audit({})).rejects.toBeInstanceOf(BadQuery);
+    await expect(fake(401, {}).api.audit({})).rejects.toBeInstanceOf(Unauthenticated);
   });
 });

@@ -1,15 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import type { LoadedConfiguration } from '@aiops/config';
-import type { BatchContext, ChangeItemRecord, ChangeWriter, ExecutionGuard, ItemOutcome, ReadPage, UpstreamReader } from '@aiops/core';
+import {
+  changesetTransitionEvent,
+  type BatchContext,
+  type ChangeItemRecord,
+  type ChangeSetRecord,
+  type ChangeWriter,
+  type ExecutionGuard,
+  type ItemOutcome,
+  type ReadPage,
+  type RollbackStrategy,
+  type UpstreamReader,
+} from '@aiops/core';
 import { PostgresChangeSetRepository, PostgresNotificationOutbox } from '@aiops/db';
 import { DEFAULT_TUNING, PREPARE_MAX_ATTEMPTS, type ChangesetActivities } from '@aiops/temporal';
 import { allowAllGuard, ScriptedWriter } from '@aiops/testing';
 import { MockActivityEnvironment } from '@temporalio/testing';
 import { DefaultLogger } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createActivities } from '../../src/activities/index.js';
+import { createActivities, type ActivityDeps } from '../../src/activities/index.js';
 import { createPrepared, createPreparing } from '../support/changesets.js';
-import { READ_OPERATION, testConfiguration } from '../support/configuration.js';
+import { READ_OPERATION, testConfiguration, WRITE_OPERATION } from '../support/configuration.js';
 import { auditEventsOf, startTestPostgres, type TestPostgres } from '../support/postgres.js';
 
 let postgres: TestPostgres;
@@ -68,9 +79,12 @@ class GatedWriter implements ChangeWriter {
 
 interface Fixture {
   readonly writer?: ChangeWriter;
+  /** Default: a `ScriptedWriter` for every operation. */
+  readonly rollbackWriterFor?: ActivityDeps['rollbackWriterFor'];
   readonly reader?: UpstreamReader;
   readonly guard?: ExecutionGuard;
   readonly configuration?: LoadedConfiguration;
+  readonly now?: () => Date;
 }
 
 function activities(fixture: Fixture = {}): ChangesetActivities {
@@ -78,11 +92,12 @@ function activities(fixture: Fixture = {}): ChangesetActivities {
     repository,
     configuration: () => fixture.configuration ?? configuration,
     writerFor: () => fixture.writer ?? new ScriptedWriter(),
+    rollbackWriterFor: fixture.rollbackWriterFor ?? (() => new ScriptedWriter()),
     readerFor: () => fixture.reader ?? new CatalogReader(),
     guardFor: () => fixture.guard ?? allowAllGuard,
     tuning: DEFAULT_TUNING,
     newId: randomUUID,
-    now: () => new Date(),
+    now: fixture.now ?? (() => new Date()),
   });
 }
 
@@ -469,6 +484,235 @@ describe('change-set activities', () => {
       batchSize: 2,
       itemsPerRun: 100,
       cancelRequested: false,
+    });
+  });
+
+  describe('EXE-8 rollback activities', () => {
+    const HOUR_MS = 3_600_000;
+    const submission = { actor: 'alice', groups: ['editors'], correlationId: 'corr-submit', at: new Date(), role: 'editor', rule: 'role:editor/grant:all' };
+
+    /** The test configuration with the write operation's manifest changed, or the operation removed (`undefined`). */
+    const reconfigured = (change: { rollback?: RollbackStrategy; hours?: number; drop?: boolean }): LoadedConfiguration => {
+      const operations = configuration.policy.operations
+        .filter((o) => change.drop !== true || o.id !== WRITE_OPERATION)
+        .map((o) =>
+          o.id === WRITE_OPERATION && o.manifest !== undefined && change.rollback !== undefined
+            ? { ...o, manifest: { ...o.manifest, rollback: change.rollback } }
+            : o,
+        );
+      return {
+        ...configuration,
+        policy: { ...configuration.policy, operations },
+        changesets: { ...configuration.changesets, rollbackWindowHours: change.hours ?? configuration.changesets.rollbackWindowHours },
+      };
+    };
+
+    /** Executes every item with `writer` (default: all written) and finishes the run `done`. */
+    const executed = async (items: number, writer: ChangeWriter = new ScriptedWriter(), opts: { hash?: string } = {}): Promise<ChangeSetRecord> => {
+      const cs = await createPrepared(repository, items, {
+        ...(opts.hash === undefined ? {} : { hash: opts.hash }),
+        execute: { correlationId: 'corr-exec', submission },
+      });
+      const a = activities({ writer });
+      for (let batchNo = 0; ; batchNo++) {
+        if ((await attempt(1, () => a.executeBatch(cs.id, batchNo))).remaining === 0) break;
+      }
+      await attempt(1, () => a.finishExecution(cs.id, 'done'));
+      return cs;
+    };
+
+    /** Opens the window and stores a rollback request, as the api's request path does. */
+    const rollingBack = async (cs: ChangeSetRecord): Promise<ChangeSetRecord> => {
+      await attempt(1, () => activities().openRollbackWindow(cs.id));
+      const requested = await repository.requestRollback({
+        changesetId: cs.id,
+        request: { actor: 'alice', correlationId: 'corr-rollback', requestedAt: new Date() },
+        marginMs: 60_000,
+        audit: [],
+      });
+      if (!requested.ok) throw new Error(`test rollback not requested: ${requested.reason}`);
+      return requested.changeset;
+    };
+
+    /** Rollback outcomes scripted per target (default: restored), with an optional error. */
+    class RestoringWriter implements ChangeWriter {
+      calls = 0;
+      readonly keys: string[] = [];
+      constructor(private readonly outcomes: Readonly<Record<string, Omit<ItemOutcome, 'targetId'>>> = {}) {}
+      async writeBatch(input: { items: readonly ChangeItemRecord[]; batch: BatchContext }): Promise<readonly ItemOutcome[]> {
+        this.calls += 1;
+        this.keys.push(input.batch.key);
+        // The plan holds an internal outcome; the activity must take the returned outcomes, not this.
+        await input.batch.recordSubmission({
+          upstreamBatchId: input.batch.key,
+          plan: input.items.map((i) => ({ targetId: i.targetId, action: 'outcome' as const, status: 'written' as const, error: 'already_applied' })),
+        });
+        return input.items.map((i): ItemOutcome => ({ targetId: i.targetId, ...(this.outcomes[i.targetId] ?? { status: 'written' }) }));
+      }
+    }
+
+    const rollbackOf = async (changesetId: string) =>
+      (await repository.itemsPage(changesetId, { limit: 100 })).map((i) => [i.targetId, i.rollbackStatus, i.rollbackError]);
+
+    it('EXE-8 openRollbackWindow opens once for an executed change-set and answers the stored end', async () => {
+      const cs = await executed(3);
+      const before = Date.now();
+      const opened = await attempt(1, () => activities().openRollbackWindow(cs.id));
+      const after = Date.now();
+      const hours = configuration.changesets.rollbackWindowHours;
+      expect(hours).toBeGreaterThan(0);
+      expect(opened.untilMs).toBeGreaterThanOrEqual(before + hours * HOUR_MS);
+      expect(opened.untilMs).toBeLessThanOrEqual(after + hours * HOUR_MS);
+      expect((await repository.get(cs.id))?.rollbackUntil?.getTime()).toBe(opened.untilMs);
+      // Later, and under a configuration that would open no window: the stored end (write-once, NFR-2).
+      const later = activities({ now: () => new Date(Date.now() + 5 * HOUR_MS), configuration: reconfigured({ hours: 0 }) });
+      await expect(attempt(2, () => later.openRollbackWindow(cs.id))).resolves.toEqual(opened);
+    });
+
+    it('EXE-8 openRollbackWindow answers null for hours 0, strategy none, nothing written, a run that never started', async () => {
+      const none = { untilMs: null };
+      const hoursZero = await executed(2);
+      await expect(attempt(1, () => activities({ configuration: reconfigured({ hours: 0 }) }).openRollbackWindow(hoursZero.id))).resolves.toEqual(none);
+      const strategyNone = await executed(2);
+      await expect(
+        attempt(1, () => activities({ configuration: reconfigured({ rollback: { strategy: 'none' } }) }).openRollbackWindow(strategyNone.id)),
+      ).resolves.toEqual(none);
+      // An operation gone from the configuration answers null as well, never operation_unavailable.
+      const unknown = await executed(2);
+      await expect(attempt(1, () => activities({ configuration: reconfigured({ drop: true }) }).openRollbackWindow(unknown.id))).resolves.toEqual(none);
+      const nothingWritten = await executed(2, new ScriptedWriter({ outcomes: { 't-0001': 'failed', 't-0002': 'skipped' } }));
+      await expect(attempt(1, () => activities().openRollbackWindow(nothingWritten.id))).resolves.toEqual(none);
+      const prepared = await createPrepared(repository, 2);
+      const neverStarted = await repository.transition(
+        prepared.id,
+        ['prepared'],
+        'cancelled',
+        changesetTransitionEvent({ id: randomUUID(), actor: 'alice', changeset: prepared, from: 'prepared', to: 'cancelled', correlationId: 'corr-cancel' }),
+      );
+      expect(neverStarted?.status).toBe('cancelled');
+      await expect(attempt(1, () => activities().openRollbackWindow(prepared.id))).resolves.toEqual(none);
+      for (const cs of [hoursZero, strategyNone, unknown, nothingWritten, prepared]) {
+        expect((await repository.get(cs.id))?.rollbackUntil).toBeUndefined();
+      }
+    });
+
+    it('EXE-8 beginRollback checks the status, the hash and the writer', async () => {
+      const a = activities();
+      const completed = await executed(3);
+      await expect(attempt(1, () => a.beginRollback(completed.id))).resolves.toEqual({ ok: false, outcome: 'executor_error' });
+
+      const tampered = await rollingBack(await executed(2, new ScriptedWriter(), { hash: `sha256:${'0'.repeat(64)}` }));
+      await expect(attempt(1, () => a.beginRollback(tampered.id))).resolves.toEqual({ ok: false, outcome: 'hash_mismatch' });
+
+      const withoutWriter = activities({ rollbackWriterFor: () => undefined });
+      const unwritable = await rollingBack(await executed(2));
+      await expect(attempt(1, () => withoutWriter.beginRollback(unwritable.id))).resolves.toEqual({ ok: false, outcome: 'executor_error' });
+      // A batch of an operation without a rollback writer is not retried.
+      await expect(attempt(1, () => withoutWriter.rollbackBatch(unwritable.id, 1))).rejects.toMatchObject({
+        message: 'operation_unavailable',
+        nonRetryable: true,
+      });
+
+      const ready = await rollingBack(await executed(3));
+      const env = environment(1);
+      let heartbeats = 0;
+      env.on('heartbeat', () => {
+        heartbeats += 1;
+      });
+      await expect(env.run(() => a.beginRollback(ready.id))).resolves.toEqual({ ok: true, nextBatch: 1, itemsPerRun: 100 });
+      // One per stored-items page while hashing.
+      expect(heartbeats).toBeGreaterThanOrEqual(1);
+    });
+
+    it('EXE-8 rollbackBatch restores claimed items and a done batch answers from storage without writing', async () => {
+      const cs = await rollingBack(await executed(3));
+      const writer = new RestoringWriter({
+        't-0002': { status: 'written', error: 'already_restored' },
+        't-0003': { status: 'skipped', error: 'drift' },
+      });
+      const a = activities({ rollbackWriterFor: () => writer });
+
+      const first = await attempt(1, () => a.rollbackBatch(cs.id, 1));
+      expect(first).toEqual({ restored: 2, skipped: 0, failed: 0, remaining: 1, empty: false });
+      await expect(attempt(1, () => a.rollbackBatch(cs.id, 2))).resolves.toEqual({ restored: 0, skipped: 1, failed: 0, remaining: 0, empty: false });
+      await expect(attempt(1, () => a.rollbackBatch(cs.id, 3))).resolves.toEqual({ restored: 0, skipped: 0, failed: 0, remaining: 0, empty: true });
+      expect(writer.keys).toEqual([`${cs.id}:rollback:1`, `${cs.id}:rollback:2`]);
+      expect(await rollbackOf(cs.id)).toEqual([
+        ['t-0001', 'restored', undefined],
+        ['t-0002', 'restored', 'already_restored'],
+        ['t-0003', 'skipped', 'drift'],
+      ]);
+      expect((await repository.get(cs.id))?.stats.rollback).toEqual({ restored: 2, skipped: 1, failed: 0 });
+
+      // A retry of a done batch answers its stored counts (and what is left now) and calls the writer no more (NFR-2).
+      await expect(attempt(2, () => a.rollbackBatch(cs.id, 1))).resolves.toEqual({ ...first, remaining: 0 });
+      expect(writer.calls).toBe(2);
+
+      // AUD-1: one changeset.batch row per rollback batch, phase rollback, under the rollback request's correlation ID.
+      const audited = (await auditEventsOf(postgres.database, cs.id)).filter((e) => e.action === 'changeset.batch' && e.details.phase === 'rollback');
+      expect(audited.map((e) => [e.actor, e.correlationId, e.details])).toEqual([
+        ['system', 'corr-rollback', { phase: 'rollback', batchNo: 1, restored: 2, skipped: 0, failed: 0 }],
+        ['system', 'corr-rollback', { phase: 'rollback', batchNo: 2, restored: 0, skipped: 1, failed: 0 }],
+      ]);
+    });
+
+    it('NFR-2 a rollbackBatch retry after a recorded submission polls instead of resubmitting', async () => {
+      const cs = await rollingBack(await executed(2));
+      const seen: (string | undefined)[] = [];
+      let recorded = 0;
+      const writer: ChangeWriter = {
+        async writeBatch({ items, batch }) {
+          seen.push(batch.submission?.upstreamBatchId);
+          if (batch.submission === undefined) {
+            await batch.recordSubmission({ upstreamBatchId: 'upstream-rollback-1', plan: items.map((i) => ({ targetId: i.targetId, action: 'write' as const })) });
+            recorded += 1;
+            // The worker is lost after the submission was recorded; the message must not leak (SEC-3).
+            throw new Error('upstream said secret-upstream-text');
+          }
+          return items.map((i): ItemOutcome => ({ targetId: i.targetId, status: 'written' }));
+        },
+      };
+      const a = activities({ rollbackWriterFor: () => writer });
+      let error: unknown;
+      try {
+        await attempt(1, () => a.rollbackBatch(cs.id, 1));
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toMatchObject({ message: 'writer_failed', nonRetryable: false });
+      expect(`${String((error as Error).stack)} ${JSON.stringify(error)}`).not.toContain('secret-upstream-text');
+      expect(await rollbackOf(cs.id)).toEqual([
+        ['t-0001', undefined, undefined],
+        ['t-0002', undefined, undefined],
+      ]);
+
+      await expect(attempt(2, () => a.rollbackBatch(cs.id, 1))).resolves.toEqual({ restored: 2, skipped: 0, failed: 0, remaining: 0, empty: false });
+      expect(seen).toEqual([undefined, 'upstream-rollback-1']);
+      expect(recorded).toBe(1);
+    });
+
+    it('EXE-8 NTF-1 finishRollback ends rolled_back or failed with the rollback code and queues rollback_result once', async () => {
+      const notifying = activities({ configuration: { ...configuration, notify: new Map([['editor', { approvalRequests: [], results: ['chat'] }]]) } });
+      const queued = async (changesetId: string) =>
+        (await new PostgresNotificationOutbox(postgres.database.db).listFor(changesetId)).map(({ kind, round, step, target }) => ({ kind, round, step, target }));
+      const fromRollingBack = async (changesetId: string) =>
+        (await auditEventsOf(postgres.database, changesetId)).filter((e) => e.action === 'changeset.transition' && e.details.from === 'rolling_back');
+
+      const done = await rollingBack(await executed(2));
+      await attempt(1, () => notifying.rollbackBatch(done.id, 1));
+      await expect(attempt(1, () => notifying.finishRollback(done.id, 'done'))).resolves.toEqual({ status: 'rolled_back' });
+      // A retry after success loses the compare-and-set and answers the current status (NFR-2, NTF-3).
+      await expect(attempt(2, () => notifying.finishRollback(done.id, 'done'))).resolves.toEqual({ status: 'rolled_back' });
+      expect((await repository.get(done.id))?.errorCode).toBeUndefined();
+      expect((await fromRollingBack(done.id)).map((e) => [e.actor, e.correlationId, e.details.to])).toEqual([['system', 'corr-rollback', 'rolled_back']]);
+      expect(await queued(done.id)).toEqual([{ kind: 'rollback_result', round: 0, step: 0, target: 'chat' }]);
+
+      const broken = await rollingBack(await executed(2));
+      await expect(attempt(1, () => notifying.finishRollback(broken.id, 'writer_error'))).resolves.toEqual({ status: 'failed' });
+      await expect(attempt(2, () => notifying.finishRollback(broken.id, 'writer_error'))).resolves.toEqual({ status: 'failed' });
+      expect(await repository.get(broken.id)).toMatchObject({ status: 'failed', errorCode: 'rollback_writer_error' });
+      expect((await fromRollingBack(broken.id)).map((e) => [e.actor, e.correlationId, e.details.to])).toEqual([['system', 'corr-rollback', 'failed']]);
+      expect(await queued(broken.id)).toEqual([{ kind: 'rollback_result', round: 0, step: 0, target: 'chat' }]);
     });
   });
 });

@@ -2,10 +2,13 @@ import { randomUUID } from 'node:crypto';
 import {
   approvalRequestedEvent,
   ChangeSetHasher,
+  changesetBatchEvent,
   changesetTransitionEvent,
+  startEventFactory,
   type ApprovalPlan,
   type ChangeItemRecord,
   type ChangeSetRepository,
+  type ChangeSetStatus,
 } from '@aiops/core';
 
 /** A change-set seeded straight into `pending_approval`, as the submit path would leave it. */
@@ -136,4 +139,53 @@ export async function seedPending(
   });
   if (!result.ok) throw new Error(`seedPending: submitForApproval refused: ${result.reason}`);
   return { id, hash, included };
+}
+
+export interface ExecutedOptions {
+  requester: string;
+  items: number;
+  /** Opens the rollback window until then, as the workflow does after the finish. */
+  rollbackUntil?: Date;
+  status?: Extract<ChangeSetStatus, 'completed' | 'completed_with_errors' | 'cancelled' | 'failed'>;
+}
+
+/**
+ * Seeds a change-set as `seedPrepared` does, starts it without approval, writes every item in one
+ * batch and moves it to `status` (default `completed`); then opens the rollback window when
+ * `rollbackUntil` is given (EXE-8).
+ */
+export async function seedExecuted(repo: ChangeSetRepository, o: ExecutedOptions): Promise<Seeded> {
+  const correlationId = randomUUID();
+  const seeded = await prepare(repo, { requester: o.requester, items: o.items }, correlationId);
+  const { id, hash } = seeded;
+  const changeset = { id, operation: OPERATION };
+  const request = { actor: o.requester, groups: ['content'], clientId: 'aiops-mcp', correlationId };
+  const started = await repo.startExecution({
+    changesetId: id,
+    expectedHash: hash,
+    request,
+    now: new Date(),
+    event: startEventFactory({ newId: randomUUID, ...request }),
+  });
+  if (!started.ok) throw new Error(`seedExecuted: startExecution refused: ${started.reason}`);
+  const claim = await repo.claimBatch(id, 1, 1, Math.max(o.items, 1));
+  if (claim.kind !== 'claimed') throw new Error(`seedExecuted: claimBatch answered ${claim.kind}`);
+  const outcomes = claim.items.map((item) => ({ targetId: item.targetId, status: 'written' as const }));
+  const audit = changesetBatchEvent({ id: randomUUID(), changeset, batchNo: 1, counts: { written: outcomes.length, failed: 0, skipped: 0 }, correlationId });
+  const completed = await repo.completeBatch(id, 1, 1, outcomes, audit);
+  if (!completed.ok) throw new Error('seedExecuted: completeBatch fenced');
+  const status = o.status ?? 'completed';
+  if (status === 'cancelled') {
+    const cancel = await repo.requestCancel(id, { actor: o.requester, correlationId, requestedAt: new Date() });
+    if (!cancel.ok) throw new Error('seedExecuted: requestCancel refused');
+  }
+  const moved = await repo.transition(
+    id,
+    ['executing'],
+    status,
+    changesetTransitionEvent({ id: randomUUID(), actor: 'system', changeset, from: 'executing', to: status, correlationId }),
+  );
+  if (moved === undefined) throw new Error(`seedExecuted: could not move to ${status}`);
+  if (o.rollbackUntil !== undefined) await repo.openRollbackWindow(id, o.rollbackUntil);
+  return seeded;
 }

@@ -17,9 +17,19 @@ import type {
   ItemsPageQuery,
   NewChangeSet,
   NewNotification,
+  RollbackCounts,
+  RollbackItemOutcome,
   Submission,
 } from '@aiops/core';
-import { changesetTransitionEvent, compareTargetIds, EMPTY_STATS, evaluateLimits, isExpiryDue } from '@aiops/core';
+import {
+  changesetTransitionEvent,
+  compareTargetIds,
+  EMPTY_STATS,
+  evaluateLimits,
+  isExpiryDue,
+  rollbackFromFinished,
+  rollbackWindowOpen,
+} from '@aiops/core';
 import { createHash, randomUUID } from 'node:crypto';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
 import { InMemoryNotificationOutbox } from './in-memory-notification-outbox.js';
@@ -28,6 +38,8 @@ const MAX_PAGE = 500;
 const MAX_BATCH = 1000;
 const DAY_MS = 24 * 3_600_000;
 const NO_COUNTS: BatchCounts = Object.freeze({ written: 0, failed: 0, skipped: 0 });
+const NO_ROLLBACK_COUNTS: RollbackCounts = Object.freeze({ restored: 0, skipped: 0, failed: 0 });
+const ROLLBACK_BATCH_REFUSED = 'rollback batch outcomes rejected: change-set is not rolling back';
 
 interface Entry {
   record: ChangeSetRecord;
@@ -45,9 +57,28 @@ interface Batch {
   counts: BatchCounts;
 }
 
+/** A rollback batch row (EXE-3, EXE-8): the same fencing as `Batch`, its own sequence. */
+interface RollbackBatch {
+  attempt: number;
+  state: 'open' | 'done';
+  readonly targetIds: readonly string[];
+  readonly lastTarget: string;
+  submission?: BatchSubmission;
+  counts: RollbackCounts;
+}
+
 type StartRequestOf = Parameters<ChangeSetRepository['startExecution']>[0];
 type StartResult = Awaited<ReturnType<ChangeSetRepository['startExecution']>>;
 type ClaimResult = Awaited<ReturnType<ChangeSetRepository['claimBatch']>>;
+type RollbackClaimResult = Awaited<ReturnType<ChangeSetRepository['claimRollbackBatch']>>;
+type RollbackCompleteResult = Awaited<ReturnType<ChangeSetRepository['completeRollbackBatch']>>;
+type RollbackRequestOf = Parameters<ChangeSetRepository['requestRollback']>[0];
+type RollbackResult = Awaited<ReturnType<ChangeSetRepository['requestRollback']>>;
+
+export interface InMemoryChangeSetRepositoryOptions {
+  /** The clock `requestRollback` judges the window on and stamps `updatedAt` with (PostgreSQL: `statement_timestamp()`). */
+  readonly now?: () => Date;
+}
 
 function copyDate(d: Date): Date {
   return new Date(d.getTime());
@@ -74,10 +105,20 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
   private readonly batches = new Map<string, Map<number, Batch>>();
   /** Highest batch number per change-set, tracked as batches are created. */
   private readonly highestBatch = new Map<string, number>();
+  private readonly rollbackBatches = new Map<string, Map<number, RollbackBatch>>();
+  /** Highest rollback batch number per change-set, tracked as rollback batches are created. */
+  private readonly highestRollbackBatch = new Map<string, number>();
 
-  constructor(audit: InMemoryAuditLog = new InMemoryAuditLog(), outbox = new InMemoryNotificationOutbox(audit)) {
+  private readonly now: () => Date;
+
+  constructor(
+    audit: InMemoryAuditLog = new InMemoryAuditLog(),
+    outbox = new InMemoryNotificationOutbox(audit),
+    options: InMemoryChangeSetRepositoryOptions = {},
+  ) {
     this.audit = audit;
     this.outbox = outbox;
+    this.now = options.now ?? (() => new Date());
   }
 
   async create(cs: NewChangeSet, audit: AuditEventInput): Promise<ChangeSetRecord> {
@@ -557,6 +598,148 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     return { ok: true, counts: { ...counts } };
   }
 
+  rollbackableCount(changesetId: string): Promise<number> {
+    let n = 0;
+    for (const it of this.entries.get(changesetId)?.items.values() ?? []) if (isRollbackable(it)) n += 1;
+    return Promise.resolve(n);
+  }
+
+  openRollbackWindow(changesetId: string, until: Date): Promise<Date | undefined> {
+    if (Number.isNaN(until.getTime())) return Promise.reject(new Error('invalid rollback window'));
+    const entry = this.entries.get(changesetId);
+    if (entry === undefined) return Promise.resolve(undefined);
+    // Write-once: a later call answers the stored window.
+    if (entry.record.rollbackUntil === undefined) entry.record = { ...entry.record, rollbackUntil: copyDate(until) };
+    return Promise.resolve(entry.record.rollbackUntil === undefined ? undefined : copyDate(entry.record.rollbackUntil));
+  }
+
+  async requestRollback(req: RollbackRequestOf): Promise<RollbackResult> {
+    // Checked and applied synchronously up to the audit append: the in-memory form of the locked transaction.
+    const entry = this.entries.get(req.changesetId);
+    if (entry === undefined) return { ok: false, reason: 'not_found' };
+    const record = entry.record;
+    if (record.status === 'rolling_back' || record.status === 'rolled_back' || record.rollbackRequest !== undefined) {
+      return { ok: false, reason: 'already_rolled_back' };
+    }
+    if (!rollbackFromFinished(record)) return { ok: false, reason: 'not_finished' };
+    const now = this.now();
+    if (!rollbackWindowOpen(record.rollbackUntil, now, req.marginMs)) return { ok: false, reason: 'window_closed' };
+    const next: ChangeSetRecord = {
+      ...record,
+      status: 'rolling_back',
+      rollbackRequest: structuredClone(req.request),
+      updatedAt: now,
+    };
+    await this.commit(entry, next, ...req.audit);
+    return { ok: true, changeset: copyRecord(next) };
+  }
+
+  nextRollbackBatch(changesetId: string): Promise<number> {
+    const batches = this.rollbackBatches.get(changesetId);
+    let open: number | undefined;
+    let highestDone = 0;
+    for (const [batchNo, row] of batches ?? []) {
+      if (row.state === 'open') open = open === undefined ? batchNo : Math.min(open, batchNo);
+      else highestDone = Math.max(highestDone, batchNo);
+    }
+    return Promise.resolve(open ?? highestDone + 1);
+  }
+
+  claimRollbackBatch(changesetId: string, batchNo: number, attempt: number, size: number): Promise<RollbackClaimResult> {
+    if (!Number.isInteger(size) || size < 1 || size > MAX_BATCH) {
+      return Promise.reject(new Error(`batch size must be between 1 and ${MAX_BATCH}`));
+    }
+    const entry = this.entries.get(changesetId);
+    const batches = this.rollbackBatches.get(changesetId) ?? new Map<number, RollbackBatch>();
+    const row = batches.get(batchNo);
+    if (row === undefined) {
+      if (entry === undefined) return Promise.resolve({ kind: 'empty' });
+      // No rollback batch is claimed unless the change-set is rolling back.
+      if (entry.record.status !== 'rolling_back') return Promise.resolve({ kind: 'fenced' });
+      // Continue after the last target of the highest existing rollback batch.
+      const highest = this.highestRollbackBatch.get(changesetId);
+      const after = highest === undefined ? undefined : batches.get(highest)?.lastTarget;
+      const items = [...entry.items.values()]
+        .filter((i) => isRollbackable(i) && (after === undefined || compareTargetIds(i.targetId, after) > 0))
+        .sort((a, b) => compareTargetIds(a.targetId, b.targetId))
+        .slice(0, size);
+      const last = items[items.length - 1];
+      if (last === undefined) return Promise.resolve({ kind: 'empty' });
+      const created: RollbackBatch = {
+        attempt,
+        state: 'open',
+        targetIds: items.map((i) => i.targetId),
+        lastTarget: last.targetId,
+        counts: NO_ROLLBACK_COUNTS,
+      };
+      batches.set(batchNo, created);
+      this.rollbackBatches.set(changesetId, batches);
+      if (highest === undefined || batchNo > highest) this.highestRollbackBatch.set(changesetId, batchNo);
+      return Promise.resolve(claimed(changesetId, batchNo, created, entry));
+    }
+    if (row.state === 'done') return Promise.resolve({ kind: 'done', counts: { ...row.counts } });
+    if (row.attempt >= attempt || entry?.record.status !== 'rolling_back') return Promise.resolve({ kind: 'fenced' });
+    row.attempt = attempt;
+    return Promise.resolve(claimed(changesetId, batchNo, row, entry));
+  }
+
+  recordRollbackSubmission(
+    changesetId: string,
+    batchNo: number,
+    attempt: number,
+    submission: BatchSubmission,
+  ): Promise<boolean> {
+    const row = this.rollbackBatches.get(changesetId)?.get(batchNo);
+    if (row?.attempt !== attempt || row.state !== 'open') return Promise.resolve(false);
+    row.submission = structuredClone(submission);
+    return Promise.resolve(true);
+  }
+
+  async completeRollbackBatch(
+    changesetId: string,
+    batchNo: number,
+    attempt: number,
+    outcomes: readonly RollbackItemOutcome[],
+    audit: AuditEventInput,
+  ): Promise<RollbackCompleteResult> {
+    const entry = this.entries.get(changesetId);
+    const row = this.rollbackBatches.get(changesetId)?.get(batchNo);
+    if (entry === undefined || row?.attempt !== attempt || row.state !== 'open') return { ok: false };
+    if (entry.record.status !== 'rolling_back') throw new Error(ROLLBACK_BATCH_REFUSED);
+    // The first outcome per target of the batch wins; only rollbackable items change and count.
+    // Check and apply synchronously, undo if the audit append fails.
+    const inBatch = new Set(row.targetIds);
+    const first = new Map<string, RollbackItemOutcome>();
+    for (const o of outcomes) if (inBatch.has(o.targetId) && !first.has(o.targetId)) first.set(o.targetId, o);
+    const replaced = new Map<string, ChangeItemRecord>();
+    const counts: { -readonly [K in keyof RollbackCounts]: number } = { restored: 0, skipped: 0, failed: 0 };
+    for (const o of first.values()) {
+      const current = entry.items.get(o.targetId);
+      if (current === undefined || !isRollbackable(current)) continue;
+      replaced.set(o.targetId, current);
+      entry.items.set(o.targetId, {
+        ...current,
+        rollbackStatus: o.status,
+        ...(o.error === undefined ? {} : { rollbackError: o.error }),
+      });
+      counts[o.status] += 1;
+    }
+    const beforeBatch = entry.record;
+    entry.record = { ...entry.record, stats: computeStats(entry.items), updatedAt: new Date() };
+    row.state = 'done';
+    row.counts = counts;
+    try {
+      await this.audit.append(audit);
+    } catch (error) {
+      for (const [targetId, item] of replaced) entry.items.set(targetId, item);
+      entry.record = beforeBatch;
+      row.state = 'open';
+      row.counts = NO_ROLLBACK_COUNTS;
+      throw error;
+    }
+    return { ok: true, counts: { ...counts } };
+  }
+
   /** Applies `next` synchronously, then appends `audit`; undoes the change if the append fails. */
   private async commit(entry: Entry, next: ChangeSetRecord, ...audit: AuditEventInput[]): Promise<void> {
     const previous = entry.record;
@@ -582,7 +765,12 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
   }
 }
 
-function claimed(changesetId: string, batchNo: number, row: Batch, entry: Entry): ClaimResult {
+function claimed(
+  changesetId: string,
+  batchNo: number,
+  row: Pick<Batch, 'attempt' | 'targetIds' | 'submission'>,
+  entry: Entry,
+): { kind: 'claimed'; batch: BatchRecord; items: readonly ChangeItemRecord[] } {
   const batch: BatchRecord = {
     changesetId,
     batchNo,
@@ -621,13 +809,23 @@ function derivedItem(it: ChangeItemRecord, exclude: ReadonlySet<string>, include
   return { ...base, status: it.status, ...(it.reason === undefined ? {} : { reason: it.reason }) };
 }
 
+/** EXE-8: this run wrote the item itself (no `already_applied`) and it has no rollback outcome yet. */
+function isRollbackable(it: ChangeItemRecord): boolean {
+  return it.status === 'written' && it.error === undefined && it.rollbackStatus === undefined;
+}
+
 function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetStats {
   const excluded: Partial<Record<ExclusionReason, number>> = {};
   let included = 0;
   let written = 0;
   let failed = 0;
   let skipped = 0;
+  let rollback: { -readonly [K in keyof RollbackCounts]: number } | undefined;
   for (const it of items.values()) {
+    if (it.rollbackStatus !== undefined) {
+      rollback ??= { restored: 0, skipped: 0, failed: 0 };
+      rollback[it.rollbackStatus] += 1;
+    }
     if (it.status === 'excluded') {
       if (it.reason !== undefined) excluded[it.reason] = (excluded[it.reason] ?? 0) + 1;
       continue;
@@ -637,5 +835,5 @@ function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetSt
     else if (it.status === 'failed') failed += 1;
     else if (it.status === 'skipped') skipped += 1;
   }
-  return { total: items.size, included, excluded, written, failed, skipped };
+  return { total: items.size, included, excluded, written, failed, skipped, ...(rollback === undefined ? {} : { rollback }) };
 }

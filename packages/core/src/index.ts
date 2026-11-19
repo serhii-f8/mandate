@@ -1,5 +1,27 @@
 /** Domain model, policy evaluation, manifest engine and diff. Free of frameworks, drivers and adapters. */
-export type { AuditAction, AuditDecision, AuditEventInput, AuditLog, AuditOutcome } from './audit.js';
+export { AUDIT_ACTIONS, type AuditAction, type AuditDecision, type AuditEventInput, type AuditLog, type AuditOutcome } from './audit.js';
+export { AuditRedactionError, REDACTED, redactAuditDetails } from './audit/redact.js';
+export type { AuditReader, AuditRecord, AuditSearchFilter } from './audit/search.js';
+export {
+  AUDIT_CHAIN_FORMAT,
+  auditRowHash,
+  checkLink,
+  GENESIS_HASH,
+  type ChainBreak,
+  type ChainHead,
+  type ChainRow,
+  type SealedChainRow,
+} from './audit/chain.js';
+export type {
+  ApplyRevisionResult,
+  ConfigListener,
+  ConfigListenerHandlers,
+  ConfigRevision,
+  ConfigRevisionSource,
+  ConfigRevisionStore,
+  ConfigRevisionSummary,
+  NewConfigRevision,
+} from './config-revision.js';
 export { ANONYMOUS_CALLER, type Caller } from './caller.js';
 export { toolCallAuditEvent, type ToolCallRecord } from './tool-call-audit.js';
 export type {
@@ -41,9 +63,37 @@ export type {
   ChangeSetStatus,
   ExclusionReason,
   ItemStatus,
+  RollbackCounts,
+  RollbackItemStatus,
+  RollbackRequest,
 } from './changeset/model.js';
 export { EMPTY_STATS } from './changeset/model.js';
-export { CANCELLABLE, canTransition, isExpiryDue, PRE_EXECUTION, TRANSITIONS } from './changeset/lifecycle.js';
+export {
+  CANCELLABLE,
+  canTransition,
+  executionStarted,
+  isExpiryDue,
+  PRE_EXECUTION,
+  ROLLBACK_FROM,
+  TRANSITIONS,
+} from './changeset/lifecycle.js';
+export {
+  changesetRollbackBatchEvent,
+  ROLLBACK_REQUEST_MARGIN_MS,
+  rollbackEligibility,
+  rollbackFromFinished,
+  rollbackOutcome,
+  rollbackRequestEvents,
+  rollbackTerminal,
+  rollbackWindowEnd,
+  rollbackWindowOpen,
+  type RollbackEligibility,
+  type RollbackEligibilityDeps,
+  type RollbackOutcome,
+  type RollbackReads,
+  type RollbackReason,
+  type RollbackRefusal,
+} from './changeset/rollback.js';
 export type {
   BatchContext,
   BatchRecord,
@@ -65,6 +115,9 @@ export type {
   PrepareFailure,
   RateCounter,
   ReadPage,
+  RollbackItemOutcome,
+  RollbackRequestInput,
+  RollbackRequestOutcome,
   StartEvent,
   StartOutcome,
   StartRefusal,
@@ -89,6 +142,7 @@ export { buildItems, inScope, touchedFields } from './changeset/items.js';
 export {
   type BulkItemState,
   type BulkWriter,
+  classifyForRollback,
   classifyForWrite,
   type Clock,
   ManifestBatchWriter,
@@ -99,8 +153,10 @@ export {
   POLL_MAX_MS,
   RetryableWriteError,
   type RetryableWriteCode,
+  type RollbackClassification,
   UnsupportedWriter,
   type WriteClassification,
+  type WriteDirection,
   type WriteOutcomeCode,
 } from './changeset/writer.js';
 export {

@@ -36,6 +36,9 @@ const widgetSyntax = [
 
 const nodeIo = ['node:http', 'node:https', 'node:net', 'node:dgram', 'node:child_process', 'http', 'https', 'net', 'child_process'];
 
+/** Adapters (and their tests) never import OpenTelemetry; the hook is the connector SDK's `RequestInstrumentation`. */
+const noTelemetryInAdapters = { group: ['@opentelemetry/*'], message: 'Adapters reach telemetry only through RequestInstrumentation (connector-sdk).' };
+
 /** @type {import('eslint').Linter.Config[]} */
 export const boundaryRules = [
   {
@@ -60,7 +63,10 @@ export const boundaryRules = [
   {
     files: ['packages/adapters/**/*.ts'],
     rules: {
-      'no-restricted-imports': ['error', { patterns: [workspaceExcept(['connector-sdk'], 'Adapters depend on @aiops/connector-sdk only.')] }],
+      'no-restricted-imports': [
+        'error',
+        { patterns: [workspaceExcept(['connector-sdk'], 'Adapters depend on @aiops/connector-sdk only.'), noTelemetryInAdapters] },
+      ],
     },
   },
   {
@@ -69,7 +75,12 @@ export const boundaryRules = [
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [workspaceExcept(['connector-sdk', 'testing'], 'Adapter tests depend on @aiops/connector-sdk and @aiops/testing only.')] },
+        {
+          patterns: [
+            workspaceExcept(['connector-sdk', 'testing'], 'Adapter tests depend on @aiops/connector-sdk and @aiops/testing only.'),
+            noTelemetryInAdapters,
+          ],
+        },
       ],
     },
   },

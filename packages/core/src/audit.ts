@@ -1,25 +1,37 @@
-/** Audit actions (AUD-1). Later phases extend the union. */
-export type AuditAction =
-  | 'tool.call'
-  | 'tools.list'
-  | 'policy.decision'
-  | 'auth.rejected'
-  | 'auth.login'
-  | 'auth.logout'
-  | 'credential.set'
-  | 'credential.rotate'
-  | 'connection.test'
-  | 'changeset.transition'
-  | 'changeset.batch'
-  | 'task.cancel'
-  | 'approval.requested'
-  | 'approval.decision'
-  | 'changeset.start'
-  | 'changeset.export'
-  | 'changeset.submit'
-  | 'changeset.exclude'
-  | 'notification.sent'
-  | 'notification.failed';
+/**
+ * Audit actions (AUD-1), once each. Runtime list for the audit search query parser (AUD-6).
+ * Later phases extend it.
+ */
+export const AUDIT_ACTIONS = [
+  'tool.call',
+  'tools.list',
+  'policy.decision',
+  'auth.rejected',
+  'auth.login',
+  'auth.logout',
+  'credential.set',
+  'credential.rotate',
+  'connection.test',
+  'changeset.transition',
+  'changeset.batch',
+  'task.cancel',
+  'approval.requested',
+  'approval.decision',
+  'changeset.start',
+  'changeset.export',
+  'changeset.submit',
+  'changeset.exclude',
+  'changeset.rollback',
+  'notification.sent',
+  'notification.failed',
+  'audit.search',
+  'audit.export',
+  'audit.retention',
+  'config.apply',
+  'config.load',
+] as const;
+
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
 export type AuditOutcome = 'ok' | 'error' | 'denied';
 

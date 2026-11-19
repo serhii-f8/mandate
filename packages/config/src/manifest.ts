@@ -27,6 +27,8 @@ export const manifestSchema = z.strictObject({
   values_arg: name,
   fields: z.array(name).min(1),
   required_fields: z.array(name).default([]),
+  /** AUD-4: fields whose values the audit trail redacts; each must be one of fields. */
+  sensitive_fields: z.array(name).default([]),
   scope_args: z.record(name, name).default({}),
   read_before: z.strictObject({ operation: operationId, ids_arg: name, args: templateMap }),
   selector: z
@@ -54,10 +56,14 @@ export const DEFAULT_FAILURE_THRESHOLD = 0.5;
 /** EXE-9: items one workflow run handles before continuing as new. */
 export const DEFAULT_ITEMS_PER_WORKFLOW_RUN = 2000;
 
+/** EXE-8: hours after execution during which a change-set can be rolled back; 0 disables rollback. */
+export const DEFAULT_ROLLBACK_WINDOW_HOURS = 168;
+
 export const changesetsSchema = z.strictObject({
   expire_after_hours: z.number().min(1 / 60).max(2160).default(72),
   failure_threshold: z.number().gt(0).max(1).default(DEFAULT_FAILURE_THRESHOLD),
   items_per_workflow_run: z.number().int().min(100).max(1_000_000).default(DEFAULT_ITEMS_PER_WORKFLOW_RUN),
+  rollback_window_hours: z.number().min(0).max(2160).default(DEFAULT_ROLLBACK_WINDOW_HOURS),
 });
 
 export const DEFAULT_EXPIRE_AFTER_HOURS = 72;
@@ -152,6 +158,9 @@ export function checkManifests(input: ManifestCheckInput): void {
     if (value.fields_arg !== undefined && value.fields_arg !== manifest.values_arg) {
       at(source, [...path, 'fields_arg'], 'must equal manifest.values_arg');
     }
+    manifest.sensitive_fields.forEach((f, index) => {
+      if (!manifest.fields.includes(f)) mAt(['sensitive_fields', index], 'must be one of fields');
+    });
     if (!op.enabled) continue;
 
     const schema = op.definition.inputSchema;
@@ -276,6 +285,13 @@ export function checkManifests(input: ManifestCheckInput): void {
         if (!input.operationsIncomplete) mAt(['rollback', 'operation'], 'must name an enabled write operation');
       } else if (!inverse.enabled || inverse.definition.risk !== 'write') mAt(['rollback', 'operation'], 'must name an enabled write operation');
       else if (inverse.definition.connection !== op.definition.connection) mAt(['rollback', 'operation'], 'must name an operation of the same connection');
+      else {
+        const inverseManifest = inverse.located.value.manifest;
+        if (inverseManifest !== undefined) {
+          if (inverseManifest.id_field !== manifest.id_field) mAt(['rollback', 'operation'], 'must name an operation with the same id_field');
+          else if (!manifest.fields.every((f) => inverseManifest.fields.includes(f))) mAt(['rollback', 'operation'], 'must name an operation whose manifest lists every field of this one');
+        }
+      }
     }
   }
 }

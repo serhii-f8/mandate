@@ -12,7 +12,9 @@ import {
   type ChangeSetRepository,
   type StartOutcome,
 } from '@aiops/core';
+import { rollbackBlock } from '../changesets/rollback.js';
 import { progressOf } from '../mcp/changeset-tools.js';
+import { snapshotOf } from '../mcp/tool-pipeline.js';
 import { APPROVAL_SERVICE, AUDIT_LOG, CHANGESET_EXECUTOR, CHANGESET_REPOSITORY, CONFIGURATION, PAGE_CHECKS } from '../tokens.js';
 import { PageAccess, pageDenial, pageOf, type PageChecks, type PageRequest } from '../web/access.js';
 import { pageCorrelation } from '../web/correlation.js';
@@ -192,18 +194,26 @@ export class ChangeSetPagesController {
     const found = await this.visible(id, viewer, res);
     if (found === undefined) return;
     const { changeset, approvals } = found;
-    const operation = this.configuration.current.policy.operations.find((op) => op.id === changeset.operation);
+    // One configuration for the operation and the rollback block, even across a reload.
+    const snapshot = snapshotOf(this.configuration.current);
+    const operation = snapshot.configuration.policy.operations.find((op) => op.id === changeset.operation);
     const progress = await progressOf({ repository: this.repository, executor: this.executor, newId: randomUUID, now: () => new Date() }, changeset);
     const drift = isSummarised(changeset) ? ((await this.repository.errorCounts(changeset.id)).drift ?? 0) : undefined;
+    const now = new Date();
+    const { session } = pageOf(req);
+    const caller = { subject: session.subject, groups: session.groups, clientId: session.clientId, authTime: session.authTime };
+    // UI-4: the same block as get_changeset, under the current configuration (POL-6).
+    const rollback = await rollbackBlock({ repository: this.repository, snapshot, now: () => now }, changeset, caller);
     res.status(200).json(
       changesetDetail({
         changeset,
+        rollback,
         ...(drift === undefined ? {} : { drift }),
         approvals,
         ...(operation === undefined ? {} : { operation }),
         ...(progress === undefined ? {} : { progress }),
         viewer,
-        now: new Date(),
+        now,
       }),
     );
   }
