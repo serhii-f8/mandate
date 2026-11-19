@@ -381,6 +381,8 @@ group_2() {
     "$(psql_q "SELECT actor FROM audit_event WHERE chain_pos = $p" 2>&1 || true)" == "$orig-tampered" ]]; then
     pass audit-tamper "chain_pos=$p actor '$orig' → '$orig-tampered'; as aiops: $denied; as superuser with replica: $tampered"
   else
+    # The superuser UPDATE may have landed even though a check failed: put the row back first.
+    psql_replica "UPDATE audit_event SET actor = '${orig//\'/\'\'}' WHERE chain_pos = $p" >/dev/null 2>&1 || true
     fail audit-tamper "chain_pos=$p as aiops: $denied; as superuser: $tampered"
     return 0
   fi
