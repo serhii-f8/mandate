@@ -49,8 +49,25 @@ describe('NFR-4 worker runtime start-up', () => {
       AIOPS_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
     });
     const signals = new EventEmitter();
+    // The start-failure cleanup removes the handler again (F6), so the count is taken when it does:
+    // the connect failed with the handler in place.
+    let installedAtCleanup: number | undefined;
+    const off = signals.off.bind(signals);
+    signals.off = (event, listener) => {
+      if (event === 'SIGHUP') installedAtCleanup = signals.listenerCount('SIGHUP');
+      return off(event, listener);
+    };
     await expect(startWorkerRuntime(env, pino({ level: 'silent' }), signals)).rejects.toThrow(/ConnectionRefused/);
-    expect(signals.listenerCount('SIGHUP')).toBe(1);
+    expect(installedAtCleanup).toBe(1);
+    expect(signals.listenerCount('SIGHUP')).toBe(0);
+    // The configuration came from a revision bootstrapped from deploy/config (CFG-4).
+    const database = createDb(url, { onError: () => undefined });
+    try {
+      const { rows } = await database.pool.query<{ count: string }>('select count(*) from config_revision');
+      expect(rows[0]?.count).toBe('1');
+    } finally {
+      await database.close();
+    }
   }, 60_000);
 });
 

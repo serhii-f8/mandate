@@ -1,17 +1,27 @@
 import { randomUUID } from 'node:crypto';
 import { createOpenApiAdapter } from '@aiops/adapters';
-import { ConfigurationError, ConfigurationHolder, formatIssue, type WorkerEnv } from '@aiops/config';
+import {
+  ConfigurationError,
+  ConfigurationHolder,
+  formatIssue,
+  startConfigurationSync,
+  type ConfigurationStateSource,
+  type ConfigurationSync,
+  type WorkerEnv,
+} from '@aiops/config';
 import {
   assertMigrated,
   createDb,
   DrizzleAuditLog,
   parseMasterKeys,
   PostgresChangeSetRepository,
+  PostgresConfigRevisionStore,
   PostgresCredentialVault,
   PostgresNotificationOutbox,
   PostgresRateCounter,
   runAuditRetention,
   sealAuditChain,
+  type Database,
 } from '@aiops/db';
 import { parseTemporalKeys, workerDataConverter, type ActivityTuning } from '@aiops/temporal';
 import { assertFullyChecked, configurationLoadOptions, createUpstreamReader, type UpstreamCallLog } from '@aiops/upstream';
@@ -23,7 +33,6 @@ import { createAuditJobs } from './audit-jobs.js';
 import { createNotificationDispatcher } from './notifications/dispatcher.js';
 import { createSmtpSender } from './notifications/email.js';
 import { createWebhookSender } from './notifications/webhook.js';
-import { installReload } from './reload.js';
 import { createWorker } from './worker.js';
 import { createRollbackWriterFor, createWriterFor } from './writers.js';
 
@@ -33,8 +42,10 @@ export interface WorkerRuntime {
    * notifications (NTF-3), seals the audit chain (AUD-3) and runs audit retention (AUD-7) meanwhile.
    */
   run(): Promise<void>;
-  /** Closes the SMTP transport, the Temporal connection and the database pool. */
+  /** Closes the configuration sync, the SMTP transport, the Temporal connection and the database pool. */
   close(): Promise<void>;
+  /** The configuration state (CFG-4); the worker's `/readyz` reads it. */
+  readonly configuration: ConfigurationStateSource;
 }
 
 /** What the activities are bound to. */
@@ -84,35 +95,57 @@ function activitiesFor(stores: RuntimeStores): WorkerActivities {
 }
 
 /**
- * Worker start-up (NFR-4): refuses an unmigrated schema (migrations are `api`'s job), loads the
- * configuration exactly as `api` does (specs resolved, presets loaded), binds the activities to
- * the database, connects to Temporal with the encrypting data converter (SEC-4) and reloads the
- * configuration on SIGHUP (CFG-2). `signals` is the process (a test passes its own emitter).
+ * The configuration part of the start (CFG-3, CFG-4): a holder backed by the stored revisions
+ * (an empty table is bootstrapped from AIOPS_CONFIG_DIR) and the sync that keeps it current
+ * through SIGHUP, NOTIFY and the poll. Its `config.load` rows are written by `system:worker`
+ * (AUD-1) through an audit log without sensitive keys (F5): they come from the active
+ * configuration, which may not exist yet. SIGHUP is installed before this resolves.
  */
-export async function startWorkerRuntime(
-  env: WorkerEnv,
-  logger: Logger,
-  signals: Pick<NodeJS.EventEmitter, 'on'> = process,
-): Promise<WorkerRuntime> {
-  await assertMigrated(env.databaseUrl);
-
-  // One adapter: its resolver checks the specs at load and on every reload; it also runs the calls.
-  const adapter = createOpenApiAdapter();
-  let configuration: ConfigurationHolder;
+export async function startRuntimeConfiguration(input: {
+  env: WorkerEnv;
+  database: Database;
+  adapter: ReturnType<typeof createOpenApiAdapter>;
+  logger: Logger;
+  signals: Pick<NodeJS.EventEmitter, 'on' | 'off'>;
+}): Promise<{ readonly holder: ConfigurationHolder; readonly sync: ConfigurationSync }> {
+  const { env, database, adapter, logger, signals } = input;
+  const store = new PostgresConfigRevisionStore(database.db, { databaseUrl: env.databaseUrl });
+  let holder: ConfigurationHolder;
   try {
-    configuration = await ConfigurationHolder.load(env.configDir, configurationLoadOptions(adapter, env));
+    holder = await ConfigurationHolder.fromRevisions({
+      store,
+      fallbackDir: env.configDir,
+      load: configurationLoadOptions(adapter, env),
+      audit: new DrizzleAuditLog(database.db),
+      service: 'worker',
+      newId: randomUUID,
+      logger,
+    });
   } catch (error) {
     if (error instanceof ConfigurationError) {
       for (const issue of error.issues) logger.fatal({ issue: formatIssue(issue) }, 'invalid configuration');
     }
     throw error;
   }
-  assertFullyChecked(configuration.current);
-  logger.info({ hash: configuration.current.hash }, 'configuration loaded');
-  // Before the slow connect and workflow bundling: an early SIGHUP must reload, not end the process.
-  installReload(configuration, logger, signals);
+  const sync = await startConfigurationSync({ holder, store, signals, logger });
+  return { holder, sync };
+}
 
-  // Parsed before any connection so a malformed key set stops the start; messages name no key material.
+/**
+ * Worker start-up (NFR-4): refuses an unmigrated schema (migrations are `api`'s job), loads the
+ * active configuration revision exactly as `api` does (specs resolved, presets loaded) and keeps
+ * it current (CFG-3), waits while no revision is loadable, binds the activities to the
+ * database and connects to Temporal with the encrypting data converter (SEC-4). SIGHUP is
+ * installed before the connect, so an early one refreshes instead of ending the process.
+ * `signals` is the process (a test passes its own emitter).
+ */
+export async function startWorkerRuntime(
+  env: WorkerEnv,
+  logger: Logger,
+  signals: Pick<NodeJS.EventEmitter, 'on' | 'off'> = process,
+): Promise<WorkerRuntime> {
+  await assertMigrated(env.databaseUrl);
+  // Parsed before the pool and the listener so a malformed key set stops the start; messages name no key material.
   const masterKeys = parseMasterKeys(env.masterKeys);
   const temporalKeys = parseTemporalKeys(env.temporalKeys);
 
@@ -121,13 +154,28 @@ export async function startWorkerRuntime(
       logger.error({ err: error.message }, 'idle database connection failed');
     },
   });
+  // One adapter: its resolver checks the specs of every revision loaded; it also runs the calls.
+  const adapter = createOpenApiAdapter();
+  // Set as soon as startRuntimeConfiguration returns; the cleanup closes only what was returned
+  // (a listener whose LISTEN never settles is not covered: the start hangs there).
+  let sync: ConfigurationSync | undefined;
   let connection: NativeConnection | undefined;
   // Without a relay, e-mail rows fail with channel_unconfigured on the retry schedule (NTF-3).
   const email = env.smtpUrl === undefined ? undefined : createSmtpSender({ url: env.smtpUrl, from: env.mailFrom });
-  if (email === undefined && configuration.current.notifications.some((n) => n.kind === 'email')) {
-    logger.warn('AIOPS_SMTP_URL is not set: email notifications fail with channel_unconfigured');
-  }
   try {
+    const started = await startRuntimeConfiguration({ env, database, adapter, logger, signals });
+    sync = started.sync;
+    const configuration = started.holder;
+    const state = configuration.state();
+    if (state.status !== 'active') {
+      logger.warn({ state }, 'waiting for a loadable configuration');
+      await configuration.whenActive();
+    }
+    assertFullyChecked(configuration.current);
+
+    if (email === undefined && configuration.current.notifications.some((n) => n.kind === 'email')) {
+      logger.warn('AIOPS_SMTP_URL is not set: email notifications fail with channel_unconfigured');
+    }
     const repository = new PostgresChangeSetRepository(database.db);
     const vault = new PostgresCredentialVault(database.db, masterKeys);
     // Preset sensitive fields are covered: the configuration was loaded with the preset directories (AUD-4).
@@ -178,7 +226,9 @@ export async function startWorkerRuntime(
       dataConverter: workerDataConverter(temporalKeys),
     });
     const open = connection;
+    const openSync = sync;
     return {
+      configuration,
       run: async () => {
         // Delivery and the audit jobs run beside the worker; a failure in either never stops polling (NTF-3, AUD-3).
         const delivery = dispatcher.start();
@@ -190,8 +240,9 @@ export async function startWorkerRuntime(
         }
       },
       close: async () => {
-        // The pool is closed even when closing the Temporal connection fails.
+        // The pool is closed even when closing the sync or the Temporal connection fails.
         try {
+          await openSync.close();
           email?.close();
           await open.close();
         } finally {
@@ -201,6 +252,8 @@ export async function startWorkerRuntime(
     };
   } catch (error) {
     try {
+      // F6: the listener's own client, then the rest; the pool is closed last.
+      await sync?.close();
       email?.close();
       await connection?.close();
     } catch {
