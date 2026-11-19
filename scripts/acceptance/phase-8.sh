@@ -6,7 +6,10 @@
 #   rb-second-refused, rb-audit;
 #   group 2, audit chain (AUD-3, AUD-5): audit-sealed, audit-verify-ok, audit-tamper,
 #   audit-verify-fails, audit-restore; it needs group 1's flows (at least 10 audit rows);
-#   groups 3-4 (configuration, observability) are appended by the later Phase 8 plans.
+#   group 3, configuration apply (CFG-3, CFG-4, AUD-1): config-diff, config-apply-live, config-audit;
+#   it grants dave (content_lead) catalog.search_products by editing the mounted roles.yaml, diffs and
+#   applies it with the CLI, and needs no restart of the api or the worker;
+#   group 4 (observability) is appended by the later Phase 8 plan.
 # AIOPS_ACCEPT8_GROUPS selects the groups (default "1 2 3 4"); a selected group that is not
 # defined is a FAIL (ADR 0043).
 # Tests the committed HEAD (a fresh clone sees only commits), with a Compose override that joins
@@ -390,6 +393,74 @@ group_2() {
     pass audit-restore "actor of chain_pos=$p back to '$orig'; aiops audit verify → exit $code: $out"
   else
     fail audit-restore "restore: $restored; verify exit $code: $out"
+  fi
+}
+
+# ---- Group 3: configuration apply (CFG-3, CFG-4, AUD-1) -------------------------------------------
+# User U is dave (group content-leads, role content_lead), operation X is catalog.search_products,
+# which content_lead does not grant in the acceptance configuration. `aiops config explain` (Task 12)
+# is not run here until it exists.
+
+# Whether the tools dave lists include the name: yes|no.
+dave_lists() {
+  local token list
+  token="$(login dave 2>/dev/null || true)"
+  list="$(AIOPS_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --list 2>&1 || true)"
+  [[ "$(json "$list" ".tools.includes(\"$1\")")" == true ]] && echo yes || echo no
+}
+started_at() { docker inspect -f '{{.State.StartedAt}}' "$(compose ps -q "$1")"; }
+
+group_3() {
+  local op=catalog.search_products before_list diff code=0 h1 h2 started_api started_worker apply listed deadline
+  local apply_code=0 cnt actor services
+
+  # 1. Dave's role lacks X; the grant is appended on disk; the CLI diff names exactly that change.
+  before_list="$(dave_lists "$op")"
+  sed -i '/^  - id: content_lead$/{n;s/grants: \[\]/grants: [{ operation: catalog.search_products, id: lead-search }]/}' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml"
+  grep -q 'id: lead-search' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml" || { fail config-diff "grant not appended to roles.yaml"; return 0; }
+  diff="$(compose exec -T api node dist/cli.js config diff /etc/aiops/config 2>&1)" || code=$?
+  h1="$(sed -n 's/^hash \(.*\) -> .*$/\1/p' <<<"$diff")"
+  h2="$(sed -n 's/^hash .* -> \(.*\)$/\1/p' <<<"$diff")"
+  if [[ "$before_list" == no && "$code" == 0 && "$(grep -c '^[+~-] ' <<<"$diff")" == 1 && "$(grep -cx '~ role content_lead: grants' <<<"$diff")" == 1 &&
+    -n "$h1" && -n "$h2" && "$h1" != "$h2" ]]; then
+    pass config-diff "dave lists $op: $before_list; config diff → exit $code: $(tr '\n' '|' <<<"$diff")"
+  else
+    fail config-diff "dave lists $op: $before_list; exit $code: $(tr '\n' '|' <<<"$diff")"
+    return 0
+  fi
+
+  # 2. Apply it; the running api and worker follow without a restart (bounded).
+  started_api="$(started_at api)"
+  started_worker="$(started_at worker)"
+  apply="$(compose exec -T api node dist/cli.js config apply /etc/aiops/config --actor acceptance 2>&1)" || apply_code=$?
+  listed=no
+  deadline=$((SECONDS + 60))
+  while :; do
+    [[ "$(dave_lists "$op")" == yes ]] && { listed=yes; break; }
+    ((SECONDS >= deadline)) && break
+    sleep 2
+  done
+  if [[ "$apply_code" == 0 && "$listed" == yes && "$(started_at api)" == "$started_api" && "$(started_at worker)" == "$started_worker" ]]; then
+    pass config-apply-live "config apply → exit $apply_code: $(tr '\n' '|' <<<"$apply"); dave lists $op; api started $started_api and worker started $started_worker unchanged"
+  else
+    fail config-apply-live "apply exit $apply_code: $apply; dave lists $op: $listed; api $started_api → $(started_at api); worker $started_worker → $(started_at worker)"
+    return 0
+  fi
+
+  # 3. One config.apply row by cli:acceptance; both services logged config.load for the new hash.
+  cnt="$(psql_q "select count(*) from audit_event where action = 'config.apply' and details->>'hash' = '$h2'" 2>&1 || true)"
+  actor="$(psql_q "select actor from audit_event where action = 'config.apply' and details->>'hash' = '$h2'" 2>&1 || true)"
+  deadline=$((SECONDS + 60))
+  while :; do
+    services="$(psql_q "select count(distinct details->>'service') from audit_event where action = 'config.load' and outcome = 'ok' and details->>'hash' = '$h2'" 2>&1 || true)"
+    [[ "$services" == 2 ]] && break
+    ((SECONDS >= deadline)) && break
+    sleep 2
+  done
+  if [[ "$cnt" == 1 && "$actor" == cli:acceptance && "$services" == 2 ]]; then
+    pass config-audit "config.apply rows for $h2: $cnt by $actor; config.load ok from $services services"
+  else
+    fail config-audit "config.apply rows: $cnt by '$actor'; config.load services: $services"
   fi
 }
 

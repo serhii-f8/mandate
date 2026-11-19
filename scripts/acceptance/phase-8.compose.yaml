@@ -8,7 +8,7 @@ services:
     networks: [default, sandbox]
     volumes:
       - ${AIOPS_ACCEPT_CONFIG_DIR:?set AIOPS_ACCEPT_CONFIG_DIR}:/etc/aiops/config:ro
-  # Preparation and execution run in the worker (ADR 0027); it reloads on SIGHUP like the api.
+  # Preparation and execution run in the worker (ADR 0027); it follows applied revisions like the api.
   worker:
     networks: [default, sandbox]
     volumes:

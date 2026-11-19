@@ -448,7 +448,7 @@ DAVE_TOKEN="$(login dave 2>/dev/null || true)"
 BEFORE="$(AIOPS_MCP_TOKEN="$DAVE_TOKEN" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --list 2>&1 || true)"
 LISTED_BEFORE="$(json "$BEFORE" '.tools.includes("decide_changeset")')"
 sed -i 's/allow_widget: false }/allow_widget: true }/' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml"
-compose kill -s HUP api worker >/dev/null 2>&1 || true
+APPLY_OUT="$(compose exec -T api node dist/cli.js config apply /etc/aiops/config --actor acceptance 2>&1 || true)"
 LISTED=no
 T0=$SECONDS
 while ((SECONDS - T0 < 60)); do
@@ -457,10 +457,10 @@ while ((SECONDS - T0 < 60)); do
   if [[ "$(json "$DLIST" '.tools.includes("decide_changeset")')" == true ]]; then LISTED=yes; break; fi
   sleep 2
 done
-if grep -q 'allow_widget: true }' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml" && [[ "$LISTED_BEFORE" == false && "$LISTED" == yes ]]; then
-  pass reconfigure-allow-widget "before: decide_changeset listed to dave: $LISTED_BEFORE; allow_widget: true, SIGHUP api worker; dave lists decide_changeset after $((SECONDS - T0)) s"
+if grep -q 'allow_widget: true }' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml" && [[ "$APPLY_OUT" =~ '~ role '.*': approval' ]] && [[ "$LISTED_BEFORE" == false && "$LISTED" == yes ]]; then
+  pass reconfigure-allow-widget "before: decide_changeset listed to dave: $LISTED_BEFORE; allow_widget: true, config apply ($(tr '\n' '|' <<<"$APPLY_OUT")); dave lists decide_changeset after $((SECONDS - T0)) s"
 else
-  fail reconfigure-allow-widget "before=$LISTED_BEFORE listed=$LISTED tools=${DLIST:0:800}"
+  fail reconfigure-allow-widget "apply=${APPLY_OUT:0:400} before=$LISTED_BEFORE listed=$LISTED tools=${DLIST:0:800}"
 fi
 
 # 24. The approval widget decides; the decision is audited on the widget channel (APR-8).
