@@ -8,7 +8,7 @@
 #   audit-verify-fails, audit-restore; it needs group 1's flows (at least 10 audit rows);
 #   group 3, configuration apply (CFG-3, CFG-4, AUD-1): config-diff, config-apply-live, config-audit;
 #   it grants dave (content_lead) catalog.search_products by editing the mounted roles.yaml, diffs and
-#   applies it with the CLI, and needs no restart of the api or the worker;
+#   applies it with the CLI, explains it, and needs no restart of the api or the worker;
 #   group 4 (observability) is appended by the later Phase 8 plan.
 # AIOPS_ACCEPT8_GROUPS selects the groups (default "1 2 3 4"); a selected group that is not
 # defined is a FAIL (ADR 0043).
@@ -398,8 +398,7 @@ group_2() {
 
 # ---- Group 3: configuration apply (CFG-3, CFG-4, AUD-1) -------------------------------------------
 # User U is dave (group content-leads, role content_lead), operation X is catalog.search_products,
-# which content_lead does not grant in the acceptance configuration. `aiops config explain` (Task 12)
-# is not run here until it exists.
+# which content_lead does not grant in the acceptance configuration.
 
 # Whether the tools dave lists include the name: yes|no.
 dave_lists() {
@@ -412,7 +411,7 @@ started_at() { docker inspect -f '{{.State.StartedAt}}' "$(compose ps -q "$1")";
 
 group_3() {
   local op=catalog.search_products before_list diff code=0 h1 h2 started_api started_worker apply listed deadline
-  local apply_code=0 cnt actor services
+  local apply_code=0 cnt actor services explain explain_code=0
 
   # 1. Dave's role lacks X; the grant is appended on disk; the CLI diff names exactly that change.
   before_list="$(dave_lists "$op")"
@@ -447,7 +446,8 @@ group_3() {
     return 0
   fi
 
-  # 3. One config.apply row by cli:acceptance; both services logged config.load for the new hash.
+  # 3. One config.apply row by cli:acceptance; both services logged config.load for the new hash;
+  #    config explain answers allow for dave's group against the applied revision (POL-7).
   cnt="$(psql_q "select count(*) from audit_event where action = 'config.apply' and details->>'hash' = '$h2'" 2>&1 || true)"
   actor="$(psql_q "select actor from audit_event where action = 'config.apply' and details->>'hash' = '$h2'" 2>&1 || true)"
   deadline=$((SECONDS + 60))
@@ -457,10 +457,11 @@ group_3() {
     ((SECONDS >= deadline)) && break
     sleep 2
   done
-  if [[ "$cnt" == 1 && "$actor" == cli:acceptance && "$services" == 2 ]]; then
-    pass config-audit "config.apply rows for $h2: $cnt by $actor; config.load ok from $services services"
+  explain="$(compose exec -T api node dist/cli.js config explain --operation "$op" --groups content-leads --args '{"brand":"acme","fields":["sku"]}' 2>&1)" || explain_code=$?
+  if [[ "$cnt" == 1 && "$actor" == cli:acceptance && "$services" == 2 && "$explain_code" == 0 && "$(head -n 1 <<<"$explain")" == "effect: allow" ]]; then
+    pass config-audit "config.apply rows for $h2: $cnt by $actor; config.load ok from $services services; config explain → exit $explain_code: $(tr '\n' '|' <<<"$explain")"
   else
-    fail config-audit "config.apply rows: $cnt by '$actor'; config.load services: $services"
+    fail config-audit "config.apply rows: $cnt by '$actor'; config.load services: $services; explain exit $explain_code: $(tr '\n' '|' <<<"$explain")"
   fi
 }
 
