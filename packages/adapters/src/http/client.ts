@@ -27,8 +27,13 @@ export type RawResult =
   | { kind: 'status'; status: number; headers: IncomingHttpHeaders }
   | { kind: 'error'; code: 'timeout' | 'network' | 'egress_denied' | 'invalid_response'; message: string };
 
+export interface TransportOptions {
+  /** Any 2xx finishes on its headers as `json: null`; the body is destroyed unread (SEC-3, EXE-4). */
+  readonly discardBody?: boolean;
+}
+
 /** One guarded HTTP exchange with a per-attempt timeout. Never follows redirects. */
-export type Transport = (spec: HttpRequestSpec, timeoutMs: number) => Promise<RawResult>;
+export type Transport = (spec: HttpRequestSpec, timeoutMs: number, opts?: TransportOptions) => Promise<RawResult>;
 
 export type SendResult =
   | { ok: true; status: number; json: unknown; durationMs: number }
@@ -38,6 +43,14 @@ export interface SendOptions {
   credential?: CredentialSource;
   /** Reads only: retries on connection errors, timeouts, 429, 502, 503, 504 (CONN-6). */
   retryable: boolean;
+  /**
+   * Called once, after the credential, the semaphore slot and the host allow-list check,
+   * immediately before the single transport call (EXE-4). A throw releases the slot and is
+   * rethrown; nothing is sent. With it the client never retries and never resends after a 401.
+   */
+  beforeSend?: () => Promise<void>;
+  /** A 2xx answers `json: null` without reading the body (see `TransportOptions.discardBody`). */
+  discardBody?: boolean;
 }
 
 export interface ConnectionClient {
@@ -113,20 +126,27 @@ export function networkMessage(err: unknown): string {
   return `network error (${code})`;
 }
 
+/** The scheme and host allow-list check of a request URL (CONN-5); undefined when allowed. */
+function egressRefusal(settings: ConnectionSettings, url: URL): RawResult | undefined {
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return { kind: 'error', code: 'egress_denied', message: 'unsupported URL scheme' };
+  }
+  try {
+    // Node skips `lookup` for IP literals, so the host is checked here before every request.
+    assertEgressAllowed(settings, url.hostname);
+  } catch (err) {
+    const message = err instanceof EgressDeniedError ? err.message : 'egress denied';
+    return { kind: 'error', code: 'egress_denied', message };
+  }
+  return undefined;
+}
+
 /** Guarded transport: pre-connect host check, guarded lookup, timeout, JSON-only 2xx bodies up to 5 MB. */
 export function createTransport(settings: ConnectionSettings, lookup: LookupFunction): Transport {
-  return (spec, timeoutMs) => {
+  return (spec, timeoutMs, opts = {}) => {
     const url = spec.url;
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      return Promise.resolve({ kind: 'error', code: 'egress_denied', message: 'unsupported URL scheme' });
-    }
-    try {
-      // Node skips `lookup` for IP literals, so the host is checked here before every request.
-      assertEgressAllowed(settings, url.hostname);
-    } catch (err) {
-      const message = err instanceof EgressDeniedError ? err.message : 'egress denied';
-      return Promise.resolve({ kind: 'error', code: 'egress_denied', message });
-    }
+    const refused = egressRefusal(settings, url);
+    if (refused) return Promise.resolve(refused);
     return new Promise<RawResult>((resolve) => {
       let settled = false;
       const headers: Record<string, string> = { ...spec.headers };
@@ -148,7 +168,7 @@ export function createTransport(settings: ConnectionSettings, lookup: LookupFunc
           res.destroy();
           return;
         }
-        if (status === 204) {
+        if (status === 204 || opts.discardBody === true) {
           finish({ kind: 'response', status, headers: res.headers, json: null });
           res.destroy();
           return;
@@ -251,13 +271,22 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
     });
 
     const semaphore = semaphoreFor(settings.id, settings.maxConcurrency);
+    const transportOpts: TransportOptions = opts.discardBody === true ? { discardBody: true } : {};
+    const beforeSend = opts.beforeSend;
     const attemptOnce = async (): Promise<RawResult | 'busy'> => {
       const waitStart = now();
       const release = await semaphore.acquire(settings.timeoutMs);
       if (!release) return 'busy';
       try {
-        // Waiting for the slot counts against the timeout (CONN-6).
+        // Waiting for the slot counts against the timeout (CONN-6); the hook's own time does not.
         const remaining = Math.max(1, settings.timeoutMs - Math.max(0, now() - waitStart));
+        if (beforeSend) {
+          // The allow-list refuses before the hook, so a refused call records nothing (R4, F4); the
+          // transport checks again. The resolved address is still checked at connect.
+          const refused = egressRefusal(settings, req.url);
+          if (refused) return refused;
+          await beforeSend();
+        }
         const headers: Record<string, string> = { ...req.headers };
         let span: RequestSpan | undefined;
         if (instrumentation) {
@@ -283,7 +312,7 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
         if (authHeader) headers[authHeader[0]] = authHeader[1];
         let result: RawResult | undefined;
         try {
-          result = await transport({ ...req, headers }, remaining);
+          result = await transport({ ...req, headers }, remaining, transportOpts);
           return result;
         } finally {
           if (span) {
@@ -300,7 +329,8 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
       }
     };
 
-    const maxAttempts = opts.retryable ? Math.max(1, settings.retry.maxAttempts) : 1;
+    // A call with a pre-send hook is sent at most once (EXE-4).
+    const maxAttempts = opts.retryable && !beforeSend ? Math.max(1, settings.retry.maxAttempts) : 1;
     let retries = 0;
     for (;;) {
       const r = await attemptOnce();
@@ -308,7 +338,8 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
       if (r.kind === 'response') {
         return { ok: true, status: r.status, json: auth.scrubber.deep(r.json), durationMs: Math.max(0, now() - start) };
       }
-      if (r.kind === 'status' && r.status === 401) {
+      // With a pre-send hook a 401 is the answer: a refreshed resend would be a second request.
+      if (r.kind === 'status' && r.status === 401 && !beforeSend) {
         // OAuth only, once per send: the cached token may have been revoked or expired early.
         const refresh = await auth.refreshAfter401();
         if (refresh?.ok === true) continue;

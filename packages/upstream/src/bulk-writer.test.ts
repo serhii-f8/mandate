@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import type { BulkStatusOutcome, BulkSubmitOutcome, WriteAdapter } from '@aiops/connector-sdk';
+import type { BulkStatusOutcome, BulkSubmitOutcome, CallOutcome, WriteAdapter } from '@aiops/connector-sdk';
 import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
 import { createBulkWriter } from './bulk-writer.js';
 import type { UpstreamCallLog } from './read.js';
@@ -105,6 +105,8 @@ class FakeWriteAdapter implements WriteAdapter {
   bulkStatus(input: Parameters<WriteAdapter['bulkStatus']>[0]): Promise<BulkStatusOutcome> {
     this.statuses.push(input);
     return Promise.resolve(this.statusOutcome);
+  }  callOnce(): Promise<CallOutcome> {
+    return Promise.resolve({ result: 'not_sent', code: 'mapping', durationMs: 0 });
   }
 }
 

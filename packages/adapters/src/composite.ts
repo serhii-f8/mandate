@@ -7,6 +7,7 @@
 import type {
   BulkStatusOutcome,
   BulkSubmitOutcome,
+  CallOutcome,
   ConnectionSettings,
   CredentialSource,
   McpToolAdapter,
@@ -39,6 +40,7 @@ const isMcp = (connection: ConnectionSettings): boolean => connection.kind === '
 
 const readMismatch = (message: string): ReadOutcome & { ok: false } => ({ ok: false, code: 'mapping', durationMs: 0, message });
 const writeMismatch = (): WriteFailure => ({ ok: false, code: 'mapping', durationMs: 0, retriable: false });
+const callNotSent: CallOutcome = { result: 'not_sent', code: 'mapping', durationMs: 0 };
 
 export function createAdapters(deps: AdaptersDeps = {}): UpstreamAdapters {
   const instrumentation = deps.instrumentation === undefined ? {} : { instrumentation: deps.instrumentation };
@@ -69,6 +71,9 @@ export function createAdapters(deps: AdaptersDeps = {}): UpstreamAdapters {
     detectScopes: (input) => (isMcp(input.connection) ? Promise.resolve(NOT_DETECTABLE) : openapi.detectScopes(input)),
     submitBulk: (input): Promise<BulkSubmitOutcome> => (isMcp(input.connection) ? Promise.resolve(writeMismatch()) : openapi.submitBulk(input)),
     bulkStatus: (input): Promise<BulkStatusOutcome> => (isMcp(input.connection) ? Promise.resolve(writeMismatch()) : openapi.bulkStatus(input)),
+    // An MCP connection or target is not sent here yet; the MCP call path replaces this branch.
+    callOnce: (input): Promise<CallOutcome> =>
+      isMcp(input.connection) || input.target.kind === 'mcp' ? Promise.resolve(callNotSent) : openapi.callOnce(input),
     listTools: (input) => (isMcp(input.connection) ? mcp.listTools(input) : Promise.resolve(readMismatch('tool listing needs an mcp connection'))),
     callTool: (input) => (isMcp(input.connection) ? mcp.callTool(input) : Promise.resolve(readMismatch('a tool call needs an mcp connection'))),
   };

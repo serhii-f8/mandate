@@ -3,6 +3,8 @@ import {
   CONNECTOR_SDK_VERSION,
   CREDENTIAL_SCHEMES,
   type BulkMapping,
+  type CallOutcome,
+  type CallTarget,
   type ConnectionSettings,
   type ReadErrorCode,
   type ToolListOutcome,
@@ -10,6 +12,7 @@ import {
   type RequestInstrumentation,
   type UpstreamMapping,
   type UpstreamResolver,
+  type WriteAdapter,
   type WriteErrorCode,
 } from './index.js';
 
@@ -36,5 +39,14 @@ describe('NFR-18 connector SDK 0.6.0 is additive', () => {
       ((input: { connection: ConnectionSettings }) => Promise<ToolListOutcome>) | undefined
     >();
     expectTypeOf<'upstream_error'>().toExtend<ReadErrorCode>();
+  });
+  it('NFR-18 EXE-4 WriteAdapter.callOnce takes an HTTP or MCP target and answers codes only', () => {
+    expectTypeOf<CallTarget>().toEqualTypeOf<
+      { readonly kind: 'http'; readonly mapping: UpstreamMapping } | { readonly kind: 'mcp'; readonly tool: string }
+    >();
+    expectTypeOf<Parameters<WriteAdapter['callOnce']>[0]['target']>().toEqualTypeOf<CallTarget>();
+    expectTypeOf<Parameters<WriteAdapter['callOnce']>[0]['beforeSend']>().toEqualTypeOf<() => Promise<void>>();
+    expectTypeOf<CallOutcome['result']>().toEqualTypeOf<'accepted' | 'refused' | 'unknown' | 'not_sent'>();
+    expectTypeOf<CallOutcome['code']>().toEqualTypeOf<WriteErrorCode | undefined>();
   });
 });

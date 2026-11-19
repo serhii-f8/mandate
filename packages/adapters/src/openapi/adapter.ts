@@ -1,12 +1,14 @@
 /**
  * OpenAPI adapter facade (CONN-2, CONN-7, SEC-7): the spec resolver the configuration loader uses,
- * the read path the api uses, scope detection for the connection test, and the bulk write path the
- * worker uses (OPS-6, EXE-4).
+ * the read path the api uses, scope detection for the connection test, and the bulk and opaque write
+ * paths the worker uses (OPS-6, EXE-4).
  */
+import { validateHeaderName, validateHeaderValue } from 'node:http';
 import {
   parseSecret,
   type BulkStatusOutcome,
   type BulkSubmitOutcome,
+  type CallOutcome,
   type ConnectionSettings,
   type CredentialSource,
   type HttpMethod,
@@ -22,6 +24,7 @@ import {
 } from '@aiops/connector-sdk';
 import { createConnectionClient, createTransport, type ConnectionClient, type SendResult, type Transport } from '../http/client.js';
 import { createGuardedLookup } from '../http/egress.js';
+import { FORBIDDEN_HEADERS } from '../http/headers.js';
 import { clientCredentialsToken, lastTokenScopes } from '../http/oauth.js';
 import { buildBulkBody, extractBatchId, isSafeBatchId, mapBulkStatus } from './bulk.js';
 import { deriveCatalog } from './derive.js';
@@ -104,6 +107,39 @@ function classify(r: SendResult & { ok: false }, kind: 'submit' | 'status'): Wri
     return { ...base, code: retriable || kind === 'status' ? 'http_status' : 'rejected', retriable };
   }
   return { ...base, code: r.code, retriable: r.code === 'timeout' || r.code === 'network' || r.code === 'busy' };
+}
+
+const callNotSent: CallOutcome = { result: 'not_sent', code: 'mapping', durationMs: 0 };
+
+/** True when node would send every header as is; checked before the hook so a bad value records nothing. */
+function headersSendable(headers: Readonly<Record<string, string>>): boolean {
+  try {
+    for (const [name, value] of Object.entries(headers)) {
+      validateHeaderName(name);
+      validateHeaderValue(name, value);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Outcome of a failed opaque call (EXE-4, R10), codes only (SEC-3). A failure before the hook ran
+ * sent nothing. After it: a status decides (3xx and 5xx unknown, 4xx a refusal); an egress refusal
+ * at connect sent nothing (R4); timeouts, network errors and broken responses may have been applied.
+ */
+function classifyCall(r: SendResult & { ok: false }, hookRan: boolean): CallOutcome {
+  const { code, durationMs } = r;
+  if (!hookRan || code === 'egress_denied' || code === 'busy' || code === 'mapping' || code === 'credential_missing' || code === 'credential_unusable') {
+    return { result: 'not_sent', code, durationMs };
+  }
+  if (code === 'http_status' && r.status !== undefined) {
+    const status = r.status;
+    if (status >= 400 && status < 500) return { result: 'refused', code: 'rejected', status, durationMs };
+    return { result: 'unknown', code, status, durationMs };
+  }
+  return { result: 'unknown', code, ...(r.status === undefined ? {} : { status: r.status }), durationMs };
 }
 
 async function openSecret(
@@ -266,6 +302,41 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
     return { ok: true, items, durationMs: r.durationMs };
   }
 
-  return { resolver, read, detectScopes, submitBulk, bulkStatus };
+  async function callOnce(input: Parameters<WriteAdapter['callOnce']>[0]): Promise<CallOutcome> {
+    const { connection, target, args, credential, idempotencyKey, beforeSend } = input;
+    if (target.kind !== 'http') return callNotSent;
+    const { mapping } = target;
+    const { method, path } = mapping;
+    // An opaque call is a write sent once: never a GET, never a bulk submission (R9).
+    if (method === undefined || method === 'GET' || path === undefined || mapping.bulk !== undefined) return callNotSent;
+    let req: HttpRequestSpec;
+    try {
+      req = buildRequest(connection.baseUrl, { ...mapping, method, path }, args);
+    } catch (err) {
+      if (err instanceof MappingError) return callNotSent;
+      throw err;
+    }
+    const keyHeader = mapping.idempotency?.header.toLowerCase();
+    if (keyHeader !== undefined && idempotencyKey !== undefined) {
+      if (FORBIDDEN_HEADERS.has(keyHeader)) return callNotSent;
+      req.headers[keyHeader] = idempotencyKey;
+    }
+    if (!headersSendable(req.headers)) return callNotSent;
+    let hookRan = false;
+    const r = await clientOf(connection).send(req, {
+      retryable: false,
+      discardBody: true,
+      beforeSend: async () => {
+        await beforeSend();
+        hookRan = true;
+      },
+      ...(credential ? { credential } : {}),
+    });
+    // The body was discarded unread: any 2xx is accepted, whatever it carried (R10).
+    if (r.ok) return { result: 'accepted', status: r.status, durationMs: r.durationMs };
+    return classifyCall(r, hookRan);
+  }
+
+  return { resolver, read, detectScopes, submitBulk, bulkStatus, callOnce };
 }
 
