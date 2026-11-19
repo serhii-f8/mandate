@@ -193,7 +193,7 @@ class AppModule {
             return { connection, client };
           },
         },
-        { provide: AUDIT_LOG, inject: [DATABASE], useFactory: (d: Database) => new DrizzleAuditLog(d.db) },
+        { provide: AUDIT_LOG, inject: [DATABASE], useFactory: (d: Database) => new DrizzleAuditLog(d.db, { sensitiveKeys: () => configuration.current.sensitiveFields }) },
         {
           provide: CREDENTIAL_VAULT,
           inject: [DATABASE],

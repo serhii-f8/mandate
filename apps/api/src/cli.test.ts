@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
 import { InMemoryAuditLog, startFakeUpstream, type FakeUpstream } from '@aiops/testing';
 import { loadConfigurationDirectory } from '@aiops/config';
-import { runApiCli, type CliDeps, type CliStore } from './cli.js';
+import { runApiCli, type CliDeps, type CliStore, type StoreInput } from './cli.js';
 
 const DEV_CONFIG = fileURLToPath(new URL('../../../deploy/config', import.meta.url));
 const REPO_PRESETS = fileURLToPath(new URL('../../../presets', import.meta.url));
@@ -49,6 +49,7 @@ interface Run {
   readonly code: number;
   readonly lines: readonly string[];
   readonly audit: InMemoryAuditLog;
+  readonly storeInputs: readonly StoreInput[];
 }
 
 async function run(argv: string[], env: Record<string, string> = {}, stored = true): Promise<Run> {
@@ -56,21 +57,25 @@ async function run(argv: string[], env: Record<string, string> = {}, stored = tr
   const vault = new MemoryVault();
   if (stored) await vault.put({ ref: 'shop-token', scheme: 'bearer', secret: { token: TOKEN }, actor: 'setup' });
   const audit = new InMemoryAuditLog();
+  const storeInputs: StoreInput[] = [];
   const store: CliStore = {
     vault,
     audit,
-    rotate: () => Promise.reject(new Error('not used')),
+    rotate: () => Promise.resolve({ rewrapped: 0, onOldVersions: 0, failed: [] }),
     close: () => Promise.resolve(),
   };
   const deps: CliDeps = {
     env: { AIOPS_CONFIG_DIR: configDir, DATABASE_URL: 'postgres://u:p@h/db', AIOPS_MASTER_KEYS: 'x', ...env },
-    openStore: () => Promise.resolve(store),
+    openStore: (input) => {
+      storeInputs.push(input);
+      return Promise.resolve(store);
+    },
     newId: () => 'id-1',
     // Do not pick up the repository's presets directory in these tests.
     defaultPresetDir: null,
   };
   const code = await runApiCli(argv, (line) => lines.push(line), deps);
-  return { code, lines, audit };
+  return { code, lines, audit, storeInputs };
 }
 
 describe('CFG-3 aiops validate and test-connection', () => {
@@ -161,5 +166,24 @@ describe('CFG-3 aiops validate and test-connection', () => {
     expect(code2).toBe(2);
     expect(lines2.join('\n')).toMatch(/DATABASE_URL/);
     expect(lines2.join('\n')).not.toContain('not-a-url-secret-value');
+  });
+});
+
+describe('AUD-4 the CLI audit log gets the loaded configuration\'s sensitive keys', () => {
+  it('AUD-4 test-connection opens the store with the loaded configuration\'s sensitive fields', async () => {
+    const loaded = await loadConfigurationDirectory(configDir);
+    if (!loaded.ok) throw new Error('fixture configuration invalid');
+    const { code, storeInputs } = await run(['test-connection', 'shop']);
+    expect(code).toBe(0);
+    expect(storeInputs).toHaveLength(1);
+    expect(storeInputs[0]?.sensitiveKeys).toBeInstanceOf(Set);
+    expect([...(storeInputs[0]?.sensitiveKeys ?? [])]).toEqual([...loaded.configuration.sensitiveFields]);
+  });
+
+  it('AUD-4 rotate loads no configuration and opens the store without sensitive keys', async () => {
+    const { code, storeInputs } = await run(['credentials', 'rotate']);
+    expect(code).toBe(0);
+    expect(storeInputs).toHaveLength(1);
+    expect(storeInputs[0]).not.toHaveProperty('sensitiveKeys');
   });
 });

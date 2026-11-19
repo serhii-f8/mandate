@@ -127,7 +127,7 @@ export async function startWorkerRuntime(
       configuration,
       adapter,
       repository,
-      audit: new DrizzleAuditLog(database.db),
+      audit: new DrizzleAuditLog(database.db, { sensitiveKeys: () => configuration.current.sensitiveFields }),
       vault,
       tuning: env.activityTuning,
       logger,

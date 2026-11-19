@@ -1,5 +1,6 @@
-import { asc } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { AuditRedactionError } from '@aiops/core';
 import { startPostgres, type StartedPostgres } from '@aiops/testing';
 import { DrizzleAuditLog } from '../../src/audit-log.js';
 import { createDb, type Database } from '../../src/client.js';
@@ -108,5 +109,53 @@ describe('AUD-1 audit base schema', () => {
     for (const value of ['secret-actor-value', 'secret-correlation-value', 'secret-detail-value', event.id]) {
       expect(text).not.toContain(value);
     }
+  });
+});
+
+describe('AUD-4 audit details are redacted before insert', () => {
+  it('AUD-4 an appended row carries redacted details, with the configured sensitive keys', async () => {
+    const log = new DrizzleAuditLog(database.db, { sensitiveKeys: () => new Set(['cost']) });
+    const id = '00000000-0000-4000-8000-0000000000e1';
+    await log.append({
+      id,
+      actor: 'alice',
+      action: 'tool.call',
+      outcome: 'ok',
+      correlationId: 'corr-e1',
+      details: { token: 't', nested: { cost: 5 }, auth: 'Bearer x', count: 2 },
+    });
+    const [row] = await database.db.select().from(auditEvent).where(eq(auditEvent.id, id));
+    expect(row?.details).toEqual({ token: '[redacted]', nested: { cost: '[redacted]' }, auth: '[redacted]', count: 2 });
+  });
+
+  it('AUD-4 without configured keys the key pattern and value shapes still apply', async () => {
+    const log = new DrizzleAuditLog(database.db);
+    const id = '00000000-0000-4000-8000-0000000000e2';
+    await log.append({ id, actor: 'alice', action: 'tool.call', outcome: 'ok', correlationId: 'corr-e2', details: { password: 'p', cost: 5 } });
+    const [row] = await database.db.select().from(auditEvent).where(eq(auditEvent.id, id));
+    expect(row?.details).toEqual({ password: '[redacted]', cost: 5 });
+  });
+
+  it('AUD-4 reads the sensitive keys on every append, so a reload applies', async () => {
+    let keys: ReadonlySet<string> = new Set();
+    const log = new DrizzleAuditLog(database.db, { sensitiveKeys: () => keys });
+    const id = '00000000-0000-4000-8000-0000000000e3';
+    keys = new Set(['sku']);
+    await log.append({ id, actor: 'alice', action: 'tool.call', outcome: 'ok', correlationId: 'corr-e3', details: { sku: 'A-1' } });
+    const [row] = await database.db.select().from(auditEvent).where(eq(auditEvent.id, id));
+    expect(row?.details).toEqual({ sku: '[redacted]' });
+  });
+
+  it('AUD-4 details that cannot be redacted fail closed: AuditRedactionError and no row', async () => {
+    const log = new DrizzleAuditLog(database.db);
+    const id = '00000000-0000-4000-8000-0000000000e4';
+    const details: Record<string, unknown> = { note: 'secret-cyclic-value' };
+    details.self = details;
+    const failure = await log
+      .append({ id, actor: 'alice', action: 'tool.call', outcome: 'ok', correlationId: 'corr-e4', details })
+      .then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(AuditRedactionError);
+    expect((failure as Error).message).not.toContain('secret-cyclic-value');
+    expect(await database.db.select().from(auditEvent).where(eq(auditEvent.id, id))).toHaveLength(0);
   });
 });

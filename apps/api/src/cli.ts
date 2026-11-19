@@ -37,11 +37,18 @@ export interface CliStore {
   close(): Promise<void>;
 }
 
+export interface StoreInput {
+  readonly databaseUrl: string;
+  readonly masterKeys: string;
+  /** The loaded configuration's `sensitive_fields` for the store's audit log (AUD-4); absent when the command loads none. */
+  readonly sensitiveKeys?: ReadonlySet<string>;
+}
+
 export interface CliDeps {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly adapter?: OpenApiAdapter;
   /** Opens the database and vault; the default connects to PostgreSQL (already migrated). */
-  readonly openStore?: (input: { databaseUrl: string; masterKeys: string }) => Promise<CliStore>;
+  readonly openStore?: (input: StoreInput) => Promise<CliStore>;
   readonly newId?: () => string;
   /** Preset directory used when none is given and presets are declared; `null` for none. Defaults to `presets/` of the repository, when it exists next to the package. */
   readonly defaultPresetDir?: string | null;
@@ -131,7 +138,7 @@ async function validate(args: readonly string[], out: (line: string) => void, de
   return 0;
 }
 
-async function openStoreDefault(input: { databaseUrl: string; masterKeys: string }): Promise<CliStore> {
+async function openStoreDefault(input: StoreInput): Promise<CliStore> {
   const keys = parseMasterKeys(input.masterKeys);
   const database = createDb(input.databaseUrl, { onError: () => undefined });
   try {
@@ -142,7 +149,8 @@ async function openStoreDefault(input: { databaseUrl: string; masterKeys: string
     throw new CliError('cannot read the credential table: check DATABASE_URL, and start the api once so it applies the migrations', 1);
   }
   const vault = new PostgresCredentialVault(database.db, keys);
-  const audit = new DrizzleAuditLog(database.db);
+  const { sensitiveKeys } = input;
+  const audit = new DrizzleAuditLog(database.db, sensitiveKeys === undefined ? {} : { sensitiveKeys: () => sensitiveKeys });
   return {
     vault,
     audit,
@@ -151,10 +159,16 @@ async function openStoreDefault(input: { databaseUrl: string; masterKeys: string
   };
 }
 
-async function withStore<T>(deps: CliDeps, env: { DATABASE_URL: string; AIOPS_MASTER_KEYS: string }, action: (store: CliStore) => Promise<T>): Promise<T> {
+async function withStore<T>(
+  deps: CliDeps,
+  env: { DATABASE_URL: string; AIOPS_MASTER_KEYS: string },
+  sensitiveKeys: ReadonlySet<string> | undefined,
+  action: (store: CliStore) => Promise<T>,
+): Promise<T> {
   let store: CliStore;
   try {
-    store = await (deps.openStore ?? openStoreDefault)({ databaseUrl: env.DATABASE_URL, masterKeys: env.AIOPS_MASTER_KEYS });
+    const input = { databaseUrl: env.DATABASE_URL, masterKeys: env.AIOPS_MASTER_KEYS };
+    store = await (deps.openStore ?? openStoreDefault)(sensitiveKeys === undefined ? input : { ...input, sensitiveKeys });
   } catch (error) {
     if (error instanceof CliError) throw error;
     // parseMasterKeys errors carry the variable and an entry index only; anything else is unexpected.
@@ -178,7 +192,7 @@ async function testConnection(args: readonly string[], out: (line: string) => vo
   const adapter = deps.adapter ?? createOpenApiAdapter();
   const configuration = await loadChecked(env.AIOPS_CONFIG_DIR, presetDirsOf([], deps.env, deps), adapter, out);
   if (configuration === undefined) return 1;
-  return withStore(deps, env, async (store) => {
+  return withStore(deps, env, configuration.sensitiveFields, async (store) => {
     const newId = deps.newId ?? randomUUID;
     const service = new ConnectionTestService({ configuration: () => configuration, vault: store.vault, adapter, audit: store.audit, newId });
     const report = await service.run(connectionId, CLI_ACTOR, CLI_ACTOR, newId());
@@ -198,7 +212,7 @@ async function rotate(args: readonly string[], out: (line: string) => void, deps
     return 2;
   }
   const env = parseEnv({ DATABASE_URL: postgresUrl, AIOPS_MASTER_KEYS: nonEmpty }, deps.env);
-  return withStore(deps, env, async (store) => {
+  return withStore(deps, env, undefined, async (store) => {
     const result = await store.rotate(CLI_ACTOR, (deps.newId ?? randomUUID)());
     out(`rewrapped=${String(result.rewrapped)} on_old_versions=${String(result.onOldVersions)}`);
     // Refs are identifiers, not secrets. A row that cannot be opened with the configured keys needs the operator.
