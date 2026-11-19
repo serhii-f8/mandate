@@ -189,6 +189,10 @@ services:
       AIOPS_PREPARE_WAIT_MS: ${AIOPS_PREPARE_WAIT_MS:-20000}
       # Audit archive files written by retention and read by `aiops audit verify --archive` (AUD-7).
       AIOPS_AUDIT_ARCHIVE_DIR: /var/lib/aiops/audit-archive
+      # Traces (NFR-11): empty means no export; with `--profile observability` set http://jaeger:4318.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      # Prometheus text on GET /metrics (NFR-12); not published, scraped on the internal network.
+      AIOPS_METRICS_PORT: "9464"
     volumes:
       - ./config:/etc/aiops/config:ro
       - audit-archive:/var/lib/aiops/audit-archive
@@ -236,9 +240,21 @@ services:
       AIOPS_PUBLIC_URL: ${AIOPS_PUBLIC_URL:-http://localhost:8400}
       # Audit retention archives the sealed prefix here before deleting it (AUD-7).
       AIOPS_AUDIT_ARCHIVE_DIR: /var/lib/aiops/audit-archive
+      # Traces (NFR-11), as for api: empty means no export.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      # /healthz, /readyz and /metrics (NFR-10, NFR-12); not published.
+      AIOPS_WORKER_HTTP_PORT: "8081"
     volumes:
       - ./config:/etc/aiops/config:ro
       - audit-archive:/var/lib/aiops/audit-archive
+    # Ready means database, configuration and a polling Temporal worker (NFR-10). The path is matched
+    # exactly by the worker, so no query string.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8081/readyz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 20s
     restart: unless-stopped
 
   # Development SMTP sink only (NTF-1): catches every notification e-mail; the web UI and API
@@ -251,6 +267,16 @@ services:
       test: ["CMD", "/mailpit", "readyz"]
       interval: 3s
       retries: 30
+    restart: unless-stopped
+
+  # Optional trace backend (NFR-11), only with `--profile observability` (or COMPOSE_PROFILES).
+  # The UI is published on 127.0.0.1; OTLP (4318) stays on the internal network. Set
+  # OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 so api and worker export to it.
+  jaeger:
+    image: jaegertracing/jaeger:2.23.0
+    profiles: [observability]
+    ports:
+      - "127.0.0.1:${AIOPS_JAEGER_PORT:-16686}:16686"
     restart: unless-stopped
 
 volumes:

@@ -9,7 +9,11 @@
 #   group 3, configuration apply (CFG-3, CFG-4, AUD-1): config-diff, config-apply-live, config-audit;
 #   it grants dave (content_lead) catalog.search_products by editing the mounted roles.yaml, diffs and
 #   applies it with the CLI, explains it, and needs no restart of the api or the worker;
-#   group 4 (observability) is appended by the later Phase 8 plan.
+#   group 4, observability (NFR-10, NFR-11, NFR-12): obs-jaeger-up, obs-trace-prepared,
+#   obs-trace-workflow-run, obs-no-secrets, worker-readyz, api-readyz, metrics-names; it needs groups
+#   1 to 3 on the same stack (the rollback histogram bucket exists only after group 1's rollback on
+#   this worker process), so with AIOPS_ACCEPT8_GROUPS=4 alone metrics-names may FAIL. The stack runs
+#   with the Compose profile `observability` (Jaeger) and exports traces to it.
 # AIOPS_ACCEPT8_GROUPS selects the groups (default "1 2 3 4"); a selected group that is not
 # defined is a FAIL (ADR 0043).
 # Tests the committed HEAD (a fresh clone sees only commits), with a Compose override that joins
@@ -18,7 +22,8 @@
 # Not part of CI: needs the sandbox.
 # Secrets: the Magento token, access tokens and session cookies travel through variables, stdin
 # and the environment of node only, never through argv.
-# Needs: docker with compose v2, git, node, curl, and `pnpm install` in this checkout.
+# Needs: docker with compose v2 (pulls jaegertracing/jaeger:2.23.0 for group 4), git, node, curl,
+# and `pnpm install` in this checkout.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -31,6 +36,10 @@ SANDBOX="http://127.0.0.1:${AIOPS_MAGENTO_PORT:-4390}"
 free_port() { node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})"; }
 export AIOPS_API_PORT="$(free_port)" AIOPS_KEYCLOAK_PORT="$(free_port)" AIOPS_TEMPORAL_PORT="$(free_port)" AIOPS_POSTGRES_PORT="$(free_port)"
 export AIOPS_MAILPIT_PORT="$(free_port)"
+# Group 4: the optional trace backend runs on this stack, and api and worker export to it (NFR-11).
+# Exported before the trap, so `compose down -v` removes jaeger too.
+export COMPOSE_PROFILES=observability OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+export AIOPS_JAEGER_PORT="$(free_port)"
 export AIOPS_KEYCLOAK_PUBLIC_URL="http://localhost:${AIOPS_KEYCLOAK_PORT}"
 export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
 # Origin of the trusted pages and the base of the page links in tool results (MCP-6).
@@ -462,6 +471,177 @@ group_3() {
     pass config-audit "config.apply rows for $h2: $cnt by $actor; config.load ok from $services services; config explain → exit $explain_code: $(tr '\n' '|' <<<"$explain")"
   else
     fail config-audit "config.apply rows: $cnt by '$actor'; config.load services: $services; explain exit $explain_code: $(tr '\n' '|' <<<"$explain")"
+  fi
+}
+
+# ---- Group 4: observability (NFR-10, NFR-11, NFR-12) ---------------------------------------------
+# Runs last, on the same stack as groups 1 to 3 (ruling F16).
+
+JAEGER="http://127.0.0.1:${AIOPS_JAEGER_PORT}"
+# GET on a port inside a service's container (not published); prints the status, a space, the body.
+in_container() { compose exec -T "$1" node -e "fetch('http://127.0.0.1:$2$3').then(async (r) => console.log(r.status, await r.text()), (e) => { console.log('000', String(e)); process.exit(1); })" 2>&1; }
+# Summarises a Jaeger trace answer (file) against the correlation ID as JSON: the trace ID, the span
+# names found, whether RunActivity:prepare carries the ID, the http.request spans of aiops-worker.
+trace_summary() {
+  node -e '
+    const fs = require("fs");
+    try {
+      const body = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const traces = body.data ?? [];
+      const t = traces[0] ?? { spans: [], processes: {} };
+      const tag = (s, k) => (s.tags ?? []).find((x) => x.key === k)?.value;
+      const service = (s) => t.processes?.[s.processID]?.serviceName;
+      const names = [...new Set(t.spans.map((s) => s.operationName))].sort();
+      console.log(JSON.stringify({
+        traces: traces.length,
+        traceID: t.traceID ?? "",
+        names,
+        prepareTagged: t.spans.some((s) => s.operationName === "RunActivity:prepare" && tag(s, "aiops.correlation_id") === process.argv[2]),
+        workerHttp: t.spans.filter((s) => s.operationName === "http.request" && service(s) === "aiops-worker").length,
+      }));
+    } catch { console.log("{}"); }' "$1" "$2"
+}
+# yes when the summary has every span name in the list (space-separated).
+has_spans() { node -e 'try{const n=JSON.parse(process.argv[1]).names??[];console.log(process.argv[2].split(" ").every((x)=>n.includes(x))?"yes":"no")}catch{console.log("no")}' "$1" "$2"; }
+# Whether the metrics text (file) has a sample line starting with the prefix and containing every
+# further argument: yes|no.
+has_sample() {
+  local file="$1" prefix="$2" line
+  shift 2
+  while IFS= read -r line; do
+    [[ "$line" == "$prefix"* ]] || continue
+    local ok=yes part
+    for part in "$@"; do [[ "$line" == *"$part"* ]] || ok=no; done
+    [[ "$ok" == yes ]] && { echo yes; return 0; }
+  done <"$file"
+  echo no
+}
+
+group_4() {
+  local skus="UMBRELLA-0801,UMBRELLA-0802,UMBRELLA-0803,UMBRELLA-0804" stamp_4 args denied deadline services
+  local call cid cs status tags summary trace_id expected cancel leaks readyz body api_text worker_text missing
+
+  # 0. One call dave is not granted (no_grant), so aiops_policy_denials_total has a sample (F16).
+  stamp_4="$(stamp observability)"
+  args="$(cs_args "$skus" "$stamp_4")"
+  denied="$(dave_mcp catalog.update_content "$args")"
+
+  # 1. The trace backend answers (bounded).
+  deadline=$((SECONDS + 60))
+  while :; do
+    services="$(curl -sf --max-time 5 "$JAEGER/api/services" 2>/dev/null || true)"
+    [[ -n "$services" ]] && break
+    ((SECONDS >= deadline)) && break
+    sleep 2
+  done
+  if [[ -n "$services" ]]; then
+    pass obs-jaeger-up "GET $JAEGER/api/services → $services"
+  else
+    fail obs-jaeger-up "no answer from $JAEGER/api/services within 60 s"
+    return 0
+  fi
+
+  # 2. alice's write call parks in prepared; its trace is findable by the correlation ID before the
+  #    workflow closes, with the prepare activity and the upstream read (ruling R1).
+  call="$(alice_mcp catalog.update_content "$args")"
+  cid="$(json "$call" '.correlationId')"
+  cs="$(json "$call" '.structuredContent.changeset.id')"
+  [[ -n "$cs" ]] || cs="$(json "$call" '.structuredContent.changesetId')"
+  status="$(json "$call" '.structuredContent.changeset.status')"
+  [[ -n "$status" ]] || status="$(json "$call" '.structuredContent.status')"
+  if [[ "$status" == preparing && -n "$cs" ]]; then
+    poll_cs "$cs" '^[^p]|^prepared$' 120 || true
+    status="$POLL_STATUS"
+  fi
+  if [[ -z "$cid" || -z "$cs" || "$status" != prepared ]]; then
+    fail obs-trace-prepared "correlation=$cid changeset=$cs status=$status answer=${call:0:800}"
+    return 0
+  fi
+  tags="$(node -e 'console.log(encodeURIComponent(JSON.stringify({ "aiops.correlation_id": process.argv[1] })))' "$cid")"
+  expected="mcp.request mcp.tool_call StartWorkflow:changesetWorkflow StartActivity:prepare RunActivity:prepare http.request"
+  deadline=$((SECONDS + 30))
+  while :; do
+    curl -sf --max-time 5 "$JAEGER/api/traces?service=aiops-api&lookback=1h&limit=5&tags=$tags" >"$WORK/trace.json" 2>/dev/null || echo '{}' >"$WORK/trace.json"
+    summary="$(trace_summary "$WORK/trace.json" "$cid")"
+    [[ "$(json "$summary" '.traces')" == 1 && "$(has_spans "$summary" "$expected")" == yes && "$(json "$summary" '.prepareTagged')" == true &&
+      "$(json "$summary" '.workerHttp')" =~ ^[1-9] ]] && break
+    ((SECONDS >= deadline)) && break
+    sleep 2
+  done
+  trace_id="$(json "$summary" '.traceID')"
+  if [[ "$(json "$summary" '.traces')" == 1 && "$(has_spans "$summary" "$expected")" == yes && "$(json "$summary" '.prepareTagged')" == true &&
+    "$(json "$summary" '.workerHttp')" =~ ^[1-9] ]]; then
+    pass obs-trace-prepared "change-set $cs prepared; correlation $cid → trace $trace_id: $(json "$summary" '.names'); RunActivity:prepare tagged; http.request spans of aiops-worker: $(json "$summary" '.workerHttp')"
+  else
+    fail obs-trace-prepared "change-set $cs $status; correlation $cid; after 30 s: $summary"
+    return 0
+  fi
+
+  # 3. Cancelling the change-set closes the workflow; its RunWorkflow span joins the same trace (R1).
+  cancel="$(alice_mcp cancel_changeset "{\"changeset_id\":\"$cs\"}")"
+  deadline=$((SECONDS + 30))
+  while :; do
+    curl -sf --max-time 5 "$JAEGER/api/traces/$trace_id" >"$WORK/trace.json" 2>/dev/null || echo '{}' >"$WORK/trace.json"
+    summary="$(trace_summary "$WORK/trace.json" "$cid")"
+    [[ "$(has_spans "$summary" "RunWorkflow:changesetWorkflow")" == yes ]] && break
+    ((SECONDS >= deadline)) && break
+    sleep 2
+  done
+  if [[ "$(json "$cancel" '.structuredContent.changeset.status')" == cancelled && "$(has_spans "$summary" "RunWorkflow:changesetWorkflow")" == yes ]]; then
+    pass obs-trace-workflow-run "cancel_changeset → cancelled; trace $trace_id: $(json "$summary" '.names')"
+  else
+    fail obs-trace-workflow-run "cancel=${cancel:0:600}; after 30 s: $summary"
+  fi
+
+  # 4. The trace carries no secret and no argument value (SEC-3): not the Magento token, not the
+  #    string authorization (any case), not the description, a SKU or the brand of the call.
+  #    The token reaches node through its environment only.
+  leaks="$(MAGENTO_TOKEN="$TOKEN" node -e '
+    const text = require("fs").readFileSync(process.argv[1], "utf8");
+    const found = [];
+    if (process.env.MAGENTO_TOKEN && text.includes(process.env.MAGENTO_TOKEN)) found.push("magento-token");
+    if (/authorization/i.test(text)) found.push("authorization");
+    for (const v of process.argv.slice(2)) if (text.includes(v)) found.push(JSON.stringify(v));
+    console.log(text.length < 100 ? "trace-missing" : found.join(",") || "none");' "$WORK/trace.json" "$stamp_4" umbrella ${skus//,/ } 2>&1)"
+  if [[ "$leaks" == none ]]; then
+    pass obs-no-secrets "trace $trace_id ($(wc -c <"$WORK/trace.json" | tr -d ' ') bytes): no token, no authorization, no argument value"
+  else
+    fail obs-no-secrets "trace $trace_id contains: $leaks"
+  fi
+
+  # 5. Readiness inside the containers (ports not published): the worker and the api report Temporal ok (NFR-10, F6).
+  readyz="$(in_container worker 8081 /readyz || true)"
+  body="${readyz#* }"
+  if [[ "${readyz%% *}" == 200 && "$(json "$body" '.temporal')" == ok ]]; then
+    pass worker-readyz "worker GET 127.0.0.1:8081/readyz → $readyz"
+  else
+    fail worker-readyz "$readyz"
+  fi
+  readyz="$(in_container api 8080 /readyz || true)"
+  body="${readyz#* }"
+  if [[ "${readyz%% *}" == 200 && "$(json "$body" '.temporal')" == ok ]]; then
+    pass api-readyz "api GET 127.0.0.1:8080/readyz → $readyz"
+  else
+    fail api-readyz "$readyz"
+  fi
+
+  # 6. All six metric names, scraped inside the containers (NFR-12).
+  api_text="$WORK/api-metrics.txt"
+  worker_text="$WORK/worker-metrics.txt"
+  in_container api 9464 /metrics >"$api_text" || true
+  in_container worker 8081 /metrics >"$worker_text" || true
+  missing=""
+  [[ "$(has_sample "$api_text" 'aiops_tool_calls_total{' 'tool="catalog.update_content"')" == yes ]] || missing+=" aiops_tool_calls_total{tool=catalog.update_content}"
+  [[ "$(has_sample "$api_text" 'aiops_policy_denials_total{' 'reason="no_grant"')" == yes ]] || missing+=" aiops_policy_denials_total{reason=no_grant}"
+  [[ "$(has_sample "$worker_text" 'aiops_changesets{')" == yes ]] || missing+=" aiops_changesets"
+  [[ "$(has_sample "$worker_text" 'aiops_batch_duration_seconds_bucket{' 'phase="execute"')" == yes ]] || missing+=" aiops_batch_duration_seconds_bucket{phase=execute}"
+  [[ "$(has_sample "$worker_text" 'aiops_batch_duration_seconds_bucket{' 'phase="rollback"')" == yes ]] || missing+=" aiops_batch_duration_seconds_bucket{phase=rollback}"
+  [[ "$(has_sample "$worker_text" 'aiops_upstream_requests_total{')" == yes ]] || missing+=" aiops_upstream_requests_total"
+  [[ "$(has_sample "$worker_text" 'aiops_upstream_request_duration_seconds_bucket{')" == yes ]] || missing+=" aiops_upstream_request_duration_seconds_bucket"
+  if [[ -z "$missing" ]]; then
+    pass metrics-names "dave catalog.update_content → isError $(json "$denied" '.isError'); api: $(grep -cE '^aiops_(tool_calls|policy_denials)_total\{' "$api_text") samples of aiops_tool_calls_total and aiops_policy_denials_total; worker: $(grep -cE '^aiops_(changesets|batch_duration_seconds_bucket|upstream_requests_total|upstream_request_duration_seconds_bucket)\{' "$worker_text") samples of the other four names"
+  else
+    fail metrics-names "missing:$missing; dave answer ${denied:0:400}; api $(head -c 300 "$api_text" | tr '\n' ' '); worker $(head -c 300 "$worker_text" | tr '\n' ' ')"
   fi
 }
 
