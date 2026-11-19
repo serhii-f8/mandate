@@ -6,7 +6,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { createSchemaCompiler } from '@aiops/config';
 import { CHANGESET_TEXT, READ_RESULT_TEXT, type DeriveRefusal } from '@aiops/core';
-import { excludeItems, type ExclusionDeps } from '../changesets/exclusions.js';
+import { excludableIn, excludeItems, type ExclusionDeps } from '../changesets/exclusions.js';
 import { preparedAnswer, toCallToolResult } from '../changesets/results.js';
 import { notFound } from './changeset-tools.js';
 import type { BuiltinTool } from './tool-catalog.js';
@@ -51,6 +51,8 @@ function refusal(id: string, r: DeriveRefusal): { code: string; result: CallTool
         code: r.reason,
         result: error(`${String(r.count)} of the named items cannot be changed: exclude only included items, include only items you excluded.`),
       };
+    case 'not_excludable':
+      return { code: r.reason, result: error(`Change-set ${id} is a single upstream call; it has no items to exclude.`) };
     case 'nothing_left':
       return { code: r.reason, result: error('Excluding these items would leave nothing to change.') };
   }
@@ -66,12 +68,20 @@ export function excludeChangesetItemsTool(deps: ExclusionDeps): BuiltinTool {
     // It creates a change-set, so clients must not treat it as a pure read.
     readOnlyHint: false,
     validate: createSchemaCompiler()(EXCLUDE_SCHEMA),
-    async handler(args, { caller, correlationId, report }): Promise<CallToolResult> {
+    async handler(args, { caller, correlationId, report, snapshot }): Promise<CallToolResult> {
       // `validate` guarantees the shape.
       const sourceId = args.changeset_id as string;
       const exclude = (args.exclude as string[] | undefined) ?? [];
       const include = (args.include as string[] | undefined) ?? [];
-      const outcome = await excludeItems(deps, { sourceId, hash: args.hash as string, exclude, include, caller, correlationId });
+      const outcome = await excludeItems(deps, {
+        sourceId,
+        hash: args.hash as string,
+        exclude,
+        include,
+        caller,
+        correlationId,
+        excludable: excludableIn(snapshot),
+      });
       if (!outcome.ok) {
         const { code, result } = refusal(sourceId, outcome);
         report({ errorCode: code });

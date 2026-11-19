@@ -26,7 +26,7 @@ const alice: Caller = { subject: 'alice', clientId: 'aiops-mcp', groups: ['conte
 const bob: Caller = { subject: 'bob', groups: ['content'] };
 
 /** A source of three pending items and one `not_found` exclusion, owned by alice, in `stage`. */
-async function setup(options: { expiresAt?: Date; stage?: ChangeSetStatus } = {}) {
+async function setup(options: { expiresAt?: Date; stage?: ChangeSetStatus; risk?: 'write' | 'write_opaque' } = {}) {
   const repository = new InMemoryChangeSetRepository(new InMemoryAuditLog());
   const event = { id: 'a0', actor: 'alice', action: 'changeset.transition' as const, outcome: 'ok' as const, correlationId: 'c0', details: {} };
   await repository.create(
@@ -73,8 +73,8 @@ async function setup(options: { expiresAt?: Date; stage?: ChangeSetStatus } = {}
   const reported: AuditDetails[] = [];
   const ctx = (caller: Caller) => ({
     caller,
-    // The tool reads nothing from the snapshot.
-    snapshot: undefined as never,
+    // The tool reads only the operations' risk and manifest from the snapshot.
+    snapshot: { configuration: { policy: { operations: [{ id: 'catalog.update_content', risk: options.risk ?? 'write', manifest: {} }] } } } as never,
     correlationId: 'corr-6',
     tasks: false,
     report: (d: AuditDetails) => {
@@ -184,6 +184,18 @@ describe('MCP-8 CS-5 exclude_changeset_items', () => {
       expect(reportedAll()).toEqual({ errorCode: c.code });
       expect(started).toEqual([]);
     });
+  });
+
+  it('CS-5 exclude_changeset_items refuses an opaque change-set', async () => {
+    const { tool, ctx, reportedAll, started } = await setup({ risk: 'write_opaque' });
+    const result = plain(await tool.handler({ changeset_id: SOURCE, hash: HASH, exclude: ['SECRET-T1'] }, ctx(alice)));
+    expect(result).toEqual({
+      isError: true,
+      content: [{ type: 'text', text: `Change-set ${SOURCE} is a single upstream call; it has no items to exclude.` }],
+      structuredContent: { changesetId: SOURCE },
+    });
+    expect(reportedAll()).toEqual({ errorCode: 'not_excludable' });
+    expect(started).toEqual([]);
   });
 
   it('MCP-6 a refusal after the requester check names the source change-set; not_found names none', async () => {

@@ -38,10 +38,12 @@ export interface DeriveRequest {
   readonly include: readonly string[];
   readonly caller: Caller;
   readonly correlationId: string;
+  /** Whether the source's operation has items to exclude; an opaque operation does not (CS-5, design §2). */
+  readonly excludable: (operationId: string) => boolean;
 }
 
 export type DeriveRefusal =
-  | { readonly reason: 'not_found' | 'expired' | 'hash_mismatch' | 'invalid_request' | 'empty_request' | 'nothing_left' }
+  | { readonly reason: 'not_found' | 'not_excludable' | 'expired' | 'hash_mismatch' | 'invalid_request' | 'empty_request' | 'nothing_left' }
   | { readonly reason: 'not_prepared'; readonly status: ChangeSetStatus }
   | { readonly reason: 'unknown_items'; readonly count: number };
 
@@ -66,6 +68,7 @@ export async function deriveChangeSet(deps: DeriveDeps, req: DeriveRequest): Pro
   // 1. Unknown and foreign change-sets look the same (SEC-1).
   const source = await repository.get(req.sourceId);
   if (source?.requester !== caller.subject) return { ok: false, reason: 'not_found' };
+  if (!req.excludable(source.operation)) return { ok: false, reason: 'not_excludable' };
 
   // 2. Lazy expiry (CS-6): a miss means someone else moved it first; it is past its expiry either way.
   const now = deps.now();

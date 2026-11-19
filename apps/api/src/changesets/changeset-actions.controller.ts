@@ -36,7 +36,7 @@ import { snapshotOf } from '../mcp/tool-pipeline.js';
 import { API_ENV, AUDIT_LOG, CHANGESET_EXECUTOR, CHANGESET_REPOSITORY, CONFIGURATION, LOGGER, PAGE_CHECKS, SUBMIT_SERVICE, WORKFLOW_STARTER } from '../tokens.js';
 import { PageAccess, pageDenial, pageOf, type PageChecks, type PageRequest } from '../web/access.js';
 import { pageCorrelation } from '../web/correlation.js';
-import { excludeItems } from './exclusions.js';
+import { excludableIn, excludeItems } from './exclusions.js';
 import { eligibilityDeps } from './rollback.js';
 import type { SubmitOutcome, SubmitService } from './submit-service.js';
 
@@ -208,7 +208,15 @@ export class ChangeSetActionsController {
           this.logger.warn({ changesetId, err: e instanceof Error ? e.name : 'unknown' }, 'workflow start after derivation failed');
         },
       },
-      { sourceId: c.changeset.id, hash: c.body.hash, exclude, include, caller: c.caller, correlationId: c.correlationId },
+      {
+        sourceId: c.changeset.id,
+        hash: c.body.hash,
+        exclude,
+        include,
+        caller: c.caller,
+        correlationId: c.correlationId,
+        excludable: excludableIn(snapshotOf(this.configuration.current)),
+      },
     );
     if (!outcome.ok) {
       await this.refuseExclusion(c.refuser, outcome);
@@ -235,6 +243,7 @@ export class ChangeSetActionsController {
       case 'not_prepared':
         return refuser(notPrepared(refusal.status));
       case 'not_found':
+      case 'not_excludable':
       case 'expired':
       case 'hash_mismatch':
       case 'empty_request':
