@@ -10,11 +10,14 @@
  */
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import {
   BatchFenced,
   type ExecutionGuard,
   type ItemOutcome,
   type ReadPage,
+  ROLLBACK_REQUEST_MARGIN_MS,
+  rollbackRequestEvents,
   type UpstreamReader,
 } from '@aiops/core';
 import { CHANGESET_WORKFLOW, PROGRESS_QUERY, WAKE_SIGNAL, type WorkflowProgress } from '@aiops/temporal';
@@ -78,6 +81,48 @@ function signalWithStart(infra: Infra, worker: TestWorker, changesetId: string):
     args: [{ changesetId }],
     signal: WAKE_SIGNAL,
     signalArgs: [],
+  });
+}
+
+const WINDOW_1H = { rollbackWindowHours: 1 };
+
+/** Waits until execution has finished and the rollback window is open (observable state). */
+async function windowOpen(infra: Infra, changesetId: string, status = 'completed'): Promise<void> {
+  await waitFor(`the rollback window after ${status}`, async () => {
+    const cs = await infra.repository.get(changesetId);
+    return cs?.status === status && cs.rollbackUntil !== undefined;
+  });
+}
+
+/** Stores a rollback request and wakes the workflow, as the executor's request does (EXE-8). */
+async function requestRollback(infra: Infra, worker: TestWorker, changesetId: string): Promise<void> {
+  const cs = await infra.repository.get(changesetId);
+  if (cs === undefined) throw new Error('change-set not found');
+  const request = { actor: 'alice', correlationId: 'corr-rollback', requestedAt: new Date() };
+  const requested = await infra.repository.requestRollback({
+    changesetId,
+    request,
+    marginMs: ROLLBACK_REQUEST_MARGIN_MS,
+    audit: rollbackRequestEvents({ newId: randomUUID, changeset: cs, request, channel: 'page', count: cs.stats.written }),
+  });
+  if (!requested.ok) throw new Error(`rollback request refused: ${requested.reason}`);
+  await worker.executor.wake(changesetId);
+}
+
+/** Completed with a one-hour window, then rolled back; returns the history fetched by `beforeRequest`. */
+async function completedThenRolledBack(
+  infra: Infra,
+  items: number,
+  beforeRequest?: (handle: WorkflowHandle<typeof changesetWorkflow>) => Promise<History>,
+): Promise<History[]> {
+  const cs = await createPrepared(infra.repository, items, { execute: {} });
+  return withWorker(infra, { settings: WINDOW_1H }, async (worker) => {
+    const handle = await signalWithStart(infra, worker, cs.id);
+    await windowOpen(infra, cs.id);
+    const parked = beforeRequest === undefined ? [] : [await beforeRequest(handle)];
+    await requestRollback(infra, worker, cs.id);
+    await expectResult(handle, 'rolled_back');
+    return [...parked, await handle.fetchHistory()];
   });
 }
 
@@ -426,6 +471,114 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
     async run(infra) {
       const writer = { writeBatch: (): Promise<readonly ItemOutcome[]> => Promise.reject(new BatchFenced()) };
       return { 'executor-error': await executeToEnd(infra, { writer }, 2, 'failed') };
+    },
+  },
+
+  /** Parked in the rollback window after completion (history fetched while the timer runs), then rolled back. */
+  'rollback-window-parked': {
+    files: ['rollback-window-parked'],
+    async run(infra) {
+      const [parked] = await completedThenRolledBack(infra, 3, async (handle) => {
+        await waitFor('the window timer', async () => {
+          const events = (await handle.fetchHistory()).events ?? [];
+          return events.at(-1)?.timerStartedEventAttributes != null;
+        });
+        const progress = await handle.query<WorkflowProgress>(PROGRESS_QUERY);
+        if (progress.status !== 'completed') throw new Error(`parked in ${progress.status}, expected completed`);
+        return handle.fetchHistory();
+      });
+      if (parked === undefined) throw new Error('no parked history');
+      return { 'rollback-window-parked': parked };
+    },
+  },
+
+  /** Completed, rollback requested in the window, compensation finishes rolled_back (EXE-8). */
+  'rolled-back': {
+    files: ['rolled-back'],
+    async run(infra) {
+      const [history] = await completedThenRolledBack(infra, 3);
+      if (history === undefined) throw new Error('no history');
+      return { 'rolled-back': history };
+    },
+  },
+
+  /** A run cancelled after batch 0 keeps its window; the rollback restores what it wrote (EXE-7, EXE-8). */
+  'rolled-back-cancelled': {
+    files: ['rolled-back-cancelled'],
+    async run(infra) {
+      const writer = new ScriptedWriter();
+      const paused = writer.pauseAt(0);
+      const cs = await createPrepared(infra.repository, 4, { execute: {} });
+      return withWorker(infra, { writer, settings: WINDOW_1H }, async (worker) => {
+        const handle = await signalWithStart(infra, worker, cs.id);
+        await paused.reached;
+        const stored = await infra.repository.requestCancel(cs.id, { actor: 'bob', correlationId: 'corr-cancel', requestedAt: new Date() });
+        if (!stored.ok) throw new Error('cancel not stored');
+        paused.release();
+        await windowOpen(infra, cs.id, 'cancelled');
+        await requestRollback(infra, worker, cs.id);
+        await expectResult(handle, 'rolled_back');
+        return { 'rolled-back-cancelled': await handle.fetchHistory() };
+      });
+    },
+  },
+
+  /** The 15 s window closes by its timer without a request: the run ends completed. */
+  'rollback-window-closed': {
+    files: ['rollback-window-closed'],
+    async run(infra) {
+      const cs = await createPrepared(infra.repository, 3, { execute: {} });
+      return withWorker(infra, { settings: { rollbackWindowHours: 15 / 3600 } }, async (worker) => {
+        const handle = await signalWithStart(infra, worker, cs.id);
+        await expectResult(handle, 'completed');
+        const history = await handle.fetchHistory();
+        if (!history.events?.some((e) => e.timerFiredEventAttributes != null)) throw new Error('the window timer did not fire');
+        return { 'rollback-window-closed': history };
+      });
+    },
+  },
+
+  /** The rollback writer fails every attempt of its first batch: failed/rollback_writer_error (EXE-8). */
+  'rollback-failed': {
+    files: ['rollback-failed'],
+    async run(infra) {
+      const rollbackWriter = new ScriptedWriter();
+      rollbackWriter.throwAt(0);
+      const cs = await createPrepared(infra.repository, 4, { execute: {} });
+      return withWorker(infra, { rollbackWriter, settings: WINDOW_1H }, async (worker) => {
+        const handle = await signalWithStart(infra, worker, cs.id);
+        await windowOpen(infra, cs.id);
+        await requestRollback(infra, worker, cs.id);
+        await expectResult(handle, 'failed');
+        const record = await infra.repository.get(cs.id);
+        if (record?.errorCode !== 'rollback_writer_error') throw new Error(`errorCode ${String(record?.errorCode)}`);
+        return { 'rollback-failed': await handle.fetchHistory() };
+      });
+    },
+  },
+
+  /** 200 items, batch 50, 100 per run: execution spans runs 1-2, compensation continues as new in run 2 and ends in run 3. */
+  'rollback-continued': {
+    files: ['rollback-continued-run2', 'rollback-continued-run3'],
+    async run(infra) {
+      const cs = await createPrepared(infra.repository, 200, { execute: {} });
+      return withWorker(infra, { settings: { batchSize: 50, itemsPerRun: 100, rollbackWindowHours: 1 } }, async (worker) => {
+        const handle = await signalWithStart(infra, worker, cs.id);
+        await windowOpen(infra, cs.id);
+        await requestRollback(infra, worker, cs.id);
+        await expectResult(handle, 'rolled_back');
+        const nextRun = (h: History): string => {
+          const next = h.events?.at(-1)?.workflowExecutionContinuedAsNewEventAttributes?.newExecutionRunId;
+          if (next === undefined || next === null) throw new Error('run did not continue as new');
+          return next;
+        };
+        const run1 = await infra.client.workflow.getHandle(cs.id, handle.signaledRunId).fetchHistory();
+        const run2 = await infra.client.workflow.getHandle(cs.id, nextRun(run1)).fetchHistory();
+        const run3 = await infra.client.workflow.getHandle(cs.id, nextRun(run2)).fetchHistory();
+        const last = run3.events?.at(-1);
+        if (last?.workflowExecutionCompletedEventAttributes == null) throw new Error('third run did not complete (more than three runs?)');
+        return { 'rollback-continued-run2': run2, 'rollback-continued-run3': run3 };
+      });
     },
   },
 };

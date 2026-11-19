@@ -39,6 +39,8 @@ function converterFor(type: string): DataConverter | undefined {
  * activity (the wake condition in `prepared` and in `pending_approval`, the prepare-retry pause, the
  * expire-retry pause), completed per code path (also after approval), failed, cancelled, rejected and
  * expired (also in `pending_approval`, and after a return and a resubmission), one per continue-as-new run.
+ * The rollback patch: parked in the window, rolled back after completion and after a cancel, window
+ * closed by the timer, a failed rollback, one per continue-as-new run of a rollback.
  */
 const REQUIRED_CHANGESET_FIXTURES = [
   'parked-prepared',
@@ -62,7 +64,21 @@ const REQUIRED_CHANGESET_FIXTURES = [
   'rejected-while-pending',
   'returned-resubmitted-expired',
   'expired-pending-approval',
+  'rollback-window-parked',
+  'rolled-back',
+  'rolled-back-cancelled',
+  'rollback-window-closed',
+  'rollback-failed',
+  'rollback-continued-run2',
+  'rollback-continued-run3',
 ];
+
+/**
+ * SDK-internal payloads that never pass the codec and carry only the patch id (`{id, deprecated}`):
+ * the `core_patch` marker's `patch-data` and the `TemporalChangeVersion` search attribute. Skipped by
+ * the SEC-4 walk; the patch id is not workflow data.
+ */
+const PATCH_METADATA_KEYS = new Set(['patch-data', 'TemporalChangeVersion']);
 
 /** Every payload's `metadata.encoding` in a history JSON (base64 in the proto JSON form), decoded. */
 function payloadEncodings(node: unknown): string[] {
@@ -70,6 +86,7 @@ function payloadEncodings(node: unknown): string[] {
   if (node === null || typeof node !== 'object') return [];
   const found: string[] = [];
   for (const [key, value] of Object.entries(node) as [string, unknown][]) {
+    if (PATCH_METADATA_KEYS.has(key)) continue;
     if (key === 'metadata' && value !== null && typeof value === 'object') {
       const encoding: unknown = (value as { encoding?: unknown }).encoding;
       if (typeof encoding === 'string') found.push(Buffer.from(encoding, 'base64').toString('utf8'));
