@@ -1,5 +1,15 @@
 /** Domain model, policy evaluation, manifest engine and diff. Free of frameworks, drivers and adapters. */
 export type { AuditAction, AuditDecision, AuditEventInput, AuditLog, AuditOutcome } from './audit.js';
+export {
+  AUDIT_CHAIN_FORMAT,
+  auditRowHash,
+  checkLink,
+  GENESIS_HASH,
+  type ChainBreak,
+  type ChainHead,
+  type ChainRow,
+  type SealedChainRow,
+} from './audit/chain.js';
 export { ANONYMOUS_CALLER, type Caller } from './caller.js';
 export { toolCallAuditEvent, type ToolCallRecord } from './tool-call-audit.js';
 export type {
