@@ -5,7 +5,7 @@
  * the catalog entries and listed MCP tools nothing binds as disabled operations.
  */
 import type { CatalogEntry, HttpMethod, UpstreamMapping } from '@aiops/connector-sdk';
-import type { DisabledOperation, OperationDefinition } from '@aiops/core';
+import { isOpaque, type DisabledOperation, type OperationDefinition } from '@aiops/core';
 import type { ArgumentValidator } from './argument-validators.js';
 import { pathToString } from './issues.js';
 import type { OverrideConfig, PresetOperationConfig } from './schema.js';
@@ -262,19 +262,29 @@ export function buildRegistry(input: RegistryInput): Registry {
     }
 
     const binding = bindingOf(connection, op, u, entry);
+    const { definition, enabled } = definitionOf(located, schema);
+    const opaque = isOpaque(definition);
     // A non-GET call labelled read would skip the change-set path (MCP-4).
     const method = binding?.mapping.method ?? u.method;
+    const methodAt = [u.method === undefined ? 'operation' : 'method'];
     if (op.risk === 'read' && method !== undefined && method !== 'GET') {
       at(source, [...path, 'risk'], 'read operations must use GET; writes need change-sets');
     }
+    // OPS-1: an opaque call is sent once as a write; a GET would be a read without a change-set.
+    if (opaque && method === 'GET') upstreamAt(methodAt, 'must not be GET for a write without a manifest');
+    // EXE-4: only an opaque call is resent with its key; a manifest write has its own submission record.
+    if (u.idempotency !== undefined && !opaque) {
+      upstreamAt(['idempotency'], 'is allowed only on write_opaque operations and destructive operations without a manifest');
+    }
     if (u.bulk !== undefined) {
       if (op.risk !== 'write' && op.risk !== 'destructive') upstreamAt(['bulk'], 'is allowed on write and destructive operations only');
+      // A bulk binding writes per record, which needs the manifest's items (OPS-6).
+      else if (opaque) upstreamAt(['bulk'], 'requires a manifest');
       if (method !== undefined && method !== 'POST' && method !== 'PUT') {
-        upstreamAt([u.method === undefined ? 'operation' : 'method'], 'must be POST or PUT for a bulk binding');
+        upstreamAt(methodAt, 'must be POST or PUT for a bulk binding');
       }
       for (const ref of templateArgs(u)) upstreamAt(ref.path, 'cannot reference arguments in a bulk binding');
     }
-    const { definition, enabled } = definitionOf(located, schema);
     all.set(op.id, { definition, located, enabled, schemaKnown, ...(validator === undefined ? {} : { validator }) });
 
     if (enabled) {
@@ -360,6 +370,7 @@ function bindingOf(connection: string, op: PresetOperationConfig, u: UpstreamCon
       path: entry.path,
       response: u.response === undefined ? base.response : toResponse(u.response),
       ...(u.bulk === undefined ? {} : { bulk: toBulkMapping(u.bulk) }),
+      ...(u.idempotency === undefined ? {} : { idempotency: { header: u.idempotency.header } }),
     },
   };
 }

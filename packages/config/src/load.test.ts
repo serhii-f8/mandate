@@ -283,6 +283,26 @@ describe('CFG-2 APR-3 POL-5 approval configuration', () => {
     expect(result.ok, JSON.stringify(result.ok ? [] : result.issues)).toBe(true);
   });
 
+  it('POL-5 a write_opaque grant needs an approval step unless required: never', async () => {
+    const SEND = `version: 1
+operations:
+  - id: mail.send
+    connection: magento
+    risk: write_opaque
+    description: Send.
+    upstream: { method: POST, path: /V1/send }
+    input_schema: { type: object, properties: { to: { type: string } } }
+`;
+    const granted = (roles: string): string => roles.replace('    grants:\n', '    grants:\n      - { operation: mail.send }\n');
+    const message = 'needs at least one step: a write or destructive grant requires approval by default (set steps, or required: never for write operations)';
+    const refused = issues(await load({ 'send.yaml': SEND, 'roles.yaml': granted(ROLES) }));
+    expect(refused).toEqual([expect.objectContaining({ path: 'roles[0].approval', message })]);
+    const never = await load({ 'send.yaml': SEND, 'roles.yaml': granted(withApproval('{ required: never }')) });
+    expect(never.ok, JSON.stringify(never.ok ? [] : never.issues)).toBe(true);
+    const stepped = await load({ 'send.yaml': SEND, 'roles.yaml': granted(withApproval('{ steps: [{ role: content_manager }] }')) });
+    expect(stepped.ok, JSON.stringify(stepped.ok ? [] : stepped.issues)).toBe(true);
+  });
+
   it('approver_role is no longer accepted', async () => {
     const found = issues(await load({ 'roles.yaml': withApproval('{ approver_role: content_manager }') }));
     expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval' }));

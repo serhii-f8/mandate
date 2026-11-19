@@ -135,7 +135,8 @@ describe('MCP-9 overridden tool name', () => {
   it('MCP-9 tools/list shows the override name and a call by it reaches the operation', async () => {
     const client = await connectClient({ era: 'modern', baseUrls: [api.url], token: bob });
     try {
-      expect((await client.listTools()).tools.map((t) => t.name)).toEqual([...BUILTIN_NAMES, 'support.find_order']);
+      // bob's role is the approval step of content_manager (POL-5), so he also reviews change-sets.
+      expect((await client.listTools()).tools.map((t) => t.name)).toEqual([...BUILTIN_NAMES, 'review_changeset', 'support.find_order']);
     } finally {
       await client.close();
     }

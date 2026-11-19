@@ -145,10 +145,13 @@ export type BulkConfig = z.output<typeof bulkSchema>;
 
 /**
  * Headers the platform sets itself. `authorization`, `proxy-authorization` and `cookie` are
- * caught by the CFG-5 key scan. Keep in step with `FORBIDDEN_HEADERS` in
+ * caught by the CFG-5 key scan when they are keys of `headers`; `idempotency.header` names a
+ * header in a value, so it is checked against `CREDENTIAL_HEADERS` too. Keep in step with `FORBIDDEN_HEADERS` in
  * `@aiops/adapters` (src/http/headers.ts); this package cannot import the adapters.
  */
 const PLATFORM_HEADERS: ReadonlySet<string> = new Set(['host', 'content-length', 'transfer-encoding', 'connection']);
+/** Headers that carry credentials (SEC-2): the platform's own, never a configured value. */
+const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set(['authorization', 'proxy-authorization', 'cookie']);
 
 /** The HTTP mapping of an operation of an `openapi` connection. */
 export const httpUpstreamSchema = z
@@ -162,6 +165,8 @@ export const httpUpstreamSchema = z
     body: templateValue.optional(),
     response: responseSchema.optional(),
     bulk: bulkSchema.optional(),
+    /** EXE-4: the header of the idempotency key of an opaque write. */
+    idempotency: z.strictObject({ header: headerName }).optional(),
   })
   .superRefine((u, ctx) => {
     const byPath = u.method !== undefined || u.path !== undefined;
@@ -174,6 +179,15 @@ export const httpUpstreamSchema = z
     if (u.bulk !== undefined && u.body !== undefined) ctx.addIssue({ code: 'custom', path: ['body'], message: 'is not allowed together with bulk' });
     for (const name of Object.keys(u.headers ?? {})) {
       if (PLATFORM_HEADERS.has(name.toLowerCase())) ctx.addIssue({ code: 'custom', path: ['headers', name], message: 'is set by the platform' });
+    }
+    if (u.idempotency !== undefined) {
+      const header = u.idempotency.header.toLowerCase();
+      if (PLATFORM_HEADERS.has(header) || CREDENTIAL_HEADERS.has(header)) {
+        ctx.addIssue({ code: 'custom', path: ['idempotency', 'header'], message: 'is set by the platform' });
+      } else if (Object.keys(u.headers ?? {}).some((name) => name.toLowerCase() === header)) {
+        ctx.addIssue({ code: 'custom', path: ['idempotency', 'header'], message: 'is already declared in headers' });
+      }
+      if (u.bulk !== undefined) ctx.addIssue({ code: 'custom', path: ['idempotency'], message: 'is not allowed together with bulk' });
     }
   });
 /** Alias of `httpUpstreamSchema`, kept for existing importers (new code uses the new name). */
@@ -295,6 +309,7 @@ export function toUpstreamMapping(u: UpstreamConfig): UpstreamMapping {
     ...(u.body === undefined ? {} : { body: toTemplate(u.body) }),
     response: toResponse(u.response),
     ...(u.bulk === undefined ? {} : { bulk: toBulkMapping(u.bulk) }),
+    ...(u.idempotency === undefined ? {} : { idempotency: { header: u.idempotency.header } }),
   };
 }
 

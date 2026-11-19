@@ -1,6 +1,7 @@
 version: 1
 roles:
   - id: content_manager
+    approval: { steps: [{ role: support_agent }] }
     grants:
       - operation: catalog.search_products
         id: own-brands

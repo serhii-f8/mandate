@@ -558,25 +558,64 @@ describe('POL-3 field rules and projection use the same argument', () => {
   });
 });
 
-describe('OPS-6 bulk bindings', () => {
-  it('OPS-6 a bulk binding is allowed on a destructive operation', async () => {
-    const BULK = `version: 1
+describe('OPS-1 EXE-4 bindings of opaque operations', () => {
+  const opaque = (risk: string, upstream: string): string => `version: 1
 operations:
-  - id: shop.retire_items
+  - id: shop.send
     connection: shop
-    risk: destructive
-    description: Retire items.
+    risk: ${risk}
+    description: Send.
     upstream:
-      method: POST
-      path: /async/bulk/items
-      bulk:
-        body: { wrap: item }
-        batch_id: bulk_uuid
-        status: { method: GET, path: '/bulk/{batch_id}/status', items: ops, index: id, state: status, states: { ok: [1], retriable: [2], failed: [3], open: [4] } }
+${upstream}
     input_schema: { type: object, properties: { skus: { type: array, items: { type: string } } } }
 `;
-    const result = await sources({ 'retire.yaml': BULK });
-    expect(result.ok, JSON.stringify(result.ok ? [] : result.issues)).toBe(true);
+  const POST = '      method: POST\n      path: /send';
+  const BULK = `      bulk:
+        body: { wrap: item }
+        batch_id: bulk_uuid
+        status: { method: GET, path: '/bulk/{batch_id}/status', items: ops, index: id, state: status, states: { ok: [1], retriable: [2], failed: [3], open: [4] } }`;
+  const GET_MESSAGE = 'must not be GET for a write without a manifest';
+
+  it('OPS-1 a write_opaque OpenAPI binding must not be GET', async () => {
+    const byMethod = issues(await sources({ 'send.yaml': opaque('write_opaque', '      method: GET\n      path: /send') }));
+    expect(byMethod).toEqual([expect.objectContaining({ path: 'operations[0].upstream.method', message: GET_MESSAGE })]);
+    const destructive = issues(await sources({ 'send.yaml': opaque('destructive', '      method: GET\n      path: /send') }));
+    expect(destructive).toEqual([expect.objectContaining({ path: 'operations[0].upstream.method', message: GET_MESSAGE })]);
+    const loaded = await sources({ 'send.yaml': opaque('write_opaque', POST) });
+    expect(loaded.ok, JSON.stringify(loaded.ok ? [] : loaded.issues)).toBe(true);
+  });
+
+  it('OPS-1 a write_opaque binding derived from a GET spec operation is refused at upstream.operation', async () => {
+    const dir = await fixture('derived', {
+      'config.yaml': (await readFile(join(FIXTURES, 'derived', 'config.yaml'), 'utf8')).replace('risk: read', 'risk: write_opaque'),
+    });
+    const found = issues(await loadConfigurationDirectory(dir, { resolver: resolver() }));
+    expect(found).toEqual([expect.objectContaining({ path: 'operations[0].upstream.operation', message: GET_MESSAGE })]);
+  });
+
+  it('OPS-1 a destructive operation without a manifest cannot have bulk', async () => {
+    const found = issues(await sources({ 'send.yaml': opaque('destructive', `${POST}\n${BULK}`) }));
+    expect(found).toEqual([expect.objectContaining({ path: 'operations[0].upstream.bulk', message: 'requires a manifest' })]);
+  });
+
+  it('EXE-4 idempotency is allowed only on opaque operations', async () => {
+    const IDEMPOTENT = `${POST}\n      idempotency: { header: Idempotency-Key }`;
+    for (const risk of ['write_opaque', 'destructive']) {
+      const config = ok(await sources({ 'send.yaml': opaque(risk, IDEMPOTENT) }));
+      expect(httpBinding(config, 'shop.send').mapping.idempotency).toEqual({ header: 'Idempotency-Key' });
+    }
+    const dir = await fixture('derived', {
+      'config.yaml': (await readFile(join(FIXTURES, 'derived', 'config.yaml'), 'utf8'))
+        .replace('risk: read\n    description: Get one item.', 'risk: write_opaque\n    description: Delete one item.')
+        .replace('upstream: { operation: getItem }', 'upstream: { operation: deleteItem, idempotency: { header: Idempotency-Key } }'),
+    });
+    const derived = ok(await loadConfigurationDirectory(dir, { resolver: resolver() }));
+    expect(httpBinding(derived, 'shop.get_item').mapping).toMatchObject({ method: 'DELETE', idempotency: { header: 'Idempotency-Key' } });
+    const read = SEARCH.replace('      path: /items\n', '      path: /items\n      idempotency: { header: Idempotency-Key }\n');
+    const found = issues(await sources({ 'search.yaml': read }));
+    expect(found).toEqual([
+      expect.objectContaining({ path: 'operations[0].upstream.idempotency', message: 'is allowed only on write_opaque operations and destructive operations without a manifest' }),
+    ]);
   });
 });
 

@@ -98,3 +98,30 @@ describe('OPS-6 bulk mapping', () => {
     expect(issuesOf({ method: 'POST', path: '/p', bulk: { ...bulk, status: { ...bulk.status, extra: 1 } } })).not.toEqual([]);
   });
 });
+
+describe('EXE-4 idempotency header', () => {
+  it('EXE-4 NFR-18 idempotency maps to UpstreamMapping.idempotency', () => {
+    expect(toUpstreamMapping(parse({ method: 'POST', path: '/p', idempotency: { header: 'Idempotency-Key' } }))).toEqual({
+      method: 'POST',
+      path: '/p',
+      pathParams: {},
+      query: {},
+      headers: {},
+      response: { maxItems: 100 },
+      idempotency: { header: 'Idempotency-Key' },
+    });
+    expect(Object.hasOwn(toUpstreamMapping(parse({ method: 'POST', path: '/p' })), 'idempotency')).toBe(false);
+    expect(issuesOf({ method: 'POST', path: '/p', idempotency: { header: 'Idempotency-Key', extra: 1 } })).not.toEqual([]);
+    expect(issuesOf({ method: 'POST', path: '/p', idempotency: { header: 'not a header' } })).not.toEqual([]);
+  });
+
+  it('SEC-2 idempotency cannot name a platform or credential header', () => {
+    const withHeader = (header: string, extra: Record<string, unknown> = {}) => ({ method: 'POST', path: '/p', idempotency: { header }, ...extra });
+    for (const header of ['Authorization', 'cookie', 'Host', 'Proxy-Authorization', 'CONTENT-LENGTH']) {
+      expect(issuesOf(withHeader(header))).toEqual([['idempotency.header', 'is set by the platform']]);
+    }
+    expect(issuesOf(withHeader('x-request-key', { headers: { 'X-Request-Key': 'fixed' } }))).toEqual([['idempotency.header', 'is already declared in headers']]);
+    const bulk = { batch_id: 'id', status: { path: '/s/{batch_id}', items: 'l', index: 'i', state: 's', states: { ok: [1], open: [2] } } };
+    expect(issuesOf(withHeader('Idempotency-Key', { bulk }))).toEqual([['idempotency', 'is not allowed together with bulk']]);
+  });
+});

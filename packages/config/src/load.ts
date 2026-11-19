@@ -484,7 +484,8 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       return risk === undefined ? [] : [risk];
     });
     const destructive = risks.includes('destructive');
-    const writes = destructive || risks.includes('write');
+    // write_opaque counts as a write: without steps its calls could never be approved.
+    const writes = destructive || risks.includes('write') || risks.includes('write_opaque');
     const stepless = (approval?.steps ?? []).length === 0;
     if (writes && stepless && (destructive || approval?.required !== 'never')) {
       const message = 'needs at least one step: a write or destructive grant requires approval by default (set steps, or required: never for write operations)';

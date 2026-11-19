@@ -47,4 +47,9 @@ export interface UpstreamMapping {
   response: ResponseMapping;
   /** since 0.3.0, additive */
   bulk?: BulkMapping;
+  /**
+   * since 0.6.0, additive. Header that carries the idempotency key of an opaque write
+   * (`<changeset-id>:call`), so a call whose outcome is unknown can be resent (EXE-4).
+   */
+  idempotency?: { header: string };
 }
