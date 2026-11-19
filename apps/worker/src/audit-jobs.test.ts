@@ -1,7 +1,7 @@
 import type { RetentionReport, SealResult } from '@aiops/db';
 import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAuditJobs, type AuditJobsDeps } from './audit-jobs.js';
+import { AUDIT_SEAL_MAX_ROUNDS, createAuditJobs, type AuditJobsDeps } from './audit-jobs.js';
 
 interface LogLine {
   readonly level: 'info' | 'warn' | 'error';
@@ -63,6 +63,51 @@ describe('AUD-3 audit sealer job', () => {
     await vi.advanceTimersByTimeAsync(200);
     expect(calls).toBe(5);
     await jobs.stop();
+  });
+
+  it('AUD-3 a full batch is followed by another seal in the same tick until a partial one', async () => {
+    const results = [3, 3, 3, 1];
+    let calls = 0;
+    const seal = (): Promise<SealResult> => {
+      const sealed = results[calls] ?? 0;
+      calls += 1;
+      return Promise.resolve({ sealed, locked: false });
+    };
+    const jobs = createAuditJobs(deps({ seal, sealBatchSize: 3 })).start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(4);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(calls).toBe(5);
+    await jobs.stop();
+  });
+
+  it('AUD-3 a backlog drain is bounded per tick and ends on an error', async () => {
+    let calls = 0;
+    const jobs = createAuditJobs(
+      deps({
+        seal: () => {
+          calls += 1;
+          return Promise.resolve({ sealed: 3, locked: false });
+        },
+        sealBatchSize: 3,
+      }),
+    ).start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(AUDIT_SEAL_MAX_ROUNDS);
+    await jobs.stop();
+    let failing = 0;
+    const second = createAuditJobs(
+      deps({
+        seal: () => {
+          failing += 1;
+          return failing === 2 ? Promise.reject(new Error('x')) : Promise.resolve({ sealed: 3, locked: false });
+        },
+        sealBatchSize: 3,
+      }),
+    ).start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(failing).toBe(2);
+    await second.stop();
   });
 
   it('AUD-3 stop waits for the running pass and starts no other', async () => {

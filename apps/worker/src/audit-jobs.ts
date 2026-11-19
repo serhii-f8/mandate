@@ -1,4 +1,4 @@
-import type { RetentionReport, SealResult } from '@aiops/db';
+import { SEAL_BATCH, type RetentionReport, type SealResult } from '@aiops/db';
 import type { Logger } from 'pino';
 
 /** Pause between two sealing rounds (design §2). */
@@ -11,8 +11,13 @@ export interface AuditJobsDeps {
   readonly retain: () => Promise<RetentionReport>;
   readonly logger: Pick<Logger, 'info' | 'warn' | 'error'>;
   readonly sealIntervalMs?: number;
+  /** Rows per seal call; a result at this size means a backlog (default `SEAL_BATCH`). */
+  readonly sealBatchSize?: number;
   readonly retentionIntervalMs?: number;
 }
+
+/** Most seal calls in one tick, so a stop is honoured within a bounded time under a long backlog. */
+export const AUDIT_SEAL_MAX_ROUNDS = 100;
 
 /** The thrown value's class name; the message may carry row content and is never logged (SEC-3). */
 function errorName(error: unknown): string {
@@ -24,7 +29,7 @@ function errorName(error: unknown): string {
  * notification dispatcher: `stop()` cuts the pause short, waits for a running pass and starts no
  * other. `pass` must not throw.
  */
-function repeat(intervalMs: number, pass: () => Promise<void>): { stop(): Promise<void> } {
+function repeat(intervalMs: number, pass: (stopping: () => boolean) => Promise<void>): { stop(): Promise<void> } {
   // An object, so the loop re-reads the flag that stop() sets across the awaits.
   const state: { stopping: boolean; timer?: ReturnType<typeof setTimeout>; wake?: () => void } = { stopping: false };
   const pause = (): Promise<void> =>
@@ -34,7 +39,7 @@ function repeat(intervalMs: number, pass: () => Promise<void>): { stop(): Promis
     });
   const loop = (async () => {
     do {
-      await pass();
+      await pass(() => state.stopping);
       if (!state.stopping) await pause();
     } while (!state.stopping);
   })();
@@ -59,9 +64,15 @@ export function createAuditJobs(deps: AuditJobsDeps): { start(): { stop(): Promi
   const retentionIntervalMs = deps.retentionIntervalMs ?? AUDIT_RETENTION_INTERVAL_MS;
   const { logger } = deps;
 
-  async function sealOnce(): Promise<void> {
+  const batchSize = deps.sealBatchSize ?? SEAL_BATCH;
+
+  /** Seals while the last call filled a batch (a backlog), at most `AUDIT_SEAL_MAX_ROUNDS` times. */
+  async function sealOnce(stopping: () => boolean): Promise<void> {
     try {
-      await deps.seal();
+      for (let round = 0; round < AUDIT_SEAL_MAX_ROUNDS; round += 1) {
+        const result = await deps.seal();
+        if (result.sealed < batchSize || stopping()) return;
+      }
     } catch (error) {
       logger.error({ error: errorName(error) }, 'audit seal failed');
     }
