@@ -70,6 +70,14 @@ describe('CONN-1 CFG-2 MCP-backed operations in configuration', () => {
     expect(issuesOf(result)).toEqual([{ path: 'operations[0].upstream', message: 'unknown key: method' }]);
   });
 
+  it('CFG-2 pin with method and path is the tool variant: tool is required, method and path are unknown keys', async () => {
+    const result = await load({ 'ops.yaml': operations(ECHO.replace(`tool: echo, pin: ${PIN} }`, `pin: ${PIN}, method: GET, path: /items }`)) });
+    expect(issuesOf(result)).toEqual([
+      { path: 'operations[0].upstream.tool', message: 'is required' },
+      { path: 'operations[0].upstream', message: 'unknown keys: method, path' },
+    ]);
+  });
+
   it('CFG-2 a tool name outside MCP_TOOL_NAME is refused at upstream.tool', async () => {
     const result = await load({ 'ops.yaml': operations(ECHO.replace('tool: echo', "tool: 'bad name'")) });
     expect(issuesOf(result)).toEqual([{ path: 'operations[0].upstream.tool', message: 'has an invalid format' }]);
@@ -87,6 +95,19 @@ describe('CONN-1 CFG-2 MCP-backed operations in configuration', () => {
     expect(issuesOf(result)).toEqual([{ path: 'operations[0].upstream', message: 'an operation of an mcp connection needs upstream: { tool, pin }' }]);
   });
 
+  it('CFG-2 after the HTTP-upstream issue on an mcp connection no HTTP rule runs, and grants still find the operation', async () => {
+    const op = `  - id: tools.post
+    connection: tools
+    risk: read
+    description: Post.
+    upstream: { method: POST, path: '/items/{id}' }
+    input_schema: { type: object }
+`;
+    const roles = 'version: 1\nroles:\n  - id: viewer\n    grants:\n      - { operation: tools.post }\n';
+    const result = await load({ 'ops.yaml': operations(op), 'roles.yaml': roles });
+    expect(issuesOf(result)).toEqual([{ path: 'operations[0].upstream', message: 'an operation of an mcp connection needs upstream: { tool, pin }' }]);
+  });
+
   it('CFG-2 { tool, pin } on an openapi connection is refused at upstream.tool', async () => {
     const op = ECHO.replace('id: tools.echo', 'id: shop.echo').replace('connection: tools', 'connection: shop');
     const result = await load({ 'shop.yaml': SHOP, 'ops.yaml': operations(op) });
@@ -95,21 +116,23 @@ describe('CONN-1 CFG-2 MCP-backed operations in configuration', () => {
 
   it('CFG-2 risk write on an MCP-backed operation is refused at risk', async () => {
     const result = await load({ 'ops.yaml': operations(ECHO.replace('risk: read', 'risk: write')) });
-    expect(issuesOf(result)).toContainEqual({
-      path: 'operations[0].risk',
-      message: 'write needs a manifest, which MCP-backed operations cannot carry (use read, write_opaque or destructive)',
-    });
+    expect(issuesOf(result)).toEqual([
+      {
+        path: 'operations[0].risk',
+        message: 'write needs a manifest, which MCP-backed operations cannot carry (use read, write_opaque or destructive)',
+      },
+    ]);
   });
 
   it('CFG-2 a manifest on an MCP-backed operation is refused at manifest', async () => {
     const op = `${ECHO.replace('risk: read', 'risk: destructive')}    manifest: { id_field: sku, ids_arg: skus, values_arg: values, fields: [name], read_before: { operation: tools.echo, ids_arg: skus }, rollback: { strategy: none } }\n`;
     const result = await load({ 'ops.yaml': operations(op) });
-    expect(issuesOf(result)).toContainEqual({ path: 'operations[0].manifest', message: 'is not allowed on an MCP-backed operation' });
+    expect(issuesOf(result)).toEqual([{ path: 'operations[0].manifest', message: 'is not allowed on an MCP-backed operation' }]);
   });
 
   it('CFG-2 fields_arg on an MCP-backed operation is refused at fields_arg', async () => {
     const result = await load({ 'ops.yaml': operations(`${ECHO}    fields_arg: fields\n`) });
-    expect(issuesOf(result)).toContainEqual({ path: 'operations[0].fields_arg', message: 'is not allowed on an MCP-backed operation' });
+    expect(issuesOf(result)).toEqual([{ path: 'operations[0].fields_arg', message: 'is not allowed on an MCP-backed operation' }]);
   });
 
   it('CFG-2 a second operation on the same (connection, tool) is refused at upstream.tool', async () => {

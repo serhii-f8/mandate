@@ -7,6 +7,7 @@ import type { ManifestDefinition, ManifestRead, ManifestTemplate, RollbackStrate
 import { z } from 'zod';
 import type { At, RegisteredOperation } from './registry.js';
 import { propertiesOf, requiredOf } from './registry.js';
+import { isMcpUpstream } from './mcp.js';
 import { operationId } from './upstream-schema.js';
 
 const name = z.string().min(1).max(128);
@@ -140,6 +141,8 @@ export function checkManifests(input: ManifestCheckInput): void {
   const { all, at } = input;
   for (const op of all.values()) {
     const { value, source, path } = op.located;
+    // An MCP-backed operation carries no manifest; the registry already refused one (ADR 0050 decision 7).
+    if (isMcpUpstream(value.upstream)) continue;
     const manifest = value.manifest;
     const mAt = (sub: readonly PropertyKey[], message: string): void => {
       at(source, [...path, 'manifest', ...sub], message);

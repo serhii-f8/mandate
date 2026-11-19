@@ -2,7 +2,7 @@
  * The operation registry (design part 1 §3.2, §3.3, §5; OPS-1, MCP-9, CONN-2): turns
  * configured and preset operations into enabled operation definitions, input
  * validators and upstream bindings, applies overrides, checks tool names and lists
- * the catalog entries nothing enables as disabled operations.
+ * the catalog entries and listed MCP tools nothing binds as disabled operations.
  */
 import type { CatalogEntry, HttpMethod, UpstreamMapping } from '@aiops/connector-sdk';
 import type { DisabledOperation, OperationDefinition } from '@aiops/core';
@@ -11,7 +11,7 @@ import { pathToString } from './issues.js';
 import type { OverrideConfig, PresetOperationConfig } from './schema.js';
 import type { SourceDocument } from './yaml-source.js';
 import { toManifestDefinition } from './manifest.js';
-import { isMcpUpstream, type McpUpstreamConfig } from './mcp.js';
+import { isMcpUpstream, type McpCatalogState, type McpUpstreamConfig } from './mcp.js';
 import { hasTemplates, pathPlaceholders, templateArgs, toBulkMapping, toResponse, toUpstreamMapping, type UpstreamConfig } from './upstream-schema.js';
 
 export interface Located<T> {
@@ -80,6 +80,8 @@ export interface RegistryInput {
   readonly operations: readonly OperationSource[];
   readonly overrides: readonly Located<OverrideConfig>[];
   readonly catalogs: ReadonlyMap<string, CatalogState>;
+  /** The tool list of each `mcp` connection at load (CONN-1); listed tools nothing binds become disabled entries. */
+  readonly mcpCatalogs?: ReadonlyMap<string, McpCatalogState>;
   readonly connectionIds: ReadonlySet<string>;
   /** The adapter of each defined connection: decides which `upstream` variant its operations need. */
   readonly connectionKinds: ReadonlyMap<string, 'openapi' | 'mcp'>;
@@ -162,6 +164,16 @@ export function buildRegistry(input: RegistryInput): Registry {
     }
   };
 
+  /** An operation whose upstream is refused: its definition only, no binding. */
+  const registerUnbound = (located: OperationSource): void => {
+    const { value: op, source, path } = located;
+    const explicit = op.input_schema !== undefined;
+    const schema: Readonly<Record<string, unknown>> = op.input_schema ?? PLACEHOLDER_SCHEMA;
+    const validator = explicit ? compileAt(schema, source, [...path, 'input_schema'], true) : undefined;
+    const { definition, enabled } = definitionOf(located, schema);
+    all.set(op.id, { definition, located, enabled, schemaKnown: explicit, ...(validator === undefined ? {} : { validator }) });
+  };
+
   for (const located of input.operations) {
     const { value: op, source, path, connection } = located;
     const u = op.upstream;
@@ -184,7 +196,13 @@ export function buildRegistry(input: RegistryInput): Registry {
       registerMcp(located, u);
       continue;
     }
-    if (kind === 'mcp') upstreamAt([], 'an operation of an mcp connection needs upstream: { tool, pin }');
+    if (kind === 'mcp') {
+      upstreamAt([], 'an operation of an mcp connection needs upstream: { tool, pin }');
+      // None of the HTTP rules below applies to an MCP connection: registered without a binding, so
+      // grants naming it are not also reported as naming an undefined operation.
+      registerUnbound(located);
+      continue;
+    }
 
     // Resolve `upstream.operation` against the connection's catalog.
     let entry: CatalogEntry | undefined;
@@ -294,6 +312,15 @@ export function buildRegistry(input: RegistryInput): Registry {
         ...(e.operationId === undefined ? {} : { operationId: e.operationId }),
         ...(e.summary === undefined ? {} : { summary: e.summary }),
       });
+    }
+  }
+
+  // Listed MCP tools no operation binds, enabled or disabled, are registered as disabled (CONN-1).
+  for (const [connection, catalog] of input.mcpCatalogs ?? []) {
+    if (catalog.status !== 'listed') continue;
+    for (const tool of catalog.tools) {
+      if (boundTools.has(`${connection}\0${tool.name}`)) continue;
+      disabled.push({ key: `${connection}.${tool.name}`, connection, method: 'MCP', path: tool.name, tool: tool.name, hash: tool.hash });
     }
   }
 

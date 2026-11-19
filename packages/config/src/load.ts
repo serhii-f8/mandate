@@ -13,6 +13,7 @@ import { createSchemaCompiler, type ArgumentValidator } from './argument-validat
 import { pathToString, type ConfigIssue } from './issues.js';
 import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN, DEFAULT_ROLLBACK_WINDOW_HOURS } from './manifest.js';
 import { readSpecFile, resolvePreset, type LoadedPreset } from './presets.js';
+import { toMcpCatalog, type McpCatalogState } from './mcp.js';
 import { buildRegistry, propertiesOf, sentArguments, type CatalogState, type Located, type OperationBinding, type OperationSource } from './registry.js';
 import {
   configDocumentSchema,
@@ -67,6 +68,11 @@ export interface LoadedConfiguration {
   readonly connectionSettings: ReadonlyMap<string, ConnectionSettings>;
   /** CONN-4: seconds between pin checks, per `mcp` connection only. */
   readonly pinCheckSeconds: ReadonlyMap<string, number>;
+  /**
+   * CONN-1, CONN-4: the tool list of each `mcp` connection at load. It only seeds pin states
+   * and the disabled list: it never adds an issue and is not part of `hash` (ADR 0051 item 1).
+   */
+  readonly mcpCatalogs: ReadonlyMap<string, McpCatalogState>;
   /** CONN-7: the read operation and arguments that test a connection. */
   readonly connectionTests: ReadonlyMap<string, { readonly operation: string; readonly args: Readonly<Record<string, unknown>> }>;
   /** Credential reference → its scheme and the connections and webhook notifications that use it (SEC-2). */
@@ -116,6 +122,8 @@ export interface LoadOptions {
    * `loadConfigurationDirectory`; defaults to the working directory.
    */
   readonly baseDir?: string;
+  /** Clock for `listedAt` of the MCP tool catalogs; defaults to `Date.now`. */
+  readonly now?: () => number;
 }
 
 const YAML_FILE = /\.ya?ml$/i;
@@ -332,11 +340,27 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     }
   }
 
+  // MCP tool lists (CONN-1): never an issue, so every process loads a revision identically (R1).
+  const now = options.now ?? Date.now;
+  const resolveTools = options.resolver?.resolveTools?.bind(options.resolver);
+  const mcpCatalogs = new Map<string, McpCatalogState>(
+    await Promise.all(
+      [...states.values()]
+        .filter((state) => state.located.value.adapter === 'mcp')
+        .map(async ({ settings }): Promise<readonly [string, McpCatalogState]> => {
+          if (resolveTools === undefined) return [settings.id, { status: 'skipped' }];
+          return [settings.id, toMcpCatalog(await resolveTools({ connection: settings }), now())];
+        }),
+    ),
+  );
+  if (resolveTools === undefined && mcpCatalogs.size > 0) specChecksSkipped = true;
+
   const compile = createSchemaCompiler();
   const registry = buildRegistry({
     operations: [...operationById.values()],
     overrides,
     catalogs,
+    mcpCatalogs,
     connectionIds: new Set(connectionById.keys()),
     connectionKinds: new Map([...connectionById].map(([id, c]) => [id, c.value.adapter] as const)),
     operationsIncomplete,
@@ -516,6 +540,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       pinCheckSeconds: new Map(
         [...connectionById].flatMap(([id, { value: c }]) => (c.adapter === 'mcp' ? [[id, c.pin_check_seconds] as const] : [])),
       ),
+      mcpCatalogs,
       connectionTests,
       credentialRefs,
       credentialManagers,
