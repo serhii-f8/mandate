@@ -1,0 +1,15 @@
+version: 1
+roles:
+  - id: support_agent
+    grants:
+      - operation: tools.echo
+  - id: content_manager
+    grants:
+      - operation: tools.lookup
+        id: own-keys
+        scope: { key: [k1] }
+role_mapping:
+  - group: support
+    roles: [support_agent]
+  - group: content
+    roles: [content_manager]

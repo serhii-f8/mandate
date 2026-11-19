@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { ProtocolError, type CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
 import type { AuditEventInput, Caller, DenyReason, OperationDefinition, PolicyDecision, RateCounter, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
+import { createSchemaCompiler, loadConfigurationSources, type LoadedConfiguration, type PinEvaluation } from '@aiops/config';
+import type { UpstreamToolView } from '@aiops/upstream';
 import {
   FakeInvoker,
   InMemoryAuditLog,
@@ -877,5 +878,93 @@ describe('NFR-12 tool call metrics', () => {
     }
     expect(actions(observed.audit.events)).toEqual(['policy.decision:allow', 'tool.call:ok', 'policy.decision:deny']);
     expect(observed.audit.events).toEqual(plainRun.audit.events);
+  });
+});
+
+const MCP_PIN = `sha256:${'b'.repeat(64)}`;
+const MCP_SOURCES = {
+  'connections.yaml': `version: 1
+connections:
+  - { id: tools, adapter: mcp, mcp_url: http://tools.example.test/mcp }
+`,
+  'operations.yaml': `version: 1
+operations:
+  - { id: tools.echo, connection: tools, risk: read, description: Echo a message back., upstream: { tool: echo, pin: '${MCP_PIN}' } }
+`,
+  'roles.yaml': `version: 1
+roles:
+  - id: support_agent
+    grants:
+      - { operation: tools.echo }
+role_mapping:
+  - { group: support, roles: [support_agent] }
+`,
+};
+const mcpLoaded = await loadConfigurationSources(Object.entries(MCP_SOURCES).map(([file, text]) => ({ file, text })));
+if (!mcpLoaded.ok) throw new Error(JSON.stringify(mcpLoaded.issues));
+const MCP_LOADED: LoadedConfiguration = mcpLoaded.configuration;
+const DERIVED = { type: 'object', properties: { message: { type: 'string' } }, additionalProperties: false };
+
+/** A tool view answering one evaluation; records refreshes and touches. */
+function toolView(evaluation: PinEvaluation): UpstreamToolView & { touched: string[][]; refreshed: string[] } {
+  const touched: string[][] = [];
+  const refreshed: string[] = [];
+  return {
+    touched,
+    refreshed,
+    view: () => evaluation,
+    current: (_c, id) => {
+      refreshed.push(id);
+      return Promise.resolve(evaluation);
+    },
+    touch: (_c, ids) => {
+      touched.push([...ids]);
+    },
+  };
+}
+
+const OK: PinEvaluation = { state: 'ok', liveHash: MCP_PIN, inputSchema: DERIVED, validator: createSchemaCompiler()(DERIVED) };
+
+describe('CONN-4 MCP-backed operations in the pipeline', () => {
+  it('CONN-4 without a tool view an MCP-backed operation is never listed (fail closed)', async () => {
+    const { deps, req } = setupWith(MCP_LOADED, new FakeInvoker());
+    expect((await listTools(deps, req(bob))).map((t) => t.name)).toEqual(['ping']);
+  });
+
+  it('CONN-4 an ok operation is listed with the derived schema and its connection is touched (R9)', async () => {
+    const view = toolView(OK);
+    const { deps, req } = setupWith(MCP_LOADED, new FakeInvoker());
+    const tools = await listTools({ ...deps, upstreamTools: view }, req(bob));
+    expect(tools.map((t) => t.name)).toEqual(['ping', 'tools.echo']);
+    expect(tools[1]?.inputSchema).toEqual(DERIVED);
+    expect(tools[1]?.description).toBe('Echo a message back.');
+    expect(view.touched).toEqual([['tools.echo']]);
+  });
+
+  it.each(['changed', 'missing', 'unverified', 'schema_invalid'] as const)('CONN-4 a %s operation is not listed but still touched', async (state) => {
+    const view = toolView({ state, liveHash: null });
+    const { deps, req } = setupWith(MCP_LOADED, new FakeInvoker());
+    expect((await listTools({ ...deps, upstreamTools: view }, req(bob))).map((t) => t.name)).toEqual(['ping']);
+    expect(view.touched).toEqual([['tools.echo']]);
+  });
+
+  it('MCP-3 an ok call is validated against the derived schema after a refresh', async () => {
+    const view = toolView(OK);
+    const invoker = new FakeInvoker();
+    const { deps, req, audit } = setupWith(MCP_LOADED, invoker);
+    const result = plain(await callTool({ ...deps, upstreamTools: view }, req(bob), 'tools.echo', { message: 5 }));
+    expect(text(result)).toContain('Input validation error');
+    expect(view.refreshed).toEqual(['tools.echo']);
+    expect(invoker.calls).toEqual([]);
+    expect(audit.events.map((e) => e.details.errorCode)).toEqual(['invalid_arguments']);
+  });
+
+  it('CONN-4 a not-ok call passes an object-only check and reaches policy, so the router refuses it (R8)', async () => {
+    const view = toolView({ state: 'changed', liveHash: `sha256:${'c'.repeat(64)}` });
+    const invoker = new FakeInvoker();
+    const { deps, req, audit } = setupWith(MCP_LOADED, invoker);
+    await callTool({ ...deps, upstreamTools: view }, req(bob), 'tools.echo', { message: 5 });
+    expect(actions(audit.events)[0]).toBe('policy.decision:allow');
+    expect(invoker.calls.map((c) => c.operation.id)).toEqual(['tools.echo']);
   });
 });

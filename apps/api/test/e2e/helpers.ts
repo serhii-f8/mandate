@@ -8,7 +8,7 @@ import pg from 'pg';
 import { Client, StreamableHTTPClientTransport, type FetchLike } from '@modelcontextprotocol/client';
 import type { INestApplication } from '@nestjs/common';
 import type { Logger } from 'pino';
-import { createOpenApiAdapter, type OpenApiAdapter } from '@aiops/adapters';
+import { createAdapters, type OpenApiAdapter } from '@aiops/adapters';
 import { ConfigurationHolder, type ApiEnv } from '@aiops/config';
 import type { ChangeSetExecutor, CredentialVault, OperationInvoker, WorkflowStarter } from '@aiops/core';
 import { createDb, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, runMigrations } from '@aiops/db';
@@ -63,7 +63,7 @@ export interface StartApiOptions {
   readonly port?: number;
   /** The api logger, e.g. one writing to a captured stream. */
   readonly logger?: Logger;
-  /** The read adapter; a fresh OpenAPI adapter by default, as `main.ts` uses. */
+  /** The upstream adapter; a fresh composite adapter (`createAdapters()`) by default. */
   readonly adapter?: OpenApiAdapter;
   /** Directory of the web bundle to serve under /app/ (`AIOPS_WEB_DIR`). */
   readonly webDir?: string;
@@ -125,7 +125,7 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
   const env = testApiEnv(databaseUrl, port, options);
   // As given: the token audience must match it character for character.
   const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
-  const adapter = options.adapter ?? createOpenApiAdapter();
+  const adapter = options.adapter ?? createAdapters();
   // Loaded as `main.ts` loads it: with the adapter's spec resolver and the preset directories.
   const configuration = options.configuration ?? (await ConfigurationHolder.load(env.configDir, configurationLoadOptions(adapter, env)));
   // The test-side execution stack has its own pool on the api database: what the worker would do.

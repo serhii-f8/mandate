@@ -1,0 +1,14 @@
+# The test replaces __ECHO_PIN__ and __LOOKUP_PIN__ with mcpToolHash of the fake's tools.
+# No input_schema: the schema is derived from the pinned tool (ADR 0051 R2). The fake's `add` is unbound.
+version: 1
+operations:
+  - id: tools.echo
+    connection: tools
+    risk: read
+    description: Echo a message back.
+    upstream: { tool: echo, pin: __ECHO_PIN__ }
+  - id: tools.lookup
+    connection: tools
+    risk: read
+    description: Look up a record by key.
+    upstream: { tool: lookup, pin: __LOOKUP_PIN__ }

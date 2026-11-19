@@ -5,19 +5,40 @@
  */
 import type { LoadedConfiguration } from '@aiops/config';
 import { setTimeout as delay } from 'node:timers/promises';
+import type { UpstreamToolView } from '@aiops/upstream';
 import type { ChangeSetRepository, InvocationRequest, InvocationResult, OperationInvoker, TaskRepository, WorkflowStarter } from '@aiops/core';
 import { ChangeSetInvoker, checkPrepareWait } from '../changesets/changeset-invoker.js';
 import type { PipelineDeps } from '../mcp/tool-pipeline.js';
+import { pinRefusal } from './pin-refusal.js';
 import { DirectReadInvoker, type DirectReadInvokerDeps } from './read-invoker.js';
 import { riskNotSupportedResult } from './risk-not-supported.js';
 
 export { riskNotSupportedResult };
 
+/** What the router needs to refuse MCP-backed operations by pin state (CONN-4). */
+export interface RouterUpstream {
+  /** The request's configuration snapshot, the one its policy decision used (SEC-1). */
+  readonly configuration: LoadedConfiguration;
+  /** Pin states; without it every MCP-backed operation is refused (fail closed). */
+  readonly upstreamTools?: UpstreamToolView;
+}
+
 export class OperationRouter implements OperationInvoker {
-  constructor(private readonly paths: { readonly read: OperationInvoker; readonly changeset: OperationInvoker }) {}
+  constructor(
+    private readonly paths: { readonly read: OperationInvoker; readonly changeset: OperationInvoker },
+    private readonly upstream?: RouterUpstream,
+  ) {}
 
   invoke(request: InvocationRequest): Promise<InvocationResult> {
     const { operation } = request;
+    // R8: an MCP-backed operation runs only while its pinned tool is `ok`, whatever its risk
+    // class; the read path itself does not check the pin (performRead assumes the caller did).
+    const configuration = this.upstream?.configuration;
+    if (configuration?.bindings.get(operation.id)?.kind === 'mcp') {
+      const view = this.upstream?.upstreamTools?.view(configuration, operation.id) ?? { state: 'unverified' as const, liveHash: null };
+      const refusal = pinRefusal(operation, view);
+      if (refusal !== undefined) return Promise.resolve(refusal);
+    }
     if (operation.risk === 'read') return this.paths.read.invoke(request);
     if ((operation.risk === 'write' || operation.risk === 'destructive') && operation.manifest !== undefined) return this.paths.changeset.invoke(request);
     return Promise.resolve(riskNotSupportedResult(operation));
@@ -37,6 +58,8 @@ export interface OperationInvokersBase extends Omit<DirectReadInvokerDeps, 'conf
   /** Poll interval of that wait; 250 ms. */
   readonly pollMs?: number;
   readonly sleep?: (ms: number) => Promise<void>;
+  /** Pin states of MCP-backed operations (CONN-4); without it they are refused. */
+  readonly upstreamTools?: UpstreamToolView;
 }
 
 const POLL_MS = 250;
@@ -60,6 +83,6 @@ export function operationInvokers(base: OperationInvokersBase): PipelineDeps['in
         correlationId,
         wait,
       }),
-    });
+    }, { configuration, ...(base.upstreamTools === undefined ? {} : { upstreamTools: base.upstreamTools }) });
   };
 }

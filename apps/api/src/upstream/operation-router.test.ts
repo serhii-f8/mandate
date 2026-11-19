@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { loadConfigurationSources } from '@aiops/config';
+import { loadConfigurationSources, type PinState } from '@aiops/config';
 import type { ReadAdapter } from '@aiops/connector-sdk';
+import { READ_RESULT_TEXT } from '@aiops/core';
 import type {
   Caller,
   CredentialVault,
@@ -12,6 +13,7 @@ import type {
   RiskClass,
 } from '@aiops/core';
 import { InMemoryChangeSetRepository, InMemoryTaskRepository } from '@aiops/testing';
+import type { UpstreamToolView } from '@aiops/upstream';
 import { OperationRouter, operationInvokers, riskNotSupportedResult } from './operation-router.js';
 
 const caller: Caller = { subject: 'alice-id', groups: [] };
@@ -193,5 +195,121 @@ describe('MCP-1 MCP-7 operationInvokers wiring', () => {
         now: () => new Date(),
       }),
     ).toThrow(/timeoutMs must not be negative/);
+  });
+});
+
+const MCP_PIN = `sha256:${'a'.repeat(64)}`;
+const MCP_SOURCES = [
+  {
+    file: 'connections.yaml',
+    text: `version: 1
+connections:
+  - { id: tools, adapter: mcp, mcp_url: http://tools.example.test/mcp }
+`,
+  },
+  {
+    file: 'operations.yaml',
+    text: `version: 1
+operations:
+  - id: tools.echo
+    connection: tools
+    risk: read
+    description: Echo.
+    upstream: { tool: echo, pin: '${MCP_PIN}' }
+`,
+  },
+];
+
+/** A view that answers one fixed evaluation for every MCP-backed operation. */
+function fixedView(state: PinState, liveHash: string | null = MCP_PIN): UpstreamToolView & { viewed: string[] } {
+  const viewed: string[] = [];
+  return {
+    viewed,
+    view: (_configuration, operationId) => {
+      viewed.push(operationId);
+      return { state, liveHash };
+    },
+    current: () => Promise.resolve({ state, liveHash }),
+    touch: () => undefined,
+  };
+}
+
+async function mcpSetup(state: PinState | undefined) {
+  const loaded = await loadConfigurationSources(MCP_SOURCES);
+  if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
+  const configuration = loaded.configuration;
+  const op = configuration.policy.operations.find((o) => o.id === 'tools.echo');
+  if (op === undefined) throw new Error('fixture has no MCP operation');
+  const read = new Recording('read');
+  const changeset = new Recording('changeset');
+  const view = state === undefined ? undefined : fixedView(state);
+  const router = new OperationRouter({ read, changeset }, { configuration, ...(view === undefined ? {} : { upstreamTools: view }) });
+  return { router, read, changeset, op, view };
+}
+
+describe('CONN-4 refusal after policy', () => {
+  it('CONN-4 a changed tool is refused as upstream_changed with the fixed text and no upstream call', async () => {
+    const { router, read, changeset, op } = await mcpSetup('changed');
+    const result = await router.invoke({ operation: op, args: {}, caller });
+    expect(result).toEqual({
+      isError: true,
+      text: READ_RESULT_TEXT.errors.upstream_changed('tools.echo'),
+      auditDetails: { operation: 'tools.echo', connection: 'tools', errorCode: 'upstream_changed', pinState: 'changed' },
+    });
+    expect(result.text).toBe(
+      'tools.echo cannot run: its upstream tool changed since it was reviewed; an operator must review it and record the new pin.',
+    );
+    expect([...read.seen, ...changeset.seen]).toEqual([]);
+  });
+
+  it('CONN-4 a missing tool is refused as upstream_changed', async () => {
+    const { router, read, op } = await mcpSetup('missing');
+    const result = await router.invoke({ operation: op, args: {}, caller });
+    expect(result.auditDetails).toEqual({ operation: 'tools.echo', connection: 'tools', errorCode: 'upstream_changed', pinState: 'missing' });
+    expect(read.seen).toEqual([]);
+  });
+
+  it.each(['unverified', 'schema_invalid'] as const)('CONN-4 a %s tool is refused as upstream_unavailable', async (state) => {
+    const { router, read, op } = await mcpSetup(state);
+    const result = await router.invoke({ operation: op, args: {}, caller });
+    expect(result).toEqual({
+      isError: true,
+      text: READ_RESULT_TEXT.errors.upstream_unavailable('tools.echo'),
+      auditDetails: { operation: 'tools.echo', connection: 'tools', errorCode: 'upstream_unavailable', pinState: state },
+    });
+    expect(result.text).toBe('tools.echo cannot run: its upstream tool could not be verified right now.');
+    expect(read.seen).toEqual([]);
+  });
+
+  it('CONN-4 an ok tool takes the read path', async () => {
+    const { router, read, op, view } = await mcpSetup('ok');
+    expect((await router.invoke({ operation: op, args: {}, caller })).text).toBe('read');
+    expect(read.seen).toEqual(['tools.echo']);
+    expect(view?.viewed).toEqual(['tools.echo']);
+  });
+
+  it('CONN-4 without a tool view an MCP-backed operation is refused as upstream_unavailable (fail closed)', async () => {
+    const { router, read, op } = await mcpSetup(undefined);
+    const result = await router.invoke({ operation: op, args: {}, caller });
+    expect(result.auditDetails).toEqual({ operation: 'tools.echo', connection: 'tools', errorCode: 'upstream_unavailable', pinState: 'unverified' });
+    expect(read.seen).toEqual([]);
+  });
+
+  it('CONN-4 a write_opaque MCP-backed operation is refused by its pin before its risk class', async () => {
+    const { router, op } = await mcpSetup('changed');
+    const result = await router.invoke({ operation: { ...op, risk: 'write_opaque' }, args: {}, caller });
+    expect(result.auditDetails?.errorCode).toBe('upstream_changed');
+  });
+
+  it('CONN-4 an HTTP-bound operation is not asked about pins', async () => {
+    const loaded = await loadConfigurationSources(Object.entries(WIRING_SOURCES).map(([file, text]) => ({ file, text })));
+    if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
+    const read = new Recording('read');
+    const view = fixedView('changed');
+    const router = new OperationRouter({ read, changeset: new Recording('changeset') }, { configuration: loaded.configuration, upstreamTools: view });
+    const op = loaded.configuration.policy.operations.find((o) => o.id === 'shop.get_products');
+    if (op === undefined) throw new Error('fixture has no read operation');
+    expect((await router.invoke({ operation: op, args: {}, caller })).text).toBe('read');
+    expect(view.viewed).toEqual([]);
   });
 });

@@ -5,7 +5,8 @@
  * argument validation (MCP-3) → policy decision, audited (POL-8) → run (SEC-1).
  */
 import { ProtocolError, ProtocolErrorCode, type CallToolResult, type Tool } from '@modelcontextprotocol/server';
-import type { LoadedConfiguration } from '@aiops/config';
+import { createSchemaCompiler, type ArgumentValidator, type LoadedConfiguration } from '@aiops/config';
+import type { UpstreamToolView } from '@aiops/upstream';
 import {
   allowingRole,
   createPolicyEngine,
@@ -57,6 +58,8 @@ export interface PipelineDeps {
   readonly publicUrl: URL;
   /** Spans and counters of tool calls (NFR-11, NFR-12); default `NO_TELEMETRY`. */
   readonly telemetry?: PipelineTelemetry;
+  /** Pin states of MCP-backed operations (CONN-4); without it they are never listed and always refused. */
+  readonly upstreamTools?: UpstreamToolView;
 }
 
 /** The start of the UTC minute containing `now`. */
@@ -100,14 +103,18 @@ export function uiMeta(existing: Readonly<Record<string, unknown>> | undefined, 
   return { ...existing, ui: { ...(existing?.ui as object | undefined), resourceUri }, 'ui/resourceUri': resourceUri };
 }
 
-/** Operations are published under their tool name (MCP-9); policy and audit use the operation ID. */
-function operationTool(op: OperationDefinition, widgets: WidgetCatalog): Tool {
+/**
+ * Operations are published under their tool name (MCP-9); policy and audit use the operation ID.
+ * The description is always the configured one (SEC-6); `inputSchema` replaces the operation's
+ * own when the schema is derived from a pinned upstream tool.
+ */
+function operationTool(op: OperationDefinition, widgets: WidgetCatalog, inputSchema: Readonly<Record<string, unknown>> = op.inputSchema): Tool {
   const uri = linksChangeset(op) ? widgets.uriFor('changeset') : undefined;
   return {
     name: op.toolName,
     ...(op.title === undefined ? {} : { title: op.title }),
     description: op.description,
-    inputSchema: op.inputSchema as Tool['inputSchema'],
+    inputSchema: inputSchema as Tool['inputSchema'],
     annotations: { readOnlyHint: op.risk === 'read', destructiveHint: op.risk === 'destructive' },
     ...(uri === undefined ? {} : { _meta: uiMeta(undefined, uri) }),
   };
@@ -130,10 +137,52 @@ function visibleBuiltins(builtins: readonly BuiltinTool[], caller: Caller, confi
   return builtins.filter((t) => t.visibleTo?.(caller, configuration) ?? true);
 }
 
+/**
+ * The granted operations as tools. An MCP-backed one is listed only while its pinned tool is
+ * `ok` (CONN-4), with the derived schema when it takes its schema from the tool; without a tool
+ * view it is never listed (fail closed). In memory (NFR-6): stale connections are refreshed in
+ * the background for the next list (R9).
+ */
+function operationTools(deps: PipelineDeps, configuration: LoadedConfiguration, granted: readonly OperationDefinition[]): Tool[] {
+  const tools: Tool[] = [];
+  const mcpBacked: string[] = [];
+  for (const op of granted) {
+    const binding = configuration.bindings.get(op.id);
+    if (binding?.kind !== 'mcp') {
+      tools.push(operationTool(op, deps.widgets));
+      continue;
+    }
+    mcpBacked.push(op.id);
+    const view = deps.upstreamTools?.view(configuration, op.id);
+    if (view?.state !== 'ok') continue;
+    if (!binding.schemaFromTool) tools.push(operationTool(op, deps.widgets));
+    else if (view.inputSchema !== undefined) tools.push(operationTool(op, deps.widgets, view.inputSchema));
+  }
+  if (mcpBacked.length > 0) deps.upstreamTools?.touch(configuration, mcpBacked);
+  return tools;
+}
+
+/** Only checks that the arguments are an object: what a not-`ok` MCP-backed call is validated with, so policy decides and the router refuses (R8). */
+const validateObjectOnly: ArgumentValidator = createSchemaCompiler()({ type: 'object' });
+
+/**
+ * The argument validator of an operation (MCP-3). For an MCP-backed one the pin is refreshed
+ * first, so the router's check after policy is fresh (R8): a derived schema comes from the
+ * pinned tool when it is `ok`; an explicit `input_schema` is the configured validator.
+ */
+async function operationValidator(deps: PipelineDeps, configuration: LoadedConfiguration, op: OperationDefinition): Promise<ArgumentValidator | undefined> {
+  const binding = configuration.bindings.get(op.id);
+  if (binding?.kind !== 'mcp') return configuration.validators.get(op.id);
+  const view = await deps.upstreamTools?.current(configuration, op.id);
+  if (!binding.schemaFromTool) return configuration.validators.get(op.id);
+  if (view?.state === 'ok' && view.validator !== undefined) return view.validator;
+  return validateObjectOnly;
+}
+
 export async function listTools(deps: PipelineDeps, req: PipelineRequest): Promise<Tool[]> {
   const granted = req.snapshot.engine.grantedOperations(req.caller);
   const builtins = visibleBuiltins(deps.builtins, req.caller, req.snapshot.configuration);
-  const tools = [...builtins.map((t) => builtinTool(t, deps.widgets)), ...granted.map((op) => operationTool(op, deps.widgets))];
+  const tools = [...builtins.map((t) => builtinTool(t, deps.widgets)), ...operationTools(deps, req.snapshot.configuration, granted)];
   try {
     await deps.audit.append({
       id: deps.newId(),
@@ -221,7 +270,8 @@ async function runCall(deps: PipelineDeps, req: PipelineRequest, name: string, r
 
   // 2. Arguments (MCP-3), before any policy or upstream call.
   const args = rawArgs ?? {};
-  const check = builtin !== undefined ? builtin.validate(args) : operation === undefined ? undefined : configuration.validators.get(operation.id)?.(args);
+  const check =
+    builtin !== undefined ? builtin.validate(args) : operation === undefined ? undefined : (await operationValidator(deps, configuration, operation))?.(args);
   // MCP-9: operation rows record the operation ID behind the called tool name.
   const operationDetails = operation === undefined ? {} : { details: { operation: operation.id } };
   if (check?.ok !== true) {
