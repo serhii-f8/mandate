@@ -62,6 +62,17 @@ const realSleep = (ms: number): Promise<void> =>
 
 /** RFC 9110 field-name token, checked after lower-casing. */
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9a-z-]+$/;
+/**
+ * A hook header value: visible ASCII with internal spaces allowed (a W3C `tracestate` member value
+ * may contain one), never CR/LF, tab or other controls, never a leading or trailing space.
+ */
+const HOOK_VALUE = /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/;
+
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  if (typeof v !== 'object' || v === null) return false;
+  const proto: unknown = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
 
 /**
  * The hook's headers that may be added to the request: valid names and values only, never a
@@ -70,9 +81,12 @@ const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9a-z-]+$/;
  */
 function hookHeaders(span: RequestSpan, taken: ReadonlySet<string>): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [rawName, value] of Object.entries(span.headers)) {
+  const raw: unknown = span.headers;
+  // A string or array would yield index names ('0', '1', ...): only a plain object is read.
+  if (!isPlainRecord(raw)) return out;
+  for (const [rawName, value] of Object.entries(raw)) {
     const name = rawName.toLowerCase();
-    if (!HEADER_NAME.test(name) || typeof value !== 'string' || !HEADER_SAFE.test(value)) continue;
+    if (!HEADER_NAME.test(name) || typeof value !== 'string' || !HOOK_VALUE.test(value)) continue;
     if (FORBIDDEN_HEADERS.has(name) || taken.has(name) || Object.hasOwn(out, name)) continue;
     out[name] = value;
   }

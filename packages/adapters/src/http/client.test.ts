@@ -667,6 +667,39 @@ describe('NFR-11 request instrumentation', () => {
     expect(h?.traceparent).toBe(TRACEPARENT);
   });
 
+  it('NFR-11 a tracestate with an internal space in a member value is forwarded', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const tracestate = 'vendor=a b,other=c';
+    const c = createConnectionClient(settings(), {
+      instrumentation: recorder({ tracestate, 'x-lead': ' v', 'x-trail': 'v ', 'x-tab': 'a\tb' }).hook,
+    });
+    expect(await c.send(get(), { retryable: false })).toMatchObject({ ok: true, status: 200 });
+    const h = up.requests[0]?.headers;
+    expect(h?.tracestate).toBe(tracestate);
+    expect(h?.['x-lead']).toBeUndefined();
+    expect(h?.['x-trail']).toBeUndefined();
+    expect(h?.['x-tab']).toBeUndefined();
+  });
+
+  it('NFR-11 hook headers that are not a plain object are ignored', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    for (const headers of ['ab', ['v0', 'v1'], null, new Map([['traceparent', TRACEPARENT]])]) {
+      const ends: RequestAttemptEnd[] = [];
+      const hook: RequestInstrumentation = {
+        // The hook's declared type is bypassed on purpose: a hostile or buggy hook may return anything.
+        start: () => ({ headers: headers as unknown as Record<string, string>, end: (r) => ends.push(r) }),
+      };
+      const r = await createConnectionClient(settings(), { instrumentation: hook }).send(get(), { retryable: false });
+      expect(r).toMatchObject({ ok: true, status: 200 });
+      expect(ends).toEqual([{ status: 200 }]);
+    }
+    expect(up.requests).toHaveLength(4);
+    for (const req of up.requests) {
+      expect(Object.keys(req.headers).filter((n) => /^\d+$/.test(n))).toEqual([]);
+      expect(req.headers.traceparent).toBeUndefined();
+    }
+  });
+
   it('NFR-11 a throwing hook never fails the request', async () => {
     up.route('GET', '/items', () => ({ status: 200, body: { ok: 1 } }));
     const throwingStart: RequestInstrumentation = {
