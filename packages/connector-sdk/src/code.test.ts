@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   parsePresetModule,
+  recordOutcomeOf,
   type CodeAdapter,
   type CodeArgs,
   type CodeContext,
@@ -67,5 +68,15 @@ describe('OPS-5 EXE-8 code write direction', () => {
     >();
     // The adapter input names the direction; absent means forward.
     expectTypeOf<Parameters<CodeAdapter['codeWrite']>[0]['direction']>().toEqualTypeOf<CodeWriteDirection | undefined>();
+  });
+});
+
+describe('OPS-6 recordOutcomeOf', () => {
+  it('OPS-6 a 2xx, or a 2xx the client could not read, is ok; a retriable failure is retriable; any other failure is failed', () => {
+    expect(recordOutcomeOf({ ok: true, status: 204, durationMs: 1 })).toBe('ok');
+    expect(recordOutcomeOf({ ok: false, code: 'invalid_response', status: 200, durationMs: 1, retriable: false })).toBe('ok');
+    expect(recordOutcomeOf({ ok: false, code: 'http_status', status: 503, durationMs: 1, retriable: true })).toBe('retriable');
+    expect(recordOutcomeOf({ ok: false, code: 'http_status', status: 404, durationMs: 1, retriable: false })).toBe('failed');
+    expect(recordOutcomeOf({ ok: false, code: 'credential_missing', durationMs: 0, retriable: false })).toBe('failed');
   });
 });

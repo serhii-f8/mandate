@@ -4,7 +4,7 @@
  * the preset's code module (OPS-5). The credential is opened only inside the adapter (SEC-2);
  * each request logs identifiers, method, status and timing only, never records (SEC-3).
  */
-import type { CodeAdapter, CodeWriteDirection, CodeWriteOperation, RecordSendOutcome, RecordWriteAdapter } from '@aiops/connector-sdk';
+import { recordOutcomeOf, type CodeAdapter, type CodeWriteDirection, type CodeWriteOperation, type RecordSendOutcome, type RecordWriteAdapter } from '@aiops/connector-sdk';
 import type { LoadedConfiguration } from '@aiops/config';
 import type { CredentialVault, DirectRecordState, DirectWriter } from '@aiops/core';
 import { connectionCredential, type UpstreamCallLog } from './read.js';
@@ -57,16 +57,6 @@ function servesManifestWrite(deps: DirectWriterDeps): boolean {
   const operation = configuration.policy.operations.find((op) => op.id === operationId);
   const writes = operation?.risk === 'write' || operation?.risk === 'destructive';
   return writes && isManifestWrite(configuration, manifestOperationId);
-}
-
-/**
- * A record's answer (OPS-6): a 2xx, or a 2xx the client could not read (`invalid_response`), is
- * `ok` and the verify read decides; a failure the adapter marks retriable (429, 5xx, timeout,
- * network, busy) is `retriable`; every other failure is `failed`.
- */
-function stateOf(outcome: RecordSendOutcome): DirectRecordState {
-  if (outcome.ok || outcome.code === 'invalid_response') return 'ok';
-  return outcome.retriable ? 'retriable' : 'failed';
 }
 
 type LogFields = { readonly status?: number; readonly durationMs: number } & ({ readonly ok: true } | { readonly ok: false; readonly code: string });
@@ -125,7 +115,8 @@ export function createPerRecordWriter(deps: DirectWriterDeps): DirectWriter | un
           }
           log(outcome);
           heartbeat();
-          const state = stateOf(outcome);
+          // The SDK's mapping, shared with the preset contract helper (OPS-6).
+          const state: DirectRecordState = recordOutcomeOf(outcome);
           states[index] = state;
           if (state === 'retriable') stopped = true;
         }

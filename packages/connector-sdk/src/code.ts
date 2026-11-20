@@ -1,5 +1,6 @@
 import type { HttpMethod } from './mapping.js';
 import type { ReadErrorCode } from './read.js';
+import type { RecordSendOutcome } from './write.js';
 
 /** since 0.6.0, additive. A query value a code operation may send. */
 export type CodeQueryValue = string | number | boolean | readonly (string | number | boolean)[];
@@ -44,6 +45,16 @@ export interface CodeReadResult {
 
 /** since 0.6.0, additive. The outcome of one record of a code write, in record order. */
 export type RecordOutcome = 'ok' | 'failed' | 'retriable';
+
+/**
+ * since 0.6.0, additive. The outcome of one per-record request (OPS-6): a 2xx, or a 2xx the client
+ * could not read (`invalid_response`), is `ok` and the verify read decides; a failure the adapter
+ * marks retriable (429, 5xx, timeout, network, busy) is `retriable`; every other failure is `failed`.
+ */
+export function recordOutcomeOf(outcome: RecordSendOutcome): RecordOutcome {
+  if (outcome.ok || outcome.code === 'invalid_response') return 'ok';
+  return outcome.retriable ? 'retriable' : 'failed';
+}
 
 /**
  * since 0.6.0, additive. The outcome of a code call. `definite: true` means the upstream

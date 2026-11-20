@@ -1,22 +1,23 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import type {
-  CodeAdapter,
-  CodeArgs,
-  CodeOperation,
-  CodeReadOperation,
-  CodeWriteOperation,
-  ConnectionSettings,
-  CredentialSource,
-  ReadAdapter,
-  ReadOutcome,
-  RecordOutcome,
-  RecordWriteAdapter,
-  ResponseMapping,
-  UpstreamMapping,
-  WriteFailure,
-  WriteRecord,
+import {
+  recordOutcomeOf,
+  type CodeAdapter,
+  type CodeArgs,
+  type CodeOperation,
+  type CodeReadOperation,
+  type CodeWriteOperation,
+  type ConnectionSettings,
+  type CredentialSource,
+  type ReadAdapter,
+  type ReadOutcome,
+  type RecordOutcome,
+  type RecordWriteAdapter,
+  type ResponseMapping,
+  type UpstreamMapping,
+  type WriteFailure,
+  type WriteRecord,
 } from '@aiops/connector-sdk';
 import type { FakeUpstream, RecordedRequest } from './fake-upstream.js';
 
@@ -192,7 +193,8 @@ export async function contractWrite(input: {
     const outcomes: RecordOutcome[] = [];
     for (const record of input.records) {
       const sent = await input.adapter.writeRecord({ connection: input.connection, mapping: input.binding.mapping, record, args: input.args, credential });
-      outcomes.push(sent.ok ? 'ok' : sent.retriable ? 'retriable' : 'failed');
+      // The production mapping (record-writers.ts): an unreadable 2xx is `ok`, the verify read decides.
+      outcomes.push(recordOutcomeOf(sent));
     }
     return outcomes;
   }
