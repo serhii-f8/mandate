@@ -31,6 +31,7 @@ import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
 import { HealthController } from './health/health.controller.js';
 import { bodyErrorHandler } from './http/body-errors.js';
+import { EndpointRateLimiter } from './http/rate-limiter.js';
 import { configurationGate } from './config/configuration-gate.js';
 import { createLogger, PinoNestLogger } from './logger.js';
 import { ApprovalService } from './approvals/approval-service.js';
@@ -65,6 +66,8 @@ import {
   PAGE_CHECKS,
   PAGE_SESSIONS,
   PIN_MONITOR,
+  RATE_COUNTER,
+  RATE_LIMITER,
   SUBMIT_SERVICE,
   TELEMETRY,
   TEMPORAL,
@@ -261,6 +264,17 @@ class AppModule {
         { provide: AUDIT_LOG, inject: [DATABASE], useFactory: (d: Database) => new DrizzleAuditLog(d.db, { sensitiveKeys: () => configuration.current.sensitiveFields }) },
         { provide: AUDIT_READER, inject: [DATABASE], useFactory: (d: Database) => new PostgresAuditReader(d.pool) },
         {
+          // One counter for the pipeline's calls_per_minute (POL-4) and the endpoint limits (SEC-10), shared across instances (NFR-3).
+          provide: RATE_COUNTER,
+          inject: [DATABASE],
+          useFactory: (d: Database): RateCounter => overrides.rateCounter ?? new PostgresRateCounter(d.db),
+        },
+        {
+          provide: RATE_LIMITER,
+          inject: [RATE_COUNTER, AUDIT_LOG],
+          useFactory: (rateCounter: RateCounter, audit: AuditLog) => new EndpointRateLimiter({ rateCounter, audit, wallClock: () => new Date(), logger }),
+        },
+        {
           provide: CREDENTIAL_VAULT,
           inject: [DATABASE],
           useFactory: (d: Database): CredentialVault =>
@@ -329,7 +343,7 @@ class AppModule {
         },
         {
           provide: MCP_HANDLER,
-          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE, WORKFLOW_STARTER, WIDGET_BUNDLES, PIN_MONITOR],
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE, WORKFLOW_STARTER, WIDGET_BUNDLES, PIN_MONITOR, RATE_COUNTER],
           useFactory: (
             audit: AuditLog,
             vault: CredentialVault,
@@ -340,6 +354,7 @@ class AppModule {
             starter: WorkflowStarter,
             widgets: WidgetBundles,
             pinMonitor: PinMonitorRun | null,
+            rateCounter: RateCounter,
           ) => {
             // One task store for the write path that creates tasks and the handlers that read them.
             const tasks = overrides.tasks ?? new PostgresTaskRepository(database.db);
@@ -382,7 +397,7 @@ class AppModule {
                   audit,
                   newId: randomUUID,
                   now: () => performance.now(),
-                  rateCounter: overrides.rateCounter ?? new PostgresRateCounter(database.db),
+                  rateCounter,
                   wallClock: () => new Date(),
                   widgets,
                   publicUrl: env.publicUrl,

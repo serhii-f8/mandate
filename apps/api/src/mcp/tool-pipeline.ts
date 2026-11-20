@@ -21,6 +21,7 @@ import {
   type PolicyEngine,
   type RateCounter,
 } from '@aiops/core';
+import { minuteWindow } from '../http/rate-window.js';
 import { preparesChangeSet } from '../changesets/changeset-invoker.js';
 import { withPageLink } from '../changesets/links.js';
 import { pinRefusal, usablePin } from '../upstream/pin-refusal.js';
@@ -64,10 +65,7 @@ export interface PipelineDeps {
   readonly upstreamTools?: UpstreamToolView;
 }
 
-/** The start of the UTC minute containing `now`. */
-export function minuteWindow(now: Date): Date {
-  return new Date(Math.floor(now.getTime() / 60_000) * 60_000);
-}
+export { minuteWindow };
 
 const RATE_LIMIT_UNAVAILABLE: CallToolResult = {
   isError: true,

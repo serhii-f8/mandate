@@ -30,6 +30,8 @@ export const AUDIT_ACTIONS = [
   'config.apply',
   'config.load',
   'upstream.pin',
+  /** SEC-10: the first over-limit request of a (key, minute window). */
+  'rate.limited',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

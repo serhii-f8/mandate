@@ -19,6 +19,10 @@ export const ON_SHUTDOWN = Symbol('OnShutdown');
 export const PIN_MONITOR = Symbol('PinMonitor');
 export const PAGE_CHECKS = Symbol('PageChecks');
 export const PAGE_SESSIONS = Symbol('SessionService');
+/** The shared rate counter of the pipeline (POL-4) and the endpoint limiter (SEC-10). */
+export const RATE_COUNTER = Symbol('RateCounter');
+/** The endpoint limiter of `/mcp` and the page login routes (SEC-10). */
+export const RATE_LIMITER = Symbol('EndpointRateLimiter');
 export const SUBMIT_SERVICE = Symbol('SubmitService');
 /** The api's telemetry, or `null` without one; shut down after everything else (NFR-11). */
 export const TELEMETRY = Symbol('Telemetry');
