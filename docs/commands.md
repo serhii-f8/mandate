@@ -10,6 +10,8 @@ corepack (`corepack enable` once); the user's global corepack cannot run pnpm 12
 | Purpose | Command |
 | --- | --- |
 | Install | `pnpm install` (CI: `pnpm install --frozen-lockfile`) |
+| Dependency scan (SEC-11) | `bash scripts/dependency-scan.sh` (after `pnpm install`; runs `pnpm audit --json` through `tooling/security/audit-gate.mjs` and `tooling/security/audit-allowlist.yaml`: exit 1 on an unallowlisted high or critical advisory, an expired or stale entry, or an `expires` more than 90 days out; moderates are listed; also runs in CI on every push and weekly on Mondays) |
+| Rate limits and reverse proxy (SEC-10) | Limits in the configuration (`rate_limits:` keys `mcp_user_per_minute`, `mcp_service_account_per_minute`, `unauthenticated_per_minute`, integers 1 to 100000; a service account may set `rate_limit_per_minute`). `api` environment `AIOPS_TRUST_PROXY` (integer 0 to 10, default 0): number of reverse-proxy hops to trust for the client address; behind a proxy leave it at 0 and every user shares the proxy's address, so set it to the hop count; an invalid value refuses to start |
 | Build | `pnpm build` |
 | Type-check | `pnpm typecheck` |
 | Lint (incl. package boundaries) | `pnpm lint` |

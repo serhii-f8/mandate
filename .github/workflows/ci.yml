@@ -3,12 +3,28 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: '17 5 * * 1'
 
 permissions:
   contents: read
 
 jobs:
+  dependency-scan:
+    name: dependency audit gate (SEC-11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/dependency-scan.sh
+
   ci:
+    if: github.event_name != 'schedule'
     name: lint, type-check, build, tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -21,6 +37,7 @@ jobs:
       - run: bash scripts/ci.sh
 
   compose:
+    if: github.event_name != 'schedule'
     name: Compose stack acceptance (Phases 1 and 2)
     runs-on: ubuntu-latest
     timeout-minutes: 45

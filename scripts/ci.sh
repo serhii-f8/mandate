@@ -8,6 +8,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 step() { echo; echo "=== $*"; }
 
 step install;           pnpm install --frozen-lockfile
+step "dependency scan"; bash scripts/dependency-scan.sh
 step lint;              pnpm lint
 step typecheck;         pnpm typecheck
 step build;             pnpm build
