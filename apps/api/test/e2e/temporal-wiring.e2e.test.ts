@@ -141,7 +141,7 @@ describe('MCP-7 EXE-11 production Temporal wiring while Temporal is down', () =>
       expect(request.ended).toBe(true);
       expect(request.attributes).toEqual({ 'aiops.correlation_id': correlationId });
       expect(toolCall.spanContext().traceId).toBe(request.spanContext().traceId);
-      expect(toolCall.parentSpanId).toBe(request.spanContext().spanId);
+      expect(toolCall.parentSpanContext?.spanId).toBe(request.spanContext().spanId);
       expect(toolCall.attributes).toMatchObject({ 'aiops.tool': 'ping', 'aiops.correlation_id': correlationId });
       // SEC-3: no attribute of any span carries the bearer token.
       for (const span of spans) {

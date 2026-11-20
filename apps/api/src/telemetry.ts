@@ -9,7 +9,7 @@ import { context, diag, trace, type Meter, type Tracer } from '@opentelemetry/ap
 import { W3CTraceContextPropagator } from '@opentelemetry/core';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
-import { Resource } from '@opentelemetry/resources';
+import { resourceFromAttributes } from '@opentelemetry/resources';
 import { MeterProvider } from '@opentelemetry/sdk-metrics';
 import { BatchSpanProcessor, type SpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
@@ -45,8 +45,11 @@ export function traceMixin(): Record<string, string> {
   return { trace_id: ctx.traceId, span_id: ctx.spanId };
 }
 
+/** The 0.57 exposition: no `otel_scope_*` labels on each series, which 0.200+ add by default (ADR 0054). */
+const PROMETHEUS_FORMAT = { withoutScopeInfo: true } as const;
+
 export function startApiTelemetry(options: TelemetryOptions): ApiTelemetry {
-  const resource = new Resource({ 'service.name': options.serviceName });
+  const resource = resourceFromAttributes({ 'service.name': options.serviceName });
   const spanProcessors: SpanProcessor[] = [];
   if (options.otlpEndpoint !== undefined) {
     spanProcessors.push(new BatchSpanProcessor(new OTLPTraceExporter({ url: otlpTracesUrl(options.otlpEndpoint) })));
@@ -55,7 +58,7 @@ export function startApiTelemetry(options: TelemetryOptions): ApiTelemetry {
   const tracerProvider = new NodeTracerProvider({ resource, spanProcessors });
   if (options.register) tracerProvider.register({ propagator: new W3CTraceContextPropagator() });
 
-  const exporter = new PrometheusExporter({ preventServerStart: true });
+  const exporter = new PrometheusExporter({ preventServerStart: true, ...PROMETHEUS_FORMAT });
   const meterProvider = new MeterProvider({ resource, readers: [exporter] });
 
   const handle = (req: IncomingMessage, res: ServerResponse): void => {

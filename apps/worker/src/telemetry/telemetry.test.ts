@@ -124,7 +124,8 @@ describe('NFR-11 NFR-12 worker telemetry failures', () => {
       unregister();
       await close(metrics);
     }
-  });
+    // The 2.x OTLP exporter retries a refused export with backoff until its 10 s timeout (ADR 0054).
+  }, 20_000);
 
   it('NFR-11 a throwing processor does not keep the span from the other one, and flush and shutdown resolve', async () => {
     const memory = new InMemorySpanExporter();

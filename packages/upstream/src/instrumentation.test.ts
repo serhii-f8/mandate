@@ -121,7 +121,7 @@ describe('upstream instrumentation', () => {
     parent.end();
 
     const child = spans.getFinishedSpans().find((s) => s.name === 'http.request');
-    expect(child?.parentSpanId).toBe(parentContext.spanId);
+    expect(child?.parentSpanContext?.spanId).toBe(parentContext.spanId);
     expect(child?.spanContext().traceId).toBe(parentContext.traceId);
     const childSpanId = child?.spanContext().spanId ?? '';
     expect(childSpanId).not.toBe(parentContext.spanId);

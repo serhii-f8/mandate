@@ -10,7 +10,7 @@ import type { Context, Exception, Meter } from '@opentelemetry/api';
 import { globalErrorHandler, W3CTraceContextPropagator } from '@opentelemetry/core';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
-import { Resource } from '@opentelemetry/resources';
+import { resourceFromAttributes } from '@opentelemetry/resources';
 import { MeterProvider } from '@opentelemetry/sdk-metrics';
 import { BatchSpanProcessor, NoopSpanProcessor, type ReadableSpan, type Span, type SpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
@@ -85,8 +85,11 @@ function combined(processors: readonly SpanProcessor[]): SpanProcessor {
   return fanOutSpanProcessor(processors);
 }
 
+/** The 0.57 exposition: no `otel_scope_*` labels on each series, which 0.200+ add by default (ADR 0054). */
+const PROMETHEUS_FORMAT = { withoutScopeInfo: true } as const;
+
 export function startWorkerTelemetry(options: WorkerTelemetryOptions): WorkerTelemetry {
-  const resource = new Resource({ 'service.name': SERVICE_NAME });
+  const resource = resourceFromAttributes({ 'service.name': SERVICE_NAME });
   const processors: SpanProcessor[] = [];
   if (options.otlpEndpoint !== undefined) {
     processors.push(new BatchSpanProcessor(new OTLPTraceExporter({ url: otlpTracesUrl(options.otlpEndpoint) })));
@@ -96,7 +99,7 @@ export function startWorkerTelemetry(options: WorkerTelemetryOptions): WorkerTel
   const tracerProvider = new NodeTracerProvider({ resource, spanProcessors: [spanProcessor] });
   if (options.register) tracerProvider.register({ propagator: new W3CTraceContextPropagator() });
 
-  const exporter = new PrometheusExporter({ preventServerStart: true });
+  const exporter = new PrometheusExporter({ preventServerStart: true, ...PROMETHEUS_FORMAT });
   const meterProvider = new MeterProvider({ resource, readers: [exporter] });
 
   let shutting: Promise<void> | undefined;

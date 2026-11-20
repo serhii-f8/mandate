@@ -68,7 +68,8 @@ describe('NFR-11 api tracing', () => {
     telemetry.tracer.startSpan('probe').end();
     await expect(telemetry.shutdown()).resolves.toBeUndefined();
     await expect(telemetry.shutdown()).resolves.toBeUndefined();
-  });
+    // The 2.x OTLP exporter retries a refused export with backoff until its 10 s timeout (ADR 0054).
+  }, 20_000);
 
   it('NFR-11 without an endpoint nothing is exported and spans still carry attributes', async () => {
     const telemetry = startApiTelemetry({ serviceName: 'aiops-api', register: false });
