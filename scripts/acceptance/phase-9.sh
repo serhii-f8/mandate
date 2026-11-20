@@ -19,11 +19,25 @@
 #   approves there, and the change-set runs; the fake received exactly one tools/call of create_note; rollback is
 #   refused; the audit has the transitions and the batch and never the argument text. It runs alone
 #   or after group 1 (it attaches the connections itself when group 1 did not).
+#   group 3, the Gitea preset from its tarball with no core change (CONN-8, OPS-5, OPS-6, POL-2,
+#   NFR-17): gitea-config-apply, gitea-credential, gitea-scope-allowed, gitea-scope-denied, gl-prepare,
+#   gl-approved-executed, gl-rolled-back, gl-unknown-label, no-core-change. It adds `gitea.yaml`
+#   (preset gitea-issues bound to connection gitea, role issue_manager for group content with one
+#   content_lead step, gitea_admin for admins); `config diff` names the preset and `config apply` loads
+#   it live; carol enters the bare write:issue token on the credential page and the connection test
+#   passes; alice's issue search inside acme/website returns the open bug issues and the same search on
+#   acme/internal is denied with its audited rule; alice sets [bug, wontfix] on issues 1-5, dave
+#   approves on the page, Gitea has the labels, alice rolls back on the page and Gitea has the seeded
+#   labels again; an unknown label name on issue 6 ends the item `failed` and Gitea keeps [bug]
+#   (OPS-5); the history of the checkout shows that no commit touching presets/gitea-issues and no
+#   commit of the plan (trailer `Plan: phase-9-mcp-upstream-gitea`) changes packages/core, apps/api or
+#   apps/worker. Runs alone or after groups 1 and 2.
+# `--history-only` runs only no-core-change (git history, no Docker) and prints `# RESULT`.
 # Setup before the groups: sandbox-gitea-ready (deploy/sandbox/gitea up, seeded, a write:issue token
 # in GTOKEN), presets-packed (every preset of the built image is packed with `npm pack` and extracted
 # into a node_modules tree that the api and the worker mount as their only preset directory, so every
 # group loads presets from tarballs, CONN-8), stack-healthy, presets-dir-env.
-# AIOPS_ACCEPT9_GROUPS selects the groups (default "1 2"); a selected group that is not defined is a
+# AIOPS_ACCEPT9_GROUPS selects the groups (default "1 2 3"); a selected group that is not defined is a
 # FAIL (ADR 0043).
 # Tests the committed HEAD (a fresh clone sees only commits), with a Compose override that mounts a
 # generated configuration and the packed presets, joins the api and the worker to the sandbox network
@@ -40,9 +54,74 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SHA="$(git -C "$REPO" rev-parse HEAD)"
+FAILED=0
+
+pass() { echo "PASS $1${2:+ — $2}"; }
+fail() { echo "FAIL $1${2:+ — $2}"; FAILED=1; }
+
+# ---- Check 9 of group 3: the Gitea preset needed no change to core, api or worker (CONN-8) -------
+# Reads only git history of $REPO at $SHA; no Docker. Merge commits are skipped on purpose: a merge's
+# first-parent diff would show other plans' work. The plan's commits carry the trailer
+# `Plan: phase-9-mcp-upstream-gitea`; its range is BASE (parent of the first) .. END (the last).
+PLAN_TRAILER='Plan: phase-9-mcp-upstream-gitea'
+check_no_core_change() {
+  local commits c touched bad="" plan first base end ledger ledger_base base_detail range n_range foreign
+  commits="$(git -C "$REPO" log --no-merges --format=%H "$SHA" -- presets/gitea-issues)" ||
+    { fail no-core-change "git log over presets/gitea-issues failed"; return 0; }
+  [[ -n "$commits" ]] || { fail no-core-change "no commit touches presets/gitea-issues at ${SHA:0:12}"; return 0; }
+  # a. No commit that touches the preset touches core, api or worker.
+  for c in $commits; do
+    touched="$(git -C "$REPO" diff-tree --no-commit-id --name-only -r "$c" | grep -E '^(packages/core|apps/api|apps/worker)/' || true)"
+    [[ -z "$touched" ]] || bad+="${c:0:12} ($(git -C "$REPO" log -1 --format=%s "$c")) touches $(tr '\n' ' ' <<<"$touched"); "
+  done
+  [[ -z "$bad" ]] || { fail no-core-change "$bad"; return 0; }
+  # b. The plan's range from its trailer.
+  plan="$(git -C "$REPO" log --no-merges --reverse --format=%H --grep="^${PLAN_TRAILER}\$" "$SHA")"
+  [[ -n "$plan" ]] || { fail no-core-change "no commit carries the trailer '$PLAN_TRAILER'"; return 0; }
+  first="$(head -1 <<<"$plan")"
+  end="$(tail -1 <<<"$plan")"
+  base="$(git -C "$REPO" rev-parse --verify --quiet "${first}^")" || { fail no-core-change "the first plan commit ${first:0:12} has no parent"; return 0; }
+  # c. The controller's ledger, when present, names the same base.
+  ledger="$REPO/.superpowers/sdd/phase-9-mcp-upstream-gitea/progress.md"
+  if [[ -f "$ledger" ]]; then
+    ledger_base="$(sed -n 's/^Task 1: dispatched (base \([0-9a-f]\{7,40\}\))$/\1/p' "$ledger" | head -1)"
+    [[ -n "$ledger_base" ]] || { fail no-core-change "the ledger has no line 'Task 1: dispatched (base <sha>)'"; return 0; }
+    if [[ "$(git -C "$REPO" rev-parse --verify --quiet "${ledger_base}^{commit}" || true)" != "$base" ]]; then
+      fail no-core-change "the ledger base $ledger_base is not the parent ${base:0:12} of the first plan commit ${first:0:12}"; return 0
+    fi
+    base_detail="ledger base ${ledger_base:0:12} matches"
+  else
+    base_detail="ledger absent; range from trailers"
+  fi
+  # d. Every commit of the range is a plan commit; a foreign commit would void the claim.
+  range="$(git -C "$REPO" log --no-merges --format=%H "$base..$end")"
+  n_range="$(grep -c . <<<"$range" || true)"
+  foreign=""
+  for c in $range; do
+    grep -qx "$PLAN_TRAILER" <<<"$(git -C "$REPO" log -1 --format=%B "$c")" || foreign+="${c:0:12} ($(git -C "$REPO" log -1 --format=%s "$c")); "
+  done
+  [[ -z "$foreign" ]] || { fail no-core-change "commits in ${base:0:12}..${end:0:12} without the trailer: $foreign"; return 0; }
+  # e. The range changes nothing under core, api or worker.
+  touched="$(git -C "$REPO" diff --stat "$base..$end" -- packages/core apps/api apps/worker)"
+  [[ -z "$touched" ]] || { fail no-core-change "diff ${base:0:12}..${end:0:12} over core/api/worker: $(tr '\n' '|' <<<"$touched")"; return 0; }
+  pass no-core-change "$(grep -c . <<<"$commits" || true) commits touch presets/gitea-issues; range ${base:0:12}..${end:0:12} ($n_range commits, all Plan-trailed); $base_detail; diff over core/api/worker empty"
+}
+
+result() {
+  if [[ "$FAILED" == 0 ]]; then echo "# RESULT: PASS"; else echo "# RESULT: FAIL"; fi
+  exit "$FAILED"
+}
+
+# --history-only: check 9 alone, before any port, clone or compose call.
+if [[ "${1:-}" == --history-only ]]; then
+  echo "# Phase 9 history check of ${SHA:0:12}"
+  check_no_core_change
+  result
+fi
+(($# == 0)) || { echo "usage: $0 [--history-only]" >&2; exit 2; }
+
 WORK="$(mktemp -d)"
 PROJECT="aiops-accept9-$$"
-FAILED=0
 
 free_port() { node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})"; }
 AIOPS_API_PORT="$(free_port)" AIOPS_KEYCLOAK_PORT="$(free_port)" AIOPS_TEMPORAL_PORT="$(free_port)" AIOPS_POSTGRES_PORT="$(free_port)"
@@ -68,8 +147,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-pass() { echo "PASS $1${2:+ — $2}"; }
-fail() { echo "FAIL $1${2:+ — $2}"; FAILED=1; }
 json() { node -e "try{const v=JSON.parse(process.argv[1])$2;console.log(v===undefined?'':typeof v==='string'?v:JSON.stringify(v))}catch{console.log('')}" "$1"; }
 login() { node "$REPO/tooling/acceptance/login.mjs" "$AIOPS_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$AIOPS_MCP_RESOURCE"; }
 page_login() { node "$REPO/tooling/acceptance/page-login.mjs" "$API" "$1" dev-only-password "${2:-/app/approvals}"; }
@@ -291,9 +368,13 @@ pack_presets() {
   done
   for tgz in "$WORK"/tarballs/*.tgz; do
     name="$(tar -xzOf "$tgz" package/package.json | node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>console.log(JSON.parse(s).name))')"
-    [[ "$name" =~ ^(@[a-z0-9._-]+/)?[a-z0-9._-]+$ ]] || { echo "unexpected package name in $tgz: $name"; return 1; }
+    # A name segment of `.` or `..` would extract outside node_modules/<name>.
+    if [[ ! "$name" =~ ^(@[a-z0-9._-]+/)?[a-z0-9._-]+$ || "/$name/" == */./* || "/$name/" == */../* ]]; then
+      echo "unexpected package name in $tgz: $name"; return 1
+    fi
     mkdir -p "$AIOPS_ACCEPT_PRESET_DIR/node_modules/$name"
-    tar -xzf "$tgz" -C "$AIOPS_ACCEPT_PRESET_DIR/node_modules/$name" --strip-components=1
+    tar -xzf "$tgz" -C "$AIOPS_ACCEPT_PRESET_DIR/node_modules/$name" --strip-components=1 ||
+      { echo "tar -xzf $tgz failed"; return 1; }
   done
 }
 if pack_out="$(pack_presets 2>&1)"; then
@@ -449,11 +530,12 @@ fake_calls() {
   node -e 'try{const l=JSON.parse(process.argv[1]);if(!Array.isArray(l))throw 0;console.log(l.filter((r)=>r.rpcMethod==="tools/call"&&r.tool===process.argv[2]).length)}catch{console.log("unreadable")}' "$log" "$1"
 }
 # get_changeset as alice every 2 s until the status matches the regex or the timeout (s) passes; the
-# last answer is left in POLL and its status in POLL_STATUS. Returns 1 on timeout.
+# last answer is left in POLL and its status in POLL_STATUS. Returns 1 on timeout. An optional fourth
+# argument is the page_size of the items.
 poll_cs() {
   local deadline=$((SECONDS + $3))
   while :; do
-    POLL="$(user_mcp alice get_changeset "{\"changeset_id\":\"$1\"}")"
+    POLL="$(user_mcp alice get_changeset "{\"changeset_id\":\"$1\"${4:+,\"page_size\":$4}}")"
     POLL_STATUS="$(json "$POLL" '.structuredContent.changeset.status')"
     [[ "$POLL_STATUS" =~ $2 ]] && return 0
     ((SECONDS >= deadline)) && return 1
@@ -575,8 +657,194 @@ group_2() {
   fi
 }
 
+# ---- Group 3: the Gitea preset from its tarball, approved, rolled back, with no core change -------
+# (CONN-8, OPS-5, OPS-6, POL-2, NFR-17)
+
+# alice's issues.set_labels call; polled while it is preparing. Leaves the answer in PREP and its
+# change-set ID, hash and status in PREP_ID, PREP_HASH and PREP_STATUS.
+gitea_prepare() {
+  local status
+  PREP="$(user_mcp alice issues.set_labels "$1")"
+  PREP_ID="$(json "$PREP" '.structuredContent.changeset.id')"
+  [[ -n "$PREP_ID" ]] || PREP_ID="$(json "$PREP" '.structuredContent.changesetId')"
+  status="$(json "$PREP" '.structuredContent.changeset.status')"
+  [[ -n "$status" ]] || status="$(json "$PREP" '.structuredContent.status')"
+  if [[ "$status" == preparing && -n "$PREP_ID" ]]; then
+    poll_cs "$PREP_ID" '^[^p]|^prepared$' 120 || true
+    PREP="$POLL"
+  fi
+  PREP_HASH="$(json "$PREP" '.structuredContent.changeset.hash')"
+  PREP_STATUS="$(json "$PREP" '.structuredContent.changeset.status')"
+}
+# dave approves a change-set on the page with the hash and count he sees there. Leaves the answer in
+# APPROVE and the values he sent in APPROVE_HASH and APPROVE_COUNT.
+gitea_approve() {
+  local dave view
+  APPROVE_HASH="" APPROVE_COUNT=""
+  dave="$(page_login dave 2>&1)" || { APPROVE="{\"loginError\":true}"; return 0; }
+  view="$(page_api "$dave" changeset "$1" 2>&1 || true)"
+  APPROVE_HASH="$(json "$view" '.body.hash')"
+  APPROVE_COUNT="$(json "$view" '.body.stats.included')"
+  APPROVE="$(page_api "$dave" decide "$1" approve "${APPROVE_HASH:-x}" "${APPROVE_COUNT:-0}" 2>&1 || true)"
+}
+# The labels per targetId of a get_changeset answer, from the items' before ($2 = before) or after.
+item_labels() { node -e 'try{const o=JSON.parse(process.argv[1]);const m={};for(const i of o.structuredContent.items)m[i.targetId]=i[process.argv[2]]?.labels??null;console.log(JSON.stringify(m))}catch{console.log("{}")}' "$1" "$2"; }
+# The rollback stats of a get_changeset answer as sorted [key, value] pairs (jsonb orders keys its own way).
+sorted_stats() { node -e 'try{const o=JSON.parse(process.argv[1]).structuredContent.rollback.stats;console.log(JSON.stringify(Object.keys(o).sort().map((k)=>[k,o[k]])))}catch{console.log("")}' "$1"; }
+
+GITEA_BEFORE='{"1":["bug"],"2":["feature"],"3":["bug","triage"],"4":[],"5":["docs"]}'
+GITEA_AFTER='{"1":["bug","wontfix"],"2":["bug","wontfix"],"3":["bug","wontfix"],"4":["bug","wontfix"],"5":["bug","wontfix"]}'
+
+group_3() {
+  group_3_gitea
+  # 9. Independent of checks 1-8: the history shows the preset needed no core, api or worker change.
+  check_no_core_change
+}
+
+group_3_gitea() {
+  local started_api started_worker diff diff_code diff_preset pkg_version apply apply_code carol put conn_test search check deny cid row
+  local cs hash view before after sub labels deadline rb alice2 page_rb stats restored cs8 sub8 items8 item6 labels6
+
+  started_api="$(started_at api)"
+  started_worker="$(started_at worker)"
+
+  # 1. The preset is declared and bound in a new file; diff names it, apply loads it live (CONN-8).
+  write_gitea_config "$AIOPS_ACCEPT_CONFIG_DIR/gitea.yaml"
+  diff_code=0
+  diff="$(cli config diff /etc/aiops/config 2>&1)" || diff_code=$?
+  # `config diff` lists an added preset as `+ preset <id>` without its version (formatDiff), so the
+  # version is read from the package the api loads: its only preset directory is the tarball tree.
+  pkg_version="$(compose exec -T api node -e 'console.log(require(process.argv[1]).version)' /etc/aiops/presets/node_modules/@aiops/gitea-issues/package.json 2>&1 || true)"
+  grep -qx '+ preset gitea-issues' <<<"$diff" && diff_preset=yes || diff_preset=no
+  apply_code=0
+  apply="$(apply_config)" || apply_code=$?
+  if [[ "$diff_code" == 0 && "$diff_preset" == yes && "$pkg_version" == 0.1.0 && "$apply_code" == 0 ]] &&
+    await_listed alice issues.search yes && await_listed alice issues.set_labels yes &&
+    [[ "$(started_at api)" == "$started_api" && "$(started_at worker)" == "$started_worker" ]]; then
+    pass gitea-config-apply "config diff → exit 0: $(grep -E '^\+ (preset|connection|operation) ' <<<"$diff" | tr '\n' '|' | head -c 400); api loads @aiops/gitea-issues $pkg_version; config apply → exit 0; alice lists issues.search and issues.set_labels; api started $started_api and worker started $started_worker unchanged"
+  else
+    fail gitea-config-apply "diff exit $diff_code: $(tr '\n' '|' <<<"$diff" | head -c 800); api's @aiops/gitea-issues version: ${pkg_version:0:200}; apply exit $apply_code: $(tr '\n' '|' <<<"$apply" | head -c 800); alice lists issues.search: $(lists alice issues.search), issues.set_labels: $(lists alice issues.set_labels); api $started_api → $(started_at api); worker $started_worker → $(started_at worker)"
+    return 0
+  fi
+
+  # 2. carol enters the bare token on the credential page; the connection test passes.
+  carol="$(page_login carol /app/credentials 2>&1)" || { fail gitea-credential "page login: $carol"; return 0; }
+  put="$(put_gitea_credential "$carol" 2>&1 || true)"
+  conn_test="$(page_api "$carol" test gitea 2>&1 || true)"
+  if [[ "$put" == '{"status":204}' && "$(json "$conn_test" '.body.ok')" == true ]]; then
+    pass gitea-credential "carol: put-credential gitea-integration → $put; test gitea → $(json "$conn_test" '.body')"
+  else
+    fail gitea-credential "put-credential: $put; test: ${conn_test:0:800}"
+    return 0
+  fi
+
+  # 3. A search inside the grant's scope (POL-2): the open bug issues of acme/website, newest first.
+  search="$(user_mcp alice issues.search '{"owner":"acme","repo":"website","labels":["bug"],"fields":["number","labels"]}')"
+  check="$(node -e '
+    try {
+      const r = JSON.parse(process.argv[1]); const items = r.structuredContent?.items ?? [];
+      const problems = [];
+      if (r.isError) problems.push("isError");
+      const numbers = items.map((i) => i.number).join(",");
+      if (numbers !== "28,26,18,16,13,11,8,6,3,1") problems.push(`numbers ${numbers}`);
+      if (!items.every((i) => Array.isArray(i.labels) && i.labels.every((l) => typeof l === "string") && i.labels.includes("bug"))) problems.push("labels not string arrays with bug");
+      console.log(problems.length === 0 ? `ok ${numbers}` : problems.join("; "));
+    } catch (e) { console.log(`unreadable: ${e.message}`); }' "$search")"
+  if [[ "$check" == ok* ]]; then
+    pass gitea-scope-allowed "alice issues.search acme/website labels [bug] → numbers ${check#ok }, every labels a string array with bug; summary: $(json "$search" '.content[0]')"
+  else
+    fail gitea-scope-allowed "$check; answer: ${search:0:1200}"
+  fi
+
+  # 4. The same search on another repository is denied, and the denial is audited with its rule (POL-2).
+  deny="$(user_mcp alice issues.search '{"owner":"acme","repo":"internal","labels":["bug"],"fields":["number","labels"]}')"
+  cid="$(json "$deny" '.correlationId')"
+  row="$(psql_q "select decision || ' ' || (details->>'rule') from audit_event where correlation_id = '${cid:-none}' and action = 'policy.decision'" 2>&1 || true)"
+  if [[ "$(json "$deny" '.isError')" == true && "$(json "$deny" '.text')" == "Denied by policy:"* && -n "$cid" &&
+    "$row" == *"deny role:issue_manager/grant:website-issues/scope:repo" ]]; then
+    pass gitea-scope-denied "repo internal → $(json "$deny" '.text') | audited correlation_id=$cid: $row"
+  else
+    fail gitea-scope-denied "answer: ${deny:0:800}; row: $row"
+  fi
+
+  # 5. Five issues prepared; the stored before and after values are the seeded and requested labels.
+  gitea_prepare '{"owner":"acme","repo":"website","numbers":["1","2","3","4","5"],"changes":{"labels":["bug","wontfix"]}}'
+  cs="$PREP_ID"
+  hash="$PREP_HASH"
+  view="$(user_mcp alice get_changeset "{\"changeset_id\":\"${cs:-none}\",\"page_size\":5}")"
+  before="$(item_labels "$view" before)"
+  after="$(item_labels "$view" after)"
+  if [[ "$PREP_STATUS" == prepared && "$(json "$PREP" '.structuredContent.changeset.stats.included')" == 5 &&
+    "$before" == "$GITEA_BEFORE" && "$after" == "$GITEA_AFTER" ]]; then
+    pass gl-prepare "change-set $cs prepared, stats $(json "$PREP" '.structuredContent.changeset.stats'), hash $hash; before $before; after $after"
+  else
+    fail gl-prepare "status=$PREP_STATUS; before=$before; after=$after; answer=${PREP:0:1200}"
+    return 0
+  fi
+
+  # 6. alice submits, dave approves on the page, the run completes and Gitea has the labels (OPS-6).
+  sub="$(user_mcp alice submit_for_approval "{\"changeset_id\":\"$cs\",\"hash\":\"$hash\"}")"
+  gitea_approve "$cs"
+  poll_cs "$cs" "$TERMINAL" 300 5 || true
+  labels="$(gitea_labels "1 2 3 4 5")"
+  if [[ "$(json "$sub" '.structuredContent.status')" == pending_approval && "$APPROVE_HASH" == "$hash" && "$APPROVE_COUNT" == 5 &&
+    "$(json "$APPROVE" '.status')" == 200 && "$POLL_STATUS" == completed && "$labels" == "$GITEA_AFTER" ]]; then
+    pass gl-approved-executed "submit → pending_approval; dave: decide approve $APPROVE_HASH 5 → $APPROVE; then $POLL_STATUS; Gitea $labels"
+  else
+    fail gl-approved-executed "submit=$(json "$sub" '.structuredContent.status'); decide=$APPROVE (hash $APPROVE_HASH, count $APPROVE_COUNT); status=$POLL_STATUS; items=$(json "$POLL" '.structuredContent.items.map((i)=>i.targetId+":"+i.status).join(",")'); Gitea $labels"
+    return 0
+  fi
+
+  # 7. alice rolls back on the page after a fresh login; Gitea has the before values again. The
+  #    rollback window opens when the workflow finishes, so the offer is awaited (bounded).
+  deadline=$((SECONDS + 60))
+  while :; do
+    rb="$(user_mcp alice rollback_changeset "{\"changeset_id\":\"$cs\",\"hash\":\"$hash\"}")"
+    [[ "$(json "$rb" '.structuredContent.rollback.available')" == true ]] && break
+    ((SECONDS >= deadline)) && break
+    sleep 2
+  done
+  alice2="$(page_login alice "/app/changesets/$cs" 2>&1)" || { fail gl-rolled-back "page login: $alice2"; return 0; }
+  page_rb="$(page_api "$alice2" rollback "$cs" "$hash" 2>&1 || true)"
+  if [[ "$(json "$page_rb" '.status')" == 200 && "$(json "$page_rb" '.body')" == '{"status":"rolling_back"}' ]]; then
+    poll_cs "$cs" "$TERMINAL" 300 5 || true
+    stats="$(sorted_stats "$POLL")"
+    restored="$(gitea_labels "1 2 3 4 5")"
+    if [[ "$POLL_STATUS" == rolled_back && "$stats" == '[["failed",0],["restored",5],["skipped",0]]' && "$restored" == "$before" ]]; then
+      pass gl-rolled-back "alice: fresh page login; rollback $cs $hash → $page_rb; then $POLL_STATUS, rollback stats $(json "$POLL" '.structuredContent.rollback.stats'); Gitea $restored equals the before values"
+    else
+      fail gl-rolled-back "status=$POLL_STATUS; rollback=$(json "$POLL" '.structuredContent.rollback'); Gitea $restored; before $before"
+      return 0
+    fi
+  else
+    fail gl-rolled-back "rollback offer: $(json "$rb" '.structuredContent.rollback'); page rollback: $page_rb"
+    return 0
+  fi
+
+  # 8. An unknown label name is refused before any write: Gitea would drop it silently and report
+  #    success for a partial write (OPS-5). Issue 6 keeps its seeded [bug].
+  gitea_prepare '{"owner":"acme","repo":"website","numbers":["6"],"changes":{"labels":["bug","no-such-label"]}}'
+  cs8="$PREP_ID"
+  if [[ "$PREP_STATUS" != prepared ]]; then
+    fail gl-unknown-label "status=$PREP_STATUS; answer=${PREP:0:1200}"
+    return 0
+  fi
+  sub8="$(user_mcp alice submit_for_approval "{\"changeset_id\":\"$cs8\",\"hash\":\"$PREP_HASH\"}")"
+  gitea_approve "$cs8"
+  poll_cs "$cs8" "$TERMINAL" 300 5 || true
+  items8="$(json "$POLL" '.structuredContent.items.map((i)=>i.targetId+":"+i.status).join(",")')"
+  item6="$(json "$POLL" '.structuredContent.items.find((i)=>i.targetId==="6")?.status')"
+  labels6="$(gitea_labels 6)"
+  if [[ "$(json "$sub8" '.structuredContent.status')" == pending_approval && "$(json "$APPROVE" '.status')" == 200 &&
+    "$POLL_STATUS" =~ ^(failed|completed_with_errors)$ && "$item6" == failed && "$labels6" == '{"6":["bug"]}' ]]; then
+    pass gl-unknown-label "change-set $cs8 [bug, no-such-label] on issue 6: submit → pending_approval; dave: decide approve → $APPROVE; then $POLL_STATUS; items $items8; Gitea $labels6"
+  else
+    fail gl-unknown-label "submit=$(json "$sub8" '.structuredContent.status'); decide=$APPROVE; status=$POLL_STATUS; items=$items8; Gitea $labels6"
+  fi
+}
+
 # Not GROUPS: bash ignores assignments to its own GROUPS array (the user's group IDs).
-RUN_GROUPS="${AIOPS_ACCEPT9_GROUPS:-1 2}"
+RUN_GROUPS="${AIOPS_ACCEPT9_GROUPS:-1 2 3}"
 for g in $RUN_GROUPS; do
   if declare -F "group_$g" >/dev/null; then
     "group_$g"
@@ -585,5 +853,4 @@ for g in $RUN_GROUPS; do
   fi
 done
 
-if [[ "$FAILED" == 0 ]]; then echo "# RESULT: PASS"; else echo "# RESULT: FAIL"; fi
-exit "$FAILED"
+result
