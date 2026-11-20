@@ -1,9 +1,9 @@
 /**
  * The code fixture preset of `@aiops/testing` as the worker loads it (OPS-5, OPS-6): connection
  * `items` at a fake upstream served by `installFakeItems`, a fake bearer token, and the role
- * `editor` (group `editors`, no approval) granted `fixture.update`, `fixture.set_tags` and
- * `fixture.ping`. Each load copies the fixture into a new temporary preset directory, so the
- * process-wide code-import cache never sees a changed tree under one entry path.
+ * `editor` (group `editors`, no approval) granted `fixture.update`, `fixture.set_tags`,
+ * `fixture.ping` and any extra grants. Each load copies the fixture into a new temporary preset
+ * directory, so the process-wide code-import cache never sees a changed tree under one entry path.
  */
 import { cp, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -16,7 +16,14 @@ import { MemoryVault } from './magento.js';
 export const CODE_FIXTURE_GROUP = 'editors';
 export const CODE_FIXTURE_CREDENTIAL_REF = 'items-token';
 
-function sources(baseUrl: string, maxConcurrency: number): { file: string; text: string }[] {
+const FIXTURE_GRANTS: readonly string[] = ['fixture.update', 'fixture.set_tags', 'fixture.ping'];
+
+interface Source {
+  readonly file: string;
+  readonly text: string;
+}
+
+function sources(baseUrl: string, maxConcurrency: number, grants: readonly string[]): Source[] {
   return [
     {
       file: 'connections.yaml',
@@ -39,9 +46,7 @@ connections:
 roles:
   - id: editor
     grants:
-      - operation: fixture.update
-      - operation: fixture.set_tags
-      - operation: fixture.ping
+${grants.map((g) => `      - operation: ${g}`).join('\n')}
     approval: { required: never }
 role_mapping:
   - group: ${CODE_FIXTURE_GROUP}
@@ -51,15 +56,25 @@ role_mapping:
   ];
 }
 
-/** The fixture bound to `baseUrl`; the temporary preset copy is removed before it returns. */
+/**
+ * The fixture bound to `baseUrl`; the temporary preset copy is removed before it returns. `extra`
+ * sources load with it (e.g. configuration operations on connection `items`), and `grants` adds
+ * operations to the role `editor`.
+ */
 export async function loadCodeFixture(
   baseUrl: string,
-  opts: { readonly maxConcurrency?: number; readonly resolver?: UpstreamResolver } = {},
+  opts: {
+    readonly maxConcurrency?: number;
+    readonly resolver?: UpstreamResolver;
+    readonly extra?: readonly Source[];
+    readonly grants?: readonly string[];
+  } = {},
 ): Promise<LoadedConfiguration> {
   const presets = await mkdtemp(join(tmpdir(), 'aiops-worker-code-presets-'));
   try {
     await cp(CODE_FIXTURE_PRESET_DIR, join(presets, 'code-fixture'), { recursive: true });
-    const loaded = await loadConfigurationSources(sources(baseUrl, opts.maxConcurrency ?? 2), {
+    const all = [...sources(baseUrl, opts.maxConcurrency ?? 2, [...FIXTURE_GRANTS, ...(opts.grants ?? [])]), ...(opts.extra ?? [])];
+    const loaded = await loadConfigurationSources(all, {
       presetDirs: [presets],
       ...(opts.resolver === undefined ? {} : { resolver: opts.resolver }),
     });

@@ -238,6 +238,38 @@ describe('OPS-5 OPS-6 direct writers', () => {
     expect(JSON.stringify(s.lines)).not.toContain(SECRET);
   });
 
+  it('OPS-3 EXE-8 an inverse-operation rollback writes through a write binding without a manifest of its own', async () => {
+    const s = await setup('fixture.update');
+    // The inverse operations as load accepts them: risk write, no manifest (records come from the original's).
+    const bare = new Set(['fixture.update', 'fixture.set_tags']);
+    const operations = s.config.policy.operations.map((op) => {
+      if (!bare.has(op.id)) return op;
+      const rest = { ...op };
+      delete rest.manifest;
+      return rest;
+    });
+    const inverse: LoadedConfiguration = { ...s.config, policy: { ...s.config.policy, operations } };
+    const base = { ...s.deps, configuration: inverse };
+    // Without the original operation named, a binding of an operation without a manifest gets no writer.
+    expect(createPerRecordWriter(base)).toBeUndefined();
+    expect(createCodeRecordWriter({ ...base, operationId: 'fixture.set_tags' })).toBeUndefined();
+    // Named, the original's manifest drives the records and the inverse's binding sends them.
+    // An original that is unknown or has no manifest gives none.
+    expect(createPerRecordWriter({ ...base, manifestOperationId: 'no.such' })).toBeUndefined();
+    expect(createPerRecordWriter({ ...base, manifestOperationId: 'fixture.set_tags' })).toBeUndefined();
+    const update = s.config.policy.operations.find((op) => op.id === 'fixture.update');
+    if (update?.manifest === undefined) throw new Error('fixture.update has no manifest');
+    const withOriginal: LoadedConfiguration = { ...inverse, policy: { ...inverse.policy, operations: [...operations, { ...update, id: 'items.original' }] } };
+    const direct = { ...base, configuration: withOriginal, manifestOperationId: 'items.original' };
+    const writer = createPerRecordWriter(direct);
+    expect(writer).toBeDefined();
+    expect(createCodeRecordWriter({ ...direct, operationId: 'fixture.set_tags' })).toBeDefined();
+    // The inverse must still be a write: a read binding gets none even with the original named.
+    expect(createPerRecordWriter({ ...direct, operationId: 'fixture.search' })).toBeUndefined();
+    expect(await writer?.write(records(1), s.heartbeat)).toEqual({ ok: true, states: ['ok'] });
+    expect(s.adapter.records.map((r) => r.record)).toEqual([{ id: '1', title: TITLE }]);
+  });
+
   it('OPS-6 both writers answer undefined for a binding of another kind', async () => {
     const s = await setup('fixture.update');
     const base = { ...s.deps };

@@ -14,7 +14,14 @@ export interface DirectWriterDeps {
   readonly configuration: LoadedConfiguration;
   readonly vault: CredentialVault;
   readonly adapter: RecordWriteAdapter & CodeAdapter;
+  /** The operation whose binding sends the records. */
   readonly operationId: string;
+  /**
+   * The operation whose manifest the records come from; default `operationId`. An
+   * `inverse_operation` rollback names the original here: the inverse then needs only a write
+   * binding, as on the bulk path (ruling on T11 I1).
+   */
+  readonly manifestOperationId?: string;
   readonly correlationId: string;
   /** The change-set's validated arguments, for `{ arg }` templates and the code module. */
   readonly args: Readonly<Record<string, unknown>>;
@@ -31,6 +38,20 @@ const MISALIGNED = { ok: false, code: 'invalid_response', retriable: false } as 
 function isManifestWrite(configuration: LoadedConfiguration, operationId: string): boolean {
   const operation = configuration.policy.operations.find((op) => op.id === operationId);
   return operation?.manifest !== undefined && (operation.risk === 'write' || operation.risk === 'destructive');
+}
+
+/**
+ * The records come from a manifest write and the binding's operation is a write: the same operation
+ * by default, or for an `inverse_operation` rollback the original's manifest and the inverse's
+ * binding, whether or not the inverse has a manifest of its own.
+ */
+function servesManifestWrite(deps: DirectWriterDeps): boolean {
+  const { configuration, operationId } = deps;
+  const manifestOperationId = deps.manifestOperationId ?? operationId;
+  if (manifestOperationId === operationId) return isManifestWrite(configuration, operationId);
+  const operation = configuration.policy.operations.find((op) => op.id === operationId);
+  const writes = operation?.risk === 'write' || operation?.risk === 'destructive';
+  return writes && isManifestWrite(configuration, manifestOperationId);
 }
 
 /**
@@ -68,7 +89,7 @@ function logger(deps: DirectWriterDeps, connection: string, method: string): (ou
 export function createPerRecordWriter(deps: DirectWriterDeps): DirectWriter | undefined {
   const { configuration, adapter, operationId } = deps;
   const binding = configuration.bindings.get(operationId);
-  if (binding?.kind !== 'http' || !isManifestWrite(configuration, operationId)) return undefined;
+  if (binding?.kind !== 'http' || !servesManifestWrite(deps)) return undefined;
   const { mapping } = binding;
   if (mapping.method === 'GET' || mapping.bulk !== undefined) return undefined;
   const connection = configuration.connectionSettings.get(binding.connection);
@@ -122,7 +143,7 @@ export function createPerRecordWriter(deps: DirectWriterDeps): DirectWriter | un
 export function createCodeRecordWriter(deps: DirectWriterDeps): DirectWriter | undefined {
   const { configuration, adapter, operationId } = deps;
   const binding = configuration.bindings.get(operationId);
-  if (binding?.kind !== 'code' || !isManifestWrite(configuration, operationId)) return undefined;
+  if (binding?.kind !== 'code' || !servesManifestWrite(deps)) return undefined;
   const code = configuration.codeOperations.get(operationId);
   if (code?.kind !== 'write') return undefined;
   const operation: CodeWriteOperation = code;

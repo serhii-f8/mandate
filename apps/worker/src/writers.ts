@@ -88,7 +88,8 @@ function directCapable(adapter: WriterAdapter): adapter is WriterAdapter & Recor
 }
 
 /**
- * The write mode of `writeOperationId`'s binding (OPS-5, OPS-6): `bulkFor` for an HTTP binding with
+ * The write mode of `writeOperationId`'s binding for records of `manifestOperationId`'s manifest
+ * (OPS-5, OPS-6; for an `inverse_operation` rollback the inverse needs no manifest of its own): `bulkFor` for an HTTP binding with
  * `bulk`, `directFor` with a per-record writer for an HTTP non-GET binding without it, `directFor`
  * with a code writer for a `code` binding; undefined for anything else (an MCP binding, a GET, a
  * missing binding or connection, an adapter without the needed methods).
@@ -97,6 +98,7 @@ function writeModeOf(
   deps: WriterForDeps,
   configuration: LoadedConfiguration,
   writeOperationId: string,
+  manifestOperationId: string,
   correlation: (cs: ChangeSetRecord) => string,
 ): WriteMode | undefined {
   const { vault, adapter } = deps;
@@ -118,7 +120,7 @@ function writeModeOf(
   if (binding === undefined || binding.kind === 'mcp' || !directCapable(adapter)) return undefined;
   const create = binding.kind === 'code' ? createCodeRecordWriter : createPerRecordWriter;
   const directFor = (correlationId: string, args: Readonly<Record<string, unknown>>) =>
-    create({ configuration, vault, adapter, operationId: writeOperationId, correlationId, args, ...log });
+    create({ configuration, vault, adapter, operationId: writeOperationId, manifestOperationId, correlationId, args, ...log });
   // Checked once here: a GET binding, a code operation of another kind or a missing connection answers undefined.
   if (directFor('', {}) === undefined) return undefined;
   return {
@@ -150,7 +152,8 @@ function manifestWriter(
   const operation = configuration.policy.operations.find((o) => o.id === input.operationId);
   const manifest = operation?.manifest;
   if (operation === undefined || manifest === undefined) return undefined;
-  const mode = writeModeOf(deps, configuration, input.writeOperationId, input.correlation);
+  // The records come from this operation's manifest; the write binding only sends them (T11 I1).
+  const mode = writeModeOf(deps, configuration, input.writeOperationId, input.operationId, input.correlation);
   if (mode === undefined) return undefined;
   const readOperation = configuration.policy.operations.find((o) => o.id === manifest.readBefore.operation);
 

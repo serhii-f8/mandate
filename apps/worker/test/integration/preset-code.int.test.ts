@@ -27,6 +27,58 @@ const SEED: readonly FakeItem[] = [
   { id: '4', title: 'Item 4', state: 'closed', tags: ['blue'] },
 ];
 
+/**
+ * A per-record write on connection `items` whose rollback is the inverse operation
+ * `items.restore_titles`, a per-record write that POSTs each record (`{ id, title }`) to
+ * `/items/restore` (served by this file's route). Load requires every non-MCP write to carry a
+ * manifest (manifest.ts check 1), so the inverse has one; the rollback still takes its records from
+ * the original's manifest and only the inverse's binding (ruling on T11 I1).
+ */
+const INVERSE_OPERATIONS = `version: 1
+operations:
+  - id: items.retitle
+    connection: items
+    risk: write
+    description: Change the title of items by ID.
+    input_schema:
+      type: object
+      properties:
+        ids: { type: array, minItems: 1, items: { type: string, minLength: 1, maxLength: 64 } }
+        changes: { type: object, properties: { title: { type: string, minLength: 1 } }, required: [title], additionalProperties: false }
+      required: [ids, changes]
+      additionalProperties: false
+    upstream:
+      method: PATCH
+      path: /items/{id}
+      path_params: { id: { record: id } }
+    manifest:
+      id_field: id
+      ids_arg: ids
+      values_arg: changes
+      fields: [title]
+      read_before: { operation: fixture.get_many, ids_arg: ids, args: {} }
+      rollback: { strategy: inverse_operation, operation: items.restore_titles }
+  - id: items.restore_titles
+    connection: items
+    risk: write
+    description: Put back the titles of items.
+    input_schema:
+      type: object
+      properties:
+        ids: { type: array, minItems: 1, items: { type: string, minLength: 1, maxLength: 64 } }
+        changes: { type: object, properties: { title: { type: string, minLength: 1 } }, required: [title], additionalProperties: false }
+      required: [ids, changes]
+      additionalProperties: false
+    upstream: { method: POST, path: /items/restore }
+    manifest:
+      id_field: id
+      ids_arg: ids
+      values_arg: changes
+      fields: [title]
+      read_before: { operation: fixture.get_many, ids_arg: ids, args: {} }
+      rollback: { strategy: none }
+`;
+
 let infra: Infra;
 
 beforeAll(async () => {
@@ -61,7 +113,20 @@ describe('OPS-5 OPS-6 preset code and per-record writes through changesetWorkflo
     up = await startFakeUpstream();
     fake = installFakeItems(up, SEED);
     const adapter = createAdapters();
-    configuration = await loadCodeFixture(up.url, { maxConcurrency: 1, resolver: adapter.resolver });
+    // POST /items/restore puts back the title of the one item in its body (the inverse operation).
+    up.route('POST', '/items/restore', (req) => {
+      const body = JSON.parse(req.body) as { id?: unknown; title?: unknown };
+      const item = typeof body.id === 'string' ? fake.items.get(body.id) : undefined;
+      if (item === undefined || typeof body.title !== 'string') return { status: 400, body: { error: 'bad restore' } };
+      item.title = body.title;
+      return { status: 200, body: {} };
+    });
+    configuration = await loadCodeFixture(up.url, {
+      maxConcurrency: 1,
+      resolver: adapter.resolver,
+      extra: [{ file: 'operations.yaml', text: INVERSE_OPERATIONS }],
+      grants: ['items.retitle'],
+    });
     vault = await codeFixtureVault(FAKE_TOKEN);
     worker = await startTestWorker(infra, {
       configuration,
@@ -119,6 +184,30 @@ describe('OPS-5 OPS-6 preset code and per-record writes through changesetWorkflo
     await worker.executor.settled(cs.id);
   }
 
+  /** Executes with a rollback window open (EXE-8) and waits until execution has completed. */
+  async function executeWithWindow(cs: { id: string; hash: string }): Promise<void> {
+    await startExecution(cs);
+    await expect
+      .poll(async () => {
+        const record = await infra.repository.get(cs.id);
+        return [record?.status, record?.rollbackUntil !== undefined];
+      }, { timeout: 30_000 })
+      .toEqual(['completed', true]);
+  }
+
+  /** Requests the rollback as the executor does and waits for the workflow to close rolled back. */
+  async function rollBack(changesetId: string): Promise<void> {
+    const requested = await infra.repository.requestRollback({
+      changesetId,
+      request: { actor: 'alice', correlationId: `corr-rollback-${randomUUID()}`, requestedAt: new Date() },
+      marginMs: ROLLBACK_REQUEST_MARGIN_MS,
+      audit: [],
+    });
+    expect(requested.ok).toBe(true);
+    await worker.executor.wake(changesetId);
+    await expect(infra.client.workflow.getHandle(changesetId).result()).resolves.toEqual({ status: 'rolled_back' });
+  }
+
   it('OPS-6 EXE-4 NFR-2 a per-record write retried after a 503 reports already_applied for the first record and writes the rest once', async () => {
     const cs = await prepared('fixture.update', { ids: ['1', '2', '3'], changes: { title: 'Renamed' } });
     fake.failNext('PATCH', '/items/2', 503);
@@ -145,26 +234,12 @@ describe('OPS-5 OPS-6 preset code and per-record writes through changesetWorkflo
   it('OPS-5 OPS-3 a code write executes and rolls back through the workflow', async () => {
     windowHours = 1;
     const cs = await prepared('fixture.set_tags', { ids: ['1', '2', '3'], changes: { tags: ['new', 'shiny'] } });
-    await startExecution(cs);
-    await expect
-      .poll(async () => {
-        const record = await infra.repository.get(cs.id);
-        return [record?.status, record?.rollbackUntil !== undefined];
-      }, { timeout: 30_000 })
-      .toEqual(['completed', true]);
+    await executeWithWindow(cs);
     expect(await itemOutcomes(cs.id)).toEqual({ '1': ['written', undefined], '2': ['written', undefined], '3': ['written', undefined] });
     expect(['1', '2', '3'].map((id) => fake.items.get(id)?.tags)).toEqual([['new', 'shiny'], ['new', 'shiny'], ['new', 'shiny']]);
 
     // EXE-8: the rollback replays the before values through the same code operation.
-    const requested = await infra.repository.requestRollback({
-      changesetId: cs.id,
-      request: { actor: 'alice', correlationId: `corr-rollback-${randomUUID()}`, requestedAt: new Date() },
-      marginMs: ROLLBACK_REQUEST_MARGIN_MS,
-      audit: [],
-    });
-    expect(requested.ok).toBe(true);
-    await worker.executor.wake(cs.id);
-    await expect(infra.client.workflow.getHandle(cs.id).result()).resolves.toEqual({ status: 'rolled_back' });
+    await rollBack(cs.id);
     expect(['1', '2', '3'].map((id) => fake.items.get(id)?.tags)).toEqual([['red'], ['green'], []]);
     expect((await itemsOf(cs.id)).map((i) => i.rollbackStatus)).toEqual(['restored', 'restored', 'restored']);
     expect(fake.requestsTo('PUT', '/items/1/tags')).toBe(2);
@@ -176,6 +251,44 @@ describe('OPS-5 OPS-6 preset code and per-record writes through changesetWorkflo
     expect(await itemOutcomes(refused.id)).toEqual({ '1': ['failed', 'upstream_failed'] });
     expect(await statusOf(refused.id)).toBe('failed');
     expect(fake.items.get('1')?.tags).toEqual(['red']);
+  }, 60_000);
+
+  it('OPS-6 OPS-3 EXE-8 a per-record write rolls back through its own binding', async () => {
+    windowHours = 1;
+    const cs = await prepared('fixture.update', { ids: ['1', '2'], changes: { title: 'Renamed' } });
+    await executeWithWindow(cs);
+    expect(['1', '2'].map((id) => fake.items.get(id)?.title)).toEqual(['Renamed', 'Renamed']);
+
+    await rollBack(cs.id);
+
+    expect(['1', '2', '3'].map((id) => fake.items.get(id)?.title)).toEqual(['Item 1', 'Item 2', 'Item 3']);
+    expect((await itemsOf(cs.id)).map((i) => [i.targetId, i.rollbackStatus])).toEqual([
+      ['1', 'restored'],
+      ['2', 'restored'],
+    ]);
+    // One PATCH per item forward and one back (replay_previous_state).
+    expect([fake.requestsTo('PATCH', '/items/1'), fake.requestsTo('PATCH', '/items/2')]).toEqual([2, 2]);
+  }, 60_000);
+
+  it('OPS-3 EXE-8 an inverse_operation rollback of a per-record write sends through the inverse binding', async () => {
+    windowHours = 1;
+    const cs = await prepared('items.retitle', { ids: ['1', '2'], changes: { title: 'Renamed' } });
+    await executeWithWindow(cs);
+    expect(['1', '2'].map((id) => fake.items.get(id)?.title)).toEqual(['Renamed', 'Renamed']);
+
+    await rollBack(cs.id);
+
+    // The original's manifest gave the records; the inverse's binding sent one POST per record.
+    expect(['1', '2'].map((id) => fake.items.get(id)?.title)).toEqual(['Item 1', 'Item 2']);
+    const restores = up.requests.filter((r) => r.method === 'POST' && r.path === '/items/restore').map((r) => JSON.parse(r.body) as unknown);
+    expect(restores).toEqual([
+      { id: '1', title: 'Item 1' },
+      { id: '2', title: 'Item 2' },
+    ]);
+    expect((await itemsOf(cs.id)).map((i) => [i.targetId, i.rollbackStatus])).toEqual([
+      ['1', 'restored'],
+      ['2', 'restored'],
+    ]);
   }, 60_000);
 
   it('OPS-5 OPS-4 a selector through the HTTP search and a code read_before prepare the change-set', async () => {
@@ -219,6 +332,16 @@ describe('OPS-5 OPS-6 preset code and per-record writes through changesetWorkflo
       expect(writerFor(configuration, operationId)).toBeInstanceOf(ManifestBatchWriter);
       expect(rollbackWriterFor(configuration, operationId)).toBeInstanceOf(ManifestBatchWriter);
     }
+    // T11 I1: an inverse operation without a manifest of its own still gets a rollback writer; the
+    // records come from the original's manifest (the bulk path never required one either).
+    const operations = configuration.policy.operations.map((op) => {
+      if (op.id !== 'items.restore_titles') return op;
+      const rest = { ...op };
+      delete rest.manifest;
+      return rest;
+    });
+    const bareInverse: LoadedConfiguration = { ...configuration, policy: { ...configuration.policy, operations } };
+    expect(rollbackWriterFor(bareInverse, 'items.retitle')).toBeInstanceOf(ManifestBatchWriter);
     // The OpenAPI adapter alone also writes per record and runs code.
     expect(createWriterFor({ vault, adapter: createOpenApiAdapter() })(configuration, 'fixture.update')).toBeInstanceOf(ManifestBatchWriter);
     // Fail closed (ruling F14): an adapter that cannot write per record or run code gets UnsupportedWriter.
