@@ -456,12 +456,12 @@ connections:
     ok(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: [presets] }));
   });
 
-  it('refuses a preset bound to two connections', async () => {
+  it('CONN-8 refuses a preset bound to two connections without distinct prefixes', async () => {
     const dir = await fixture('with-preset', {
       'second.yaml': 'version: 1\nconnections:\n  - { id: shop2, adapter: openapi, base_url: https://shop.example.test/api, credential_ref: shop-token, preset: fake }\n',
     });
     const found = issues(await loadConfigurationDirectory(dir, { resolver: resolver(), presetDirs: PRESET_DIRS }));
-    expect(found).toContainEqual(expect.objectContaining({ file: 'second.yaml', path: 'connections[0].preset', message: 'the preset is already bound to connection shop' }));
+    expect(found).toContainEqual(expect.objectContaining({ file: 'second.yaml', path: 'connections[0].preset', message: 'the preset is already bound to connection shop with the same operation prefix' }));
   });
 
   it('checks the connection test operation', async () => {

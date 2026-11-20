@@ -418,3 +418,99 @@ connections:
   });
 });
 
+
+describe('CONN-8 preset aliases', () => {
+  const twoShops = (a: string, b: string, grants = '      - { operation: shop_a.search }\n'): string => `version: 1
+presets:
+  - { id: fixture, package: "@aiops/code-fixture-preset" }
+connections:
+  - { id: a, adapter: openapi, base_url: https://a.example.test/api, credential_ref: items-token, preset: fixture${a} }
+  - { id: b, adapter: openapi, base_url: https://b.example.test/api, credential_ref: items-token, preset: fixture${b} }
+roles:
+  - id: viewer
+    grants:
+${grants}  - id: integration_admin
+    grants: []
+    manage_credentials: [items-token]
+role_mapping:
+  - { group: viewers, roles: [viewer] }
+`;
+  const PREFIXED = twoShops(', operation_prefix: shop_a', ', operation_prefix: shop_b');
+
+  async function loadAliased(config: string, preset?: string): Promise<LoadResult> {
+    const dirs: string[] = [];
+    try {
+      return await loadCodeFixture(dirs, { preset: preset ?? (await presetWithoutUpdate()), config: { 'config.yaml': config } });
+    } finally {
+      await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+    }
+  }
+
+  it('CONN-8 one preset bound to two connections with distinct prefixes yields two operation sets, each bound to its connection', async () => {
+    const result = await loadAliased(PREFIXED);
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    const ops = result.configuration.policy.operations;
+    const names = ['search', 'get_many', 'set_tags', 'ping', 'boom'];
+    expect(ops.map((o) => o.id)).toEqual([...names.map((n) => `shop_a.${n}`), ...names.map((n) => `shop_b.${n}`)]);
+    for (const o of ops) {
+      expect(o.connection).toBe(o.id.startsWith('shop_a.') ? 'a' : 'b');
+      expect(o.toolName).toBe(o.id);
+      expect(o.source).toBe('preset:fixture');
+    }
+    expect([...result.configuration.bindings.keys()]).toContain('shop_b.get_many');
+    expect(result.configuration.codeOperations.size).toBe(8);
+  });
+
+  it('CONN-8 internal references follow the prefix', async () => {
+    const result = await loadAliased(PREFIXED);
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    const byId = new Map(result.configuration.policy.operations.map((o) => [o.id, o]));
+    for (const ns of ['shop_a', 'shop_b']) {
+      const manifest = byId.get(`${ns}.set_tags`)?.manifest;
+      expect(manifest?.readBefore.operation).toBe(`${ns}.get_many`);
+      expect(manifest?.selector?.operation).toBe(`${ns}.search`);
+    }
+    // inverse_operation rollback: set_tags is its own inverse.
+    const text = await presetWithoutUpdate();
+    const at = text.indexOf('  - id: fixture.set_tags\n');
+    const preset = text.slice(0, at) + text.slice(at).replace('rollback: { strategy: replay_previous_state }', 'rollback: { strategy: inverse_operation, operation: fixture.set_tags }');
+    const inverse = await loadAliased(PREFIXED, preset);
+    if (!inverse.ok) throw new Error(inverse.issues.map(formatIssue).join('\n'));
+    const rollbacks = inverse.configuration.policy.operations.filter((o) => o.id.endsWith('.set_tags')).map((o) => o.manifest?.rollback);
+    expect(rollbacks).toEqual([
+      { strategy: 'inverse_operation', operation: 'shop_a.set_tags' },
+      { strategy: 'inverse_operation', operation: 'shop_b.set_tags' },
+    ]);
+  });
+
+  it('CONN-8 the preset test operation follows the prefix', async () => {
+    const preset = (await presetWithoutUpdate()).replace('operations:\n', 'test: { operation: fixture.search, args: { page: 1, per_page: 1, fields: [id] } }\noperations:\n');
+    const result = await loadAliased(PREFIXED, preset);
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    expect(result.configuration.connectionTests.get('a')).toEqual({ operation: 'shop_a.search', args: { page: 1, per_page: 1, fields: ['id'] } });
+    expect(result.configuration.connectionTests.get('b')).toEqual({ operation: 'shop_b.search', args: { page: 1, per_page: 1, fields: ['id'] } });
+  });
+
+  it('CONN-8 binding a preset twice without distinct prefixes is refused', async () => {
+    const message = 'the preset is already bound to connection a with the same operation prefix';
+    for (const config of [
+      twoShops('', '', '      - { operation: fixture.search }\n'),
+      twoShops(', operation_prefix: x', ', operation_prefix: x', '      - { operation: x.search }\n'),
+      twoShops(', operation_prefix: fixture', '', '      - { operation: fixture.search }\n'),
+    ]) {
+      expect(issues(await loadAliased(config))).toEqual([expect.objectContaining({ file: 'config.yaml', path: 'connections[1].preset', message })]);
+    }
+  });
+
+  it('CONN-8 operation_prefix without preset is refused', async () => {
+    const result = await load({
+      'connections.yaml': CONNECTIONS.replace('auth: { scheme: bearer } }', 'auth: { scheme: bearer }, operation_prefix: shop }'),
+    });
+    expect(issues(result)).toEqual([expect.objectContaining({ file: 'connections.yaml', path: 'connections[0].operation_prefix', message: 'requires preset' })]);
+  });
+
+  it('POL-1 a grant naming the unprefixed ID of an aliased preset is an unknown operation', async () => {
+    const result = await loadAliased(twoShops(', operation_prefix: shop_a', ', operation_prefix: shop_b', '      - { operation: fixture.search }\n'));
+    expect(issues(result)).toEqual([expect.objectContaining({ file: 'config.yaml', path: 'roles[0].grants[0].operation', message: 'names an operation that is not defined' })]);
+  });
+});

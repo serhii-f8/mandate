@@ -21,7 +21,14 @@ export { OPERATION_ID };
 const credentialRef = id;
 const positiveInt = z.number().int().positive();
 
-const connectionBase = { id, credential_ref: credentialRef.optional(), preset: id.optional(), ...connectionSettingsFields };
+const connectionBase = {
+  id,
+  credential_ref: credentialRef.optional(),
+  preset: id.optional(),
+  /** CONN-8: the preset's operation IDs `<ns>.<op>` become `<operation_prefix>.<op>` on this connection. */
+  operation_prefix: z.string().regex(/^[a-z][a-z0-9_]{0,30}$/).optional(),
+  ...connectionSettingsFields,
+};
 const connection = z.discriminatedUnion('adapter', [
   z.strictObject({ ...connectionBase, adapter: z.literal('openapi'), base_url: httpUrl, openapi: openApiSchema.optional() }),
   z.strictObject({
