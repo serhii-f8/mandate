@@ -1,0 +1,8 @@
+# Dependency audit allowlist (SEC-11), read by tooling/security/audit-gate.mjs.
+# Each entry: a list item with these fields, all required.
+#   id:      the GitHub advisory id, for example GHSA-xxxx-xxxx-xxxx
+#   package: the affected package name
+#   reason:  why the advisory is accepted (for example dev-only, not shipped in images)
+#   expires: YYYY-MM-DD, at most 90 days after the day the gate runs; renew deliberately
+# An expired entry, or one that matches no current advisory, fails the gate.
+[]
