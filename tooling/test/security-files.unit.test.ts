@@ -39,7 +39,7 @@ describe('SEC-11 the repository ships a security policy and dependency scanning 
     const scan = runs.findIndex((r) => r.includes('scripts/dependency-scan.sh'));
     expect(install).toBeGreaterThanOrEqual(0);
     expect(scan).toBeGreaterThan(install);
-    for (const name of ['ci', 'compose']) {
+    for (const name of ['ci', 'compose', 'restart']) {
       expect(wf.jobs[name]?.if).toBe("github.event_name != 'schedule'");
     }
     expect(wf.jobs['dependency-scan']?.if).toBeUndefined();
