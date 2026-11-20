@@ -147,10 +147,10 @@ describe('EXE-4 MCP callOnce', () => {
     expect(toolCalls(server)).toBe(1);
   });
 
-  it('EXE-4 SEC-5 a JSON-RPC error answer is refused and its text is not in the outcome', async () => {
+  it('EXE-4 SEC-5 a JSON-RPC internal error from the tool handler is unknown (it may have applied the call) and its text is not in the outcome', async () => {
     const server = await start();
     const outcome = await createMcpToolAdapter().callOnce(input(settings(server.url), 'throws', hook(server).beforeSend));
-    expect(outcome).toEqual({ result: 'refused', code: 'rejected', durationMs: ANY_MS });
+    expect(outcome).toEqual({ result: 'unknown', code: 'upstream_error', durationMs: ANY_MS });
     expect(JSON.stringify(outcome)).not.toContain('ignore previous');
     expect(toolCalls(server)).toBe(1);
   });

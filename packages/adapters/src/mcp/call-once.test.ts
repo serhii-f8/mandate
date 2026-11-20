@@ -13,7 +13,12 @@ describe('EXE-4 MCP callOnce outcome after the hook ran', () => {
   });
 
   it.each([
-    ['a JSON-RPC error answer', new ProtocolError(ProtocolErrorCode.InvalidParams, 'upstream text'), { result: 'refused', code: 'rejected' }],
+    ['a JSON-RPC invalid params answer', new ProtocolError(ProtocolErrorCode.InvalidParams, 'upstream text'), { result: 'refused', code: 'rejected' }],
+    ['a JSON-RPC method not found answer', new ProtocolError(ProtocolErrorCode.MethodNotFound, 'upstream text'), { result: 'refused', code: 'rejected' }],
+    ['a JSON-RPC invalid request answer', new ProtocolError(ProtocolErrorCode.InvalidRequest, 'upstream text'), { result: 'refused', code: 'rejected' }],
+    ['a JSON-RPC header mismatch answer', new ProtocolError(-32020, 'upstream text'), { result: 'refused', code: 'rejected' }],
+    ['a JSON-RPC internal error answer (the handler may have applied the call)', new ProtocolError(ProtocolErrorCode.InternalError, 'upstream text'), { result: 'unknown', code: 'upstream_error' }],
+    ['a JSON-RPC server-defined error answer', new ProtocolError(-32000, 'upstream text'), { result: 'unknown', code: 'upstream_error' }],
     ['a transport 4xx', new SdkHttpError(SdkErrorCode.ClientHttpNotImplemented, 'upstream text', { status: 422 }), { result: 'refused', code: 'rejected', status: 422 }],
     ['a 403 insufficient_scope', new InsufficientScopeError({ requiredScope: 'write' }), { result: 'refused', code: 'rejected', status: 403 }],
     ['a transport 5xx', new SdkHttpError(SdkErrorCode.ClientHttpNotImplemented, 'upstream text', { status: 502 }), { result: 'unknown', code: 'http_status', status: 502 }],
