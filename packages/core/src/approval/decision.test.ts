@@ -135,6 +135,16 @@ describe('APR-1 checkDecision', () => {
     const plan = { reason: 'role_always', steps: ['lead'], widget: true, included: 3 } as const;
     expect(decide({ channel: 'widget', changeset: { approvalPlan: plan } })).toBeUndefined();
   });
+
+  it('APR-2 APR-8 AUTH-4 a service approver holding the step role is refused as not_approver', () => {
+    const plan = { reason: 'role_always', steps: ['content_lead'], widget: true, included: 3 } as const;
+    const approver: Approver = { subject: 'service:sa', roles: ['content_lead'] };
+    for (const channel of ['widget', 'page'] as const) {
+      expect(decide({ changeset: { approvalPlan: plan, awaitingRole: 'content_lead' }, approver, channel })).toBe(
+        'not_approver',
+      );
+    }
+  });
 });
 
 describe('AUTH-6 step-up in checkDecision', () => {
@@ -153,8 +163,10 @@ describe('AUTH-6 step-up in checkDecision', () => {
     expect(decide({ changeset: stepUp, approver: { ...lead, authTime } })).toBe('step_up_required');
   });
 
-  it('AUTH-6 step_up_required when authTime is missing', () => {
+  it('AUTH-6 AUTH-4 step_up_required when authTime is missing', () => {
     expect(decide({ changeset: stepUp })).toBe('step_up_required');
+    // A service subject without the step role keeps the earlier answer: the service check does not mask it.
+    expect(decide({ changeset: stepUp, approver: { subject: 'service:sa', roles: [] } })).toBe('not_found');
   });
 
   it('AUTH-6 step_up_required when now - authTime > maxAgeSeconds*1000', () => {
