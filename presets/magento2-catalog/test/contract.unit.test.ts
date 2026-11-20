@@ -262,7 +262,7 @@ describe('NFR-17 magento2-catalog contract', () => {
 
   it('NFR-17 SEC-3 no recording or the vendored spec contains a token', async () => {
     // The read recordings and the Phase 5 write recordings (recordings/write/), below one directory.
-    await recordingsFreeOf(RECORDINGS, ['eyJ', '"authorization"', '"Authorization"']);
+    await recordingsFreeOf(RECORDINGS, ['eyJ', '"authorization"']);
     const spec = await readFile(join(PRESET_DIR, 'spec', 'magento2-catalog.swagger.json'), 'utf8');
     expect(spec).not.toContain('eyJ');
     expect(spec.toLowerCase()).not.toContain('"authorization"');

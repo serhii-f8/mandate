@@ -166,4 +166,14 @@ describe('NFR-17 preset contract helpers', () => {
     const dirty = await recordingsDir({ 'a.json': { v: 1 }, 'sub/b.json': { header: 'planted-secret' } });
     await expect(recordingsFreeOf(dirty, ['planted-secret'])).rejects.toThrow(/sub.b\.json contains a secret/);
   });
+
+  it('NFR-17 SEC-3 recordingsFreeOf matches secrets case-insensitively', async () => {
+    const dir = await recordingsDir({ 'a.json': { header: 'AUTHORIZATION' } });
+    await expect(recordingsFreeOf(dir, ['"authorization"'.slice(1, -1)])).rejects.toThrow(/a\.json contains a secret/);
+  });
+
+  it('NFR-17 SEC-3 recordingsFreeOf fails when the directory holds no recording', async () => {
+    const empty = await mkdtemp(join(tmpdir(), 'aiops-empty-'));
+    await expect(recordingsFreeOf(empty, ['x'])).rejects.toThrow(/no recording files/);
+  });
 });

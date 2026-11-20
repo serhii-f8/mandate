@@ -208,7 +208,7 @@ export async function contractWrite(input: {
   return done.ok ? done.outcomes : done;
 }
 
-/** Fails when any file below `dir` contains one of `secrets`. */
+/** Fails when no file is found below `dir`, or any file contains one of `secrets` (compared case-insensitively). */
 export async function recordingsFreeOf(dir: string, secrets: readonly string[]): Promise<void> {
   const walk = async (d: string): Promise<string[]> => {
     const out: string[] = [];
@@ -219,10 +219,11 @@ export async function recordingsFreeOf(dir: string, secrets: readonly string[]):
     }
     return out;
   };
-  for (const file of await walk(dir)) {
-    const text = await readFile(file, 'utf8');
-    for (const secret of secrets) {
-      if (secret !== '' && text.includes(secret)) throw new Error(`${file} contains a secret`);
-    }
+  const files = await walk(dir);
+  if (files.length === 0) throw new Error(`no recording files below ${dir}`);
+  const forbidden = secrets.filter((x) => x !== '').map((x) => x.toLowerCase());
+  for (const file of files) {
+    const text = (await readFile(file, 'utf8')).toLowerCase();
+    if (forbidden.some((x) => text.includes(x))) throw new Error(`${file} contains a secret`);
   }
 }
