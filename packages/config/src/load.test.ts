@@ -544,3 +544,51 @@ role_mapping:
     expect(issues(result)).toEqual([expect.objectContaining({ file: 'config.yaml', path: 'roles[0].grants[0].operation', message: 'names an operation that is not defined' })]);
   });
 });
+
+describe('AUTH-4 service_accounts', () => {
+  const SUPPORT_ROLE = 'version: 1\nroles:\n  - { id: support_agent, grants: [] }\n';
+  const accounts = (entries: string): string => `version: 1\nservice_accounts:\n${entries}`;
+  const CI = '  - { client_id: aiops-sa-ci, role: support_agent, description: CI }\n';
+
+  it('AUTH-4 a service account maps its client to one role', async () => {
+    const result = await load({ 'support.yaml': SUPPORT_ROLE, 'sa.yaml': accounts(CI) });
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    expect(result.configuration.serviceAccounts.get('aiops-sa-ci')).toEqual({ role: 'support_agent', description: 'CI' });
+    expect(result.configuration.policy.serviceAccounts).toEqual([{ clientId: 'aiops-sa-ci', role: 'support_agent' }]);
+  });
+
+  it('AUTH-4 without service_accounts the maps are empty', async () => {
+    const result = await load();
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    expect(result.configuration.serviceAccounts.size).toBe(0);
+    expect(result.configuration.policy.serviceAccounts).toEqual([]);
+  });
+
+  it.each([
+    ['an unknown role', { 'sa.yaml': accounts('  - { client_id: aiops-sa-ci, role: ghost }\n') }, 'sa.yaml', 'service_accounts[0].role', 'names a role that is not defined'],
+    [
+      'a duplicate client_id across two files',
+      { 'sa-a.yaml': accounts(CI), 'sa-b.yaml': accounts('  - { client_id: aiops-sa-ci, role: support_agent }\n') },
+      'sa-b.yaml',
+      'service_accounts[0].client_id',
+      'duplicate client_id; first defined in sa-a.yaml at service_accounts[0]',
+    ],
+  ])('AUTH-4 rejects %s', async (_name, files, file, path, message) => {
+    const found = issues(await load({ 'support.yaml': SUPPORT_ROLE, ...files }));
+    expect(found).toEqual([expect.objectContaining({ file, path, message })]);
+  });
+
+  it.each([
+    ['an empty client_id', '{ client_id: "", role: support_agent }', 'service_accounts[0].client_id'],
+    ['a control character in client_id', '{ client_id: "a\\u0007b", role: support_agent }', 'service_accounts[0].client_id'],
+    ['a 256-character client_id', `{ client_id: ${'a'.repeat(256)}, role: support_agent }`, 'service_accounts[0].client_id'],
+    ['an extra key', '{ client_id: aiops-sa-ci, role: support_agent, roles: [x] }', 'service_accounts[0]'],
+    ['role given as a list', '{ client_id: aiops-sa-ci, role: [support_agent] }', 'service_accounts[0].role'],
+    ['a description over 500 characters', `{ client_id: aiops-sa-ci, role: support_agent, description: ${'d'.repeat(501)} }`, 'service_accounts[0].description'],
+  ])('AUTH-4 rejects %s as a schema error', async (_name, entry, path) => {
+    const found = issues(await load({ 'support.yaml': SUPPORT_ROLE, 'sa.yaml': accounts(`  - ${entry}\n`) }));
+    // An empty client_id fails both the length and the format check: every issue is on that path.
+    expect(found.length).toBeGreaterThan(0);
+    expect(found.map((i) => [i.file, i.path])).toEqual(found.map(() => ['sa.yaml', path]));
+  });
+});

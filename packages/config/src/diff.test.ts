@@ -137,6 +137,21 @@ describe('CFG-3 configuration diff', () => {
     expect(diffConfigurations(before, after).changes).toEqual([]);
   });
 
+  it('CFG-3 AUTH-4 diff reports service accounts', async () => {
+    const withAccount = async (role: string): Promise<LoadedConfiguration> =>
+      edited(async (_file, dir) => {
+        await writeFile(join(dir, 'service-accounts.yaml'), `version: 1\nservice_accounts:\n  - { client_id: aiops-sa-ci, role: ${role}, description: CI }\n`);
+      });
+    const before = await load(VALID_DIR);
+    const added = await withAccount('support_agent');
+    expect(formatDiff(diffConfigurations(before, added))).toEqual(['+ service_account aiops-sa-ci', hashLine(before, added)]);
+    const changed = await withAccount('content_manager');
+    expect(formatDiff(diffConfigurations(added, changed))).toEqual(['~ service_account aiops-sa-ci: role', hashLine(added, changed)]);
+    const kinds = diffConfigurations(undefined, added).changes.map((c) => c.kind);
+    expect(kinds.lastIndexOf('role')).toBeLessThan(kinds.indexOf('service_account'));
+    expect(kinds.indexOf('service_account')).toBeLessThan(kinds.indexOf('setting'));
+  });
+
   it('CFG-4 diffCounts counts added, removed and changed', async () => {
     const before = await load(VALID_DIR);
     const after = await edited(async (file) => {

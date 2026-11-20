@@ -29,6 +29,7 @@ import {
   type RoleApproval,
   type RoleConfig,
   type RoleLimits,
+  type ServiceAccountConfig,
 } from './schema.js';
 import { findSecretKeys, SECRET_MESSAGE } from './secrets.js';
 import { isCodeUpstream, isSpecUrl, toAuthSettings, type AuthConfig, type ConnectionTestConfig } from './upstream-schema.js';
@@ -65,6 +66,8 @@ export interface LoadedConfiguration {
   readonly policy: PolicyConfiguration;
   /** Compiled input-schema validator per enabled operation ID (MCP-3). */
   readonly validators: ReadonlyMap<string, ArgumentValidator>;
+  /** AUTH-4: OAuth client ID (`azp`) → the one role it calls with; empty when none is configured. */
+  readonly serviceAccounts: ReadonlyMap<string, { readonly role: string; readonly description?: string }>;
   readonly connections: readonly ConnectionConfig[];
   readonly presets: readonly PresetConfig[];
   /** CONN-8: per loaded preset ID, the package and the version chosen; empty while presets are not loaded. */
@@ -215,7 +218,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   }
   if (issues.length > 0) return { ok: false, issues };
 
-  const collect = <T>(key: 'connections' | 'operations' | 'roles' | 'role_mapping' | 'presets' | 'notifications' | 'overrides') =>
+  const collect = <T>(key: 'connections' | 'operations' | 'roles' | 'role_mapping' | 'service_accounts' | 'presets' | 'notifications' | 'overrides') =>
     documents.flatMap(({ source, doc }) =>
       ((doc[key] ?? []) as T[]).map((value, index): Located<T> => ({ value, source, path: [key, index] })),
     );
@@ -223,6 +226,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   const configOperations = collect<OperationConfig>('operations');
   const roles = collect<RoleConfig>('roles');
   const mapping = collect<{ group: string; roles: string[] }>('role_mapping');
+  const serviceAccounts = collect<ServiceAccountConfig>('service_accounts');
   const presets = collect<PresetConfig>('presets');
   const notifications = collect<NotificationConfig>('notifications');
   const overrides = collect<OverrideConfig>('overrides');
@@ -574,6 +578,16 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     });
   }
 
+  // AUTH-4: one entry per client_id across all documents, each naming a defined role.
+  const serviceAccountById = new Map<string, Located<ServiceAccountConfig>>();
+  for (const item of serviceAccounts) {
+    const { value: entry, source, path } = item;
+    const first = serviceAccountById.get(entry.client_id);
+    if (first === undefined) serviceAccountById.set(entry.client_id, item);
+    else at(source, [...path, 'client_id'], `duplicate client_id; first defined in ${first.source.file} at ${pathToString(first.path)}`);
+    if (!roleById.has(entry.role)) at(source, [...path, 'role'], 'names a role that is not defined');
+  }
+
   if (issues.length > 0) return { ok: false, issues };
 
   const hash = createHash('sha256');
@@ -610,7 +624,11 @@ export async function loadConfigurationSources(sources: readonly { file: string;
         operations: registry.enabled,
         roles: roles.map(({ value }) => toRole(value)),
         roleMapping: mapping.map(({ value }) => ({ group: value.group, roles: [...value.roles] })),
+        serviceAccounts: serviceAccounts.map(({ value }) => ({ clientId: value.client_id, role: value.role })),
       },
+      serviceAccounts: new Map(
+        serviceAccounts.map(({ value }) => [value.client_id, value.description === undefined ? { role: value.role } : { role: value.role, description: value.description }] as const),
+      ),
       validators: registry.validators,
       connections: connections.map((c) => c.value),
       presets: presets.map((p) => p.value),

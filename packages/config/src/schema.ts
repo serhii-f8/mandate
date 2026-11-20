@@ -108,6 +108,13 @@ const role = z.strictObject({
 
 const roleMapping = z.strictObject({ group: z.string().min(1).max(255), roles: z.array(id).min(1) });
 
+/** AUTH-4: an OAuth client (`azp`) that calls as a service account, with exactly one role. */
+const serviceAccount = z.strictObject({
+  client_id: z.string().min(1).max(255).regex(/^[^\p{Cc}]+$/u),
+  role: id,
+  description: z.string().max(500).optional(),
+});
+
 const preset = z.strictObject({ id, package: z.string().min(1).max(214), version: z.string().min(1).max(64).optional() });
 
 /** A lower-case host name or IPv4 address, without port (CONN-5). */
@@ -131,6 +138,8 @@ export const configDocumentSchema = z.strictObject({
   operations: z.array(operation).optional(),
   roles: z.array(role).optional(),
   role_mapping: z.array(roleMapping).optional(),
+  /** AUTH-4: collected across documents like role_mapping; a client_id appears once. */
+  service_accounts: z.array(serviceAccount).optional(),
   presets: z.array(preset).optional(),
   notifications: z.array(notification).optional(),
   overrides: z.array(override).optional(),
@@ -145,6 +154,7 @@ export type ConnectionConfig = z.output<typeof connection>;
 export type OperationConfig = z.output<typeof operation>;
 export type RoleConfig = z.output<typeof role>;
 export type RoleLimits = z.output<typeof limits>;
+export type ServiceAccountConfig = z.output<typeof serviceAccount>;
 export type RoleApproval = z.output<typeof approval>;
 export type PresetConfig = z.output<typeof preset>;
 export type PresetOperationConfig = z.output<typeof presetOperationSchema>;
