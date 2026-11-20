@@ -182,6 +182,22 @@ describe('OPS-5 CONN-8 preset code modules', () => {
     expect(await load(dir, 'self/root.js')).toEqual(placement);
   });
 
+  it('OPS-5 CONN-8 a code directory or entry file that is a link out of the package is refused', async () => {
+    const elsewhere = await tempDir('aiops-preset-code-out-');
+    await writeFile(join(elsewhere, 'index.js'), 'export default { operations: {} };\n');
+    const placement = issue('must be a path inside a subdirectory of the preset');
+
+    // The code directory itself is a link to a directory outside the package.
+    const linkedDir = await copyFixture();
+    await symlink(elsewhere, join(linkedDir, 'outlib'));
+    expect(await load(linkedDir, 'outlib/index.js')).toEqual(placement);
+
+    // The entry file is a link to a file outside the package.
+    const linkedEntry = await copyFixture();
+    await symlink(join(elsewhere, 'index.js'), join(linkedEntry, 'lib', 'out.js'));
+    expect(await load(linkedEntry, 'lib/out.js')).toEqual(placement);
+  });
+
   it('OPS-5 a symlink in the code tree that points outside the preset is refused', async () => {
     const dir = await copyFixture();
     const elsewhere = await tempDir('aiops-preset-code-elsewhere-');
