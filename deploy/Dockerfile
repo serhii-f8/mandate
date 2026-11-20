@@ -20,7 +20,7 @@ RUN pnpm --filter @aiops/api deploy --prod --legacy /out/api \
  && pnpm --filter @aiops/worker deploy --prod --legacy /out/worker
 # The api serves the trusted pages from the built bundle (AIOPS_WEB_DIR), the MCP Apps widget
 # bundles (AIOPS_WIDGET_DIR) and loads presets
-# from their package.json, preset.yaml and vendored spec alone (AIOPS_PRESET_DIRS).
+# from their packed package: package.json, preset.yaml, vendored spec and code `dist` (AIOPS_PRESET_DIRS).
 # Every presets/* directory is built and packed with its own `files` list (dist, preset.yaml, spec, code),
 # so a new preset needs no Dockerfile edit. `npm pack` is the fallback should `pnpm pack` refuse a private package.
 RUN cp -r apps/web/dist /out/web \
