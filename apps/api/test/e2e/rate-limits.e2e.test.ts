@@ -9,6 +9,7 @@
  * mix. The main instance trusts one proxy hop, so anonymous tests pick their address with
  * X-Forwarded-For; only the trust-proxy test also uses the instance that trusts none.
  */
+import { createHash } from 'node:crypto';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -125,9 +126,14 @@ async function webLoginRows(): Promise<number> {
 }
 
 /** `GET <path>` on `target` without following redirects, from `address` when the instance trusts the proxy. */
-async function page(target: RunningApi, path: string, address?: string): Promise<{ status: number; retryAfter: string | null; body: string }> {
+async function page(target: RunningApi, path: string, address?: string): Promise<{ status: number; retryAfter: string | null; correlationId: string; body: string }> {
   const response = await fetch(`${target.url}${path}`, { redirect: 'manual', headers: address === undefined ? {} : { 'x-forwarded-for': address } });
-  return { status: response.status, retryAfter: response.headers.get('retry-after'), body: await response.text() };
+  return {
+    status: response.status,
+    retryAfter: response.headers.get('retry-after'),
+    correlationId: response.headers.get('x-correlation-id') ?? '',
+    body: await response.text(),
+  };
 }
 
 const RATE_LIMITED = (id: number) => ({
@@ -217,15 +223,18 @@ describe('SEC-10 MCP endpoint rate limits', () => {
     expect(await bucketCount('anon:203.0.113.7')).toBe(3);
 
     // Trust 0: X-Forwarded-For is ignored; every request counts against the socket address.
-    const statuses = [];
+    const viaDirect = [];
     for (const address of ['198.51.100.1', '198.51.100.2', '198.51.100.3']) {
-      statuses.push((await send(direct, 'tools/list', {}, { headers: { ...badToken, 'x-forwarded-for': address } })).status);
+      viaDirect.push(await send(direct, 'tools/list', {}, { headers: { ...badToken, 'x-forwarded-for': address } }));
     }
-    expect(statuses).toEqual([401, 401, 429]);
+    expect(viaDirect.map((a) => a.status)).toEqual([401, 401, 429]);
     expect(await bucketCount('anon:127.0.0.1')).toBe(3);
     expect(await bucketCount('anon:198.51.100.1')).toBeUndefined();
 
-    const anonymousRows = await auditRows(databaseUrl, "action = 'rate.limited' and actor = 'unknown'");
+    // Only this test's refusals: other tests in the file write anonymous rate.limited rows too.
+    const anonymousRows = await auditRows(databaseUrl, "action = 'rate.limited' and actor = 'unknown' and correlation_id = any($1)", [
+      [first[2]?.correlationId, viaDirect[2]?.correlationId],
+    ]);
     expect(anonymousRows).toHaveLength(2);
     for (const address of ['127.0.0.1', '203.0.113', '198.51.100']) expect(JSON.stringify(anonymousRows)).not.toContain(address);
   });
@@ -262,8 +271,13 @@ describe('SEC-10 SEC-1 unauthenticated limits and shared counters', () => {
     expect(callback.status).toBe(429);
     expect(JSON.parse(callback.body)).toEqual({ error: 'rate_limited', retryAfterSeconds: 30 });
     expect(await webLoginRows()).toBe(before);
-    const limited = await auditRows(databaseUrl, "action = 'rate.limited' and actor = 'unknown'");
+    // One rate.limited row for the window: on the first refusal (the login), none for the callback.
+    const limited = await auditRows(databaseUrl, 'correlation_id = any($1)', [[third.correlationId, callback.correlationId]]);
+    expect(limited).toEqual([
+      expect.objectContaining({ action: 'rate.limited', actor: 'unknown', outcome: 'denied', correlation_id: third.correlationId, details: { scope: 'unauthenticated', limit: 2 } }),
+    ]);
     expect(JSON.stringify(limited)).not.toContain(address);
+    expect(logLines.filter((line) => line.includes(address))).toEqual([]);
   });
 
   it('SEC-10 /mcp 401s and /auth/login share one anonymous budget per address', async () => {
@@ -296,8 +310,9 @@ describe('SEC-10 SEC-1 unauthenticated limits and shared counters', () => {
     const client = new pg.Client({ connectionString: databaseUrl });
     await client.connect();
     try {
-      const { rows } = await client.query<{ key: string; count: number }>("select key, count from rate_bucket where key like 'mcp:user:sha256:%'");
-      expect(rows).toEqual([{ key: expect.stringMatching(/^mcp:user:sha256:[0-9a-f]{64}$/) as unknown, count: 4 }]);
+      const key = `mcp:user:sha256:${createHash('sha256').update(subject, 'utf8').digest('hex')}`;
+      const { rows } = await client.query<{ count: number }>('select count from rate_bucket where key = $1', [key]);
+      expect(rows).toEqual([{ count: 4 }]);
     } finally {
       await client.end();
     }
