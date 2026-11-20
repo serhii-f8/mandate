@@ -429,7 +429,7 @@ operations:
     expect(found).toEqual([expect.objectContaining({ file: '@aiops/fake-preset/preset.yaml', path: 'spec', message: 'must be a path inside the preset' })]);
   });
 
-  it('refuses a preset bound to a connection that is not openapi', async () => {
+  it('CONN-8 refuses an openapi preset bound to a connection that is not openapi', async () => {
     const dir = await fixture('with-preset', {
       'config.yaml': `version: 1
 presets:
@@ -439,7 +439,7 @@ connections:
 `,
     });
     const found = issues(await loadConfigurationDirectory(dir, { resolver: resolver(), presetDirs: PRESET_DIRS }));
-    expect(found).toEqual([expect.objectContaining({ path: 'connections[0].preset', message: 'preset requires an openapi connection' })]);
+    expect(found).toEqual([expect.objectContaining({ path: 'connections[0].preset', message: 'the preset is for openapi connections' })]);
   });
 
   it('refuses a preset spec that is a symbolic link out of the preset directory', async () => {

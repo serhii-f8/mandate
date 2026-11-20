@@ -1,12 +1,15 @@
-import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { formatIssue, type ConfigIssue } from './issues.js';
 import { loadConfigurationDirectory, loadConfigurationSources, type LoadResult } from './load.js';
+import { resolvePreset } from './presets.js';
 
 const VALID_DIR = fileURLToPath(new URL('../test/fixtures/valid', import.meta.url));
+const FIXTURES = fileURLToPath(new URL('../test/fixtures', import.meta.url));
 
 const CONNECTIONS = `version: 1
 connections:
@@ -330,3 +333,64 @@ describe('AUD-7 SEC-1 audit configuration in the loaded configuration', () => {
     expect(plain.configuration.auditViewers.size).toBe(0);
   });
 });
+
+describe('CONN-8 preset packages in the loaded configuration', () => {
+  const PRESET_DIRS = [join(FIXTURES, 'preset-dir')];
+
+  async function withConfig(config: string): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'aiops-load-preset-'));
+    await writeFile(join(dir, 'config.yaml'), config);
+    return dir;
+  }
+
+  it('CONN-8 a preset bound to a connection of another adapter is refused', async () => {
+    const dir = await withConfig(`version: 1
+presets:
+  - { id: fake, package: "@aiops/fake-preset" }
+connections:
+  - { id: shop, adapter: mcp, mcp_url: https://shop.example.test/mcp, preset: fake }
+`);
+    try {
+      expect(issues(await loadConfigurationDirectory(dir, { presetDirs: PRESET_DIRS }))).toEqual([
+        expect.objectContaining({ file: 'config.yaml', path: 'connections[0].preset', message: 'the preset is for openapi connections' }),
+      ]);
+    } finally {
+      await rm(dir, { recursive: true });
+    }
+
+    const presets = await mkdtemp(join(tmpdir(), 'aiops-load-mcp-preset-'));
+    const openapiDir = await withConfig(`version: 1
+presets:
+  - { id: tools, package: "@acme/mcp-preset" }
+connections:
+  - { id: shop, adapter: openapi, base_url: https://shop.example.test/api, preset: tools }
+`);
+    try {
+      await mkdir(join(presets, 'mcp-preset'));
+      await writeFile(join(presets, 'mcp-preset', 'package.json'), JSON.stringify({ name: '@acme/mcp-preset', version: '1.0.0', aiops: { sdk: '^0.6.0' } }));
+      await writeFile(join(presets, 'mcp-preset', 'preset.yaml'), 'version: 1\nadapter: mcp\n');
+      expect(issues(await loadConfigurationDirectory(openapiDir, { presetDirs: [presets] }))).toEqual([
+        expect.objectContaining({ file: 'config.yaml', path: 'connections[0].preset', message: 'the preset is for mcp connections' }),
+      ]);
+    } finally {
+      await rm(presets, { recursive: true });
+      await rm(openapiDir, { recursive: true });
+    }
+  });
+
+  it('CONN-8 loadedPresets reports the chosen version', async () => {
+    const result = await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { presetDirs: PRESET_DIRS });
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    const resolved = await resolvePreset({ id: 'fake', package: '@aiops/fake-preset' }, PRESET_DIRS);
+    if (!resolved.ok) throw new Error('fixture preset must resolve');
+    const digest = createHash('sha256');
+    for (const { file, text } of resolved.preset.files) digest.update(`preset:${file}`).update('\0').update(text).update('\0');
+    expect([...result.configuration.loadedPresets]).toEqual([
+      ['fake', { package: '@aiops/fake-preset', version: '0.1.0', adapter: 'openapi', filesDigest: digest.digest('hex') }],
+    ]);
+    expect(resolved.preset.files[0]?.text).toBe(await readFile(join(FIXTURES, 'preset-dir', 'fake-preset', 'package.json'), 'utf8'));
+    const skipped = await loadConfigurationDirectory(join(FIXTURES, 'with-preset'));
+    expect(skipped.ok && skipped.configuration.loadedPresets.size).toBe(0);
+  });
+});
+

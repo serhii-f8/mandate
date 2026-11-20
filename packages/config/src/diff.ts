@@ -1,7 +1,7 @@
 import { canonicalJson } from '@aiops/core';
 import type { LoadedConfiguration } from './load.js';
 
-export type EntityKind = 'connection' | 'operation' | 'role' | 'notification' | 'disabled' | 'setting';
+export type EntityKind = 'connection' | 'operation' | 'role' | 'notification' | 'preset' | 'disabled' | 'setting';
 
 export interface EntityChange {
   readonly kind: EntityKind;
@@ -17,7 +17,7 @@ export interface ConfigDiff {
   readonly changes: readonly EntityChange[];
 }
 
-const KIND_ORDER: readonly EntityKind[] = ['connection', 'operation', 'role', 'notification', 'disabled', 'setting'];
+const KIND_ORDER: readonly EntityKind[] = ['connection', 'operation', 'role', 'notification', 'preset', 'disabled', 'setting'];
 
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -82,6 +82,8 @@ function entitiesOf(configuration: LoadedConfiguration): ReadonlyMap<EntityKind,
     });
   }
   for (const notification of configuration.notifications) put('notification', notification.id, notification);
+  // CONN-8: `files` is the digest of the preset's hash inputs, computed by the loader.
+  for (const [id, preset] of configuration.loadedPresets) put('preset', id, { package: preset.package, version: preset.version, files: preset.filesDigest });
   for (const disabled of configuration.disabled) put('disabled', disabled.key, disabled);
   put('setting', 'changesets', configuration.changesets);
   put('setting', 'audit', configuration.audit);

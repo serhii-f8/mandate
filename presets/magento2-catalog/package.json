@@ -5,6 +5,10 @@
   "type": "module",
   "description": "Curated operations and manifests for Magento 2 catalog content.",
   "license": "Apache-2.0",
+  "aiops": {
+    "preset": "preset.yaml",
+    "sdk": "^0.6.0"
+  },
   "exports": {
     ".": {
       "@aiops/source": "./src/index.ts",
