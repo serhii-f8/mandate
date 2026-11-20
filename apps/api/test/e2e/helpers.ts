@@ -63,7 +63,7 @@ export interface StartApiOptions {
   readonly port?: number;
   /** The api logger, e.g. one writing to a captured stream. */
   readonly logger?: Logger;
-  /** The upstream adapter; a fresh composite adapter (`createAdapters()`) by default. */
+  /** The upstream adapter; a fresh `testAdapters(logger)` by default. */
   readonly adapter?: OpenApiAdapter;
   /** Directory of the web bundle to serve under /app/ (`AIOPS_WEB_DIR`). */
   readonly webDir?: string;
@@ -79,6 +79,8 @@ export interface StartApiOptions {
   readonly prepareWaitMs?: number;
   /** The configuration holder, e.g. one backed by revisions (CFG-4); a directory holder on `configDir` by default. */
   readonly configuration?: ConfigurationHolder;
+  /** `AIOPS_PRESET_DIRS`; none by default. */
+  readonly presetDirs?: readonly string[];
 }
 
 /** Obviously fake Temporal payload key, same format as the master keys (never reaches Temporal here). */
@@ -88,7 +90,7 @@ const TEST_TEMPORAL_KEYS = '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=';
 export function testApiEnv(
   databaseUrl: string,
   port: number,
-  options: Pick<StartApiOptions, 'issuer' | 'configDir' | 'resource' | 'webDir' | 'widgetDir' | 'prepareWaitMs'>,
+  options: Pick<StartApiOptions, 'issuer' | 'configDir' | 'resource' | 'webDir' | 'widgetDir' | 'prepareWaitMs' | 'presetDirs'>,
 ): ApiEnv {
   const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
   return {
@@ -110,7 +112,7 @@ export function testApiEnv(
     freshAuthSeconds: 300,
     ...(options.webDir === undefined ? {} : { webDir: options.webDir }),
     widgetDir: options.widgetDir ?? join(tmpdir(), 'aiops-e2e-no-widgets'),
-    presetDirs: [],
+    presetDirs: [...(options.presetDirs ?? [])],
     temporalAddress: 'localhost:7233',
     temporalNamespace: 'default',
     taskQueue: 'aiops-operations',
@@ -120,12 +122,28 @@ export function testApiEnv(
   };
 }
 
+/**
+ * The composite adapter as `main.ts` builds it for the api: a preset code module's thrown text,
+ * already scrubbed and cut, is logged as `preset code failed` on `logger` when one is given (OPS-5).
+ */
+export function testAdapters(logger?: Logger): OpenApiAdapter {
+  return createAdapters(
+    logger === undefined
+      ? {}
+      : {
+          onCodeError: ({ connection, operation, kind, message }) => {
+            logger.warn({ connection, operation, kind, message }, 'preset code failed');
+          },
+        },
+  );
+}
+
 export async function startApi(databaseUrl: string, options: StartApiOptions): Promise<RunningApi> {
   const port = options.port ?? (await freePort());
   const env = testApiEnv(databaseUrl, port, options);
   // As given: the token audience must match it character for character.
   const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
-  const adapter = options.adapter ?? createAdapters();
+  const adapter = options.adapter ?? testAdapters(options.logger);
   // Loaded as `main.ts` loads it: with the adapter's spec resolver and the preset directories.
   const configuration = options.configuration ?? (await ConfigurationHolder.load(env.configDir, configurationLoadOptions(adapter, env)));
   // The test-side execution stack has its own pool on the api database: what the worker would do.
