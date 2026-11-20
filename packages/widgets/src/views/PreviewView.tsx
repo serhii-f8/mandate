@@ -173,7 +173,7 @@ export function PreviewView({ data, actions, onData }: ViewProps<ChangeSetViewMo
             </button>
           </>
         ) : null}
-        {exportItems && !opaque
+        {exportItems
           ? (['csv', 'xlsx'] as const).map((format) => (
               <button
                 key={format}

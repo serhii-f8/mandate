@@ -283,7 +283,18 @@ describe('useAction', () => {
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('table')).toBeNull();
     expect(screen.queryByRole('button', { name: /Exclude selected/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /Export/ })).toBeNull();
     expect(button('Submit 1 change')).toBeTruthy();
+  });
+
+  it('UI-3 CS-8 the opaque preview offers export of its one row', async () => {
+    const exportFn = vi
+      .fn<NonNullable<ChangeSetActions['export']>>()
+      .mockResolvedValue({ ok: true, value: undefined });
+    setup(opaqueChangeSetModel(), actionsWith({ export: exportFn }));
+    fireEvent.click(button('Export CSV'));
+    await flush();
+    fireEvent.click(button('Export XLSX'));
+    await flush();
+    expect(exportFn.mock.calls).toEqual([['csv'], ['xlsx']]);
   });
 });
