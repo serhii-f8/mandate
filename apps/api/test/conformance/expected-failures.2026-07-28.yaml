@@ -10,7 +10,7 @@ server:
   - server-stateless:sep-2575-server-rejects-undeclared-capability # needs fixture tool test_missing_capability
   - server-stateless:sep-2575-missing-capability-http-400 # needs fixture tool test_missing_capability
   - server-stateless:sep-2575-http-server-no-independent-requests-on-stream # needs fixture tool test_streaming_elicitation (elicitation not offered)
-  - server-stateless:sep-2575-server-no-log-without-loglevel # needs fixture tool test_logging_tool
+  - server-stateless:sep-2575-server-no-log-without-loglevel # logging is not offered (needs fixture tool test_logging_tool)
   # caching: the scenario calls prompts/list unconditionally; tools/list, resources/* checks stay enforced.
   - caching:sep-2549-prompts-list-caching-hints # prompts are not offered (SPEC section 8, no prompt registry)
   - completion-complete # completion is not offered

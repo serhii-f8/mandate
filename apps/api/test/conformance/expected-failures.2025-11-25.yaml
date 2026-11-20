@@ -1,0 +1,34 @@
+# Reviewed baseline of the official MCP conformance suite, 2025-11-25 requirement set, run on the
+# SDK's stateless legacy fallback (NFR-16, MCP-1, ADR 0003, ADR 0055).
+# Format: README "Expected Failures" of @modelcontextprotocol/conformance (pinned 0.2.0-alpha.12):
+# `<scenario>` excuses a whole scenario, `<scenario>:<check-id>` one check. Every entry carries its
+# reason as a trailing comment; only capabilities the platform deliberately does not offer may be
+# listed. A must-pass scenario (test/conformance/must-pass.ts) may only lose single checks.
+# The pin and this file change only together.
+server:
+  # server-sse-multiple-streams: the legacy fallback is sessionless (ADR 0003, ADR 0056); the scenario stops before its POSTs.
+  - server-sse-multiple-streams:server-sse-multiple-streams-session # sessions are not offered (stateless api, NFR-3); session IDs are optional in 2025-11-25
+  - logging-set-level # logging is not offered (capability not declared)
+  - completion-complete # completion is not offered
+  - tools-call-simple-text # needs fixture tool test_simple_text
+  - tools-call-image # needs fixture tool test_image_content
+  - tools-call-audio # needs fixture tool test_audio_content
+  - tools-call-embedded-resource # needs fixture tool test_embedded_resource
+  - tools-call-mixed-content # needs fixture tool test_multiple_content_types
+  - tools-call-with-logging # logging is not offered (logging/setLevel first, then fixture tool test_tool_with_logging)
+  - tools-call-error # needs fixture tool test_error_handling
+  - tools-call-with-progress # needs fixture tool test_tool_with_progress
+  - tools-call-sampling # sampling is not offered (fixture tool test_sampling)
+  - tools-call-elicitation # elicitation is not offered (fixture tool test_elicitation)
+  - elicitation-sep1034-defaults # elicitation is not offered (fixture tool test_elicitation_sep1034_defaults)
+  - elicitation-sep1330-enums # elicitation is not offered (fixture tool test_elicitation_sep1330_enums)
+  - resources-read-text # needs fixture resource test://static-text; the platform serves only its ui:// widgets
+  - resources-read-binary # needs fixture resource test://static-binary; the platform serves only its ui:// widgets
+  - resources-templates-read # needs fixture resource template test://template/{id}/data; no templates offered
+  - resources-subscribe # resource subscriptions are not offered (capability resources.subscribe not declared)
+  - resources-unsubscribe # resource subscriptions are not offered (capability resources.subscribe not declared)
+  - prompts-list # prompts are not offered
+  - prompts-get-simple # prompts are not offered
+  - prompts-get-with-args # prompts are not offered
+  - prompts-get-embedded-resource # prompts are not offered
+  - prompts-get-with-image # prompts are not offered
