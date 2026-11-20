@@ -1,0 +1,43 @@
+# Reviewed baseline of the official MCP conformance suite, 2026-07-28 requirement set (NFR-16, ADR 0055).
+# Format: README "Expected Failures" of @modelcontextprotocol/conformance (pinned 0.2.0-alpha.12):
+# `<scenario>` excuses a whole scenario, `<scenario>:<check-id>` one check. Every entry carries its
+# reason as a trailing comment; only capabilities the platform deliberately does not offer may be
+# listed (fixture tools and resources, prompts, completion, sampling, elicitation, roots). A
+# must-pass scenario (test/conformance/must-pass.ts) may only lose single checks, never itself.
+# The pin and this file change only together.
+server:
+  # server-stateless: the platform's tools are its operations; the suite's diagnostic tools are not offered.
+  - server-stateless:sep-2575-server-rejects-undeclared-capability # needs fixture tool test_missing_capability
+  - server-stateless:sep-2575-missing-capability-http-400 # needs fixture tool test_missing_capability
+  - server-stateless:sep-2575-http-server-no-independent-requests-on-stream # needs fixture tool test_streaming_elicitation (elicitation not offered)
+  - server-stateless:sep-2575-server-no-log-without-loglevel # needs fixture tool test_logging_tool
+  # caching: the scenario calls prompts/list unconditionally; tools/list, resources/* checks stay enforced.
+  - caching:sep-2549-prompts-list-caching-hints # prompts are not offered (SPEC section 8, no prompt registry)
+  - completion-complete # completion is not offered
+  - tools-call-simple-text # needs fixture tool test_simple_text
+  - tools-call-image # needs fixture tool test_image_content
+  - tools-call-audio # needs fixture tool test_audio_content
+  - tools-call-embedded-resource # needs fixture tool test_embedded_resource
+  - tools-call-mixed-content # needs fixture tool test_multiple_content_types
+  - tools-call-error # needs fixture tool test_error_handling
+  - tools-call-with-progress # needs fixture tool test_tool_with_progress
+  - resources-read-text # needs fixture resource test://static-text; the platform serves only its ui:// widgets
+  - resources-read-binary # needs fixture resource test://static-binary; the platform serves only its ui:// widgets
+  - resources-templates-read # needs fixture resource template test://template/{id}/data; no templates offered
+  - prompts-list # prompts are not offered
+  - prompts-get-simple # prompts are not offered
+  - prompts-get-with-args # prompts are not offered
+  - prompts-get-embedded-resource # prompts are not offered
+  - prompts-get-with-image # prompts are not offered
+  - input-required-result-basic-elicitation # elicitation is not offered (fixture tool test_input_required_result_elicitation)
+  - input-required-result-basic-sampling # sampling is not offered (fixture tool test_input_required_result_sampling)
+  - input-required-result-basic-list-roots # roots are not offered (fixture tool test_input_required_result_list_roots)
+  - input-required-result-request-state # input-required results are not offered (fixture tool test_input_required_result_request_state)
+  - input-required-result-multiple-input-requests # input-required results are not offered (fixture tool test_input_required_result_multiple_inputs)
+  - input-required-result-multi-round # input-required results are not offered (fixture tool test_input_required_result_elicitation)
+  - input-required-result-missing-input-response # input-required results are not offered (fixture tool test_input_required_result_elicitation)
+  - input-required-result-non-tool-request # needs prompts/get with input requests; prompts are not offered
+  - input-required-result-result-type # input-required results are not offered (fixture tool test_input_required_result_elicitation)
+  - input-required-result-tampered-state # input-required results are not offered (needs a requestState from a fixture tool)
+  - input-required-result-capability-check # input-required results are not offered (fixture tool test_input_required_result_capabilities)
+  - input-required-result-ignore-extra-params # input-required results are not offered (fixture tool test_input_required_result_elicitation)

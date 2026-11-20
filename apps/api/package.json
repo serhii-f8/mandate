@@ -29,12 +29,14 @@
   "devDependencies": {
     "@aiops/testing": "workspace:*",
     "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/conformance": "0.2.0-alpha.12",
     "@modelcontextprotocol/ext-tasks": "0.2.3",
     "@swc/core": "1.16.22",
     "@types/express": "5.0.6",
     "@types/pg": "8.23.1",
     "pg": "8.23.1",
-    "unplugin-swc": "2.0.0"
+    "unplugin-swc": "2.0.0",
+    "yaml": "2.9.1"
   },
   "dependencies": {
     "@aiops/adapters": "workspace:*",

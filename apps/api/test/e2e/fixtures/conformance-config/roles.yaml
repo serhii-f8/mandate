@@ -1,0 +1,10 @@
+version: 1
+roles:
+  - id: conformance_user
+    grants:
+      - operation: shop.get_products
+      - operation: shop.update_content
+    approval: { required: never }
+role_mapping:
+  - group: conformance
+    roles: [conformance_user]

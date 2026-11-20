@@ -1,0 +1,3 @@
+# The suite sends hundreds of requests in a minute from one user (NFR-16).
+version: 1
+rate_limits: { mcp_user_per_minute: 100000 }
