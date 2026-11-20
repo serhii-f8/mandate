@@ -10,7 +10,7 @@ import { createRemoteJWKSet, type JWTVerifyGetKey } from 'jose';
 import type { Logger } from 'pino';
 import { createAdapters } from '@aiops/adapters';
 import type { McpToolAdapter, ReadAdapter } from '@aiops/connector-sdk';
-import { createSchemaCompiler, type ApiEnv, type ConfigurationHolder } from '@aiops/config';
+import { ConfigurationUnavailableError, createSchemaCompiler, type ApiEnv, type ConfigurationHolder } from '@aiops/config';
 import {
   changesetKind,
   resolveRoles,
@@ -202,7 +202,22 @@ class AppModule {
     const pipelineTelemetry: PipelineTelemetry = telemetry === undefined ? NO_TELEMETRY : createPipelineTelemetry({ tracer: telemetry.tracer, meter: telemetry.meter });
     // One key set for MCP access tokens and page ID tokens: same issuer.
     const jwks = overrides.jwks ?? createRemoteJWKSet(env.oidcJwksUrl);
-    const verifier = createJwtVerifier({ issuer: env.oidcIssuer, audience: env.mcpResource.href, jwks });
+    const verifier = createJwtVerifier({
+      issuer: env.oidcIssuer,
+      audience: env.mcpResource.href,
+      jwks,
+      // Read per token, so an applied configuration takes effect at once (AUTH-4). Plan call 7:
+      // without an active configuration no client is a service account (fails closed); any other
+      // failure propagates.
+      isServiceAccount: (id) => {
+        try {
+          return configuration.current.serviceAccounts.has(id);
+        } catch (e) {
+          if (e instanceof ConfigurationUnavailableError) return false;
+          throw e;
+        }
+      },
+    });
     const oidc = createOidcClient({
       authorizationUrl: env.oidcAuthorizationUrl,
       tokenUrl: env.oidcTokenUrl,

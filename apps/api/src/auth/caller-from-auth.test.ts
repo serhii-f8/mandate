@@ -54,3 +54,22 @@ describe('AUTH-7 the access token never leaves authentication', () => {
     expect(JSON.stringify(caller)).not.toContain('secret-token-body');
   });
 });
+
+describe('AUTH-4 service caller', () => {
+  it('AUTH-4 extra.service builds the service subject and ignores groups', () => {
+    expect(callerFromAuthInfo(info({ sub: 'kc-id', groups: ['content'], service: 'aiops-sa-ci' }, 'aiops-sa-ci'))).toEqual({
+      subject: 'service:aiops-sa-ci',
+      clientId: 'aiops-sa-ci',
+      groups: [],
+    });
+  });
+
+  it('AUTH-6 AUTH-4 a service caller never carries authTime', () => {
+    const caller = callerFromAuthInfo(info({ sub: 'kc-id', service: 'aiops-sa-ci', auth_time: 1_794_909_570 }, 'aiops-sa-ci'));
+    expect(Object.keys(caller)).not.toContain('authTime');
+  });
+
+  it.each([[''], [7], [null]])('AUTH-4 a non-string or empty service %j is not a service caller', (service) => {
+    expect(callerFromAuthInfo(info({ sub: 'kc-id', service })).subject).toBe('kc-id');
+  });
+});
