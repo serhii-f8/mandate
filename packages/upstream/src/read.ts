@@ -5,6 +5,7 @@
 import {
   CREDENTIAL_SCHEMES,
   type CredentialScheme,
+  type CodeAdapter,
   type CredentialSource,
   type McpToolAdapter,
   type ReadAdapter,
@@ -18,7 +19,7 @@ export interface UpstreamCallLog {
   readonly correlationId: string;
   readonly operation: string;
   readonly connection: string;
-  /** HTTP method of the binding, always GET for reads (CS-1); `tools/call` for an MCP-backed read. */
+  /** HTTP method of the binding, always GET for reads (CS-1); `tools/call` for an MCP-backed call; `CODE` for a preset code operation (OPS-5). */
   readonly method: string;
   readonly status?: number;
   readonly durationMs: number;
@@ -54,16 +55,19 @@ export interface ReadDeps {
   /** The request's configuration snapshot, the one its policy decision used (SEC-1). */
   readonly configuration: LoadedConfiguration;
   readonly vault: CredentialVault;
-  /** Reads HTTP bindings; calls MCP tools when it also implements `callTool` (the composite adapter does). */
-  readonly adapter: ReadAdapter & Partial<McpToolAdapter>;
+  /**
+   * Reads HTTP bindings; calls MCP tools when it also implements `callTool`, and runs code reads
+   * when it implements `codeRead` (the composite adapter does both).
+   */
+  readonly adapter: ReadAdapter & Partial<McpToolAdapter> & Partial<CodeAdapter>;
   readonly correlationId?: string;
   readonly log?: (record: UpstreamCallLog) => void;
 }
 
 /**
  * One upstream read under the given configuration (design §4.2): binding lookup, the GET
- * check, the credential (opened only inside the adapter, SEC-2), the adapter call (`read`, or
- * `callTool` for an MCP-backed binding, CONN-1) and one log line with identifiers, method,
+ * check, the credential (opened only inside the adapter, SEC-2), the adapter call (`read`,
+ * `callTool` for an MCP-backed binding, CONN-1, or `codeRead` for a code binding, OPS-5) and one log line with identifiers, method,
  * status and timing only (SEC-3). No policy decision and no pin check: callers have made them.
  */
 export async function performRead(
@@ -104,8 +108,25 @@ export async function performRead(
     return { ok: true, outcome, connection: binding.connection };
   }
 
-  // OPS-5: code reads run once the code runner is wired (plan task 10); until then, fail closed.
-  if (binding.kind === 'code') return { ok: false, code: 'not_bound' };
+  if (binding.kind === 'code') {
+    // OPS-5: only a module operation of kind `read` reads, and only through an adapter that runs code.
+    const { codeRead } = deps.adapter;
+    const operation = configuration.codeOperations.get(operationId);
+    if (codeRead === undefined || operation?.kind !== 'read') return { ok: false, code: 'not_bound' };
+    const credential = await connectionCredential(deps.vault, connection.credentialRef);
+    if (credential === 'unusable') return { ok: false, code: 'credential_unusable', connection: binding.connection };
+    const outcome = await codeRead.call(deps.adapter, {
+      connection,
+      name: binding.name,
+      operation,
+      args,
+      response: binding.response,
+      ...(credential === undefined ? {} : { credential }),
+      ...(options.exactValues === true ? { exactValues: true } : {}),
+    });
+    logCall('CODE', outcome);
+    return { ok: true, outcome, connection: binding.connection };
+  }
 
   // Configuration refuses a read that is not GET; checked again so nothing writes without a change-set (CS-1, MCP-4).
   if (binding.mapping.method !== 'GET') return { ok: false, code: 'not_get', connection: binding.connection };

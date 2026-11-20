@@ -4,8 +4,9 @@
  * detectable scopes (SEC-7). Independent of HTTP: the credential page and the CLI use it.
  * An `mcp` connection lists its tools and calls the test operation's tool, only when the
  * listed tool still matches its pin (CONN-4); its item count is the number of listed tools.
+ * A code-bound test operation runs its preset code read through `codeRead` (OPS-5).
  */
-import type { ConnectionSettings, ConnectionTestReport, CredentialSource, McpToolAdapter, ReadAdapter, ReadErrorCode, ScopeReport } from '@aiops/connector-sdk';
+import type { CodeAdapter, ConnectionSettings, ConnectionTestReport, CredentialSource, McpToolAdapter, ReadAdapter, ReadErrorCode, ReadOutcome, ScopeReport } from '@aiops/connector-sdk';
 import type { LoadedConfiguration, McpOperationBinding } from '@aiops/config';
 import type { AuditLog, CredentialVault } from '@aiops/core';
 import { connectionCredential } from '@aiops/upstream';
@@ -22,8 +23,11 @@ export interface ConnectionTestDeps {
   /** The active configuration; a caller holding a request snapshot passes it to `run` instead. */
   readonly configuration: () => LoadedConfiguration;
   readonly vault: CredentialVault;
-  /** The MCP methods are needed only for `mcp` connections; without them their test reports `mapping`. */
-  readonly adapter: ReadAdapter & Partial<McpToolAdapter>;
+  /**
+   * The MCP methods are needed only for `mcp` connections, `codeRead` only for a code-bound test
+   * operation (OPS-5); without them those tests report `mapping`.
+   */
+  readonly adapter: ReadAdapter & Partial<McpToolAdapter> & Partial<CodeAdapter>;
   readonly audit: AuditLog;
   readonly newId: () => string;
 }
@@ -82,9 +86,22 @@ export class ConnectionTestService {
     const declared = configuration.connectionTests.get(connectionId);
     if (declared === undefined) return failed('', 'mapping', NO_TEST_DECLARED);
     const binding = configuration.bindings.get(declared.operation);
+    const noBinding = failed(declared.operation, 'mapping', 'the test operation has no upstream binding');
     // Not reachable with a fully checked configuration (the loader checks the test operation).
-    // OPS-5: a code read cannot run here until the code runner is wired (plan task 10); fail closed.
-    if (binding?.connection !== connectionId || binding.kind === 'code') return failed(declared.operation, 'mapping', 'the test operation has no upstream binding');
+    if (binding?.connection !== connectionId) return noBinding;
+    // The read of an HTTP or code binding (an MCP binding is tested by `attemptMcp`).
+    let readWith: ((withCredential: { credential?: CredentialSource }) => Promise<ReadOutcome>) | undefined;
+    if (binding.kind === 'code') {
+      // OPS-5: only a module operation of kind `read`, through an adapter that runs code.
+      const operation = configuration.codeOperations.get(declared.operation);
+      const { adapter } = this.deps;
+      const { codeRead } = adapter;
+      if (operation?.kind !== 'read' || codeRead === undefined) return noBinding;
+      readWith = (withCredential) =>
+        codeRead.call(adapter, { connection, name: binding.name, operation, args: declared.args, response: binding.response, ...withCredential });
+    } else if (binding.kind === 'http') {
+      readWith = (withCredential) => this.deps.adapter.read({ connection, mapping: binding.mapping, args: declared.args, ...withCredential });
+    }
 
     let credential: Awaited<ReturnType<typeof connectionCredential>>;
     try {
@@ -109,7 +126,8 @@ export class ConnectionTestService {
             },
           };
     if (binding.kind === 'mcp') return this.attemptMcp(connection, declared, binding, withCredential);
-    const outcome = await this.deps.adapter.read({ connection, mapping: binding.mapping, args: declared.args, ...withCredential });
+    if (readWith === undefined) return noBinding;
+    const outcome = await readWith(withCredential);
     const scopes = await this.deps.adapter.detectScopes({ connection, ...withCredential });
     if (!outcome.ok) {
       return {

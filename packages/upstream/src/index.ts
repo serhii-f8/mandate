@@ -2,6 +2,7 @@ export { assertFullyChecked, configurationLoadOptions } from './load-options.js'
 export { connectionCredential, performRead, type ReadDeps, type SingleRead, type UpstreamCallLog } from './read.js';
 export { createUpstreamReader, type UpstreamReaderDeps } from './upstream-reader.js';
 export { createBulkWriter, type BulkWriterDeps } from './bulk-writer.js';
+export { createCodeRecordWriter, createPerRecordWriter, type DirectWriterDeps } from './record-writers.js';
 export { createOpaqueCaller, type OpaqueCallerDeps } from './opaque-caller.js';
 export {
   createUpstreamInstrumentation,

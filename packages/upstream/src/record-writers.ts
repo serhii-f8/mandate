@@ -1,0 +1,147 @@
+/**
+ * The worker implementations of the core `DirectWriter` port (design phase 9 §4): a per-record
+ * write binding sends one request per record (OPS-6), a code write binding hands the records to
+ * the preset's code module (OPS-5). The credential is opened only inside the adapter (SEC-2);
+ * each request logs identifiers, method, status and timing only, never records (SEC-3).
+ */
+import type { CodeAdapter, CodeWriteOperation, RecordSendOutcome, RecordWriteAdapter } from '@aiops/connector-sdk';
+import type { LoadedConfiguration } from '@aiops/config';
+import type { CredentialVault, DirectRecordState, DirectWriter } from '@aiops/core';
+import { connectionCredential, type UpstreamCallLog } from './read.js';
+
+export interface DirectWriterDeps {
+  /** The configuration this execution runs under (the activity's snapshot). */
+  readonly configuration: LoadedConfiguration;
+  readonly vault: CredentialVault;
+  readonly adapter: RecordWriteAdapter & CodeAdapter;
+  readonly operationId: string;
+  readonly correlationId: string;
+  /** The change-set's validated arguments, for `{ arg }` templates and the code module. */
+  readonly args: Readonly<Record<string, unknown>>;
+  readonly log?: (record: UpstreamCallLog) => void;
+}
+
+type Answer = Awaited<ReturnType<DirectWriter['write']>>;
+
+const UNUSABLE: Answer = { ok: false, code: 'credential_unusable', retriable: false };
+/** A code answer that cannot be aligned with the records: the upstream may have applied them (T9-M2). */
+const MISALIGNED = { ok: false, code: 'invalid_response', retriable: false } as const;
+
+/** The operation is a manifest write (`write`, or `destructive` with a manifest): the only kind direct writers serve. */
+function isManifestWrite(configuration: LoadedConfiguration, operationId: string): boolean {
+  const operation = configuration.policy.operations.find((op) => op.id === operationId);
+  return operation?.manifest !== undefined && (operation.risk === 'write' || operation.risk === 'destructive');
+}
+
+/**
+ * A record's answer (OPS-6): a 2xx, or a 2xx the client could not read (`invalid_response`), is
+ * `ok` and the verify read decides; a failure the adapter marks retriable (429, 5xx, timeout,
+ * network, busy) is `retriable`; every other failure is `failed`.
+ */
+function stateOf(outcome: RecordSendOutcome): DirectRecordState {
+  if (outcome.ok || outcome.code === 'invalid_response') return 'ok';
+  return outcome.retriable ? 'retriable' : 'failed';
+}
+
+type LogFields = { readonly status?: number; readonly durationMs: number } & ({ readonly ok: true } | { readonly ok: false; readonly code: string });
+
+function logger(deps: DirectWriterDeps, connection: string, method: string): (outcome: LogFields) => void {
+  return (outcome) =>
+    deps.log?.({
+      correlationId: deps.correlationId,
+      operation: deps.operationId,
+      connection,
+      method,
+      ...(outcome.status === undefined ? {} : { status: outcome.status }),
+      durationMs: outcome.durationMs,
+      ...(outcome.ok ? {} : { errorCode: outcome.code }),
+    });
+}
+
+/**
+ * undefined unless the binding is HTTP, non-GET, without bulk, for a manifest write. Requests run
+ * with at most `connection.maxConcurrency` in flight; once a record answers `retriable` no new
+ * request starts (ruling F10): those in flight finish and the unsent records answer `retriable`,
+ * so the retry re-reads and sends only what is not yet written (NFR-2). One heartbeat per response.
+ */
+export function createPerRecordWriter(deps: DirectWriterDeps): DirectWriter | undefined {
+  const { configuration, adapter, operationId } = deps;
+  const binding = configuration.bindings.get(operationId);
+  if (binding?.kind !== 'http' || !isManifestWrite(configuration, operationId)) return undefined;
+  const { mapping } = binding;
+  if (mapping.method === 'GET' || mapping.bulk !== undefined) return undefined;
+  const connection = configuration.connectionSettings.get(binding.connection);
+  if (connection === undefined) return undefined;
+  const log = logger(deps, binding.connection, mapping.method);
+
+  return {
+    async write(records, heartbeat) {
+      const credential = await connectionCredential(deps.vault, connection.credentialRef);
+      if (credential === 'unusable') return UNUSABLE;
+      const states: DirectRecordState[] = records.map(() => 'retriable');
+      let next = 0;
+      let stopped = false;
+      const worker = async (): Promise<void> => {
+        while (!stopped && next < records.length) {
+          const index = next;
+          next += 1;
+          const record = records[index];
+          // In range by the loop condition; kept for noUncheckedIndexedAccess.
+          if (record === undefined) continue;
+          const outcome = await adapter.writeRecord({ connection, mapping, record, args: deps.args, ...(credential === undefined ? {} : { credential }) });
+          log(outcome);
+          heartbeat();
+          const state = stateOf(outcome);
+          states[index] = state;
+          if (state === 'retriable') stopped = true;
+        }
+      };
+      const lanes = Math.max(1, Math.min(connection.maxConcurrency, records.length));
+      await Promise.all(Array.from({ length: lanes }, worker));
+      return { ok: true, states };
+    },
+  };
+}
+
+/**
+ * undefined unless the binding is kind `code` with a write operation, for a manifest write. The
+ * code module answers one outcome per record; an answer of another length is a non-retriable
+ * `invalid_response` (every to-write item ends `no_outcome`), never trusted in part (T9-M2).
+ */
+export function createCodeRecordWriter(deps: DirectWriterDeps): DirectWriter | undefined {
+  const { configuration, adapter, operationId } = deps;
+  const binding = configuration.bindings.get(operationId);
+  if (binding?.kind !== 'code' || !isManifestWrite(configuration, operationId)) return undefined;
+  const code = configuration.codeOperations.get(operationId);
+  if (code?.kind !== 'write') return undefined;
+  const operation: CodeWriteOperation = code;
+  const connection = configuration.connectionSettings.get(binding.connection);
+  if (connection === undefined) return undefined;
+  const log = logger(deps, binding.connection, 'CODE');
+
+  return {
+    async write(records, heartbeat) {
+      const credential = await connectionCredential(deps.vault, connection.credentialRef);
+      if (credential === 'unusable') return UNUSABLE;
+      const outcome = await adapter.codeWrite({
+        connection,
+        name: binding.name,
+        operation,
+        records,
+        args: deps.args,
+        ...(credential === undefined ? {} : { credential }),
+        onProgress: heartbeat,
+      });
+      if (!outcome.ok) {
+        log(outcome);
+        return { ok: false, code: outcome.code, retriable: outcome.retriable };
+      }
+      if (outcome.outcomes.length !== records.length) {
+        log({ ok: false, code: MISALIGNED.code, durationMs: outcome.durationMs });
+        return MISALIGNED;
+      }
+      log(outcome);
+      return { ok: true, states: outcome.outcomes };
+    },
+  };
+}

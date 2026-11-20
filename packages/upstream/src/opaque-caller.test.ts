@@ -5,6 +5,8 @@ import {
   type BulkStatusOutcome,
   type BulkSubmitOutcome,
   type CallOutcome,
+  type CodeAdapter,
+  type CodeCallResult,
   type McpToolDefinition,
   type ToolListOutcome,
   type UpstreamResolver,
@@ -15,6 +17,7 @@ import type { CredentialHandle, CredentialStatus, CredentialVault, OpaqueNotSent
 import { createOpaqueCaller, type OpaqueCallerDeps } from './opaque-caller.js';
 import { verifyPinNow, type ToolLister } from './pin-monitor.js';
 import type { UpstreamCallLog } from './read.js';
+import { loadCodeFixture } from '../test/code-fixture.js';
 
 const SEND: McpToolDefinition = { name: 'send', inputSchema: { type: 'object', properties: { to: { type: 'string' } } } };
 const PIN = mcpToolHash(SEND);
@@ -371,12 +374,113 @@ describe('EXE-4 CONN-4 createOpaqueCaller', () => {
     expect(createOpaqueCaller({ ...base, operationId: 'shop.bulk' })).toBeUndefined();
     expect(createOpaqueCaller({ ...base, operationId: 'unknown.op' })).toBeUndefined();
   });
+});
 
-  it('OPS-5 undefined for a code binding until the code runner is wired', () => {
-    const configuration: LoadedConfiguration = {
-      ...CONFIG,
-      bindings: new Map([...CONFIG.bindings, ['shop.plain', { kind: 'code', connection: 'shop', preset: 'shop', name: 'plain', response: { maxItems: 100 } }]]),
-    };
-    expect(createOpaqueCaller({ configuration, vault: new MemoryVault(), adapter: new FakeWriteAdapter(), operationId: 'shop.plain', correlationId: 'c' })).toBeUndefined();
+type CodeCallInput = Parameters<CodeAdapter['codeCall']>[0];
+
+/** A write adapter that also runs code calls; `events` records the order of beforeSend and codeCall. */
+class FakeCodeCallAdapter extends FakeWriteAdapter implements Pick<CodeAdapter, 'codeCall'> {
+  readonly codeCalls: CodeCallInput[] = [];
+  constructor(
+    readonly events: string[],
+    public result: CodeCallResult = { ok: true, durationMs: 8 },
+  ) {
+    super();
+  }
+  codeCall(input: CodeCallInput): Promise<CodeCallResult> {
+    this.events.push('codeCall');
+    this.codeCalls.push(input);
+    return Promise.resolve(this.result);
+  }
+}
+
+const FIXTURE = await loadCodeFixture();
+
+describe('OPS-5 EXE-4 createOpaqueCaller for a code binding', () => {
+  const PING_ARGS = { message: 'a-distinctive-ping-message' };
+
+  async function setupCode(overrides: Partial<OpaqueCallerDeps> = {}, scheme = 'bearer') {
+    const events: string[] = [];
+    const adapter = new FakeCodeCallAdapter(events);
+    const vault = new MemoryVault();
+    await vault.put({ ref: 'items-token', scheme, secret: { token: SECRET }, actor: 'test' });
+    const lines: UpstreamCallLog[] = [];
+    const caller = createOpaqueCaller({ configuration: FIXTURE, vault, adapter, operationId: 'fixture.ping', correlationId: 'corr-c', log: (l) => lines.push(l), ...overrides });
+    if (caller === undefined) throw new Error('expected an opaque caller for fixture.ping');
+    const beforeSend = (): Promise<void> => Promise.resolve(void events.push('beforeSend'));
+    return { events, adapter, vault, lines, caller, beforeSend };
+  }
+
+  it('OPS-5 EXE-4 a code call is sent once; a definite refusal and an indefinite failure map to plan 2 outcomes', async () => {
+    const s = await setupCode();
+    expect(s.caller.idempotent).toBe(false);
+    await expect(s.caller.call({ args: PING_ARGS, idempotencyKey: KEY, beforeSend: s.beforeSend })).resolves.toEqual({ kind: 'accepted' });
+    // The submission is recorded (beforeSend) before the code module runs (EXE-4).
+    expect(s.events).toEqual(['beforeSend', 'codeCall']);
+    const binding = FIXTURE.bindings.get('fixture.ping');
+    if (binding?.kind !== 'code') throw new Error('fixture.ping has no code binding');
+    const [input] = s.adapter.codeCalls;
+    expect(input?.name).toBe(binding.name);
+    expect(input?.operation).toBe(FIXTURE.codeOperations.get('fixture.ping'));
+    expect(input?.args).toBe(PING_ARGS);
+    expect(input?.connection).toBe(FIXTURE.connectionSettings.get('items'));
+    expect(await input?.credential?.open()).toEqual({ token: SECRET });
+    expect(input).not.toHaveProperty('idempotencyKey');
+    expect(s.adapter.calls).toEqual([]);
+
+    s.adapter.result = { ok: false, definite: true, code: 'rejected', durationMs: 3 };
+    await expect(s.caller.call({ args: PING_ARGS, idempotencyKey: KEY, beforeSend: s.beforeSend })).resolves.toEqual({ kind: 'refused' });
+    s.adapter.result = { ok: false, definite: false, code: 'timeout', durationMs: 300_000 };
+    await expect(s.caller.call({ args: PING_ARGS, idempotencyKey: KEY, beforeSend: s.beforeSend })).resolves.toEqual({ kind: 'unknown' });
+    expect(s.adapter.codeCalls).toHaveLength(3);
+
+    // SEC-3: identifiers, method CODE, timing and the fixed code only.
+    expect(s.lines).toEqual([
+      { correlationId: 'corr-c', operation: 'fixture.ping', connection: 'items', method: 'CODE', durationMs: 8 },
+      { correlationId: 'corr-c', operation: 'fixture.ping', connection: 'items', method: 'CODE', durationMs: 3, errorCode: 'rejected' },
+      { correlationId: 'corr-c', operation: 'fixture.ping', connection: 'items', method: 'CODE', durationMs: 300_000, errorCode: 'timeout' },
+    ]);
+    const text = JSON.stringify(s.lines);
+    expect(text).not.toContain(PING_ARGS.message);
+    expect(text).not.toContain(SECRET);
+  });
+
+  it('OPS-5 EXE-4 a throwing beforeSend propagates and never reaches codeCall', async () => {
+    const s = await setupCode();
+    const fenced = new Error('BatchFenced');
+    await expect(s.caller.call({ args: PING_ARGS, idempotencyKey: KEY, beforeSend: () => Promise.reject(fenced) })).rejects.toBe(fenced);
+    expect(s.adapter.codeCalls).toEqual([]);
+    expect(s.events).toEqual([]);
+  });
+
+  it('OPS-5 SEC-2 pre-flight refusals are not_sent and never call beforeSend or the code module', async () => {
+    const unusable = await setupCode({}, 'no-such-scheme');
+    await expect(unusable.caller.call({ args: PING_ARGS, idempotencyKey: KEY, beforeSend: unusable.beforeSend })).resolves.toEqual({ kind: 'not_sent', code: 'credential_unusable' });
+    expect(unusable.events).toEqual([]);
+    expect(unusable.lines).toEqual([{ correlationId: 'corr-c', operation: 'fixture.ping', connection: 'items', method: 'CODE', durationMs: 0, errorCode: 'credential_unusable' }]);
+
+    // A module operation that is not a call (or none) is refused as upstream_rejected.
+    const getMany = FIXTURE.codeOperations.get('fixture.get_many');
+    if (getMany === undefined) throw new Error('fixture.get_many has no code operation');
+    for (const codeOperations of [new Map([...FIXTURE.codeOperations, ['fixture.ping', getMany]]), new Map()]) {
+      const wrong = await setupCode({ configuration: { ...FIXTURE, codeOperations } });
+      await expect(wrong.caller.call({ args: PING_ARGS, idempotencyKey: KEY, beforeSend: wrong.beforeSend })).resolves.toEqual({ kind: 'not_sent', code: 'upstream_rejected' });
+      expect(wrong.events).toEqual([]);
+    }
+
+    // An adapter that cannot run code calls is upstream_unavailable.
+    const events: string[] = [];
+    const vault = new MemoryVault();
+    const caller = createOpaqueCaller({ configuration: FIXTURE, vault, adapter: new FakeWriteAdapter(), operationId: 'fixture.ping', correlationId: 'corr-c' });
+    await expect(
+      caller?.call({ args: PING_ARGS, idempotencyKey: KEY, beforeSend: () => Promise.resolve(void events.push('beforeSend')) }),
+    ).resolves.toEqual({ kind: 'not_sent', code: 'upstream_unavailable' });
+    expect(events).toEqual([]);
+  });
+
+  it('OPS-5 undefined for a code write or read operation (not opaque)', () => {
+    const base = { configuration: FIXTURE, vault: new MemoryVault(), adapter: new FakeCodeCallAdapter([]), correlationId: 'c' };
+    expect(createOpaqueCaller({ ...base, operationId: 'fixture.set_tags' })).toBeUndefined();
+    expect(createOpaqueCaller({ ...base, operationId: 'fixture.get_many' })).toBeUndefined();
   });
 });

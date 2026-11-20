@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import { mcpToolHash, type McpToolAdapter, type McpToolDefinition, type ReadAdapter, type ReadOutcome, type ScopeReport, type ToolListOutcome } from '@aiops/connector-sdk';
+import { mcpToolHash, type CodeAdapter, type CodeOperation, type McpToolAdapter, type McpToolDefinition, type ReadAdapter, type ReadOutcome, type ScopeReport, type ToolListOutcome } from '@aiops/connector-sdk';
 import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
 import { InMemoryAuditLog } from '@aiops/testing';
 import { ConnectionTestService } from './connection-test.js';
@@ -55,6 +55,14 @@ class MemoryVault implements CredentialVault {
     return Promise.resolve({ ref, scheme: row.scheme, open: () => Promise.resolve(row.secret) });
   }
 }
+
+/** The test operation served by a code read (OPS-5); the fake adapters never run it. */
+const SEARCH_CODE: CodeOperation = { kind: 'read', read: () => Promise.resolve({ items: [] }) };
+const CODE_CONFIG: LoadedConfiguration = {
+  ...CONFIG,
+  bindings: new Map([...CONFIG.bindings, ['catalog.search_products', { kind: 'code', connection: 'magento', preset: 'magento', name: 'search', response: { maxItems: 100 } }]]),
+  codeOperations: new Map([['catalog.search_products', SEARCH_CODE]]),
+};
 
 const NOT_DETECTABLE_REPORT: ScopeReport = { detectable: false, source: 'none', values: [] };
 const JWT_SCOPES: ScopeReport = { detectable: true, source: 'jwt_claims', values: ['catalog:read'] };
@@ -158,14 +166,42 @@ describe('CONN-7 connection test service', () => {
     expect(adapter.reads[0]?.credential).toBeUndefined();
   });
 
-  it('CONN-7 OPS-5 a code-bound test operation reports no upstream binding without calling the upstream', async () => {
-    const { adapter, service } = await setup();
-    const configuration: LoadedConfiguration = {
-      ...CONFIG,
-      bindings: new Map([...CONFIG.bindings, ['catalog.search_products', { kind: 'code', connection: 'magento', preset: 'magento', name: 'search', response: { maxItems: 100 } }]]),
+  it('CONN-7 OPS-5 a code-bound test operation reports status and item count', async () => {
+    const { adapter, vault, audit } = await setup();
+    const codeReads: Parameters<CodeAdapter['codeRead']>[0][] = [];
+    const codeRead: CodeAdapter['codeRead'] = (input) => {
+      codeReads.push(input);
+      return Promise.resolve({ ok: true, status: 200, durationMs: 9, items: [{ sku: 'a' }, { sku: 'b' }, { sku: 'c' }], truncated: false });
     };
-    const report = await service.run('magento', 'cli', 'cli', 'corr-code', configuration);
-    expect(report).toMatchObject({ ok: false, operation: 'catalog.search_products', code: 'mapping', message: 'the test operation has no upstream binding' });
+    const withCode = new ConnectionTestService({ configuration: () => CONFIG, vault: vault, adapter: Object.assign(adapter, { codeRead }), audit, newId: () => 'id-code' });
+    const report = await withCode.run('magento', 'cli', 'cli', 'corr-code', CODE_CONFIG);
+    expect(report).toEqual({ ok: true, operation: 'catalog.search_products', status: 200, durationMs: 9, itemCount: 3, scopes: JWT_SCOPES });
+    const [input] = codeReads;
+    expect(input?.name).toBe('search');
+    expect(input?.operation).toBe(SEARCH_CODE);
+    expect(input?.response).toEqual({ maxItems: 100 });
+    expect(input?.args).toEqual({ brand: 'acme', fields: ['sku'] });
+    expect(input?.connection.id).toBe('magento');
+    expect(await input?.credential?.open()).toEqual({ token: TOKEN });
+    expect(adapter.reads).toEqual([]);
+    expect(audit.events.at(-1)).toMatchObject({ outcome: 'ok', details: { connection: 'magento', ok: true, status: 200, scopesDetectable: true } });
+
+    // A failed code read reports its code and status; the message stays out of the audit.
+    const failing: CodeAdapter['codeRead'] = () => Promise.resolve({ ok: false, code: 'upstream_error', durationMs: 4, message: 'preset code failed' });
+    const failedService = new ConnectionTestService({ configuration: () => CONFIG, vault: vault, adapter: Object.assign(new FakeAdapter(OK), { codeRead: failing }), audit, newId: () => 'id-code-2' });
+    expect(await failedService.run('magento', 'cli', 'cli', 'corr-code-2', CODE_CONFIG)).toMatchObject({ ok: false, code: 'upstream_error', message: 'preset code failed' });
+  });
+
+  it('CONN-7 OPS-5 a code-bound test operation without a code read or code adapter reports mapping without calling the upstream', async () => {
+    const { adapter, vault, service } = await setup();
+    // No codeRead on the adapter.
+    expect(await service.run('magento', 'cli', 'cli', 'corr-code', CODE_CONFIG)).toMatchObject({ ok: false, code: 'mapping', operation: 'catalog.search_products' });
+    // A module operation that is not a read.
+    const codeRead: CodeAdapter['codeRead'] = () => Promise.reject(new Error('must not run'));
+    const withCode = new ConnectionTestService({ configuration: () => CONFIG, vault: vault, adapter: Object.assign(new FakeAdapter(OK), { codeRead }), audit: new InMemoryAuditLog(), newId: () => 'x' });
+    const writeOp: CodeOperation = { kind: 'write', write: () => Promise.resolve([]) };
+    const report = await withCode.run('magento', 'cli', 'cli', 'corr-code', { ...CODE_CONFIG, codeOperations: new Map([['catalog.search_products', writeOp]]) });
+    expect(report).toMatchObject({ ok: false, code: 'mapping', message: 'the test operation has no upstream binding' });
     expect(adapter.reads).toEqual([]);
     expect(adapter.detections).toEqual([]);
   });

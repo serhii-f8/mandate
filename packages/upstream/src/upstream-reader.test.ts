@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import type { ReadAdapter, ReadOutcome } from '@aiops/connector-sdk';
+import type { CodeAdapter, ReadAdapter, ReadOutcome } from '@aiops/connector-sdk';
 import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
+import { loadCodeFixture } from '../test/code-fixture.js';
 import type { UpstreamCallLog } from './read.js';
 import { createUpstreamReader } from './upstream-reader.js';
 
@@ -158,5 +159,47 @@ describe('CS-1 upstream reader for preparation', () => {
     await vault.put({ ref: 'magento-integration', scheme: 'kerberos', secret: { t: 'x' }, actor: 'admin' });
     expect(await reader.read('catalog.get_products', ARGS)).toEqual({ ok: false, code: 'credential_unusable' });
     expect(adapter.reads).toHaveLength(1);
+  });
+
+  it('OPS-5 CS-1 a code read serves read_before with exact values; a code operation of another kind is not readable', async () => {
+    const configuration = await loadCodeFixture();
+    const items = [{ id: '1', title: 'One' }];
+    const codeReads: Parameters<CodeAdapter['codeRead']>[0][] = [];
+    const adapter = new FakeAdapter(OK);
+    const codeRead: CodeAdapter['codeRead'] = (input) => {
+      codeReads.push(input);
+      return Promise.resolve({ ok: true, status: 200, durationMs: 6, items, truncated: false });
+    };
+    const lines: UpstreamCallLog[] = [];
+    const vault = new MemoryVault();
+    await vault.put({ ref: 'items-token', scheme: 'bearer', secret: { token: 'tok' }, actor: 'admin' });
+    const reader = createUpstreamReader({ configuration, vault, adapter: Object.assign(adapter, { codeRead }), correlationId: 'corr-r', log: (l) => lines.push(l) });
+    const args = { ids: ['1'], fields: ['id', 'title'] };
+
+    expect(await reader.read('fixture.get_many', args)).toEqual({ ok: true, items, truncated: false });
+    const binding = configuration.bindings.get('fixture.get_many');
+    if (binding?.kind !== 'code') throw new Error('fixture.get_many has no code binding');
+    const [input] = codeReads;
+    expect(input?.name).toBe(binding.name);
+    expect(input?.operation).toBe(configuration.codeOperations.get('fixture.get_many'));
+    expect(input?.response).toBe(binding.response);
+    expect(input?.args).toEqual(args);
+    expect(input?.exactValues).toBe(true);
+    expect(input?.connection).toBe(configuration.connectionSettings.get('items'));
+    expect(input?.credential).toMatchObject({ ref: 'items-token', scheme: 'bearer' });
+    expect(adapter.reads).toEqual([]);
+    expect(lines).toEqual([{ correlationId: 'corr-r', operation: 'fixture.get_many', connection: 'items', method: 'CODE', status: 200, durationMs: 6 }]);
+
+    // A read operation whose module operation is a write is not readable: nothing runs.
+    const setTags = configuration.codeOperations.get('fixture.set_tags');
+    if (setTags === undefined) throw new Error('fixture.set_tags has no code operation');
+    const tampered = { ...configuration, codeOperations: new Map([...configuration.codeOperations, ['fixture.get_many', setTags]]) };
+    const tamperedReader = createUpstreamReader({ configuration: tampered, vault, adapter, correlationId: 'corr-r' });
+    expect(await tamperedReader.read('fixture.get_many', args)).toEqual({ ok: false, code: 'not_readable' });
+    // An adapter without code reads cannot serve the binding.
+    const plain = setup(OK, configuration);
+    expect(await plain.reader.read('fixture.get_many', args)).toEqual({ ok: false, code: 'not_bound' });
+    expect(codeReads).toHaveLength(1);
+    expect(plain.adapter.reads).toEqual([]);
   });
 });
