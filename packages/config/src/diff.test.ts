@@ -185,3 +185,22 @@ describe('CFG-3 configuration diff', () => {
   });
 });
 
+describe('CFG-3 SEC-10 rate limit diff', () => {
+  it('CFG-3 SEC-10 config diff reports rate_limits and a changed override', async () => {
+    const withSettings = async (limit: number, perMinute: number): Promise<LoadedConfiguration> =>
+      edited(async (_file, dir) => {
+        await writeFile(join(dir, 'rate.yaml'), `version: 1\nrate_limits: { mcp_user_per_minute: ${limit} }\n`);
+        await writeFile(join(dir, 'service-accounts.yaml'), `version: 1\nservice_accounts:\n  - { client_id: aiops-sa-ci, role: support_agent, rate_limit_per_minute: ${perMinute} }\n`);
+      });
+    const before = await withSettings(10, 5);
+    const after = await withSettings(20, 6);
+    expect(formatDiff(diffConfigurations(before, after))).toEqual([
+      '~ service_account aiops-sa-ci: rateLimitPerMinute',
+      '~ setting rate_limits: mcpUserPerMinute',
+      hashLine(before, after),
+    ]);
+    const plain = await load(VALID_DIR);
+    expect(formatDiff(diffConfigurations(plain, before))).toContain('+ service_account aiops-sa-ci');
+    expect(formatDiff(diffConfigurations(plain, before))).toContain('~ setting rate_limits: mcpUserPerMinute');
+  });
+});

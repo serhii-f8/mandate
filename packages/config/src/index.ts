@@ -5,6 +5,7 @@ export { formatIssue, pathToString, type ConfigIssue } from './issues.js';
 export { parseYamlSource, type SourceDocument } from './yaml-source.js';
 export {
   configDocumentSchema,
+  DEFAULT_RATE_LIMITS,
   OPERATION_ID,
   type ConfigDocument,
   type ConnectionConfig,
@@ -15,6 +16,7 @@ export {
   type PresetOperationConfig,
   type RoleApproval,
   type RoleConfig,
+  type RateLimits,
   type RoleLimits,
 } from './schema.js';
 export { createSchemaCompiler, type ArgumentCheck, type ArgumentValidator } from './argument-validators.js';
