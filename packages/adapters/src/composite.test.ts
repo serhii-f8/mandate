@@ -1,4 +1,4 @@
-import type { ConnectionSettings, CredentialSource, UpstreamMapping } from '@aiops/connector-sdk';
+import type { CodeCallOutcome, CodeContext, ConnectionSettings, CredentialSource, RecordOutcome, UpstreamMapping } from '@aiops/connector-sdk';
 import { startFakeMcpServer, startFakeUpstream, type FakeMcpServer, type FakeUpstream } from '@aiops/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAdapters } from './composite.js';
@@ -97,6 +97,53 @@ describe('CONN-1 composite adapter', () => {
     });
     expect(mcp.requests).toHaveLength(0);
     expect(up.requests).toHaveLength(1);
+  });
+
+  it('OPS-5 CONN-1 code operations run on an OpenAPI connection and answer mapping on an mcp connection without running', async () => {
+    up.route('GET', '/items/1', () => ({ status: 200, body: { id: '1' } }));
+    const errors: string[] = [];
+    let ran = 0;
+    const adapters = createAdapters({ onCodeError: (e) => errors.push(e.operation) });
+    const read = {
+      kind: 'read' as const,
+      async read(ctx: CodeContext) {
+        ran += 1;
+        const r = await ctx.http.send({ method: 'GET', path: '/items/1' });
+        return { items: r.ok ? [r.json as Record<string, unknown>] : [] };
+      },
+    };
+    const throwing = { kind: 'call' as const, call: (): Promise<CodeCallOutcome> => Promise.reject(new Error('x')) };
+    expect(await adapters.codeRead({ connection: openapi(), name: 'r', operation: read, args: {}, response: { maxItems: 5 } })).toMatchObject({
+      ok: true,
+      items: [{ id: '1' }],
+    });
+    expect(await adapters.codeCall({ connection: openapi(), name: 'boom', operation: throwing, args: {} })).toMatchObject({ ok: false, code: 'upstream_error' });
+    expect(errors).toEqual(['boom']);
+    expect(await adapters.codeRead({ connection: mcpConnection(), name: 'r', operation: read, args: {}, response: { maxItems: 5 } })).toMatchObject({
+      ok: false,
+      code: 'mapping',
+    });
+    const write = { kind: 'write' as const, write: (): Promise<readonly RecordOutcome[]> => Promise.resolve(['ok']) };
+    expect(await adapters.codeWrite({ connection: mcpConnection(), name: 'w', operation: write, records: [{ id: 1 }], args: {} })).toEqual({
+      ok: false,
+      code: 'mapping',
+      durationMs: 0,
+      retriable: false,
+    });
+    expect(await adapters.codeCall({ connection: mcpConnection(), name: 'c', operation: throwing, args: {} })).toMatchObject({ ok: false, code: 'mapping', definite: true });
+    expect(ran).toBe(1);
+    expect(up.requests).toHaveLength(1);
+    expect(mcp.requests).toHaveLength(0);
+  });
+
+  it('OPS-5 codeDeadlines reach the code runner', async () => {
+    const adapters = createAdapters({ codeDeadlines: { readMs: 20, writeMs: 20 } });
+    const hangs = { kind: 'read' as const, read: () => new Promise<never>(() => undefined) };
+    expect(await adapters.codeRead({ connection: openapi(), name: 'h', operation: hangs, args: {}, response: { maxItems: 1 } })).toMatchObject({
+      ok: false,
+      code: 'timeout',
+      message: 'preset code did not finish within 20 ms',
+    });
   });
 
   it('CONN-1 listTools and callTool on an mcp connection hit the MCP server', async () => {

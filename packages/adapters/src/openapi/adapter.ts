@@ -1,7 +1,8 @@
 /**
  * OpenAPI adapter facade (CONN-2, CONN-7, SEC-7): the spec resolver the configuration loader uses,
  * the read path the api uses, scope detection for the connection test, and the bulk and opaque write
- * paths and the per-record write the worker uses (OPS-6, EXE-4).
+ * paths and the per-record write the worker uses (OPS-6, EXE-4), and the runner of preset code
+ * operations, whose requests share the connection's client (OPS-5).
  */
 import { validateHeaderName, validateHeaderValue } from 'node:http';
 import {
@@ -9,6 +10,7 @@ import {
   type BulkStatusOutcome,
   type BulkSubmitOutcome,
   type CallOutcome,
+  type CodeAdapter,
   type ConnectionSettings,
   type CredentialSource,
   type HttpMethod,
@@ -25,6 +27,7 @@ import {
   type WriteFailure,
   type WriteRecord,
 } from '@aiops/connector-sdk';
+import { createCodeRunner, type CodeRunnerDeps } from '../code/runner.js';
 import { createConnectionClient, createTransport, type ConnectionClient, type SendResult, type Transport } from '../http/client.js';
 import { createGuardedLookup } from '../http/egress.js';
 import { FORBIDDEN_HEADERS } from '../http/headers.js';
@@ -44,9 +47,13 @@ export interface OpenApiAdapterDeps {
   transportFor?: (settings: ConnectionSettings) => Transport;
   /** Hook around each upstream attempt of the default client, also for the spec fetch (NFR-11). With a custom `clientFor` the caller wires it. */
   readonly instrumentation?: RequestInstrumentation;
+  /** Receives the scrubbed, cut message of a code operation that threw (OPS-5, SEC-3). */
+  readonly onCodeError?: CodeRunnerDeps['onCodeError'];
+  /** Code operation deadlines; default 60 s for reads, 300 s for writes and calls (OPS-5). */
+  readonly codeDeadlines?: CodeRunnerDeps['codeDeadlines'];
 }
 
-export type OpenApiAdapter = ReadAdapter & WriteAdapter & RecordWriteAdapter & { resolver: UpstreamResolver };
+export type OpenApiAdapter = ReadAdapter & WriteAdapter & RecordWriteAdapter & CodeAdapter & { resolver: UpstreamResolver };
 
 const NOT_DETECTABLE: ScopeReport = { detectable: false, source: 'none', values: [] };
 /** RFC 6749 §3.3 scope-token characters; anything else is not reported. */
@@ -388,6 +395,13 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
     return classifyCall(r, hookRan);
   }
 
-  return { resolver, read, detectScopes, submitBulk, bulkStatus, callOnce, writeRecord };
+  // Code requests go through `clientOf`, so they share the connection's semaphore, token cache and instrumentation.
+  const code = createCodeRunner({
+    clientOf,
+    ...(deps.onCodeError === undefined ? {} : { onCodeError: deps.onCodeError }),
+    ...(deps.codeDeadlines === undefined ? {} : { codeDeadlines: deps.codeDeadlines }),
+  });
+
+  return { resolver, read, detectScopes, submitBulk, bulkStatus, callOnce, writeRecord, ...code };
 }
 
