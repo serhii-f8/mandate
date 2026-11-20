@@ -70,15 +70,17 @@ describe('OPS-5 OPS-6 Gitea label writer', () => {
     expect(r.pending()).toBe(0);
   });
 
-  it('OPS-5 a PUT answer missing a requested name is failed', async () => {
+  it('OPS-5 a 2xx answer that differs from the request is ok so core verifies it', async () => {
+    // The write landed (maybe partially): `failed` would record it as refused and skip core's verify read.
     const r = replay([labelsPage(1, SEEDED), put(30, [3, 1], 200, [label(3, 'feature')])]);
-    expect(await setLabels(r.ctx, [rec(30, ['feature', 'bug'])], {})).toEqual(['failed']);
+    expect(await setLabels(r.ctx, [rec(30, ['feature', 'bug'])], {})).toEqual(['ok']);
     expect(r.pending()).toBe(0);
   });
 
-  it('OPS-5 a PUT answer that is not a label list is failed', async () => {
+  it('OPS-5 a 2xx answer that is not a label list is ok so core verifies it', async () => {
     const r = replay([labelsPage(1, SEEDED), put(30, [1], 200, { message: 'ok' })]);
-    expect(await setLabels(r.ctx, [rec(30, ['bug'])], {})).toEqual(['failed']);
+    expect(await setLabels(r.ctx, [rec(30, ['bug'])], {})).toEqual(['ok']);
+    expect(r.pending()).toBe(0);
   });
 
   it('OPS-5 a reordered label set writes and verifies as ok', async () => {
@@ -119,6 +121,23 @@ describe('OPS-5 OPS-6 Gitea label writer', () => {
     const denied = replay([{ request: labelsPage(1, []).request, response: { status: 403, body: null } }]);
     expect(await setLabels(denied.ctx, [rec(1, ['bug']), rec(2, ['docs'])], {})).toEqual(['failed', 'failed']);
     expect(denied.pending()).toBe(0);
+  });
+
+  it('OPS-6 a retriable label-list read in one repository stops sending for a later repository', async () => {
+    const r = replay([{ request: labelsPage(1, []).request, response: { code: 'timeout' } }]);
+    const outcomes = await setLabels(r.ctx, [rec(1, ['bug']), rec(2, ['docs'], 'internal')], {});
+    expect(outcomes).toEqual(['retriable', 'retriable']);
+    expect(r.calls()).toBe(1);
+    expect(r.pending()).toBe(0);
+  });
+
+  it('OPS-5 a label list that never ends with a short page fails after 20 pages without a PUT', async () => {
+    const full = (page: number): RecordedExchange =>
+      labelsPage(page, Array.from({ length: 50 }, (_, i) => label((page - 1) * 50 + i + 1, `label-${String((page - 1) * 50 + i + 1)}`)));
+    const r = replay(Array.from({ length: 20 }, (_, i) => full(i + 1)));
+    expect(await setLabels(r.ctx, [rec(1, ['label-1'])], {})).toEqual(['failed']);
+    expect(r.calls()).toBe(20);
+    expect(r.pending()).toBe(0);
   });
 
   it('OPS-5 a malformed label list fails the group without a PUT', async () => {

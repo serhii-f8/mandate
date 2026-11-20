@@ -2,9 +2,10 @@
  * Code writer `set_labels` (OPS-5, OPS-6). Gitea's `PUT …/issues/{n}/labels` drops unknown names
  * and ids with a 200, so a declarative mapping would report a partial write as success. This
  * writer resolves names to ids from the repository's own label list (exact match, repository
- * labels only), refuses a record with an unknown name without sending anything, and checks that
- * the answer holds exactly the requested names. Upstream content is data (SEC-5): only label ids
- * and names are read from it.
+ * labels only) and refuses a record with an unknown name without sending anything. A 2xx PUT has
+ * landed, so it is `ok` whatever the answer holds: `failed` means a definite refusal, and core's
+ * verify read marks a partial write as drift. Upstream content is data (SEC-5): only label ids and
+ * names are read from it.
  */
 import type { CodeArgs, CodeContext, CodeHttpResponse, RecordOutcome, WriteRecord } from '@aiops/connector-sdk';
 import { repoPath } from './issue.js';
@@ -76,12 +77,6 @@ async function readLabels(ctx: CodeContext, base: string): Promise<Resolution> {
   return { ok: false, outcome: 'failed' };
 }
 
-function sameNames(requested: readonly string[], answered: readonly string[]): boolean {
-  const want = [...new Set(requested)].sort();
-  const got = [...answered].sort();
-  return want.length === got.length && want.every((name, i) => name === got[i]);
-}
-
 /**
  * Replaces the labels of each record's issue. Outcomes have the records' length and order. A
  * retriable answer stops sending: that record and every later unsent record are `retriable`, so
@@ -130,8 +125,8 @@ export async function setLabels(ctx: CodeContext, records: readonly WriteRecord[
       outcomes.push(retriable ? 'retriable' : 'failed');
       continue;
     }
-    const answered = parseLabels(res.json);
-    outcomes.push(answered !== undefined && sameNames(target.labels, answered.map((l) => l.name)) ? 'ok' : 'failed');
+    // Landed: never `failed`, even when the answer names other labels; core's verify read checks it.
+    outcomes.push('ok');
   }
   return outcomes;
 }
