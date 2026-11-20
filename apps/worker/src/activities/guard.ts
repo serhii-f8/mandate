@@ -2,12 +2,15 @@ import type { LoadedConfiguration } from '@aiops/config';
 import {
   allowingRole,
   approvalRequirement,
+  changesetKind,
   createPolicyEngine,
   hashStoredItems,
   isOpaque,
+  OPAQUE_TARGET_ID,
   policyDecisionAuditEvent,
   type AuditLog,
   type Caller,
+  type ChangeSetKind,
   type ChangeSetRecord,
   type ChangeSetRepository,
   type ExecutionGuard,
@@ -34,6 +37,11 @@ export interface ExecutionGuardDeps {
  *    named twice needs two rows; SEC-9, APR-2), and a round holding a `returned` row counts as
  *    unapproved (APR-4); otherwise, or when no step is configured, `approval_missing`. A change-set started from
  *    `prepared` that now needs approval fails closed (design §7).
+ *
+ * Before 2, the kind the change-set was prepared as (its stored items) must equal the kind of its
+ * operation under the current configuration; a reload that flips an operation between
+ * `write_opaque` and a diff kind refuses it as `policy_denied`, so a diff is never sent as an opaque
+ * call nor an opaque call re-checked and written as a diff (EXE-4, SEC-9, APR-5).
  */
 export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: LoadedConfiguration) => ExecutionGuard {
   const { heartbeat } = deps;
@@ -46,6 +54,18 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
             return deps.repository.itemsPage(changesetId, query);
           },
         };
+
+  /**
+   * The kind the change-set was prepared as, from its stored items: opaque is exactly one item
+   * `call` with `before: null` (design §2, `runOpaquePreparation`); anything else is a diff.
+   */
+  async function storedKind(changeset: ChangeSetRecord): Promise<ChangeSetKind> {
+    const first = await repository.itemsPage(changeset.id, { limit: 2 });
+    const [only] = first;
+    return first.length === 1 && only?.targetId === OPAQUE_TARGET_ID && only.before === null
+      ? 'opaque'
+      : 'diff';
+  }
 
   /** Whether the change-set carries the approvals the current configuration requires for it. */
   async function approvalsSuffice(
@@ -87,6 +107,8 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
       }
       const request = changeset.executionRequest;
       if (request === undefined) return { ok: false, outcome: 'policy_denied' };
+      const operation = configuration.policy.operations.find((o) => o.id === changeset.operation);
+      if (changesetKind(operation) !== (await storedKind(changeset))) return { ok: false, outcome: 'policy_denied' };
       const caller: Caller = {
         subject: request.actor,
         groups: request.groups,
