@@ -24,7 +24,6 @@ export interface SendCounter {
  * open after it was counted, as a request that has left while the worker dies.
  */
 export class ScriptedOpaqueCaller implements OpaqueCaller {
-  readonly idempotent = false;
   /** Every `call`, sent or not. */
   calls = 0;
   private pause: { reached: () => void; gate: Promise<void> } | undefined;
