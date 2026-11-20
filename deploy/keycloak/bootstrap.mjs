@@ -9,6 +9,8 @@
  *   - Client ID Metadata Documents from trusted domains (client-id-metadata-document)
  *   - anonymous Dynamic Client Registration off by default; AIOPS_DCR=on admits
  *     registrations whose redirect URIs are on AIOPS_DCR_REDIRECT_HOSTS
+ *   - one confidential client-credentials client per AIOPS_KEYCLOAK_SERVICE_ACCOUNTS
+ *     name (AUTH-4); created once, updated in place, its secret left alone
  *
  * Environment (defaults in brackets):
  *   KEYCLOAK_URL [http://localhost:8080], KEYCLOAK_REALM [aiops],
@@ -16,7 +18,8 @@
  *   AIOPS_MCP_RESOURCE (required), AIOPS_CIMD_CLIENT_DOMAINS [claude.ai],
  *   AIOPS_CIMD_EXTRA_DOMAINS [localhost,127.0.0.1], AIOPS_DCR [off],
  *   AIOPS_DCR_REDIRECT_HOSTS [claude.ai,chatgpt.com,localhost,127.0.0.1],
- *   AIOPS_CIMD_ALLOW_HTTP [false] (tests only), BOOTSTRAP_WAIT_SECONDS [180].
+ *   AIOPS_CIMD_ALLOW_HTTP [false] (tests only), AIOPS_KEYCLOAK_SERVICE_ACCOUNTS [],
+ *   BOOTSTRAP_WAIT_SECONDS [180].
  * Prints one summary line; exits non-zero on any failed call. Never prints secrets.
  */
 
@@ -80,6 +83,32 @@ async function admin(token, method, path, body) {
   return text === '' ? undefined : JSON.parse(text);
 }
 
+/**
+ * Creates or updates a confidential client that only has the client-credentials grant (AUTH-4).
+ * The body never carries `secret`, so an update keeps the secret Keycloak generated on create.
+ * @param {string} token
+ * @param {string} clientId
+ */
+async function ensureServiceClient(token, clientId) {
+  const representation = {
+    clientId,
+    protocol: 'openid-connect',
+    publicClient: false,
+    clientAuthenticatorType: 'client-secret',
+    serviceAccountsEnabled: true,
+    standardFlowEnabled: false,
+    directAccessGrantsEnabled: false,
+    implicitFlowEnabled: false,
+  };
+  const found = /** @type {{ id: string }[]} */ (
+    await admin(token, 'GET', `/clients?${new URLSearchParams({ clientId, search: 'false' }).toString()}`)
+  );
+  if (found.length > 1) throw new Error(`more than one client ${clientId}`);
+  const existing = found[0];
+  if (existing === undefined) await admin(token, 'POST', '/clients', representation);
+  else await admin(token, 'PUT', `/clients/${encodeURIComponent(existing.id)}`, representation);
+}
+
 async function main() {
   const resource = required('AIOPS_MCP_RESOURCE');
   const clientDomains = list(env.AIOPS_CIMD_CLIENT_DOMAINS, 'claude.ai');
@@ -88,6 +117,7 @@ async function main() {
   const dcr = (env.AIOPS_DCR ?? 'off').toLowerCase();
   if (dcr !== 'on' && dcr !== 'off') throw new Error('AIOPS_DCR must be on or off');
   const dcrHosts = list(env.AIOPS_DCR_REDIRECT_HOSTS, 'claude.ai,chatgpt.com,localhost,127.0.0.1');
+  const serviceAccounts = [...new Set(list(env.AIOPS_KEYCLOAK_SERVICE_ACCOUNTS, ''))];
 
   const token = await adminToken();
 
@@ -155,7 +185,9 @@ async function main() {
       : { 'host-sending-registration-request-must-match': ['true'], 'client-uris-must-match': ['true'] };
   await admin(token, 'PUT', `/components/${trustedHosts.id}`, trustedHosts);
 
-  console.log(`keycloak bootstrap done: realm=${REALM} pkce=on cimd=on dcr=${dcr}`);
+  for (const clientId of serviceAccounts) await ensureServiceClient(token, clientId);
+
+  console.log(`keycloak bootstrap done: realm=${REALM} pkce=on cimd=on dcr=${dcr} service_accounts=${String(serviceAccounts.length)}`);
 }
 
 main().catch((/** @type {unknown} */ error) => {

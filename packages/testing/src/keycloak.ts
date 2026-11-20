@@ -28,6 +28,8 @@ export interface StartedKeycloak {
   clientCredentialsToken(clientId: string, options?: { resource?: string }): Promise<{ accessToken: string } | { error: string }>;
   /** The client's secret, read through the admin API; never log it. */
   clientSecret(clientId: string): Promise<string>;
+  /** The realm's clients with exactly this `clientId`, as the Admin REST API returns them. */
+  clients(clientId: string): Promise<Record<string, unknown>[]>;
   stop(): Promise<void>;
 }
 
@@ -67,13 +69,18 @@ export async function startKeycloak(options: StartKeycloakOptions): Promise<Star
     if (!r.ok) throw new Error(`admin token request failed: ${String(r.status)}`);
     return ((await r.json()) as { access_token: string }).access_token;
   };
+  const adminClients = `${baseUrl}/admin/realms/aiops/clients`;
+  const clients = async (clientId: string, token?: string): Promise<Record<string, unknown>[]> => {
+    const headers = { authorization: `Bearer ${token ?? (await adminToken())}` };
+    const r = await fetch(`${adminClients}?${new URLSearchParams({ clientId, search: 'false' }).toString()}`, { headers });
+    if (!r.ok) throw new Error(`client lookup failed: ${String(r.status)}`);
+    return (await r.json()) as Record<string, unknown>[];
+  };
   const clientSecret = async (clientId: string): Promise<string> => {
-    const headers = { authorization: `Bearer ${await adminToken()}` };
-    const admin = `${baseUrl}/admin/realms/aiops/clients`;
-    const found = (await (await fetch(`${admin}?${new URLSearchParams({ clientId, search: 'false' }).toString()}`, { headers })).json()) as { id: string }[];
-    const uuid = found[0]?.id;
-    if (uuid === undefined) throw new Error(`client ${clientId} not found`);
-    const r = await fetch(`${admin}/${uuid}/client-secret`, { headers });
+    const token = await adminToken();
+    const uuid = (await clients(clientId, token))[0]?.id;
+    if (typeof uuid !== 'string') throw new Error(`client ${clientId} not found`);
+    const r = await fetch(`${adminClients}/${uuid}/client-secret`, { headers: { authorization: `Bearer ${token}` } });
     if (!r.ok) throw new Error(`client secret request failed: ${String(r.status)}`);
     return ((await r.json()) as { value: string }).value;
   };
@@ -95,6 +102,7 @@ export async function startKeycloak(options: StartKeycloakOptions): Promise<Star
       return stdout.trim();
     },
     clientSecret,
+    clients: (clientId) => clients(clientId),
     async clientCredentialsToken(clientId, tokenOptions = {}) {
       const body = new URLSearchParams({
         grant_type: 'client_credentials',
