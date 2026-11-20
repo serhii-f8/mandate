@@ -32,12 +32,23 @@
 #   (OPS-5); the history of the checkout shows that no commit touching presets/gitea-issues and no
 #   commit of the plan (trailer `Plan: phase-9-mcp-upstream-gitea`) changes packages/core, apps/api or
 #   apps/worker. Runs alone or after groups 1 and 2.
+#   group 4, a service account writes only through human approval (AUTH-4, APR-1, POL-8, AUD-2,
+#   CFG-3, POL-7): sa-config, sa-token, sa-tools, sa-denied, sa-approved-write, sa-no-secret. It needs
+#   group 2 on the same stack: notes.create_note is bound by group 2's own apply. It adds
+#   `service-accounts.yaml` (role integration, notes.create_note only, always one content_lead step;
+#   service account aiops-sa-ci, the client the bundled Keycloak bootstrap creates); `config apply`
+#   shows `+ service_account aiops-sa-ci` and `config explain --service` allows the operation; the
+#   client-credentials token has azp aiops-sa-ci and no sid; it lists notes.create_note and neither
+#   everything.echo nor review_changeset nor decide_changeset; everything.echo is not found and the
+#   deny is audited for service:aiops-sa-ci; its note change-set (requester service:aiops-sa-ci) is
+#   submitted, approved by dave on the page, completes, and the fake receives exactly one more call;
+#   the api, worker and keycloak-setup logs hold neither the token nor the client secret.
 # `--history-only` runs only no-core-change (git history, no Docker) and prints `# RESULT`.
 # Setup before the groups: sandbox-gitea-ready (deploy/sandbox/gitea up, seeded, a write:issue token
 # in GTOKEN), presets-packed (every preset of the built image is packed with `npm pack` and extracted
 # into a node_modules tree that the api and the worker mount as their only preset directory, so every
 # group loads presets from tarballs, CONN-8), stack-healthy, presets-dir-env.
-# AIOPS_ACCEPT9_GROUPS selects the groups (default "1 2 3"); a selected group that is not defined is a
+# AIOPS_ACCEPT9_GROUPS selects the groups (default "1 2 3 4"); a selected group that is not defined is a
 # FAIL (ADR 0043).
 # Tests the committed HEAD (a fresh clone sees only commits), with a Compose override that mounts a
 # generated configuration and the packed presets, joins the api and the worker to the sandbox network
@@ -130,6 +141,8 @@ export AIOPS_API_PORT AIOPS_KEYCLOAK_PORT AIOPS_TEMPORAL_PORT AIOPS_POSTGRES_POR
 export AIOPS_KEYCLOAK_PUBLIC_URL="http://localhost:${AIOPS_KEYCLOAK_PORT}"
 export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
 export AIOPS_PUBLIC_URL="http://localhost:${AIOPS_API_PORT}"
+# The admin password service-token.mjs reads the service account's client secret with (group 4).
+export KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-dev-only-keycloak-admin-password}"
 export AIOPS_ACCEPT_CONFIG_DIR="$WORK/config"
 # The packed presets (presets-packed); the overlay requires it for every compose call, the cleanup's
 # `compose down` included.
@@ -843,8 +856,134 @@ group_3_gitea() {
   fi
 }
 
+# ---- Group 4: a service account writes through human approval (AUTH-4, APR-1, POL-8, AUD-2, CFG-3, POL-7)
+
+# The access token of the service-account client aiops-sa-ci (client_credentials); service-token.mjs
+# reads the client secret itself, so it never reaches bash (SEC-3).
+SA_CLIENT=aiops-sa-ci
+sa_token() { node "$REPO/tooling/acceptance/service-token.mjs" "$AIOPS_KEYCLOAK_PUBLIC_URL" "$SA_CLIENT" "$AIOPS_MCP_RESOURCE"; }
+# The service account runs mcp-call.mjs with the given flags. It has no refresh token, so it gets a
+# fresh token before every call and none expires during the run.
+sa_client() {
+  local token
+  token="$(sa_token 2>&1)" || { echo "{\"tokenError\":$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$token")}"; return 0; }
+  AIOPS_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" "$@" 2>&1 || true
+}
+# get_changeset as the service account (the requester) every 2 s until the status matches the regex
+# or the timeout (s) passes; leaves the answer in POLL and the status in POLL_STATUS. Returns 1 on timeout.
+sa_poll_cs() {
+  local deadline=$((SECONDS + $3))
+  while :; do
+    POLL="$(sa_client --tool get_changeset --args "{\"changeset_id\":\"$1\"}")"
+    POLL_STATUS="$(json "$POLL" '.structuredContent.changeset.status')"
+    [[ "$POLL_STATUS" =~ $2 ]] && return 0
+    ((SECONDS >= deadline)) && return 1
+    sleep 2
+  done
+}
+SA_NOTE_TEXT="phase 9 service account"
+
+group_4() {
+  local apply apply_code explain token claims list tools_ok deadline denied deny_rows calls_before calls_after prep cs hash sub requester
+  local logs token_hits secret_hits
+
+  # 1. The service account is configured with its own role: notes.create_note only, always one
+  #    content_lead step (CFG-3, POL-7). notes.create_note is bound by group 2's mcp.yaml.
+  if ! grep -q 'id: notes.create_note' "$AIOPS_ACCEPT_CONFIG_DIR/mcp.yaml" 2>/dev/null; then
+    fail sa-config "notes.create_note is not configured: group 4 needs group 2 on the same stack"
+    return 0
+  fi
+  cat >"$AIOPS_ACCEPT_CONFIG_DIR/service-accounts.yaml" <<YAML
+version: 1
+roles:
+  - id: integration
+    grants:
+      - { operation: notes.create_note }
+    approval: { required: always, steps: [{ role: content_lead }], allow_widget: false }
+service_accounts:
+  - { client_id: $SA_CLIENT, role: integration, description: Phase 9 acceptance }
+YAML
+  apply_code=0
+  apply="$(apply_config)" || apply_code=$?
+  explain="$(cli config explain --operation notes.create_note --service "$SA_CLIENT" --args "{\"text\":\"$SA_NOTE_TEXT\"}" 2>&1 || true)"
+  if [[ "$apply_code" == 0 ]] && grep -qx "+ service_account $SA_CLIENT" <<<"$apply" && grep -qx 'effect: allow' <<<"$explain"; then
+    pass sa-config "config apply → exit 0: $(grep -E '^\+ (role|service_account) ' <<<"$apply" | tr '\n' '|'); config explain --service $SA_CLIENT: $(tr '\n' '|' <<<"$explain")"
+  else
+    fail sa-config "apply exit $apply_code: $(tr '\n' '|' <<<"$apply" | head -c 1200); explain: $(tr '\n' '|' <<<"$explain")"
+    return 0
+  fi
+
+  # 2. The client-credentials token names the client and has no session (AUTH-4).
+  token="$(sa_token 2>&1)" || { fail sa-token "service-token.mjs: $token"; return 0; }
+  claims="$(AIOPS_MCP_TOKEN="$token" node -e 'try{const p=JSON.parse(Buffer.from(process.env.AIOPS_MCP_TOKEN.split(".")[1],"base64url").toString());console.log(JSON.stringify({azp:p.azp,sid:"sid" in p,aud:p.aud}))}catch{console.log("{}")}')"
+  if [[ "$(json "$claims" '.azp')" == "$SA_CLIENT" && "$(json "$claims" '.sid')" == false ]]; then
+    pass sa-token "service-token.mjs → exit 0; payload $claims"
+  else
+    fail sa-token "payload $claims"
+    return 0
+  fi
+
+  # 3. The service account lists its operation and neither group 1's read tool nor the approver tools.
+  deadline=$((SECONDS + 60))
+  while :; do
+    list="$(sa_client --list)"
+    tools_ok="$(node -e 'try{const t=JSON.parse(process.argv[1]).tools;console.log(t.includes("notes.create_note")&&!["everything.echo","review_changeset","decide_changeset"].some((n)=>t.includes(n)))}catch{console.log(false)}' "$list")"
+    [[ "$tools_ok" == true ]] && break
+    ((SECONDS >= deadline)) && break
+    sleep 2
+  done
+  if [[ "$tools_ok" == true ]]; then
+    pass sa-tools "tools/list as $SA_CLIENT: $(json "$list" '.tools')"
+  else
+    fail sa-tools "after 60 s: ${list:0:1200}"
+    return 0
+  fi
+
+  # 4. A tool outside its role is not found, and the denial is audited under the service subject (POL-8, AUD-2).
+  denied="$(sa_client --tool everything.echo --args '{"message":"service account"}')"
+  deny_rows="$(psql_q "select count(*) from audit_event where action='policy.decision' and decision='deny' and actor='service:$SA_CLIENT'" 2>&1 || true)"
+  if [[ "$denied" == *"Tool everything.echo not found"* && "$deny_rows" =~ ^[0-9]+$ ]] && ((deny_rows >= 1)); then
+    pass sa-denied "everything.echo → $(grep -o 'Tool everything.echo not found' <<<"$denied" | head -1); policy.decision deny rows for service:$SA_CLIENT: $deny_rows"
+  else
+    fail sa-denied "answer: ${denied:0:800}; deny rows: $deny_rows"
+  fi
+
+  # 5. Its write waits for a human: prepared, submitted, approved by dave on the page, run once (APR-1).
+  calls_before="$(fake_calls create_note)"
+  prep="$(sa_client --tool notes.create_note --args "{\"text\":\"$SA_NOTE_TEXT\"}")"
+  cs="$(json "$prep" '.structuredContent.changeset.id')"
+  hash="$(json "$prep" '.structuredContent.changeset.hash')"
+  if [[ "$(json "$prep" '.structuredContent.changeset.status')" != prepared || -z "$cs" ]]; then
+    fail sa-approved-write "prepare: ${prep:0:1200}"
+    return 0
+  fi
+  sub="$(sa_client --tool submit_for_approval --args "{\"changeset_id\":\"$cs\",\"hash\":\"$hash\"}")"
+  requester="$(psql_q "select requester from change_set where id = '$cs'" 2>&1 || true)"
+  gitea_approve "$cs"
+  sa_poll_cs "$cs" "$TERMINAL" 120 || true
+  calls_after="$(fake_calls create_note)"
+  if [[ "$(json "$sub" '.structuredContent.status')" == pending_approval && "$requester" == "service:$SA_CLIENT" &&
+    "$APPROVE_HASH" == "$hash" && "$(json "$APPROVE" '.status')" == 200 && "$POLL_STATUS" == completed &&
+    "$calls_before" =~ ^[0-9]+$ && "$calls_after" == "$((calls_before + 1))" ]]; then
+    pass sa-approved-write "change-set $cs: submit → pending_approval; requester $requester; dave: decide approve $APPROVE_HASH $APPROVE_COUNT → $APPROVE; then $POLL_STATUS; tools/call create_note at the fake $calls_before → $calls_after"
+  else
+    fail sa-approved-write "submit: ${sub:0:400}; requester: $requester; decide: $APPROVE (hash $APPROVE_HASH vs $hash); status: $POLL_STATUS; tools/call create_note $calls_before → $calls_after"
+  fi
+
+  # 6. Neither the token nor the client secret is in the logs (SEC-3). The token is matched through
+  #    a pattern file on a file descriptor and the secret inside service-token.mjs, never in argv.
+  logs="$(compose logs --no-color api worker keycloak-setup 2>&1 || true)"
+  token_hits="$(grep -cF -f <(printf '%s\n' "$token") <<<"$logs" || true)"
+  secret_hits="$(node "$REPO/tooling/acceptance/service-token.mjs" --count-secret "$AIOPS_KEYCLOAK_PUBLIC_URL" "$SA_CLIENT" <<<"$logs" 2>&1 || true)"
+  if [[ -n "$logs" && "$token_hits" == 0 && "$secret_hits" == 0 ]]; then
+    pass sa-no-secret "compose logs api worker keycloak-setup ($(wc -l <<<"$logs") lines): lines with the token $token_hits; occurrences of the client secret $secret_hits"
+  else
+    fail sa-no-secret "log lines: $(wc -l <<<"$logs"); lines with the token: $token_hits; occurrences of the client secret: $secret_hits"
+  fi
+}
+
 # Not GROUPS: bash ignores assignments to its own GROUPS array (the user's group IDs).
-RUN_GROUPS="${AIOPS_ACCEPT9_GROUPS:-1 2 3}"
+RUN_GROUPS="${AIOPS_ACCEPT9_GROUPS:-1 2 3 4}"
 for g in $RUN_GROUPS; do
   if declare -F "group_$g" >/dev/null; then
     "group_$g"
