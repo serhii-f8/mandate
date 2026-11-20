@@ -161,6 +161,20 @@ describe('MCP-2 granted operations', () => {
   });
 });
 
+describe('AUTH-4 service callers', () => {
+  it('AUTH-4 POL-1 the engine grants a service caller its role only', () => {
+    const withService = createPolicyEngine({ ...config, serviceAccounts: [{ clientId: 'sa', role: 'support_agent' }] });
+    const sa: Caller = { subject: 'service:sa', groups: ['content'] };
+    expect(withService.evaluate({ caller: sa, operationId: 'support.lookup_order', args: {} })).toMatchObject({ effect: 'allow', roles: ['support_agent'] });
+    expect(withService.evaluate({ caller: sa, operationId: 'catalog.search_products', args: { brand: 'acme' } })).toMatchObject({
+      effect: 'deny',
+      reason: 'no_grant',
+      roles: ['support_agent'],
+    });
+    expect(withService.grantedOperations(sa).map((o) => o.id)).toEqual(['support.lookup_order']);
+  });
+});
+
 function deepFreeze<T>(value: T): T {
   if (typeof value === 'object' && value !== null) {
     for (const v of Object.values(value)) deepFreeze(v);

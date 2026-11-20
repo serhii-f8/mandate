@@ -37,8 +37,9 @@ export type {
   RoleDefinition,
   RoleMappingEntry,
   ScopeValue,
+  ServiceAccountEntry,
 } from './policy-model.js';
-export { resolveRoles } from './roles.js';
+export { callerKind, resolveRoles, rolesOf, SERVICE_SUBJECT_PREFIX, serviceClientOf, serviceSubject } from './roles.js';
 export {
   createPolicyEngine,
   type DenyReason,
