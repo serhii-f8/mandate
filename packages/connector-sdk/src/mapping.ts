@@ -4,7 +4,9 @@ export type TemplateValue =
   | string
   | number
   | boolean
-  | { readonly arg: string; readonly default?: string | number | boolean; readonly join?: string };
+  | { readonly arg: string; readonly default?: string | number | boolean; readonly join?: string }
+  /** since 0.6.0, additive. A field of the record being written (per-record writes, OPS-6). */
+  | { readonly record: string; readonly default?: string | number | boolean; readonly join?: string };
 
 export interface ResponseMapping {
   items?: string;
@@ -25,7 +27,13 @@ export interface BulkMapping {
     /** Contains `{batch_id}`. */
     path: string;
     items: string;
-    index: string;
+    /**
+     * Field of a status entry holding the record's position. Exactly one of `index` and `key`
+     * (since 0.6.0: `index` optional because `key` is the alternative).
+     */
+    index?: string;
+    /** since 0.6.0, additive. Field of a status entry holding the record's target ID. */
+    key?: string;
     state: string;
     states: {
       ok: readonly StateValue[];
@@ -47,4 +55,9 @@ export interface UpstreamMapping {
   response: ResponseMapping;
   /** since 0.3.0, additive */
   bulk?: BulkMapping;
+  /**
+   * since 0.6.0, additive. Header that carries the idempotency key of an opaque write
+   * (`<changeset-id>:call`), so a call whose outcome is unknown can be resent (EXE-4).
+   */
+  idempotency?: { header: string };
 }

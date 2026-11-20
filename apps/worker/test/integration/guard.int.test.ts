@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { LoadedConfiguration } from '@aiops/config';
-import type { RoleApprovalRule } from '@aiops/core';
+import { OPAQUE_TARGET_ID, type OperationDefinition, type RoleApprovalRule } from '@aiops/core';
 import { DrizzleAuditLog, PostgresChangeSetRepository } from '@aiops/db';
 import { recordApproval, submitChangeSet } from '@aiops/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createExecutionGuard } from '../../src/activities/guard.js';
 import { createPrepared, startExecutionOf } from '../support/changesets.js';
-import { APPROVING_GROUP, testConfiguration } from '../support/configuration.js';
+import { APPROVING_GROUP, EDITOR_GROUP, OPAQUE_OPERATION, WRITE_OPERATION, testConfiguration } from '../support/configuration.js';
+import { createPreparedOpaque } from '../support/opaque.js';
 import { auditEventsOf, startTestPostgres, type TestPostgres } from '../support/postgres.js';
 
 let postgres: TestPostgres;
@@ -50,6 +51,25 @@ describe('production execution guard', () => {
       changesetId: cs.id,
       details: { rule: 'default-deny', operation: cs.operation },
     });
+  });
+
+  it('AUTH-4 EXE re-authorisation uses the service account role of the stored requester', async () => {
+    // The service account holds `editor` (no approval, grants the operation on brand acme); its groups are empty.
+    const withServiceAccount: LoadedConfiguration = {
+      ...configuration,
+      serviceAccounts: new Map([['aiops-sa-ci', { role: 'editor' }]]),
+      policy: { ...configuration.policy, serviceAccounts: [{ clientId: 'aiops-sa-ci', role: 'editor' }] },
+    };
+    const cs = await createPrepared(repository, 3, {
+      requester: 'service:aiops-sa-ci',
+      execute: { actor: 'service:aiops-sa-ci', groups: [], clientId: 'aiops-sa-ci', correlationId: 'corr-exec-service' },
+    });
+    await expect(guardFor(withServiceAccount).check(cs)).resolves.toEqual({ ok: true });
+    // A reload without the service_accounts entry leaves the subject without a role.
+    expect(configuration.policy.serviceAccounts ?? []).toEqual([]);
+    await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: false, outcome: 'policy_denied' });
+    const decisions = (await auditEventsOf(postgres.database, cs.id)).filter((e) => e.action === 'policy.decision');
+    expect(decisions).toMatchObject([{ actor: 'service:aiops-sa-ci', clientId: 'aiops-sa-ci', decision: 'deny', details: { rule: 'default-deny' } }]);
   });
 
   it('POL-6 the production guard denies a change-set without an execution request', async () => {
@@ -158,8 +178,50 @@ describe('execution guard approval re-check', () => {
     await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: false, outcome: 'approval_missing' });
   });
 
+  it('POL-5 an opaque change-set whose role moved from never to above_threshold after submission is refused without approvals', async () => {
+    // Started by an editor while the role needed no approval: no approval rows exist.
+    const cs = await createPreparedOpaque(repository, { execute: { groups: [EDITOR_GROUP] } });
+    expect(cs.stats.included).toBe(1);
+    await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: true });
+    // A reload moves the role to above_threshold: one record is far below 25, but an opaque call has no count to compare.
+    const tightened = withApprovalRule('editor', (rule) => ({ ...rule, required: 'above_threshold', recordThreshold: 25, steps: ['reviewer'] }));
+    await expect(guardFor(tightened).check(cs)).resolves.toEqual({ ok: false, outcome: 'approval_missing' });
+  });
+
   it('CS-4 a tampered item is hash_mismatch before the approval check', async () => {
     const cs = await createPrepared(repository, 3, { hash: '0'.repeat(64), execute: { groups: [APPROVING_GROUP] } });
     await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: false, outcome: 'hash_mismatch' });
+  });
+});
+
+/** The kind of a change-set is fixed at preparation: a reload that flips the operation's kind refuses it (EXE-4, SEC-9). */
+describe('execution guard operation kind re-check', () => {
+  /** The test configuration with one operation changed, as a reload would. */
+  function withOperation(id: string, change: (op: OperationDefinition) => OperationDefinition): LoadedConfiguration {
+    const operations = configuration.policy.operations.map((o) => (o.id === id ? change(o) : o));
+    return { ...configuration, policy: { ...configuration.policy, operations } };
+  }
+
+  it('EXE-4 SEC-9 the guard refuses an opaque change-set whose operation is no longer write_opaque', async () => {
+    const cs = await createPreparedOpaque(repository, { execute: { groups: [EDITOR_GROUP] } });
+    await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: true });
+    const asWrite = withOperation(OPAQUE_OPERATION, (op) => ({ ...op, risk: 'write' }));
+    await expect(guardFor(asWrite).check(cs)).resolves.toEqual({ ok: false, outcome: 'policy_denied' });
+  });
+
+  it('EXE-4 SEC-9 the guard refuses a diff change-set with the record id call whose operation is now write_opaque', async () => {
+    const cs = await createPrepared(repository, 1, {
+      itemFor: () => ({ targetId: OPAQUE_TARGET_ID, status: 'pending', before: { name: 'Old' }, after: { name: 'New' } }),
+      execute: { groups: [EDITOR_GROUP] },
+    });
+    await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: true });
+    const asOpaque = withOperation(WRITE_OPERATION, (op) => ({ ...op, risk: 'write_opaque' }));
+    await expect(guardFor(asOpaque).check(cs)).resolves.toEqual({ ok: false, outcome: 'policy_denied' });
+  });
+
+  it('EXE-4 SEC-9 the guard refuses a diff change-set of several records whose operation is now write_opaque', async () => {
+    const cs = await createPrepared(repository, 3, { execute: { groups: [EDITOR_GROUP] } });
+    const asOpaque = withOperation(WRITE_OPERATION, (op) => ({ ...op, risk: 'write_opaque' }));
+    await expect(guardFor(asOpaque).check(cs)).resolves.toEqual({ ok: false, outcome: 'policy_denied' });
   });
 });

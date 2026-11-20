@@ -1,16 +1,33 @@
+import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CookieJar, loginWithPkce, pageLogin, registerClient, startKeycloak, type LoginResult, type StartedKeycloak, type StartedPostgres } from '@aiops/testing';
-import { connectClient, freePort, modernRequest, rawPost, startApi, startDatabase, type RunningApi } from './helpers.js';
+import { auditRows, connectClient, FIXTURE_CONFIG, freePort, modernRequest, rawPost, startApi, startDatabase, type RunningApi } from './helpers.js';
 
 /** Built-in tools every authenticated user sees (MCP-8). */
 const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset', 'submit_for_approval', 'exclude_changeset_items', 'rollback_changeset'];
 const PASSWORD = 'dev-only-password';
 const LOOPBACK = 'http://localhost:33418/callback';
+const SERVICE_CLIENT = 'aiops-sa-ci';
+/** Service-account clients the bootstrap creates in every run of this file (AUTH-4). */
+const SERVICE_ACCOUNTS = { AIOPS_KEYCLOAK_SERVICE_ACCOUNTS: SERVICE_CLIENT };
+/** Role `integration` for the service account, added to a copy of the fixture configuration. */
+const SERVICE_ACCOUNTS_YAML = `version: 1
+roles:
+  - id: integration
+    grants:
+      - operation: support.lookup_order
+service_accounts:
+  - { client_id: ${SERVICE_CLIENT}, role: integration }
+`;
 
 let postgres: StartedPostgres;
+let databaseUrl: string;
+let configDir: string;
 let keycloak: StartedKeycloak;
 let api: RunningApi;
 let resource: string;
@@ -26,8 +43,10 @@ const login = (clientId: string, username: string, extra: Partial<Parameters<typ
   loginWithPkce({ baseUrl: keycloak.baseUrl, clientId, redirectUri: LOOPBACK, username, password: PASSWORD, resource, ...extra });
 
 beforeAll(async () => {
-  const { postgres: pgStarted, databaseUrl } = await startDatabase();
-  postgres = pgStarted;
+  ({ postgres, databaseUrl } = await startDatabase());
+  configDir = await mkdtemp(join(tmpdir(), 'aiops-keycloak-e2e-'));
+  await cp(FIXTURE_CONFIG, configDir, { recursive: true });
+  await writeFile(join(configDir, 'service-accounts.yaml'), SERVICE_ACCOUNTS_YAML);
   const port = await freePort();
   resource = `http://127.0.0.1:${String(port)}/mcp`;
 
@@ -50,8 +69,8 @@ beforeAll(async () => {
   cimdClientId = `http://host.docker.internal:${String((cimdServer.address() as AddressInfo).port)}/client.json`;
 
   keycloak = await startKeycloak({ mcpResource: resource, publicUrl: `http://127.0.0.1:${String(port)}` });
-  await keycloak.bootstrap({ AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal' });
-  api = await startApi(databaseUrl, { issuer: keycloak, port, resource });
+  await keycloak.bootstrap({ AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
+  api = await startApi(databaseUrl, { issuer: keycloak, port, resource, configDir });
 }, 300_000);
 
 afterAll(async () => {
@@ -59,6 +78,7 @@ afterAll(async () => {
   await (api as RunningApi | undefined)?.close();
   await (keycloak as StartedKeycloak | undefined)?.stop();
   await (postgres as StartedPostgres | undefined)?.stop();
+  if ((configDir as string | undefined) !== undefined) await rm(configDir, { recursive: true });
   const server = cimdServer as Server | undefined;
   if (server !== undefined) await new Promise((resolve) => server.close(resolve));
 });
@@ -103,7 +123,7 @@ describe('AUTH-8 bundled realm registration policy', () => {
   });
 
   it('AUTH-8 the DCR switch admits listed redirect hosts only, enforces PKCE, and switches back off', async () => {
-    const on = await keycloak.bootstrap({ AIOPS_DCR: 'on', AIOPS_DCR_REDIRECT_HOSTS: 'localhost', AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal' });
+    const on = await keycloak.bootstrap({ AIOPS_DCR: 'on', AIOPS_DCR_REDIRECT_HOSTS: 'localhost', AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
     expect(on).toContain('dcr=on');
     const registered = await registerClient(keycloak.baseUrl, [LOOPBACK]);
     expect(registered.status).toBe(201);
@@ -113,10 +133,57 @@ describe('AUTH-8 bundled realm registration policy', () => {
     expect(await login(clientId, 'alice', { pkce: 'none' })).toEqual({ error: expect.stringMatching(/^invalid_request/) as unknown });
 
     // Idempotent, and back to the default.
-    const off = await keycloak.bootstrap({ AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal' });
+    const off = await keycloak.bootstrap({ AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
     expect(off).toContain('dcr=off');
-    await keycloak.bootstrap({ AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal' });
+    await keycloak.bootstrap({ AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
     expect((await registerClient(keycloak.baseUrl, [LOOPBACK])).status).toBe(403);
+  });
+});
+
+describe('AUTH-4 service accounts with real Keycloak tokens', () => {
+  const serviceToken = async (options: { resource?: string } = {}): Promise<string> => {
+    const result = await keycloak.clientCredentialsToken(SERVICE_CLIENT, options);
+    if ('error' in result) throw new Error(result.error);
+    return result.accessToken;
+  };
+
+  it('AUTH-4 bootstrap creates aiops-sa-ci idempotently and keeps its secret', async () => {
+    // The secret is compared, never printed (SEC-3).
+    const before = await keycloak.clientSecret(SERVICE_CLIENT);
+    const summary = await keycloak.bootstrap({ AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
+    expect(summary).toContain('service_accounts=1');
+    expect(summary).not.toContain(before);
+    expect((await keycloak.clientSecret(SERVICE_CLIENT)) === before).toBe(true);
+    const clients = await keycloak.clients(SERVICE_CLIENT);
+    expect(clients).toHaveLength(1);
+    expect(clients[0]).toMatchObject({ clientId: SERVICE_CLIENT, standardFlowEnabled: false, serviceAccountsEnabled: true, publicClient: false });
+  });
+
+  it('AUTH-4 a client-credentials token with resource has exactly the MCP audience and no sid', async () => {
+    const claims = decodeJwt(await serviceToken({ resource }));
+    expect([claims.aud].flat()).toEqual([resource]);
+    expect(claims.azp).toBe(SERVICE_CLIENT);
+    expect(claims.client_id).toBe(SERVICE_CLIENT);
+    expect(claims.sid).toBeUndefined();
+    expect(claims.auth_time).toBeUndefined();
+  });
+
+  it('AUTH-4 AUTH-1 the service account sees its role tools at the api', async () => {
+    const token = await serviceToken({ resource });
+    const client = await connectClient({ era: 'modern', baseUrls: [api.url], token });
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    await client.close();
+    expect(names).toContain('support.lookup_order');
+    for (const absent of ['catalog.search_products', 'review_changeset', 'decide_changeset']) expect(names).not.toContain(absent);
+
+    const { body, headers } = modernRequest('tools/call', { name: 'catalog.search_products', arguments: { brand: 'acme' } });
+    const response = await rawPost(api.url, body, { ...headers, authorization: `Bearer ${token}` });
+    const json = (await response.json()) as { error?: { message: string } };
+    expect(json.error?.message).toContain('Tool catalog.search_products not found');
+    const rows = await auditRows(databaseUrl, 'correlation_id = $1', [response.headers.get('x-correlation-id')]);
+    expect(rows).toEqual([
+      expect.objectContaining({ action: 'policy.decision', decision: 'deny', actor: `service:${SERVICE_CLIENT}`, client_id: SERVICE_CLIENT, subject: 'catalog.search_products' }),
+    ]);
   });
 });
 

@@ -1,0 +1,148 @@
+# Code fixture preset (OPS-5, OPS-6, CONN-8): items with a title, a state and tags, served by
+# installFakeItems in @aiops/testing. fixture.search is a plain HTTP read and the selector of
+# both manifests; fixture.update writes one PATCH per record; get_many, set_tags, ping and boom
+# are operations of the code module lib/index.js.
+version: 1
+adapter: openapi
+spec: spec/fixture.json
+auth: { scheme: bearer }
+operations:
+  - id: fixture.search
+    risk: read
+    title: Search items
+    description: List items, optionally of one state, one page at a time. Returns only the requested fields.
+    input_schema:
+      type: object
+      properties:
+        state: &state { type: string, enum: [open, closed], description: Item state. }
+        page: { type: integer, minimum: 1, description: 'Page number, starting at 1.' }
+        per_page: { type: integer, minimum: 1, maximum: 100, description: Items per page (1-100). }
+        fields: &fields
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Item fields to return.
+          items: { type: string, enum: [id, title, state, tags] }
+      required: [page, per_page, fields]
+      additionalProperties: false
+    fields_arg: fields
+    upstream:
+      method: GET
+      path: /items
+      query:
+        state: { arg: state }
+        page: { arg: page }
+        limit: { arg: per_page }
+      response: { items: '$', fields_from_arg: fields }
+  - id: fixture.get_many
+    risk: read
+    title: Get items by ID
+    description: Look up to 100 items by ID. Unknown IDs are skipped. Returns only the requested fields.
+    input_schema:
+      type: object
+      properties:
+        ids: &ids
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          description: Item IDs.
+          items: { type: string, minLength: 1, maxLength: 64 }
+        fields: *fields
+      required: [ids, fields]
+      additionalProperties: false
+    fields_arg: fields
+    upstream:
+      code: get_many
+      response: { fields_from_arg: fields }
+  - id: fixture.update
+    risk: write
+    title: Update items
+    description: Change the title or state of items, named by ID or selected by state.
+    input_schema:
+      type: object
+      properties:
+        ids: *ids
+        state: *state
+        changes:
+          type: object
+          minProperties: 1
+          additionalProperties: false
+          description: Field to new value.
+          properties:
+            title: { type: string, minLength: 1, maxLength: 200 }
+            state: *state
+      required: [changes]
+      additionalProperties: false
+      # Exactly one of ids or state: changes is required and nothing else is allowed.
+      minProperties: 2
+      maxProperties: 2
+    upstream:
+      method: PATCH
+      path: /items/{id}
+      path_params: { id: { record: id } }
+    manifest:
+      id_field: id
+      ids_arg: ids
+      values_arg: changes
+      fields: [title, state]
+      read_before: { operation: fixture.get_many, ids_arg: ids, args: {} }
+      selector:
+        operation: fixture.search
+        args: { state: { arg: state } }
+        page_arg: page
+        page_size_arg: per_page
+      rollback: { strategy: replay_previous_state }
+  - id: fixture.set_tags
+    risk: write
+    title: Set item tags
+    description: Replace the tags of items, named by ID or selected by state. The tag unknown is refused.
+    input_schema:
+      type: object
+      properties:
+        ids: *ids
+        state: *state
+        changes:
+          type: object
+          additionalProperties: false
+          description: The new tags.
+          properties:
+            tags: { type: array, maxItems: 20, items: { type: string, minLength: 1, maxLength: 32 } }
+          required: [tags]
+      required: [changes]
+      additionalProperties: false
+      minProperties: 2
+      maxProperties: 2
+    upstream: { code: set_tags }
+    manifest:
+      id_field: id
+      ids_arg: ids
+      values_arg: changes
+      fields: [tags]
+      read_before: { operation: fixture.get_many, ids_arg: ids, args: {} }
+      selector:
+        operation: fixture.search
+        args: { state: { arg: state } }
+        page_arg: page
+        page_size_arg: per_page
+      rollback: { strategy: replay_previous_state }
+  - id: fixture.ping
+    risk: write_opaque
+    title: Ping
+    description: Send a ping message upstream.
+    input_schema:
+      type: object
+      properties:
+        message: { type: string, minLength: 1, maxLength: 200, description: The message. }
+      required: [message]
+      additionalProperties: false
+    upstream: { code: ping }
+  - id: fixture.boom
+    risk: read
+    title: Fail
+    description: Always fails; for tests of code failures.
+    input_schema:
+      type: object
+      properties: {}
+      additionalProperties: false
+    upstream: { code: boom }

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { SERVICE_SUBJECT_PREFIX } from '@aiops/core';
 import { jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { z } from 'zod';
 
@@ -117,6 +118,8 @@ export function createOidcClient(options: OidcClientOptions): OidcClient {
         if (typeof sub !== 'string' || sub === '' || payload.nonce !== nonce || typeof authTime !== 'number') {
           return { ok: false, reason: 'id_token_invalid' };
         }
+        // The `service:` namespace belongs to service accounts (AUTH-4); a page session never takes it.
+        if (sub.startsWith(SERVICE_SUBJECT_PREFIX)) return { ok: false, reason: 'id_token_invalid' };
         if (azp !== undefined && azp !== options.clientId) return { ok: false, reason: 'id_token_invalid' };
         const identity: OidcIdentity = {
           subject: sub,

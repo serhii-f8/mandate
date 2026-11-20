@@ -1,6 +1,7 @@
 import { type ReactElement, useCallback, useState } from 'react';
 import { ItemTable } from '../components/ItemTable.js';
 import { Notice } from '../components/Notice.js';
+import { RawArguments } from '../components/RawArguments.js';
 import { Pager } from '../components/Pager.js';
 import { StatusBadge } from '../components/StatusBadge.js';
 import { formatDateTime, plural } from '../format.js';
@@ -84,7 +85,7 @@ function DecisionPanel(props: Props & { action: Action; origin: Origin | undefin
             send('approve');
           }}
         >
-          {`Approve ${plural(n, 'change')}`}
+          {data.kind === 'opaque' ? 'Approve 1 call' : `Approve ${plural(n, 'change')}`}
         </button>
         <button
           type="button"
@@ -158,6 +159,7 @@ export function ApprovalView({ data, actions, onData }: Props): ReactElement {
     if (!action.busy) setOrigin(o);
   };
   const excluded = Object.entries(stats.excluded);
+  const opaque = data.kind === 'opaque';
 
   return (
     <main className="view approval">
@@ -187,7 +189,7 @@ export function ApprovalView({ data, actions, onData }: Props): ReactElement {
             <Time iso={request.submittedAt} />
           </p>
         )}
-        <pre>{JSON.stringify(request.args, null, 2)}</pre>
+        {opaque ? null : <pre>{JSON.stringify(request.args, null, 2)}</pre>}
       </section>
       <section aria-label="Policy">
         <h2>Policy</h2>
@@ -221,6 +223,9 @@ export function ApprovalView({ data, actions, onData }: Props): ReactElement {
           </ul>
         )}
       </section>
+      {opaque ? <RawArguments args={request.args} /> : null}
+      {opaque ? null : (
+      <>
       <section aria-label="Sample">
         <h2>Sample</h2>
         <button
@@ -271,6 +276,8 @@ export function ApprovalView({ data, actions, onData }: Props): ReactElement {
         />
         {pages.error === undefined ? null : <Notice kind="error">{pages.error}</Notice>}
       </section>
+      </>
+      )}
       <section aria-label="Approval chain">
         <h2>Approval chain</h2>
         {approval === undefined ? (

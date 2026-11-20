@@ -19,13 +19,15 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --project unit --passWithNoTests"
+    "test": "vitest run --project unit --passWithNoTests",
+    "test:int": "vitest run --project integration"
   },
   "devDependencies": {
     "@aiops/testing": "workspace:*"
   },
   "dependencies": {
     "@aiops/connector-sdk": "workspace:*",
+    "@modelcontextprotocol/client": "2.4.0",
     "@seriousme/openapi-schema-validator": "2.12.0",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",

@@ -1,5 +1,6 @@
 import { isExpiryDue } from '../changeset/lifecycle.js';
 import type { ChangeSetRecord } from '../changeset/model.js';
+import { serviceClientOf } from '../roles.js';
 import type {
   ApprovalChannel,
   ApprovalRecord,
@@ -65,6 +66,8 @@ export function checkDecision(input: {
   const role = changeset.awaitingRole ?? plan.steps[step - 1];
   // 4. APR-1.
   if (role === undefined || !approver.roles.includes(role)) return 'not_approver';
+  // AUTH-4: service accounts never decide (APR-2, APR-8).
+  if (serviceClientOf(approver.subject) !== undefined) return 'not_approver';
   // 5. APR-2: not the requester, and one person decides one step of a round.
   if (approver.subject === changeset.requester) return 'separation_of_duties';
   if (mine.some((a) => a.approver === approver.subject)) return 'separation_of_duties';

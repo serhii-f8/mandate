@@ -205,6 +205,30 @@ describe('changesetDetail', () => {
   });
 });
 
+describe('APR-5 UI-3 detail kind', () => {
+  const OPAQUE: OperationDefinition = { ...OPERATION, id: 'shop.post_note', risk: 'write_opaque' };
+
+  it('APR-5 UI-3 an opaque detail has kind opaque, the stored args and canExclude false', () => {
+    const cs = { ...prepared(), operation: 'shop.post_note' };
+    const d = changesetDetail({ changeset: cs, approvals: [], operation: OPAQUE, viewer: alice, now: NOW, rollback: NO_ROLLBACK });
+    expect(d.kind).toBe('opaque');
+    expect(d.request.args).toStrictEqual(ARGS);
+    expect(d.viewer.canExclude).toBe(false);
+    expect(d.viewer.canSubmit).toBe(true);
+    const widget = changesetDetailWith({ changeset: cs, approvals: [], operation: OPAQUE, viewer: { ...widgetViewerBlock(cs, [], toApprover(alice), NOW), canExclude: true }, rollback: NO_ROLLBACK });
+    expect(widget.kind).toBe('opaque');
+    expect(widget.viewer.canExclude).toBe(false);
+  });
+
+  it('APR-5 UI-3 a diff detail, or one whose operation left the configuration, has kind diff and keeps canExclude', () => {
+    const d = changesetDetail({ changeset: prepared(), approvals: [], operation: OPERATION, viewer: alice, now: NOW, rollback: NO_ROLLBACK });
+    expect(d.kind).toBe('diff');
+    expect(d.viewer.canExclude).toBe(true);
+    const gone = changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, rollback: NO_ROLLBACK });
+    expect(gone.kind).toBe('diff');
+  });
+});
+
 describe('detail additions', () => {
   it('CS-5 the detail carries derivedFrom of a derived change-set', () => {
     const src = '22222222-2222-4222-8222-222222222222';
@@ -312,7 +336,7 @@ describe('toApprover', () => {
 
 /** The plan submission would freeze for this risk and rule (POL-5), so `widget` is the real one. */
 function planOf(risk: RiskClass, rule: Omit<RoleApprovalRule, 'steps'>): ApprovalPlan {
-  const r = approvalRequirement({ risk, rule: { steps: ['content_lead', 'brand_owner'], ...rule }, included: 3 });
+  const r = approvalRequirement({ risk, opaque: false, rule: { steps: ['content_lead', 'brand_owner'], ...rule }, included: 3 });
   if (!r.required || r.unroutable === true) throw new Error('expected a routable plan');
   const { required: _required, unroutable: _unroutable, ...plan } = r; // eslint-disable-line @typescript-eslint/no-unused-vars -- not part of the plan
   return plan;

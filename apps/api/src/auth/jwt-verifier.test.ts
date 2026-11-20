@@ -1,6 +1,8 @@
 import { OAuthError } from '@modelcontextprotocol/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { exportJWK, generateKeyPair, SignJWT, createLocalJWKSet } from 'jose';
 import { startTestIssuer, type TestIssuer } from '@aiops/testing';
+import { callerFromAuthInfo } from './caller-from-auth.js';
 import { createJwtVerifier, rejectionReason } from './jwt-verifier.js';
 
 const RESOURCE = 'https://aiops.example.test/mcp';
@@ -9,7 +11,7 @@ let verify: (token: string) => ReturnType<ReturnType<typeof createJwtVerifier>['
 
 beforeAll(async () => {
   issuer = await startTestIssuer();
-  const verifier = createJwtVerifier({ issuer: issuer.issuer, audience: RESOURCE, jwks: issuer.localJwks });
+  const verifier = createJwtVerifier({ issuer: issuer.issuer, audience: RESOURCE, jwks: issuer.localJwks, isServiceAccount: (id) => id === 'aiops-sa-ci' });
   verify = (token) => verifier.verifyAccessToken(token);
 });
 
@@ -78,5 +80,52 @@ describe('AUTH-1 access token validation', () => {
 
   it('rejects garbage', async () => {
     expect(await reason('not-a-jwt')).toBe('malformed');
+  });
+});
+
+describe('AUTH-4 AUTH-1 service token classification', () => {
+  it('AUTH-4 a configured client with matching client_id and no sid is a service caller', async () => {
+    const info = await verify(await issuer.token({ sub: 'kc-sa-user-id', aud: RESOURCE, azp: 'aiops-sa-ci', client_id: 'aiops-sa-ci', groups: ['content'] }));
+    expect(info.extra).toEqual({ sub: 'kc-sa-user-id', groups: [], service: 'aiops-sa-ci' });
+    expect(callerFromAuthInfo(info)).toEqual({ subject: 'service:aiops-sa-ci', clientId: 'aiops-sa-ci', groups: [] });
+  });
+
+  it.each([
+    ['a configured azp without client_id', { azp: 'aiops-sa-ci' }],
+    ['client_id other than azp', { azp: 'aiops-sa-ci', client_id: 'other' }],
+    ['a configured azp with sid (a user token of the service client)', { azp: 'aiops-sa-ci', client_id: 'aiops-sa-ci', sid: 's-1' }],
+  ])('AUTH-4 %s is rejected as service_account_mismatch', async (_name, claims) => {
+    expect(await reason(await issuer.token({ sub: 'u-1', aud: RESOURCE, groups: ['content'], ...claims }))).toBe('service_account_mismatch');
+  });
+
+  it.each(['service:aiops-sa-ci', 'service:'])('AUTH-4 a user token whose sub starts with service: is rejected as reserved_subject (%s)', async (sub) => {
+    expect(await reason(await issuer.token({ sub, aud: RESOURCE, azp: 'aiops-mcp', sid: 's-1' }))).toBe('reserved_subject');
+  });
+
+  it('AUTH-4 a bad signature still answers invalid_signature before the classification', async () => {
+    expect(await reason(await issuer.token({ sub: 'service:x', aud: RESOURCE, azp: 'aiops-sa-ci' }, { unpublishedKey: true }))).toBe('invalid_signature');
+  });
+
+  it('AUTH-4 POL-1 a client-credentials token of an unconfigured client has no groups', async () => {
+    const info = await verify(await issuer.token({ sub: 'kc-x-user-id', aud: RESOURCE, azp: 'x', client_id: 'x', groups: ['content'] }));
+    expect(info.extra).toEqual({ sub: 'kc-x-user-id', groups: [] });
+    expect(callerFromAuthInfo(info)).toEqual({ subject: 'kc-x-user-id', clientId: 'x', groups: [] });
+  });
+
+  it('AUTH-4 a user token named service-account-x stays a user', async () => {
+    // The test issuer has no preferred_username claim, so this token is signed with a local key.
+    const { privateKey, publicKey } = await generateKeyPair('RS256');
+    const jwk = { ...(await exportJWK(publicKey)), kid: 'k-local', alg: 'RS256' };
+    const verifier = createJwtVerifier({ issuer: issuer.issuer, audience: RESOURCE, jwks: createLocalJWKSet({ keys: [jwk] }), isServiceAccount: (id) => id === 'aiops-sa-ci' });
+    const token = await new SignJWT({ preferred_username: 'service-account-aiops-sa-ci', azp: 'aiops-mcp', sid: 's-1', groups: ['content'] })
+      .setProtectedHeader({ alg: 'RS256', kid: 'k-local' })
+      .setIssuer(issuer.issuer)
+      .setAudience(RESOURCE)
+      .setSubject('alice-id')
+      .setExpirationTime('5m')
+      .sign(privateKey);
+    const info = await verifier.verifyAccessToken(token);
+    expect(info.extra).toEqual({ sub: 'alice-id', groups: ['content'] });
+    expect(callerFromAuthInfo(info)).toEqual({ subject: 'alice-id', clientId: 'aiops-mcp', groups: ['content'] });
   });
 });

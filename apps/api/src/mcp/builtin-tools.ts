@@ -1,10 +1,11 @@
 import { createSchemaCompiler } from '@aiops/config';
 import type { AuditLog, ChangeSetExecutor, ChangeSetRepository, TaskRepository, WorkflowStarter } from '@aiops/core';
+import type { UpstreamToolView } from '@aiops/upstream';
 import type { ApprovalService } from '../approvals/approval-service.js';
 import { createChangesetTools } from './changeset-tools.js';
 import { decideChangesetTool } from './decide-tool.js';
 import { excludeChangesetItemsTool } from './exclude-tool.js';
-import { listMyOperationsTool } from './operations-tool.js';
+import { createListMyOperationsTool } from './operations-tool.js';
 import { reviewChangesetTool } from './review-tool.js';
 import { rollbackChangesetTool } from './rollback-tool.js';
 import { submitForApprovalTool } from './submit-tool.js';
@@ -47,6 +48,8 @@ export interface BuiltinToolDeps {
   readonly approvals: ApprovalService;
   /** `AIOPS_PUBLIC_URL`: base of the approval page link in the submit answer (APR-7). */
   readonly publicUrl: URL;
+  /** Pin states for `list_my_operations` (CONN-4). */
+  readonly upstreamTools?: UpstreamToolView;
 }
 
 /** What `exclude_changeset_items` needs besides the shared deps: the derived change-set's workflow start (EXE-1). */
@@ -59,7 +62,7 @@ export interface ExclusionWiring {
 export function createBuiltinTools(deps: BuiltinToolDeps, exclusion: ExclusionWiring): readonly BuiltinTool[] {
   return [
     pingTool,
-    listMyOperationsTool,
+    createListMyOperationsTool(deps.upstreamTools),
     ...createChangesetTools(deps),
     submitForApprovalTool(deps),
     excludeChangesetItemsTool({ repository: deps.repository, newId: deps.newId, now: deps.now, ...exclusion }),

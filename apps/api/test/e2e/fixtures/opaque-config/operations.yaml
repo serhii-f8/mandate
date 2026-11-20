@@ -1,0 +1,16 @@
+version: 1
+operations:
+  - id: shop.post_note
+    connection: shop
+    risk: write_opaque
+    description: Post a note to the shop team.
+    upstream:
+      method: POST
+      path: /V1/notes
+      body: { arg: note }
+      idempotency: { header: Idempotency-Key }
+    input_schema:
+      type: object
+      properties: { note: { type: string, minLength: 1 } }
+      required: [note]
+      additionalProperties: false

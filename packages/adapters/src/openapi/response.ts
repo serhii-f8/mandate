@@ -87,7 +87,8 @@ export function mapResponse(
     result.value = shape(body) ?? {};
     return result;
   }
-  const raw = dotted(body, mapping.items);
+  // `$` is the body itself, for upstreams that answer a bare JSON array (Global Constraint "Root-array responses").
+  const raw = mapping.items === '$' ? body : dotted(body, mapping.items);
   if (!Array.isArray(raw)) throw new MappingError('response items path is not an array');
   if (raw.length > mapping.maxItems) result.truncated = true;
 

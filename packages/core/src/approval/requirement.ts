@@ -8,11 +8,14 @@ import {
 
 /**
  * Whether a change-set needs human approval, and from whom (POL-5). First match of:
- * destructive risk, `never`, at or below the threshold, `above_threshold`, `always`, no rule.
- * A required result without steps is unroutable.
+ * destructive risk, `never`, `above_threshold`, `always`, no rule. Under `above_threshold` an
+ * opaque operation (`isOpaque`) is required with reason `opaque`: its one call has no record
+ * count a threshold could compare. A required result without steps is unroutable.
  */
 export function approvalRequirement(input: {
   risk: RiskClass;
+  /** `isOpaque(operation)`; a caller that cannot find the operation passes true. */
+  opaque: boolean;
   rule?: RoleApprovalRule;
   included: number;
 }): ApprovalRequirement {
@@ -25,8 +28,9 @@ export function approvalRequirement(input: {
   } else if (rule?.required === 'never') {
     return { required: false };
   } else if (rule?.required === 'above_threshold') {
-    if (included <= (rule.recordThreshold ?? 0)) return { required: false };
-    reason = 'above_threshold';
+    if (input.opaque) reason = 'opaque';
+    else if (included <= (rule.recordThreshold ?? 0)) return { required: false };
+    else reason = 'above_threshold';
   } else if (rule?.required === 'always') {
     reason = 'role_always';
   } else {

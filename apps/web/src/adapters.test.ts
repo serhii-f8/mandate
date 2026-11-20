@@ -23,6 +23,7 @@ describe('page adapters', () => {
     const model = toChangeSetModel(requester, items, 'pending');
     expect(model).toEqual({
       id: requester.id,
+      kind: 'diff',
       operation: { id: 'catalog.update_prices', title: 'Update prices' },
       status: 'prepared',
       hash: requester.hash,
@@ -45,6 +46,7 @@ describe('page adapters', () => {
     const model = toApprovalModel(approver, items, sample, FRESH);
     expect(model).toEqual({
       id: approver.id,
+      kind: 'diff',
       status: 'pending_approval',
       hash: approver.hash,
       operation: approver.operation,
@@ -111,5 +113,14 @@ describe('page adapters', () => {
       permissions: { canExclude: false, canSubmit: false, canCancel: false },
     });
     expect('drift' in toChangeSetModel(requester, items)).toBe(false);
+  });
+
+  it('UI-2 APR-5 an opaque detail maps kind and arguments; a diff detail has none', () => {
+    const opaque: ChangeSetDetail = { ...requester, kind: 'opaque', request: { ...requester.request, args: { text: 'x' } } };
+    expect(toChangeSetModel(opaque, items)).toMatchObject({ kind: 'opaque', args: { text: 'x' } });
+    expect(toApprovalModel(opaque, items, sample, FRESH).kind).toBe('opaque');
+    const diff = toChangeSetModel(requester, items);
+    expect(diff.kind).toBe('diff');
+    expect('args' in diff).toBe(false);
   });
 });

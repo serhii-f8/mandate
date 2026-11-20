@@ -7,6 +7,7 @@ import { diffConfigurations, diffCounts, formatDiff } from './diff.js';
 import { loadConfigurationDirectory, type LoadedConfiguration } from './load.js';
 
 const VALID_DIR = fileURLToPath(new URL('../test/fixtures/valid', import.meta.url));
+const FIXTURES = fileURLToPath(new URL('../test/fixtures', import.meta.url));
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -136,6 +137,21 @@ describe('CFG-3 configuration diff', () => {
     expect(diffConfigurations(before, after).changes).toEqual([]);
   });
 
+  it('CFG-3 AUTH-4 diff reports service accounts', async () => {
+    const withAccount = async (role: string): Promise<LoadedConfiguration> =>
+      edited(async (_file, dir) => {
+        await writeFile(join(dir, 'service-accounts.yaml'), `version: 1\nservice_accounts:\n  - { client_id: aiops-sa-ci, role: ${role}, description: CI }\n`);
+      });
+    const before = await load(VALID_DIR);
+    const added = await withAccount('support_agent');
+    expect(formatDiff(diffConfigurations(before, added))).toEqual(['+ service_account aiops-sa-ci', hashLine(before, added)]);
+    const changed = await withAccount('content_manager');
+    expect(formatDiff(diffConfigurations(added, changed))).toEqual(['~ service_account aiops-sa-ci: role', hashLine(added, changed)]);
+    const kinds = diffConfigurations(undefined, added).changes.map((c) => c.kind);
+    expect(kinds.lastIndexOf('role')).toBeLessThan(kinds.indexOf('service_account'));
+    expect(kinds.indexOf('service_account')).toBeLessThan(kinds.indexOf('setting'));
+  });
+
   it('CFG-4 diffCounts counts added, removed and changed', async () => {
     const before = await load(VALID_DIR);
     const after = await edited(async (file) => {
@@ -144,4 +160,28 @@ describe('CFG-3 configuration diff', () => {
     });
     expect(diffCounts(diffConfigurations(before, after))).toEqual({ added: 0, removed: 1, changed: 1 });
   });
+
+  it('CFG-3 CONN-8 a preset version change is a changed preset entity', async () => {
+    const config = await mkdtemp(join(tmpdir(), 'aiops-diff-preset-config-'));
+    const presets = await mkdtemp(join(tmpdir(), 'aiops-diff-presets-'));
+    dirs.push(config, presets);
+    await cp(join(FIXTURES, 'with-preset'), config, { recursive: true });
+    await writeFile(join(config, 'config.yaml'), (await readFile(join(config, 'config.yaml'), 'utf8')).replace('version: "0.1.0"', 'version: "^0.1.0"'));
+    await cp(join(FIXTURES, 'preset-dir'), presets, { recursive: true });
+    const loadWithPresets = async (): Promise<LoadedConfiguration> => {
+      const result = await loadConfigurationDirectory(config, { presetDirs: [presets] });
+      if (!result.ok) throw new Error(JSON.stringify(result.issues));
+      return result.configuration;
+    };
+    const before = await loadWithPresets();
+    expect(formatDiff(diffConfigurations(undefined, before))).toContain('+ preset fake');
+    const packageJson = join(presets, 'fake-preset', 'package.json');
+    await writeFile(packageJson, (await readFile(packageJson, 'utf8')).replace('"version": "0.1.0"', '"version": "0.1.1"'));
+    const after = await loadWithPresets();
+    expect(formatDiff(diffConfigurations(before, after))).toEqual(['~ preset fake: files, version', hashLine(before, after)]);
+    const kinds = diffConfigurations(undefined, after).changes.map((c) => c.kind);
+    expect(kinds.indexOf('preset')).toBeGreaterThan(kinds.lastIndexOf('notification'));
+    expect(kinds.indexOf('preset')).toBeLessThan(kinds.indexOf('setting'));
+  });
 });
+

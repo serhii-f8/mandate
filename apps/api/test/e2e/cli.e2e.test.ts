@@ -176,3 +176,34 @@ describe('CFG-3 CFG-4 aiops config apply against PostgreSQL', () => {
     expect(lines).toEqual(['cannot read the config_revision table: check DATABASE_URL, and start the api once so it applies the migrations']);
   });
 });
+
+describe('CONN-1 aiops validate with an mcp connection', () => {
+  it('CONN-1 aiops validate accepts an mcp connection and reports no issue when the server is down', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aiops-cli-mcp-'));
+    try {
+      // Nothing listens on port 1: the load-time tool list fails, which is never a load issue (R1).
+      await writeFile(
+        join(dir, 'aiops.yaml'),
+        `version: 1
+connections:
+  - { id: tools, adapter: mcp, mcp_url: 'http://127.0.0.1:1/mcp', allow_private_network: true, retry: { max_attempts: 1 } }
+operations:
+  - id: tools.lookup
+    connection: tools
+    risk: read
+    description: Look up a record by key.
+    upstream: { tool: lookup, pin: 'sha256:${'0'.repeat(64)}' }
+roles:
+  - id: reader
+    grants: [{ operation: tools.lookup }]
+`,
+      );
+      const lines: string[] = [];
+      const code = await runApiCli(['validate', dir], (line) => lines.push(line), { env: {}, defaultPresetDir: null });
+      expect(lines).toEqual(['Configuration valid: 1 connections, 1 operations, 1 roles']);
+      expect(code).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -15,6 +15,8 @@ export const LOGGER = Symbol('Logger');
 export const OIDC_CLIENT = Symbol('OidcClient');
 /** The caller's shutdown step, run after the api's own resources closed (`AppOverrides.onShutdown`). */
 export const ON_SHUTDOWN = Symbol('OnShutdown');
+/** The pin monitor of MCP-backed operations (CONN-4), or `null` when the adapter cannot list tools. */
+export const PIN_MONITOR = Symbol('PinMonitor');
 export const PAGE_CHECKS = Symbol('PageChecks');
 export const PAGE_SESSIONS = Symbol('SessionService');
 export const SUBMIT_SERVICE = Symbol('SubmitService');

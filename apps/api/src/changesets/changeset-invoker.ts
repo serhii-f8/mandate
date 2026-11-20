@@ -1,6 +1,7 @@
 /**
- * A call of an allowed `write` or `destructive` operation with a manifest creates a change-set in `preparing` and
- * starts its workflow (EXE-1); the workflow prepares it (design §4.1, CS-1), and nothing is
+ * A call of an allowed opaque operation, or of a `write` or `destructive` operation with a manifest,
+ * creates a change-set in `preparing` and starts its workflow (EXE-1); the workflow prepares it
+ * (design §4.1, phase 9 §3, CS-1), and nothing is
  * written upstream. A request that declared Tasks gets a task once its row is committed (MCP-7);
  * any other request waits a bounded time for preparation and answers with the result, or with
  * "being prepared" (MCP-1). Answers carry counts and IDs only (MCP-4, SEC-5).
@@ -9,12 +10,16 @@ import type { LoadedConfiguration } from '@aiops/config';
 import {
   changesetTransitionEvent,
   createChangeSet,
+  changesetKind,
+  isOpaque,
   preparationErrorResult,
   TASK_TTL_MS,
+  type ChangeSetKind,
   type ChangeSetRecord,
   type ChangeSetRepository,
   type InvocationRequest,
   type InvocationResult,
+  type OperationDefinition,
   type OperationInvoker,
   type TaskRepository,
   type WorkflowStarter,
@@ -50,21 +55,29 @@ export function checkPrepareWait(wait: Pick<PrepareWait, 'timeoutMs' | 'pollMs'>
   if (!(Number.isFinite(wait.timeoutMs) && wait.timeoutMs >= 0)) throw new Error('prepare wait: timeoutMs must not be negative');
 }
 
+/**
+ * The operations a call of which prepares a change-set: opaque ones (phase 9 §2) and writes or
+ * destructive operations with a manifest (CS-1). The router, this invoker and the widget link
+ * (MCP-5) share it; anything else is refused by risk (fail closed).
+ */
+export function preparesChangeSet(operation: OperationDefinition): boolean {
+  return isOpaque(operation) || ((operation.risk === 'write' || operation.risk === 'destructive') && operation.manifest !== undefined);
+}
+
 export class ChangeSetInvoker implements OperationInvoker {
   constructor(private readonly deps: ChangeSetInvokerDeps) {
     checkPrepareWait(deps.wait);
   }
 
   async invoke({ operation, args, caller, asTask, report }: InvocationRequest): Promise<InvocationResult> {
-    const { manifest } = operation;
-    if ((operation.risk !== 'write' && operation.risk !== 'destructive') || manifest === undefined) return riskNotSupportedResult(operation);
+    if (!preparesChangeSet(operation)) return riskNotSupportedResult(operation);
     const { configuration, repository, correlationId } = this.deps;
     const base: Details = { operation: operation.id, connection: operation.connection };
 
     const created = await createChangeSet(
       { repository, newId: this.deps.newId, now: this.deps.now },
       {
-        operation: { ...operation, manifest },
+        operation,
         args,
         caller,
         correlationId,
@@ -125,7 +138,7 @@ export class ChangeSetInvoker implements OperationInvoker {
 
     const finished = await this.waitForPreparation(changeset.id);
     if (finished === undefined) return { ...preparingAnswer(changeset.id), auditDetails: withId };
-    return this.answer(finished, withId);
+    return this.answer(finished, withId, changesetKind(operation));
   }
 
   /** The change-set once it left `preparing`, or undefined when the wait ran out (NFR-3: state is read, not held). */
@@ -144,11 +157,11 @@ export class ChangeSetInvoker implements OperationInvoker {
   }
 
   /** One state, one answer: the same derivation the Tasks handlers use. */
-  private async answer(record: ChangeSetRecord, withId: Details): Promise<InvocationResult> {
+  private async answer(record: ChangeSetRecord, withId: Details, kind: ChangeSetKind): Promise<InvocationResult> {
     const state = deriveTaskState('prepare', record);
     if (state.status === 'completed' && state.answer === 'prepared') {
       const excluded = Object.values(record.stats.excluded).reduce((sum, n) => sum + n, 0);
-      return { ...(await preparedAnswer(this.deps.repository, record)), auditDetails: { ...withId, included: record.stats.included, excluded } };
+      return { ...(await preparedAnswer(this.deps.repository, record, kind)), auditDetails: { ...withId, included: record.stats.included, excluded } };
     }
     if (state.status === 'completed' && state.answer === 'expired') {
       return { ...expiredDuringPreparationAnswer(record), auditDetails: { ...withId, errorCode: 'expired' } };

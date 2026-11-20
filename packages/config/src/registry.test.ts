@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FakeResolver, fakeCatalogEntry } from '@aiops/testing';
 import { formatIssue, type ConfigIssue } from './issues.js';
+import type { CatalogEntry } from '@aiops/connector-sdk';
+import type { HttpOperationBinding } from './registry.js';
 import { loadConfigurationDirectory, loadConfigurationSources, type LoadedConfiguration, type LoadOptions, type LoadResult } from './load.js';
+import { FIXTURE_CONFIG, FIXTURE_PRESET_FILE, loadCodeFixture, presetWithoutUpdate } from '../test/code-fixture.js';
 
 const FIXTURES = fileURLToPath(new URL('../test/fixtures', import.meta.url));
 const PRESET_DIRS = [join(FIXTURES, 'preset-dir')];
@@ -54,6 +57,13 @@ function ok(result: LoadResult): LoadedConfiguration {
   return result.configuration;
 }
 
+/** The HTTP binding of an operation; throws for an MCP binding or none. */
+function httpBinding(config: LoadedConfiguration, id: string): HttpOperationBinding {
+  const binding = config.bindings.get(id);
+  if (binding?.kind !== 'http') throw new Error(`${id} has no HTTP binding`);
+  return binding;
+}
+
 function issues(result: LoadResult): readonly ConfigIssue[] {
   if (result.ok) throw new Error('expected issues');
   return result.issues;
@@ -100,10 +110,11 @@ describe('OPS-1 operations are enabled only by configuration or an applied prese
       ['fake.get_item', 'preset:fake', 'shop', 'fake.get_item'],
     ]);
     expect(config.bindings.get('fake.get_item')).toEqual({
+      kind: 'http',
       connection: 'shop',
       mapping: { operation: 'getItem', method: 'GET', path: '/items/{sku}', pathParams: { sku: { arg: 'sku' } }, query: {}, headers: {}, response: { maxItems: 100 } },
     });
-    expect(config.bindings.get('fake.search_items')?.mapping).toMatchObject({
+    expect(httpBinding(config, 'fake.search_items').mapping).toMatchObject({
       method: 'GET',
       path: '/items',
       query: { brand: { arg: 'brand' } },
@@ -219,8 +230,8 @@ describe('CONN-2 derived input schema from the spec', () => {
     const validate = config.validators.get('shop.get_item');
     expect(validate?.({ sku: 'A-1' })).toEqual({ ok: true });
     expect(validate?.({})).toMatchObject({ ok: false });
-    expect(config.bindings.get('shop.get_item')?.mapping).toEqual({ ...shopCatalog()[1]?.defaultMapping, operation: 'getItem' });
-    expect(config.bindings.get('shop.list_items')?.mapping.response).toEqual({ items: 'items', maxItems: 100 });
+    expect(httpBinding(config, 'shop.get_item').mapping).toEqual({ ...shopCatalog()[1]?.defaultMapping, operation: 'getItem' });
+    expect(httpBinding(config, 'shop.list_items').mapping.response).toEqual({ items: 'items', maxItems: 100 });
     expect(config.disabled.map((d) => d.key)).toEqual(['shop:deleteItem']);
 
     expect(fake.calls).toHaveLength(1);
@@ -228,6 +239,7 @@ describe('CONN-2 derived input schema from the spec', () => {
     expect(fake.calls[0]?.include).toEqual(['listItems', 'getItem', 'deleteItem']);
     expect(config.connectionSettings.get('shop')).toEqual({
       id: 'shop',
+      kind: 'openapi',
       baseUrl: 'https://shop.example.test/api',
       timeoutMs: 10_000,
       retry: { maxAttempts: 3, initialBackoffMs: 200 },
@@ -264,6 +276,7 @@ connections:
     );
     expect(config.specChecksSkipped).toBe(true);
     expect(config.bindings.get('shop.search')).toEqual({
+      kind: 'http',
       connection: 'shop',
       mapping: {
         method: 'GET',
@@ -276,6 +289,7 @@ connections:
     });
     expect(config.connectionSettings.get('shop')).toEqual({
       id: 'shop',
+      kind: 'openapi',
       baseUrl: 'https://shop.example.test/api',
       auth: { scheme: 'oauth_client_credentials', tokenUrl: 'https://idp.example.test/token', scopes: ['read'] },
       credentialRef: 'shop-oauth',
@@ -416,7 +430,7 @@ operations:
     expect(found).toEqual([expect.objectContaining({ file: '@aiops/fake-preset/preset.yaml', path: 'spec', message: 'must be a path inside the preset' })]);
   });
 
-  it('refuses a preset bound to a connection that is not openapi', async () => {
+  it('CONN-8 refuses an openapi preset bound to a connection that is not openapi', async () => {
     const dir = await fixture('with-preset', {
       'config.yaml': `version: 1
 presets:
@@ -426,7 +440,7 @@ connections:
 `,
     });
     const found = issues(await loadConfigurationDirectory(dir, { resolver: resolver(), presetDirs: PRESET_DIRS }));
-    expect(found).toEqual([expect.objectContaining({ path: 'connections[0].preset', message: 'preset requires an openapi connection' })]);
+    expect(found).toEqual([expect.objectContaining({ path: 'connections[0].preset', message: 'the preset is for openapi connections' })]);
   });
 
   it('refuses a preset spec that is a symbolic link out of the preset directory', async () => {
@@ -442,12 +456,12 @@ connections:
     ok(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: [presets] }));
   });
 
-  it('refuses a preset bound to two connections', async () => {
+  it('CONN-8 refuses a preset bound to two connections without distinct prefixes', async () => {
     const dir = await fixture('with-preset', {
       'second.yaml': 'version: 1\nconnections:\n  - { id: shop2, adapter: openapi, base_url: https://shop.example.test/api, credential_ref: shop-token, preset: fake }\n',
     });
     const found = issues(await loadConfigurationDirectory(dir, { resolver: resolver(), presetDirs: PRESET_DIRS }));
-    expect(found).toContainEqual(expect.objectContaining({ file: 'second.yaml', path: 'connections[0].preset', message: 'the preset is already bound to connection shop' }));
+    expect(found).toContainEqual(expect.objectContaining({ file: 'second.yaml', path: 'connections[0].preset', message: 'the preset is already bound to connection shop with the same operation prefix' }));
   });
 
   it('checks the connection test operation', async () => {
@@ -546,25 +560,88 @@ describe('POL-3 field rules and projection use the same argument', () => {
   });
 });
 
-describe('OPS-6 bulk bindings', () => {
-  it('OPS-6 a bulk binding is allowed on a destructive operation', async () => {
-    const BULK = `version: 1
+describe('OPS-1 EXE-4 bindings of opaque operations', () => {
+  const opaque = (risk: string, upstream: string): string => `version: 1
 operations:
-  - id: shop.retire_items
+  - id: shop.send
     connection: shop
-    risk: destructive
-    description: Retire items.
+    risk: ${risk}
+    description: Send.
     upstream:
-      method: POST
-      path: /async/bulk/items
-      bulk:
-        body: { wrap: item }
-        batch_id: bulk_uuid
-        status: { method: GET, path: '/bulk/{batch_id}/status', items: ops, index: id, state: status, states: { ok: [1], retriable: [2], failed: [3], open: [4] } }
+${upstream}
     input_schema: { type: object, properties: { skus: { type: array, items: { type: string } } } }
 `;
-    const result = await sources({ 'retire.yaml': BULK });
-    expect(result.ok, JSON.stringify(result.ok ? [] : result.issues)).toBe(true);
+  const POST = '      method: POST\n      path: /send';
+  const BULK = `      bulk:
+        body: { wrap: item }
+        batch_id: bulk_uuid
+        status: { method: GET, path: '/bulk/{batch_id}/status', items: ops, index: id, state: status, states: { ok: [1], retriable: [2], failed: [3], open: [4] } }`;
+  const GET_MESSAGE = 'must not be GET for a write without a manifest';
+
+  it('OPS-1 a write_opaque OpenAPI binding must not be GET', async () => {
+    const byMethod = issues(await sources({ 'send.yaml': opaque('write_opaque', '      method: GET\n      path: /send') }));
+    expect(byMethod).toEqual([expect.objectContaining({ path: 'operations[0].upstream.method', message: GET_MESSAGE })]);
+    const destructive = issues(await sources({ 'send.yaml': opaque('destructive', '      method: GET\n      path: /send') }));
+    expect(destructive).toEqual([expect.objectContaining({ path: 'operations[0].upstream.method', message: GET_MESSAGE })]);
+    const loaded = await sources({ 'send.yaml': opaque('write_opaque', POST) });
+    expect(loaded.ok, JSON.stringify(loaded.ok ? [] : loaded.issues)).toBe(true);
+  });
+
+  it('OPS-1 a write_opaque binding derived from a GET spec operation is refused at upstream.operation', async () => {
+    const dir = await fixture('derived', {
+      'config.yaml': (await readFile(join(FIXTURES, 'derived', 'config.yaml'), 'utf8')).replace('risk: read', 'risk: write_opaque'),
+    });
+    const found = issues(await loadConfigurationDirectory(dir, { resolver: resolver() }));
+    expect(found).toEqual([expect.objectContaining({ path: 'operations[0].upstream.operation', message: GET_MESSAGE })]);
+  });
+
+  it('OPS-1 a destructive operation without a manifest cannot have bulk', async () => {
+    const found = issues(await sources({ 'send.yaml': opaque('destructive', `${POST}\n${BULK}`) }));
+    expect(found).toEqual([expect.objectContaining({ path: 'operations[0].upstream.bulk', message: 'requires a manifest' })]);
+  });
+
+  it('EXE-4 SEC-2 idempotency cannot take the connection api_key header', async () => {
+    const apiKey = BASE.replace('auth: { scheme: bearer }', 'auth: { scheme: api_key, header: X-Api-Key }');
+    const found = issues(await sources({ 'base.yaml': apiKey, 'send.yaml': opaque('write_opaque', `${POST}\n      idempotency: { header: x-api-key }`) }));
+    expect(found).toEqual([expect.objectContaining({ file: 'send.yaml', path: 'operations[0].upstream.idempotency.header', message: 'is set by the platform' })]);
+    ok(await sources({ 'base.yaml': apiKey, 'send.yaml': opaque('write_opaque', `${POST}\n      idempotency: { header: Idempotency-Key }`) }));
+  });
+
+  it('EXE-4 idempotency cannot name a header parameter derived from the spec', async () => {
+    const withHeader = (entry: CatalogEntry): CatalogEntry =>
+      entry.operationId === 'deleteItem' ? { ...entry, defaultMapping: { ...entry.defaultMapping, headers: { 'Idempotency-Key': { arg: 'key' } } } } : entry;
+    const headed = new FakeResolver({ shop: shopCatalog().map(withHeader) });
+    const derivedText = await readFile(join(FIXTURES, 'derived', 'config.yaml'), 'utf8');
+    const config = (header: string): Promise<string> =>
+      fixture('derived', {
+        'config.yaml': derivedText.replace('risk: read\n    description: Get one item.', 'risk: write_opaque\n    description: Delete one item.').replace(
+          'upstream: { operation: getItem }',
+          `upstream: { operation: deleteItem, idempotency: { header: ${header} } }`,
+        ),
+      });
+    const found = issues(await loadConfigurationDirectory(await config('idempotency-key'), { resolver: headed }));
+    expect(found).toEqual([expect.objectContaining({ path: 'operations[1].upstream.idempotency.header', message: 'is already declared in headers' })]);
+    ok(await loadConfigurationDirectory(await config('X-Request-Key'), { resolver: headed }));
+  });
+
+  it('EXE-4 idempotency is allowed only on opaque operations', async () => {
+    const IDEMPOTENT = `${POST}\n      idempotency: { header: Idempotency-Key }`;
+    for (const risk of ['write_opaque', 'destructive']) {
+      const config = ok(await sources({ 'send.yaml': opaque(risk, IDEMPOTENT) }));
+      expect(httpBinding(config, 'shop.send').mapping.idempotency).toEqual({ header: 'Idempotency-Key' });
+    }
+    const dir = await fixture('derived', {
+      'config.yaml': (await readFile(join(FIXTURES, 'derived', 'config.yaml'), 'utf8'))
+        .replace('risk: read\n    description: Get one item.', 'risk: write_opaque\n    description: Delete one item.')
+        .replace('upstream: { operation: getItem }', 'upstream: { operation: deleteItem, idempotency: { header: Idempotency-Key } }'),
+    });
+    const derived = ok(await loadConfigurationDirectory(dir, { resolver: resolver() }));
+    expect(httpBinding(derived, 'shop.get_item').mapping).toMatchObject({ method: 'DELETE', idempotency: { header: 'Idempotency-Key' } });
+    const read = SEARCH.replace('      path: /items\n', '      path: /items\n      idempotency: { header: Idempotency-Key }\n');
+    const found = issues(await sources({ 'search.yaml': read }));
+    expect(found).toEqual([
+      expect.objectContaining({ path: 'operations[0].upstream.idempotency', message: 'is allowed only on write_opaque operations and destructive operations without a manifest' }),
+    ]);
   });
 });
 
@@ -692,5 +769,302 @@ notifications:
     expect(found).toEqual([
       expect.objectContaining({ file: 'roles.yaml', path: 'roles[0].manage_credentials[0]', message: 'names a credential that no connection or notification uses' }),
     ]);
+  });
+});
+
+describe('OPS-5 code-bound operations', () => {
+  /** Issues at `path` of the fixture preset file. */
+  const presetIssuesAt = (result: LoadResult, path: string): string[] =>
+    issues(result)
+      .filter((i) => i.file === FIXTURE_PRESET_FILE && i.path === path)
+      .map((i) => i.message);
+
+  it('OPS-5 a preset operation with upstream.code binds to the module operation and is listed in codeOperations', async () => {
+    const config = ok(await loadCodeFixture(dirs, { preset: await presetWithoutUpdate() }));
+    const binding = config.bindings.get('fixture.get_many');
+    expect(binding).toEqual({ kind: 'code', connection: 'items', preset: 'fixture', name: 'get_many', response: { fieldsFromArg: 'fields', maxItems: 100 } });
+    // The binding carries no function, so `config diff` and `canonicalJson` stay valid.
+    expect(JSON.parse(JSON.stringify(binding))).toEqual(binding);
+    expect(config.bindings.get('fixture.ping')).toEqual({ kind: 'code', connection: 'items', preset: 'fixture', name: 'ping', response: { maxItems: 100 } });
+    expect([...config.codeOperations.keys()].sort()).toEqual(['fixture.boom', 'fixture.get_many', 'fixture.ping', 'fixture.set_tags']);
+    expect(Object.fromEntries([...config.codeOperations].map(([id, op]) => [id, op.kind]))).toEqual({
+      'fixture.get_many': 'read',
+      'fixture.set_tags': 'write',
+      'fixture.ping': 'call',
+      'fixture.boom': 'read',
+    });
+    const ping = config.codeOperations.get('fixture.ping');
+    expect(ping?.kind === 'call' && typeof ping.call).toBe('function');
+    // The HTTP read keeps its HTTP binding and is not a code operation.
+    expect(config.bindings.get('fixture.search')?.kind).toBe('http');
+  });
+
+  it('OPS-5 a disabled code operation has no binding and is not in codeOperations', async () => {
+    const config = ok(
+      await loadCodeFixture(dirs, {
+        preset: await presetWithoutUpdate(),
+        config: { 'overrides.yaml': 'version: 1\noverrides:\n  - { operation: fixture.ping, enabled: false }\n' },
+      }),
+    );
+    expect(config.bindings.has('fixture.ping')).toBe(false);
+    expect(config.codeOperations.has('fixture.ping')).toBe(false);
+    expect(config.disabled).toContainEqual({ key: 'fixture.ping', connection: 'items', method: 'CODE', path: 'ping' });
+  });
+
+  it('OPS-5 upstream.code in a configuration operation is refused', async () => {
+    const result = await loadCodeFixture(dirs, {
+      preset: await presetWithoutUpdate(),
+      config: {
+        'ops.yaml': `version: 1
+operations:
+  - id: own.ping
+    connection: items
+    risk: write_opaque
+    description: Ping.
+    input_schema: { type: object, properties: { message: { type: string } } }
+    upstream: { code: ping }
+`,
+      },
+    });
+    expect(issues(result)).toEqual([expect.objectContaining({ file: 'ops.yaml', path: 'operations[0].upstream.code', message: 'code operations are allowed in preset operations only' })]);
+  });
+
+  it('OPS-5 upstream.code without a code module, or naming an unknown operation, is refused', async () => {
+    const noModule = await loadCodeFixture(dirs, {
+      preset: await presetWithoutUpdate(),
+      packageJson: (json) => ({ ...json, aiops: { preset: 'preset.yaml', sdk: '^0.6.0' } }),
+    });
+    for (const index of [1, 2, 3, 4]) {
+      expect(presetIssuesAt(noModule, `operations[${index}].upstream.code`)).toEqual(['the preset has no code module (package.json aiops.code)']);
+    }
+
+    const base = await presetWithoutUpdate();
+    for (const name of ['nope', 'constructor', 'to_string']) {
+      const unknown = await loadCodeFixture(dirs, { preset: base.replace('code: boom', `code: ${name}`) });
+      expect(issues(unknown)).toEqual([
+        expect.objectContaining({ file: FIXTURE_PRESET_FILE, path: 'operations[4].upstream.code', message: 'is not an operation of the preset code module' }),
+      ]);
+    }
+
+    // The schema refuses a name outside ^[a-z][a-z0-9_]{0,62}$, and keys other than code and response.
+    const badName = await loadCodeFixture(dirs, { preset: base.replace('code: boom', 'code: Boom') });
+    expect(presetIssuesAt(badName, 'operations[4].upstream.code')).toHaveLength(1);
+    const extra = await loadCodeFixture(dirs, { preset: base.replace('upstream: { code: boom }', 'upstream: { code: boom, method: GET }') });
+    expect(issues(extra).some((i) => i.path.startsWith('operations[4].upstream'))).toBe(true);
+  });
+
+  it('OPS-5 the code kind must match the risk', async () => {
+    const base = await presetWithoutUpdate();
+    const cases: { name: string; edit: (text: string) => string; index: number; message?: string }[] = [
+      // read needs read
+      { name: 'read with a call', edit: (t) => t.replace('code: boom', 'code: ping'), index: 4, message: 'is a call code operation; risk read needs a read code operation' },
+      // write needs write
+      { name: 'write with a read', edit: (t) => t.replace('code: set_tags', 'code: get_many'), index: 2, message: 'is a read code operation; risk write needs a write code operation' },
+      // destructive with a manifest needs write
+      {
+        name: 'destructive with a manifest and a call',
+        edit: (t) => t.replace('upstream: { code: set_tags }', 'upstream: { code: ping }').replace(/(id: fixture\.set_tags\n {4})risk: write/, '$1risk: destructive'),
+        index: 2,
+        message: 'is a call code operation; risk destructive needs a write code operation',
+      },
+      { name: 'destructive with a manifest and a write', edit: (t) => t.replace(/(id: fixture\.set_tags\n {4})risk: write/, '$1risk: destructive'), index: 2 },
+      // write_opaque needs call
+      {
+        name: 'write_opaque with a write',
+        edit: (t) => t.replace('upstream: { code: ping }', 'upstream: { code: set_tags }'),
+        index: 3,
+        message: 'is a write code operation; risk write_opaque needs a call code operation',
+      },
+      // destructive without a manifest needs call
+      {
+        name: 'destructive without a manifest and a write',
+        edit: (t) => t.replace('risk: write_opaque', 'risk: destructive').replace('upstream: { code: ping }', 'upstream: { code: set_tags }'),
+        index: 3,
+        message: 'is a write code operation; risk destructive needs a call code operation',
+      },
+      { name: 'destructive without a manifest and a call', edit: (t) => t.replace('risk: write_opaque', 'risk: destructive'), index: 3 },
+    ];
+    for (const c of cases) {
+      const text = c.edit(base);
+      expect(text, c.name).not.toBe(base);
+      const result = await loadCodeFixture(dirs, { preset: text });
+      if (c.message === undefined) {
+        expect(result.ok, `${c.name}: ${result.ok ? '' : result.issues.map(formatIssue).join('\n')}`).toBe(true);
+      } else {
+        expect(issues(result), c.name).toEqual([expect.objectContaining({ file: FIXTURE_PRESET_FILE, path: `operations[${c.index}].risk`, message: c.message })]);
+      }
+    }
+  });
+
+  it('OPS-5 a code operation requires input_schema; fields_arg must equal response.fields_from_arg', async () => {
+    const base = await presetWithoutUpdate();
+    const ping = base.indexOf('  - id: fixture.ping\n');
+    const pingSchemaStart = base.indexOf('    input_schema:\n', ping);
+    const pingSchemaEnd = base.indexOf('    upstream: { code: ping }', ping);
+    const noSchema = await loadCodeFixture(dirs, { preset: base.slice(0, pingSchemaStart) + base.slice(pingSchemaEnd) });
+    expect(issues(noSchema)).toEqual([expect.objectContaining({ file: FIXTURE_PRESET_FILE, path: 'operations[3].input_schema', message: 'is required for a code operation' })]);
+
+    const notProjected = await loadCodeFixture(dirs, { preset: base.replace('      code: get_many\n      response: { fields_from_arg: fields }\n', '      code: get_many\n') });
+    expect(presetIssuesAt(notProjected, 'operations[1].fields_arg')).toEqual(['must equal upstream.response.fields_from_arg, so the response is projected by the same argument']);
+
+    const otherArg = await loadCodeFixture(dirs, { preset: base.replace('response: { fields_from_arg: fields }\n', 'response: { fields_from_arg: ids }\n') });
+    expect(presetIssuesAt(otherArg, 'operations[1].fields_arg')).toEqual(['must equal upstream.response.fields_from_arg, so the response is projected by the same argument']);
+
+    const unknownArg = await loadCodeFixture(dirs, { preset: base.replace('response: { fields_from_arg: fields }\n', 'response: { fields_from_arg: nope }\n') });
+    expect(presetIssuesAt(unknownArg, 'operations[1].upstream.response.fields_from_arg')).toEqual(['names an argument that is not in input_schema']);
+
+    const noFieldsArg = await loadCodeFixture(dirs, { preset: base.replace('fields_arg: fields\n    upstream:\n      code: get_many', 'upstream:\n      code: get_many') });
+    expect(presetIssuesAt(noFieldsArg, 'operations[1].upstream.response.fields_from_arg')).toEqual(['requires fields_arg naming the same argument']);
+  });
+
+  it('POL-2 sentArguments of a code operation is every argument', async () => {
+    // A scope on an argument that no template sends would be refused for an HTTP operation.
+    const config = ok(
+      await loadCodeFixture(dirs, {
+        preset: await presetWithoutUpdate(),
+        config: {
+          'config.yaml': FIXTURE_CONFIG.replace(
+            '      - { operation: fixture.search }\n',
+            '      - { operation: fixture.search }\n      - { operation: fixture.ping, scope: { message: [hello] } }\n    approval: { steps: [{ role: integration_admin }] }\n',
+          ),
+        },
+      }),
+    );
+    expect(config.codeOperations.has('fixture.ping')).toBe(true);
+  });
+
+  it('OPS-5 CONN-1 upstream.code on an mcp connection is refused with the mcp-connection message', async () => {
+    const result = await sources({
+      'mcp.yaml': `version: 1
+connections:
+  - { id: tools, adapter: mcp, mcp_url: https://tools.example.test/mcp }
+operations:
+  - id: tools.ping
+    connection: tools
+    risk: write_opaque
+    description: Ping.
+    input_schema: { type: object, properties: { message: { type: string } } }
+    upstream: { code: ping }
+`,
+    });
+    expect(issues(result).filter((i) => i.file === 'mcp.yaml')).toEqual([
+      expect.objectContaining({ path: 'operations[0].upstream', message: 'an operation of an mcp connection needs upstream: { tool, pin }' }),
+    ]);
+  });
+});
+
+describe('OPS-6 per-record write bindings', () => {
+  const READS = `version: 1
+operations:
+  - id: shop.search
+    connection: shop
+    risk: read
+    description: Search.
+    upstream: { method: GET, path: /items, query: { page: { arg: page }, size: { arg: size }, fields: { arg: fields, join: ',' } }, response: { items: items, fields_from_arg: fields } }
+    input_schema:
+      type: object
+      properties:
+        page: { type: integer }
+        size: { type: integer }
+        fields: { type: array, items: { type: string } }
+      required: [fields]
+    fields_arg: fields
+  - id: shop.get_items
+    connection: shop
+    risk: read
+    description: Items by SKU.
+    upstream: { method: GET, path: /items, query: { skus: { arg: skus, join: ',' }, fields: { arg: fields, join: ',' } }, response: { items: items, fields_from_arg: fields } }
+    input_schema:
+      type: object
+      properties:
+        skus: { type: array, items: { type: string } }
+        fields: { type: array, items: { type: string } }
+      required: [skus, fields]
+    fields_arg: fields
+`;
+  const UPSTREAM = `{ method: PUT, path: '/items/{sku}', path_params: { sku: { record: sku } }, query: { store: { arg: store }, v: { record: version } }, headers: { X-Name: { record: name } }, body: { record: name } }`;
+  const write = (options: { risk?: string; upstream?: string; manifest?: boolean } = {}): string => `version: 1
+operations:
+  - id: shop.update
+    connection: shop
+    risk: ${options.risk ?? 'write'}
+    description: Update.
+    upstream: ${options.upstream ?? UPSTREAM}
+    input_schema:
+      type: object
+      properties:
+        store: { type: string }
+        skus: { type: array, items: { type: string } }
+        changes: { type: object, properties: { name: { type: string }, price: { type: number } }, additionalProperties: false }
+      required: [changes]
+${
+  options.manifest === false
+    ? ''
+    : `    manifest:
+      id_field: sku
+      ids_arg: skus
+      values_arg: changes
+      fields: [name, price]
+      write: { carry_fields: [version] }
+      read_before: { operation: shop.get_items, ids_arg: skus, args: {} }
+      selector: { operation: shop.search, args: {}, page_arg: page, page_size_arg: size }
+      rollback: { strategy: replay_previous_state }
+`
+}`;
+  const load = (text: string): Promise<LoadResult> => sources({ 'search.yaml': READS, 'write.yaml': text });
+  const ONLY = 'is allowed only in a per-record write binding';
+  const BULK = `bulk: { batch_id: id, status: { path: '/b/{batch_id}', items: ops, key: sku, state: s, states: { ok: [1], open: [2] } } }`;
+
+  it('OPS-6 a write operation with a manifest and an HTTP binding without bulk is accepted with record templates in path_params, query, headers and body', async () => {
+    const config = ok(await load(write()));
+    expect(httpBinding(config, 'shop.update').mapping).toMatchObject({
+      method: 'PUT',
+      path: '/items/{sku}',
+      pathParams: { sku: { record: 'sku' } },
+      query: { store: { arg: 'store' }, v: { record: 'version' } },
+      headers: { 'X-Name': { record: 'name' } },
+      body: { record: 'name' },
+    });
+    // Destructive with a manifest is per-record too.
+    ok(await load(write({ risk: 'destructive' })));
+  });
+
+  it('OPS-6 a record template on a read, a bulk binding or a write without manifest is refused', async () => {
+    const onRead = issues(await sources({ 'search.yaml': READS.replace("page: { arg: page }", 'page: { record: page }') }));
+    expect(onRead).toEqual([expect.objectContaining({ file: 'search.yaml', path: 'operations[0].upstream.query.page', message: ONLY })]);
+
+    const bulk = issues(await load(write({ upstream: `{ method: POST, path: /bulk, query: { v: { record: version } }, ${BULK} }` })));
+    expect(bulk).toEqual([expect.objectContaining({ file: 'write.yaml', path: 'operations[0].upstream.query.v', message: ONLY })]);
+    // The key-mapped bulk binding alone loads.
+    ok(await load(write({ upstream: `{ method: POST, path: /bulk, ${BULK} }` })));
+
+    const opaque = issues(await load(write({ risk: 'write_opaque', manifest: false, upstream: "{ method: POST, path: /send, body: { record: name } }" })));
+    expect(opaque).toEqual([expect.objectContaining({ file: 'write.yaml', path: 'operations[0].upstream.body', message: ONLY })]);
+  });
+
+  it('OPS-6 a record template naming a field outside id_field, fields and carry_fields is refused', async () => {
+    const outside = issues(await load(write({ upstream: "{ method: PUT, path: '/items/{sku}', path_params: { sku: { record: sku } }, headers: { X-Other: { record: other } } }" })));
+    expect(outside).toEqual([
+      expect.objectContaining({ path: 'operations[0].upstream.headers.X-Other', message: 'names a field that is not in the written record (id_field, fields or write.carry_fields)' }),
+    ]);
+    // F20: a path parameter takes only fields every written record has.
+    const touched = issues(await load(write({ upstream: "{ method: PUT, path: '/items/{name}', path_params: { name: { record: name } } }" })));
+    expect(touched).toEqual([
+      expect.objectContaining({ path: 'operations[0].upstream.path_params.name', message: 'names a field that is not always in the written record (id_field or write.carry_fields)' }),
+    ]);
+    ok(await load(write({ upstream: "{ method: PUT, path: '/items/{sku}/{version}', path_params: { sku: { record: sku }, version: { record: version } } }" })));
+  });
+
+  it('OPS-6 a per-record write binding on GET is refused', async () => {
+    const found = issues(await load(write({ upstream: "{ method: GET, path: '/items/{sku}', path_params: { sku: { record: sku } } }" })));
+    expect(found).toEqual([expect.objectContaining({ path: 'operations[0].upstream.method', message: 'must not be GET for a per-record write binding' })]);
+  });
+
+  it('OPS-6 MCP-4 a record template is not an argument: it needs no input_schema property', async () => {
+    // `sku`, `version` and `name` are not properties of input_schema; only `store` is.
+    const config = ok(await load(write()));
+    expect(config.policy.operations.find((o) => o.id === 'shop.update')?.inputSchema).not.toHaveProperty('properties.sku');
+    const missingArg = issues(await load(write({ upstream: "{ method: PUT, path: '/items/{sku}', path_params: { sku: { record: sku } }, query: { s: { arg: shop } } }" })));
+    expect(missingArg).toEqual([expect.objectContaining({ path: 'operations[0].upstream.query.s', message: 'names an argument that is not in input_schema' })]);
   });
 });

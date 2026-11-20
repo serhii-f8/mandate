@@ -57,8 +57,11 @@ function toApproval(approval: NonNullable<ChangeSetDetail['approval']>): Approva
  */
 export function toChangeSetModel(detail: ChangeSetDetail, items: ItemsPage, filter?: ItemFilter): ChangeSetViewModel {
   const { operation } = detail;
+  const kind = detail.kind ?? 'diff';
   return {
     id: detail.id,
+    kind,
+    ...(kind === 'opaque' ? { args: detail.request.args } : {}),
     operation: { id: operation.id, ...(operation.title === undefined ? {} : { title: operation.title }) },
     status: detail.status,
     ...(detail.hash === undefined ? {} : { hash: detail.hash }),
@@ -96,6 +99,7 @@ export function toApprovalModel(
   const { viewer } = detail;
   return {
     id: detail.id,
+    kind: detail.kind ?? 'diff',
     status: detail.status,
     ...(detail.hash === undefined ? {} : { hash: detail.hash }),
     operation: detail.operation,

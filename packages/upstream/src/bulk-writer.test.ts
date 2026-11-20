@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import type { BulkStatusOutcome, BulkSubmitOutcome, WriteAdapter } from '@aiops/connector-sdk';
+import type { BulkStatusOutcome, BulkSubmitOutcome, CallOutcome, WriteAdapter } from '@aiops/connector-sdk';
 import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
 import { createBulkWriter } from './bulk-writer.js';
 import type { UpstreamCallLog } from './read.js';
@@ -105,6 +105,8 @@ class FakeWriteAdapter implements WriteAdapter {
   bulkStatus(input: Parameters<WriteAdapter['bulkStatus']>[0]): Promise<BulkStatusOutcome> {
     this.statuses.push(input);
     return Promise.resolve(this.statusOutcome);
+  }  callOnce(): Promise<CallOutcome> {
+    return Promise.resolve({ result: 'not_sent', code: 'mapping', durationMs: 0 });
   }
 }
 
@@ -133,39 +135,46 @@ describe('OPS-6 EXE-4 bulk writer port over the connection write adapter', () =>
   it('OPS-6 passes connection settings, the bulk mapping, the records and the stored credential to the adapter', async () => {
     const { adapter, writer } = await setup();
     await writer.submit(RECORDS);
-    await writer.status('b-1');
+    await writer.status('b-1', ['A']);
     const binding = CONFIG.bindings.get('catalog.update_content');
+    if (binding?.kind !== 'http') throw new Error('fixture has no HTTP binding');
     const connection = CONFIG.connectionSettings.get('magento');
     expect(adapter.submits).toHaveLength(1);
     expect(adapter.submits[0]?.connection).toBe(connection);
-    expect(adapter.submits[0]?.mapping).toBe(binding?.mapping);
+    expect(adapter.submits[0]?.mapping).toBe(binding.mapping);
     expect(adapter.submits[0]?.mapping.bulk?.batchId).toBe('bulk_uuid');
     expect(adapter.submits[0]?.records).toEqual(RECORDS);
     expect(adapter.submits[0]?.credential).toMatchObject({ ref: 'magento-integration', scheme: 'bearer' });
     expect(await adapter.submits[0]?.credential?.open()).toEqual({ token: SECRET });
     expect(adapter.statuses).toHaveLength(1);
     expect(adapter.statuses[0]?.connection).toBe(connection);
-    expect(adapter.statuses[0]?.mapping).toBe(binding?.mapping);
+    expect(adapter.statuses[0]?.mapping).toBe(binding.mapping);
     expect(adapter.statuses[0]?.batchId).toBe('b-1');
     expect(adapter.statuses[0]?.credential).toMatchObject({ ref: 'magento-integration', scheme: 'bearer' });
+  });
+
+  it('OPS-6 passes the status keys (to-write target IDs in plan order) to the adapter', async () => {
+    const { adapter, writer } = await setup();
+    await writer.status('b-1', ['C', 'A', 'B']);
+    expect(adapter.statuses[0]?.keys).toEqual(['C', 'A', 'B']);
   });
 
   it('EXE-4 keeps code and retriable, drops status and duration from the port result', async () => {
     const ok = await setup();
     expect(await ok.writer.submit(RECORDS)).toEqual({ ok: true, batchId: 'b-1' });
-    expect(await ok.writer.status('b-1')).toEqual({ ok: true, items: [{ index: 0, state: 'ok' }] });
+    expect(await ok.writer.status('b-1', ['A'])).toEqual({ ok: true, items: [{ index: 0, state: 'ok' }] });
 
     const failed = await setup(
       { ok: false, code: 'http_status', status: 503, durationMs: 9, retriable: true },
       { ok: false, code: 'rejected', status: 404, durationMs: 3, retriable: false },
     );
     expect(await failed.writer.submit(RECORDS)).toEqual({ ok: false, code: 'http_status', retriable: true });
-    expect(await failed.writer.status('b-1')).toEqual({ ok: false, code: 'rejected', retriable: false });
+    expect(await failed.writer.status('b-1', ['A'])).toEqual({ ok: false, code: 'rejected', retriable: false });
   });
 
   it('EXE-4 a status http_status failure keeps its HTTP status, so the writer can retry a 401 or 403', async () => {
     const unauthorized = await setup(SUBMIT_OK, { ok: false, code: 'http_status', status: 401, durationMs: 3, retriable: false });
-    expect(await unauthorized.writer.status('b-1')).toEqual({ ok: false, code: 'http_status', status: 401, retriable: false });
+    expect(await unauthorized.writer.status('b-1', ['A'])).toEqual({ ok: false, code: 'http_status', status: 401, retriable: false });
   });
 
   it('OPS-6 is undefined for an operation without bulk and for an unknown operation', () => {
@@ -178,7 +187,7 @@ describe('OPS-6 EXE-4 bulk writer port over the connection write adapter', () =>
   it('SEC-3 a credential of an unknown scheme answers credential_unusable without calling the adapter', async () => {
     const { adapter, writer, lines } = await setup(SUBMIT_OK, STATUS_OK, 'carrier-pigeon');
     expect(await writer.submit(RECORDS)).toEqual({ ok: false, code: 'credential_unusable', retriable: false });
-    expect(await writer.status('b-1')).toEqual({ ok: false, code: 'credential_unusable', retriable: false });
+    expect(await writer.status('b-1', ['A'])).toEqual({ ok: false, code: 'credential_unusable', retriable: false });
     expect(adapter.submits).toEqual([]);
     expect(adapter.statuses).toEqual([]);
     expect(lines).toEqual([]);
@@ -187,7 +196,7 @@ describe('OPS-6 EXE-4 bulk writer port over the connection write adapter', () =>
   it('SEC-3 logs one record per call with identifiers, method, status and duration only', async () => {
     const { writer, lines } = await setup(SUBMIT_OK, { ok: false, code: 'http_status', status: 503, durationMs: 4, retriable: true });
     await writer.submit(RECORDS);
-    await writer.status('b-1');
+    await writer.status('b-1', ['A']);
     expect(lines).toEqual([
       { correlationId: 'corr-w', operation: 'catalog.update_content', connection: 'magento', method: 'POST', status: 202, durationMs: 11 },
       { correlationId: 'corr-w', operation: 'catalog.update_content', connection: 'magento', method: 'GET', status: 503, durationMs: 4, errorCode: 'http_status' },

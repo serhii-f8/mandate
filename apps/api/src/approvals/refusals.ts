@@ -25,6 +25,7 @@ export type PageRefusal =
   | 'empty_request'
   | 'unknown_items'
   | 'nothing_left'
+  | 'not_excludable'
   | 'policy_denied'
   | 'not_rollbackable';
 
@@ -56,6 +57,7 @@ export const REFUSAL_STATUS: Readonly<Record<PageRefusal, 400 | 403 | 404 | 409>
   empty_request: 409,
   unknown_items: 409,
   nothing_left: 409,
+  not_excludable: 409,
   policy_denied: 403,
   not_rollbackable: 409,
 };

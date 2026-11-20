@@ -7,12 +7,14 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import type { ConnectionSettings, CredentialScheme, SpecIssue, UpstreamResolver } from '@aiops/connector-sdk';
+import type { CodeOperation, ConnectionSettings, CredentialScheme, SpecIssue, ToolListOutcome, UpstreamResolver } from '@aiops/connector-sdk';
 import type { DisabledOperation, GrantDefinition, PolicyConfiguration, RoleApprovalRule, RoleDefinition, RoleNotifyTargets } from '@aiops/core';
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN, DEFAULT_ROLLBACK_WINDOW_HOURS } from './manifest.js';
 import { readSpecFile, resolvePreset, type LoadedPreset } from './presets.js';
+import type { PresetOperationConfig } from './schema.js';
+import { isMcpUpstream, toMcpCatalog, type McpCatalogState } from './mcp.js';
 import { buildRegistry, propertiesOf, sentArguments, type CatalogState, type Located, type OperationBinding, type OperationSource } from './registry.js';
 import {
   configDocumentSchema,
@@ -27,9 +29,10 @@ import {
   type RoleApproval,
   type RoleConfig,
   type RoleLimits,
+  type ServiceAccountConfig,
 } from './schema.js';
 import { findSecretKeys, SECRET_MESSAGE } from './secrets.js';
-import { isSpecUrl, toAuthSettings, type AuthConfig, type ConnectionTestConfig } from './upstream-schema.js';
+import { isCodeUpstream, isSpecUrl, toAuthSettings, type AuthConfig, type ConnectionTestConfig } from './upstream-schema.js';
 import { parseYamlSource, type SourceDocument } from './yaml-source.js';
 
 /** Names of the platform's own tools (MCP-8 and `ping`); operations may not take them. */
@@ -47,13 +50,28 @@ export const BUILTIN_TOOL_NAMES: readonly string[] = [
 
 export type { OperationBinding };
 
+/** CONN-8: what was loaded for one preset entry. */
+export interface LoadedPresetSummary {
+  readonly package: string;
+  readonly version: string;
+  readonly adapter: 'openapi' | 'mcp';
+  /** Hex SHA-256 over the preset's configuration-hash inputs (its files). */
+  readonly filesDigest: string;
+  /** Hex SHA-256 of the preset's code tree, when it has code (CFG-4). */
+  readonly codeDigest?: string;
+}
+
 export interface LoadedConfiguration {
   /** Enabled operations only (OPS-1); `toolName` and `source` set (MCP-9). */
   readonly policy: PolicyConfiguration;
   /** Compiled input-schema validator per enabled operation ID (MCP-3). */
   readonly validators: ReadonlyMap<string, ArgumentValidator>;
+  /** AUTH-4: OAuth client ID (`azp`) → the one role it calls with; empty when none is configured. */
+  readonly serviceAccounts: ReadonlyMap<string, { readonly role: string; readonly description?: string }>;
   readonly connections: readonly ConnectionConfig[];
   readonly presets: readonly PresetConfig[];
+  /** CONN-8: per loaded preset ID, the package and the version chosen; empty while presets are not loaded. */
+  readonly loadedPresets: ReadonlyMap<string, LoadedPresetSummary>;
   readonly notifications: readonly NotificationConfig[];
   readonly limits: ReadonlyMap<string, RoleLimits>;
   readonly approval: ReadonlyMap<string, RoleApprovalRule>;
@@ -63,7 +81,20 @@ export interface LoadedConfiguration {
   readonly bindings: ReadonlyMap<string, OperationBinding>;
   /** Catalog entries nothing enables, and operations disabled by an override (CONN-2, OPS-1). */
   readonly disabled: readonly DisabledOperation[];
+  /**
+   * OPS-5: the preset code-module operation of each enabled code-bound operation (binding
+   * `kind: 'code'`). Not part of `hash`: the code tree's digest is (CFG-4).
+   */
+  readonly codeOperations: ReadonlyMap<string, CodeOperation>;
+  /** Every connection's settings; `kind` is set for each (CONN-1). */
   readonly connectionSettings: ReadonlyMap<string, ConnectionSettings>;
+  /** CONN-4: seconds between pin checks, per `mcp` connection only. */
+  readonly pinCheckSeconds: ReadonlyMap<string, number>;
+  /**
+   * CONN-1, CONN-4: the tool list of each `mcp` connection at load. It only seeds pin states
+   * and the disabled list: it never adds an issue and is not part of `hash` (ADR 0051 item 1).
+   */
+  readonly mcpCatalogs: ReadonlyMap<string, McpCatalogState>;
   /** CONN-7: the read operation and arguments that test a connection. */
   readonly connectionTests: ReadonlyMap<string, { readonly operation: string; readonly args: Readonly<Record<string, unknown>> }>;
   /** Credential reference → its scheme and the connections and webhook notifications that use it (SEC-2). */
@@ -113,6 +144,14 @@ export interface LoadOptions {
    * `loadConfigurationDirectory`; defaults to the working directory.
    */
   readonly baseDir?: string;
+  /** Clock for `listedAt` of the MCP tool catalogs; defaults to `Date.now`. */
+  readonly now?: () => number;
+  /**
+   * How preset code modules are imported (OPS-5). Production leaves it unset: native
+   * `import()`. Tests pass Node's own loader, because Vitest's module runner resolves and
+   * reports differently (F23).
+   */
+  readonly importModule?: (url: string) => Promise<unknown>;
 }
 
 const YAML_FILE = /\.ya?ml$/i;
@@ -179,7 +218,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   }
   if (issues.length > 0) return { ok: false, issues };
 
-  const collect = <T>(key: 'connections' | 'operations' | 'roles' | 'role_mapping' | 'presets' | 'notifications' | 'overrides') =>
+  const collect = <T>(key: 'connections' | 'operations' | 'roles' | 'role_mapping' | 'service_accounts' | 'presets' | 'notifications' | 'overrides') =>
     documents.flatMap(({ source, doc }) =>
       ((doc[key] ?? []) as T[]).map((value, index): Located<T> => ({ value, source, path: [key, index] })),
     );
@@ -187,6 +226,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   const configOperations = collect<OperationConfig>('operations');
   const roles = collect<RoleConfig>('roles');
   const mapping = collect<{ group: string; roles: string[] }>('role_mapping');
+  const serviceAccounts = collect<ServiceAccountConfig>('service_accounts');
   const presets = collect<PresetConfig>('presets');
   const notifications = collect<NotificationConfig>('notifications');
   const overrides = collect<OverrideConfig>('overrides');
@@ -223,38 +263,54 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   // Presets (CONN-8 first cut): resolve every declared preset, bind each to at most one connection.
   // Without preset directories (the static CLI) presets are not loaded, and the result says so.
   const presetChecksSkipped = options.presetDirs === undefined && presetById.size > 0;
-  const loadedPresets = new Map<string, LoadedPreset>();
+  const resolvedPresets = new Map<string, LoadedPreset>();
   if (options.presetDirs !== undefined) {
     for (const [presetId, entry] of presetById) {
-      const result = await resolvePreset(entry.value, options.presetDirs, entry);
-      if (result.ok) loadedPresets.set(presetId, result.preset);
+      const result = await resolvePreset(entry.value, options.presetDirs, entry, options.importModule === undefined ? {} : { importModule: options.importModule });
+      if (result.ok) resolvedPresets.set(presetId, result.preset);
       else issues.push(...result.issues);
     }
   }
-  const presetBoundTo = new Map<string, string>();
+  // CONN-8: a preset may be bound to several connections when each binding has its own
+  // effective namespace: the operation_prefix, or the preset operations' own first segments.
+  const presetBoundTo = new Map<string, PresetBinding[]>();
   for (const { value: c, source, path } of connections) {
-    if (c.preset === undefined) continue;
-    if (!presetById.has(c.preset)) at(source, [...path, 'preset'], 'names a preset that is not defined');
-    if (c.adapter !== 'openapi') {
-      at(source, [...path, 'preset'], 'preset requires an openapi connection');
+    if (c.preset === undefined) {
+      if (c.operation_prefix !== undefined) at(source, [...path, 'operation_prefix'], 'requires preset');
       continue;
     }
-    const bound = presetBoundTo.get(c.preset);
-    if (bound !== undefined) at(source, [...path, 'preset'], `the preset is already bound to connection ${bound}`);
-    else presetBoundTo.set(c.preset, c.id);
+    if (!presetById.has(c.preset)) at(source, [...path, 'preset'], 'names a preset that is not defined');
+    const resolved = resolvedPresets.get(c.preset);
+    const presetAdapter = resolved?.adapter;
+    if (presetAdapter !== undefined && presetAdapter !== c.adapter) {
+      at(source, [...path, 'preset'], `the preset is for ${presetAdapter} connections`);
+      continue;
+    }
+    const binding: PresetBinding = { connection: c.id, ...(c.operation_prefix === undefined ? {} : { prefix: c.operation_prefix }) };
+    const namespaces = bindingNamespaces(binding, resolved);
+    const bindings = presetBoundTo.get(c.preset) ?? [];
+    const clash = bindings.find((b) => [...bindingNamespaces(b, resolved)].some((ns) => namespaces.has(ns)));
+    if (clash !== undefined) {
+      at(source, [...path, 'preset'], `the preset is already bound to connection ${clash.connection} with the same operation prefix`);
+      continue;
+    }
+    presetBoundTo.set(c.preset, [...bindings, binding]);
   }
 
   // All operations: configuration first, then preset operations bound to their connection.
   const operations: OperationSource[] = configOperations.map((o) => ({ ...o, connection: o.value.connection, origin: 'config' }));
-  for (const [presetId, connectionId] of presetBoundTo) {
-    const preset = loadedPresets.get(presetId);
+  for (const [presetId, bindings] of presetBoundTo) {
+    const preset = resolvedPresets.get(presetId);
     if (preset === undefined) continue;
-    preset.operations.forEach((value, index) => {
-      operations.push({ value, source: preset.source, path: ['operations', index], connection: connectionId, origin: `preset:${presetId}` });
-    });
+    for (const binding of bindings) {
+      const alias = presetAlias(preset, binding.prefix);
+      preset.operations.forEach((value, index) => {
+        operations.push({ value: alias.operation(value), source: preset.source, path: ['operations', index], connection: binding.connection, origin: `preset:${presetId}` });
+      });
+    }
   }
   /** A bound preset that failed to load: its operations are unknown, so "not defined" would mislead. */
-  const operationsIncomplete = [...presetBoundTo.keys()].some((id) => presetById.has(id) && !loadedPresets.has(id));
+  const operationsIncomplete = [...presetBoundTo.keys()].some((id) => presetById.has(id) && !resolvedPresets.has(id));
   const operationById = indexById(operations);
   for (const { value: op, source, path } of configOperations) {
     if (!connectionById.has(op.connection)) at(source, [...path, 'connection'], 'names a connection that is not defined');
@@ -265,18 +321,26 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   const states = new Map<string, ConnectionState>();
   for (const located of connectionById.values()) {
     const { value: c, source, path } = located;
-    const preset = c.preset === undefined || presetBoundTo.get(c.preset) !== c.id ? undefined : loadedPresets.get(c.preset);
+    const binding = c.preset === undefined ? undefined : presetBoundTo.get(c.preset)?.find((b) => b.connection === c.id);
+    const loadedPreset = c.preset === undefined || binding === undefined ? undefined : resolvedPresets.get(c.preset);
+    // The preset's test names its own operation IDs; on an aliased binding it follows the prefix.
+    const preset =
+      loadedPreset === undefined || binding?.prefix === undefined || loadedPreset.test === undefined
+        ? loadedPreset
+        : { ...loadedPreset, test: { ...loadedPreset.test, operation: presetAlias(loadedPreset, binding.prefix).id(loadedPreset.test.operation) } };
     const auth = c.auth ?? preset?.auth;
-    const presetFailed = c.preset !== undefined && presetById.has(c.preset) && !loadedPresets.has(c.preset);
+    // A preset that failed to load, or a binding already refused, leaves auth unknown: no follow-on issue.
+    const presetFailed = c.preset !== undefined && presetById.has(c.preset) && (!resolvedPresets.has(c.preset) || binding === undefined);
     if (c.credential_ref !== undefined && auth === undefined && !presetFailed) at(source, [...path, 'credential_ref'], 'credential_ref requires auth');
     if (c.credential_ref === undefined && auth !== undefined) at(source, [...path, 'credential_ref'], 'is required when auth is set');
     const declared = c.adapter === 'openapi' ? c.openapi?.spec : undefined;
     let spec: SpecSource | undefined;
     if (declared !== undefined) {
       spec = isSpecUrl(declared) ? { kind: 'url', url: declared } : { kind: 'file', file: resolve(baseDir, dirname(source.file), declared), owner: 'connection' };
-    } else if (preset !== undefined) spec = { kind: 'file', file: preset.specFile, owner: 'preset' };
+    } else if (preset?.specFile !== undefined) spec = { kind: 'file', file: preset.specFile, owner: 'preset' };
     const settings: ConnectionSettings = {
       id: c.id,
+      kind: c.adapter,
       baseUrl: c.adapter === 'openapi' ? c.base_url : c.mcp_url,
       ...(auth === undefined ? {} : { auth: toAuthSettings(auth) }),
       ...(c.credential_ref === undefined ? {} : { credentialRef: c.credential_ref }),
@@ -328,17 +392,53 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     }
   }
 
+  // MCP tool lists (CONN-1): never an issue, so every process loads a revision identically (R1).
+  const now = options.now ?? Date.now;
+  const resolveTools = options.resolver?.resolveTools?.bind(options.resolver);
+  const mcpCatalogs = new Map<string, McpCatalogState>(
+    await Promise.all(
+      [...states.values()]
+        .filter((state) => state.located.value.adapter === 'mcp')
+        .map(async ({ settings }): Promise<readonly [string, McpCatalogState]> => {
+          if (resolveTools === undefined) return [settings.id, { status: 'skipped' }];
+          let outcome: ToolListOutcome;
+          try {
+            outcome = await resolveTools({ connection: settings });
+          } catch {
+            // Adapters answer with outcomes; a rejection is a lister fault and must not fail the load (R1).
+            return [settings.id, { status: 'unlisted', code: 'network' }];
+          }
+          return [settings.id, toMcpCatalog(outcome, now())];
+        }),
+    ),
+  );
+  if (resolveTools === undefined && mcpCatalogs.size > 0) specChecksSkipped = true;
+
   const compile = createSchemaCompiler();
   const registry = buildRegistry({
     operations: [...operationById.values()],
     overrides,
     catalogs,
+    mcpCatalogs,
     connectionIds: new Set(connectionById.keys()),
+    connectionKinds: new Map([...connectionById].map(([id, c]) => [id, c.value.adapter] as const)),
+    codeModules: new Map([...resolvedPresets].flatMap(([id, preset]) => (preset.code === undefined ? [] : [[id, preset.code.module] as const]))),
     operationsIncomplete,
     reserved: new Set(options.reservedToolNames ?? BUILTIN_TOOL_NAMES),
     compile,
     at,
   });
+
+  // EXE-4 SEC-2: the idempotency key must not take the connection's api_key header, which the
+  // credential overwrites last, so the key would be lost without an error.
+  for (const { located } of registry.all.values()) {
+    const u = located.value.upstream;
+    if (isMcpUpstream(u) || isCodeUpstream(u) || u.idempotency === undefined) continue;
+    const auth = states.get(located.connection)?.auth;
+    if (auth?.scheme === 'api_key' && auth.header.toLowerCase() === u.idempotency.header.toLowerCase()) {
+      at(located.source, [...located.path, 'upstream', 'idempotency', 'header'], 'is set by the platform');
+    }
+  }
 
   // Manifests (OPS-2, OPS-3, OPS-4): need the registry's enabled operations and final schemas.
   checkManifests({ all: registry.all, operationsIncomplete, at });
@@ -448,7 +548,8 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       return risk === undefined ? [] : [risk];
     });
     const destructive = risks.includes('destructive');
-    const writes = destructive || risks.includes('write');
+    // write_opaque counts as a write: without steps its calls could never be approved.
+    const writes = destructive || risks.includes('write') || risks.includes('write_opaque');
     const stepless = (approval?.steps ?? []).length === 0;
     if (writes && stepless && (destructive || approval?.required !== 'never')) {
       const message = 'needs at least one step: a write or destructive grant requires approval by default (set steps, or required: never for write operations)';
@@ -477,12 +578,42 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     });
   }
 
+  // AUTH-4: one entry per client_id across all documents, each naming a defined role.
+  const serviceAccountById = new Map<string, Located<ServiceAccountConfig>>();
+  for (const item of serviceAccounts) {
+    const { value: entry, source, path } = item;
+    const first = serviceAccountById.get(entry.client_id);
+    if (first === undefined) serviceAccountById.set(entry.client_id, item);
+    else at(source, [...path, 'client_id'], `duplicate client_id; first defined in ${first.source.file} at ${pathToString(first.path)}`);
+    if (!roleById.has(entry.role)) at(source, [...path, 'role'], 'names a role that is not defined');
+  }
+
   if (issues.length > 0) return { ok: false, issues };
 
   const hash = createHash('sha256');
   for (const { file, text } of sorted) hash.update(file).update('\0').update(text).update('\0');
-  for (const presetId of [...loadedPresets.keys()].sort()) {
-    for (const { file, text } of loadedPresets.get(presetId)?.files ?? []) hash.update(`preset:${file}`).update('\0').update(text).update('\0');
+  const loadedPresets = new Map<string, LoadedPresetSummary>();
+  for (const presetId of [...resolvedPresets.keys()].sort()) {
+    const preset = resolvedPresets.get(presetId);
+    if (preset === undefined) continue;
+    // The same inputs, in the same form, as the configuration hash; `config diff` compares it (CFG-3).
+    const filesDigest = createHash('sha256');
+    for (const { file, text } of preset.files) {
+      hash.update(`preset:${file}`).update('\0').update(text).update('\0');
+      filesDigest.update(`preset:${file}`).update('\0').update(text).update('\0');
+    }
+    // CFG-4: the code tree's digest, after that preset's files.
+    if (preset.code !== undefined) {
+      hash.update(`preset-code:${preset.package}`).update('\0').update(preset.code.digest).update('\0');
+      filesDigest.update(`preset-code:${preset.package}`).update('\0').update(preset.code.digest).update('\0');
+    }
+    loadedPresets.set(presetId, {
+      package: preset.package,
+      version: preset.version,
+      adapter: preset.adapter,
+      filesDigest: filesDigest.digest('hex'),
+      ...(preset.code === undefined ? {} : { codeDigest: preset.code.digest }),
+    });
   }
   for (const { file, text } of specTexts) hash.update(`spec:${file}`).update('\0').update(text).update('\0');
 
@@ -493,10 +624,15 @@ export async function loadConfigurationSources(sources: readonly { file: string;
         operations: registry.enabled,
         roles: roles.map(({ value }) => toRole(value)),
         roleMapping: mapping.map(({ value }) => ({ group: value.group, roles: [...value.roles] })),
+        serviceAccounts: serviceAccounts.map(({ value }) => ({ clientId: value.client_id, role: value.role })),
       },
+      serviceAccounts: new Map(
+        serviceAccounts.map(({ value }) => [value.client_id, value.description === undefined ? { role: value.role } : { role: value.role, description: value.description }] as const),
+      ),
       validators: registry.validators,
       connections: connections.map((c) => c.value),
       presets: presets.map((p) => p.value),
+      loadedPresets,
       notifications: notifications.map((n) => n.value),
       limits: new Map(roles.flatMap(({ value }) => (value.limits === undefined ? [] : [[value.id, value.limits] as const]))),
       approval: new Map(roles.flatMap(({ value }) => (value.approval === undefined ? [] : [[value.id, toApprovalRule(value.approval)] as const]))),
@@ -507,7 +643,12 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       ),
       bindings: registry.bindings,
       disabled: registry.disabled,
+      codeOperations: registry.codeOperations,
       connectionSettings: new Map([...states].map(([id, s]) => [id, s.settings] as const)),
+      pinCheckSeconds: new Map(
+        [...connectionById].flatMap(([id, { value: c }]) => (c.adapter === 'mcp' ? [[id, c.pin_check_seconds] as const] : [])),
+      ),
+      mcpCatalogs,
       connectionTests,
       credentialRefs,
       credentialManagers,
@@ -532,6 +673,59 @@ export async function loadConfigurationSources(sources: readonly { file: string;
  * Resolver issues carry paths under `openapi.spec` (inside the spec) or
  * `openapi.include`. A preset spec's issues point into the preset file.
  */
+/** CONN-8: one connection that binds a preset, with its optional operation prefix. */
+interface PresetBinding {
+  readonly connection: string;
+  readonly prefix?: string;
+}
+
+/** The first segment of an operation ID. */
+function namespaceOf(operationId: string): string {
+  const dot = operationId.indexOf('.');
+  return dot < 0 ? operationId : operationId.slice(0, dot);
+}
+
+/**
+ * The effective namespaces of a binding: its prefix, or the first segments of the preset's own
+ * operation IDs. A preset that failed to load has unknown operations, so an unprefixed binding
+ * of it gets a sentinel that only another unprefixed binding of the same preset shares.
+ */
+function bindingNamespaces(binding: PresetBinding, preset: LoadedPreset | undefined): ReadonlySet<string> {
+  if (binding.prefix !== undefined) return new Set([binding.prefix]);
+  if (preset === undefined) return new Set(['']);
+  return new Set(preset.operations.map((o) => namespaceOf(o.id)));
+}
+
+/**
+ * CONN-8: the operation IDs of a preset bound with `operation_prefix`. `<ns>.<rest>` becomes
+ * `<prefix>.<rest>` (a one-segment ID `<id>` becomes `<prefix>.<id>`), and so does every
+ * reference to one of the preset's own operations inside its manifests. Other IDs stay as they are.
+ */
+function presetAlias(preset: LoadedPreset, prefix: string | undefined): { id(operationId: string): string; operation(op: PresetOperationConfig): PresetOperationConfig } {
+  const own = new Set(preset.operations.map((o) => o.id));
+  const id = (operationId: string): string => {
+    if (prefix === undefined || !own.has(operationId)) return operationId;
+    const dot = operationId.indexOf('.');
+    return `${prefix}.${dot < 0 ? operationId : operationId.slice(dot + 1)}`;
+  };
+  const operation = (op: PresetOperationConfig): PresetOperationConfig => {
+    if (prefix === undefined) return op;
+    const m = op.manifest;
+    if (m === undefined) return { ...op, id: id(op.id) };
+    return {
+      ...op,
+      id: id(op.id),
+      manifest: {
+        ...m,
+        read_before: { ...m.read_before, operation: id(m.read_before.operation) },
+        ...(m.selector === undefined ? {} : { selector: { ...m.selector, operation: id(m.selector.operation) } }),
+        rollback: m.rollback.strategy === 'inverse_operation' ? { ...m.rollback, operation: id(m.rollback.operation) } : m.rollback,
+      },
+    };
+  };
+  return { id, operation };
+}
+
 function locateSpecIssue(state: ConnectionState, issue: SpecIssue, at: (source: SourceDocument, path: readonly PropertyKey[], message: string) => void): void {
   const { located, preset, spec } = state;
   const [head, sub, ...rest] = issue.path;

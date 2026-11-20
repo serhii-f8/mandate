@@ -207,4 +207,22 @@ describe('OPS-6 EXE-4 bulk writes through the OpenAPI adapter', () => {
     });
     expect(up.requests).toHaveLength(0);
   });
+
+  it('OPS-6 bulkStatus maps by key with keys and fails closed without them', async () => {
+    const keyed: UpstreamMapping = {
+      ...MAPPING,
+      bulk: {
+        ...MAPPING.bulk,
+        status: { method: 'GET', path: '/V1/bulk/{batch_id}/status', items: 'items', key: 'sku', state: 'status', states: STATUS.states },
+      },
+    };
+    up.route('GET', '/V1/bulk/b-1/status', () => ({ status: 200, body: { items: [{ sku: 'B', status: 1 }, { sku: 'A', status: 3 }, { sku: 'X', status: 1 }] } }));
+    const adapter = createOpenApiAdapter();
+    const r = await adapter.bulkStatus({ connection: settings(), mapping: keyed, batchId: 'b-1', keys: ['A', 'B'] });
+    expect(r).toEqual({ ok: true, items: [{ index: 1, state: 'ok' }, { index: 0, state: 'failed' }, { index: 2, state: 'ok' }], durationMs: ANY_MS });
+    expect(up.requests).toHaveLength(1);
+    const without = await adapter.bulkStatus({ connection: settings(), mapping: keyed, batchId: 'b-1' });
+    expect(without).toEqual({ ok: false, code: 'mapping', durationMs: 0, retriable: false });
+    expect(up.requests).toHaveLength(1);
+  });
 });

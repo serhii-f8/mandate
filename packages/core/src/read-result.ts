@@ -14,6 +14,12 @@ export const READ_RESULT_TEXT = {
     busy: (op: string) => `${op} cannot run right now: too many requests are in flight. Try again shortly.`,
     invalid_response: (op: string) => `${op} failed: the upstream system returned a response that could not be read.`,
     mapping: (op: string) => `${op} failed: the upstream response did not match the expected shape.`,
+    upstream_error: (op: string) => `${op} failed: the upstream tool reported an error.`,
+    /** CONN-4: the live tool no longer hashes to the pin (changed or missing). */
+    upstream_changed: (op: string) =>
+      `${op} cannot run: its upstream tool changed since it was reviewed; an operator must review it and record the new pin.`,
+    /** CONN-4: the pin could not be checked, or the pinned tool's schema is unusable. */
+    upstream_unavailable: (op: string) => `${op} cannot run: its upstream tool could not be verified right now.`,
   },
   httpStatus: (op: string, status: number | undefined) =>
     `${op} failed: the upstream system answered HTTP ${status ?? 'error'}.`,

@@ -2,7 +2,7 @@ import type { ReactElement } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChangeSetActions, ChangeSetViewModel } from '../model.js';
-import { changeSetModel, item } from '../test-fixtures.js';
+import { changeSetModel, item, opaqueChangeSetModel } from '../test-fixtures.js';
 import { ChangeSetView } from './ChangeSetView.js';
 
 afterEach(cleanup);
@@ -305,5 +305,21 @@ describe('ChangeSetView', () => {
     rerender(shown('rolled_back'));
     await flush();
     expect(loadItems).toHaveBeenCalledTimes(2);
+  });
+
+  it('UI-4 the opaque result shows the call outcome and no rollback action', () => {
+    const base = {
+      status: 'completed_with_errors',
+      rollback: { available: true, count: 1 },
+      items: { items: [item('call', { status: 'failed', error: 'upstream refused' })] },
+    };
+    const { container } = setup(opaqueChangeSetModel(base), actionsWith({ rollback: vi.fn() }));
+    expect(screen.getByText('Call outcome: failed (upstream refused)')).toBeTruthy();
+    expect(container.querySelector('pre')?.textContent).toContain('"n": 2');
+    expect(container.querySelector('table')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Roll back/ })).toBeNull();
+    cleanup();
+    setup(opaqueChangeSetModel({ status: 'completed', items: { items: [item('call', { status: 'written' })] } }));
+    expect(screen.getByText('Call outcome: written')).toBeTruthy();
   });
 });

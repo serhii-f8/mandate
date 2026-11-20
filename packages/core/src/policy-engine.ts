@@ -1,6 +1,6 @@
 import type { Caller } from './caller.js';
 import type { GrantDefinition, OperationDefinition, PolicyConfiguration, ScopeValue } from './policy-model.js';
-import { resolveRoles } from './roles.js';
+import { rolesOf } from './roles.js';
 
 export type DenyReason =
   | 'no_grant'
@@ -109,16 +109,16 @@ export function createPolicyEngine(config: PolicyConfiguration): PolicyEngine {
     grants.set(role.id, byOperation);
   }
 
-  const rolesOf = (caller: Caller): readonly string[] => resolveRoles(caller.groups, config.roleMapping);
+  const rolesFor = (caller: Caller): readonly string[] => rolesOf(caller, config);
 
   return {
     grantedOperations(caller) {
-      const roles = rolesOf(caller);
+      const roles = rolesFor(caller);
       return config.operations.filter((op) => roles.some((r) => grants.get(r)?.has(op.id) === true));
     },
 
     evaluate({ caller, operationId, args }) {
-      const roles = rolesOf(caller);
+      const roles = rolesFor(caller);
       const operation = operations.get(operationId);
       const matching = operation === undefined ? [] : roles.flatMap((r) => grants.get(r)?.get(operationId) ?? []);
       if (operation === undefined || matching.length === 0) {

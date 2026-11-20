@@ -1,20 +1,36 @@
-import type { CatalogEntry, HttpMethod, SpecIssue, TemplateValue, UpstreamResolver } from '@aiops/connector-sdk';
+import type { CatalogEntry, HttpMethod, SpecIssue, TemplateValue, ToolListOutcome, UpstreamResolver } from '@aiops/connector-sdk';
 
 type ResolveInput = Parameters<UpstreamResolver['resolveSpec']>[0];
+type ResolveToolsInput = Parameters<NonNullable<UpstreamResolver['resolveTools']>>[0];
 
 /**
  * An `UpstreamResolver` that answers from fixed catalogs per connection ID instead of
  * reading a spec. `failures` makes a connection's spec fail with the given issues.
  * Every call is recorded. `include` filters by operation ID or `METHOD /path`, as the
  * OpenAPI adapter does.
+ *
+ * `tools` answers `resolveTools` per connection ID (an empty list for any other); only
+ * when it is given does the resolver have `resolveTools` at all, as an own property, so
+ * a resolver built without it behaves like a 0.5.0 resolver.
  */
 export class FakeResolver implements UpstreamResolver {
   readonly calls: ResolveInput[] = [];
+  readonly toolCalls: ResolveToolsInput[] = [];
+  // `declare`: no class field is emitted, so the property exists only when assigned below.
+  declare readonly resolveTools?: (input: ResolveToolsInput) => Promise<ToolListOutcome>;
 
   constructor(
     private readonly catalogs: Readonly<Record<string, readonly CatalogEntry[]>> = {},
     private readonly failures: Readonly<Record<string, readonly SpecIssue[]>> = {},
-  ) {}
+    tools?: Readonly<Record<string, ToolListOutcome>>,
+  ) {
+    if (tools !== undefined) {
+      this.resolveTools = (input) => {
+        this.toolCalls.push(input);
+        return Promise.resolve(tools[input.connection.id] ?? { ok: true, tools: [], dropped: 0, durationMs: 0 });
+      };
+    }
+  }
 
   resolveSpec(input: ResolveInput): ReturnType<UpstreamResolver['resolveSpec']> {
     this.calls.push(input);

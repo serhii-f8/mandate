@@ -8,11 +8,12 @@ import { createMcpHandler, type McpHttpHandler } from '@modelcontextprotocol/ser
 import { trace } from '@opentelemetry/api';
 import { createRemoteJWKSet, type JWTVerifyGetKey } from 'jose';
 import type { Logger } from 'pino';
-import { createOpenApiAdapter } from '@aiops/adapters';
-import type { ReadAdapter } from '@aiops/connector-sdk';
-import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
+import { createAdapters } from '@aiops/adapters';
+import type { McpToolAdapter, ReadAdapter } from '@aiops/connector-sdk';
+import { ConfigurationUnavailableError, createSchemaCompiler, type ApiEnv, type ConfigurationHolder } from '@aiops/config';
 import {
-  resolveRoles,
+  changesetKind,
+  rolesOf,
   type AuditLog,
   type ChangeSetExecutor,
   type ChangeSetRepository,
@@ -63,6 +64,7 @@ import {
   ON_SHUTDOWN,
   PAGE_CHECKS,
   PAGE_SESSIONS,
+  PIN_MONITOR,
   SUBMIT_SERVICE,
   TELEMETRY,
   TEMPORAL,
@@ -74,7 +76,7 @@ import { createApiTemporalClient } from './temporal-client.js';
 import type { ApiTelemetry } from './telemetry.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
 import { operationInvokers, type OperationInvokersBase } from './upstream/operation-router.js';
-import { assertFullyChecked } from '@aiops/upstream';
+import { assertFullyChecked, PinMonitor, vaultToolLister, type UpstreamToolView } from '@aiops/upstream';
 import { PageAccessGuard, type PageChecks } from './web/access.js';
 import { AuthController, SessionController } from './web/auth.controller.js';
 import { ConnectionsController } from './web/connections.controller.js';
@@ -89,8 +91,13 @@ export interface AppOverrides {
   readonly invoker?: OperationInvoker;
   /** Change-set store; defaults to `PostgresChangeSetRepository` on the api database. */
   readonly changesets?: ChangeSetRepository;
-  /** The read adapter; `main.ts` passes the one whose resolver loaded the configuration. Defaults to a new OpenAPI adapter. */
-  readonly adapter?: ReadAdapter;
+  /**
+   * The upstream adapter; `main.ts` passes the one whose resolver loaded the configuration.
+   * Defaults to `createAdapters()`. With `listTools` the api runs the pin monitor (CONN-4).
+   */
+  readonly adapter?: ReadAdapter & Partial<McpToolAdapter>;
+  /** Pin states of MCP-backed operations; replaces the pin monitor (none is built). */
+  readonly upstreamTools?: UpstreamToolView;
   /** Credential store; defaults to `PostgresCredentialVault` under `AIOPS_MASTER_KEYS`. */
   readonly vault?: CredentialVault;
   /** Signing keys; defaults to the remote JWKS at `OIDC_JWKS_URL`. */
@@ -109,9 +116,10 @@ export interface AppOverrides {
 
 interface UpstreamIo {
   readonly vault: CredentialVault;
-  readonly adapter: ReadAdapter;
+  readonly adapter: ReadAdapter & Partial<McpToolAdapter>;
   readonly repository: ChangeSetRepository;
   readonly log: NonNullable<OperationInvokersBase['log']>;
+  readonly upstreamTools: UpstreamToolView | undefined;
 }
 
 /** The api's Temporal client, present unless the tests replace both its users. */
@@ -137,7 +145,26 @@ function invokerFactory(
     newId: randomUUID,
     now: () => new Date(),
     log: io.log,
+    ...(io.upstreamTools === undefined ? {} : { upstreamTools: io.upstreamTools }),
   });
+}
+
+/**
+ * The pin monitor's run (CONN-4): `createApp` starts it once a configuration is active, and a
+ * start that arrives after `stop()` is ignored, since the database is closed by then.
+ */
+class PinMonitorRun {
+  private closed = false;
+  constructor(readonly monitor: PinMonitor) {}
+
+  start(): void {
+    if (!this.closed) this.monitor.start();
+  }
+
+  async stop(): Promise<void> {
+    this.closed = true;
+    await this.monitor.stop();
+  }
 }
 
 /** Closes the per-process resources when the application shuts down, then runs the caller's `onShutdown`. */
@@ -148,9 +175,12 @@ class Resources implements OnApplicationShutdown {
     @Inject(TEMPORAL) private readonly temporal: TemporalHandle | null,
     @Inject(ON_SHUTDOWN) private readonly onShutdown: (() => Promise<void>) | null,
     @Inject(TELEMETRY) private readonly telemetry: ApiTelemetry | null,
+    @Inject(PIN_MONITOR) private readonly pinMonitor: PinMonitorRun | null,
   ) {}
 
   async onApplicationShutdown(): Promise<void> {
+    // First: its checks write audit rows, so it stops while the database is still open.
+    await this.pinMonitor?.stop();
     await this.handler.close();
     await this.temporal?.connection.close();
     await this.database.close();
@@ -167,12 +197,27 @@ class AppModule {
     const keys = overrides.vault === undefined ? parseMasterKeys(env.masterKeys) : undefined;
     // Likewise the Temporal payload keys (SEC-4), whenever a Temporal client is built.
     const temporalKeys = overrides.executor === undefined || overrides.starter === undefined ? parseTemporalKeys(env.temporalKeys) : undefined;
-    const adapter = overrides.adapter ?? createOpenApiAdapter();
+    const adapter = overrides.adapter ?? createAdapters();
     // Without telemetry the api's spans go to the global tracer (a no-op unless one is registered) and no metric is counted.
     const pipelineTelemetry: PipelineTelemetry = telemetry === undefined ? NO_TELEMETRY : createPipelineTelemetry({ tracer: telemetry.tracer, meter: telemetry.meter });
     // One key set for MCP access tokens and page ID tokens: same issuer.
     const jwks = overrides.jwks ?? createRemoteJWKSet(env.oidcJwksUrl);
-    const verifier = createJwtVerifier({ issuer: env.oidcIssuer, audience: env.mcpResource.href, jwks });
+    const verifier = createJwtVerifier({
+      issuer: env.oidcIssuer,
+      audience: env.mcpResource.href,
+      jwks,
+      // Read per token, so an applied configuration takes effect at once (AUTH-4). Plan call 7:
+      // without an active configuration no client is a service account (fails closed); any other
+      // failure propagates.
+      isServiceAccount: (id) => {
+        try {
+          return configuration.current.serviceAccounts.has(id);
+        } catch (e) {
+          if (e instanceof ConfigurationUnavailableError) return false;
+          throw e;
+        }
+      },
+    });
     const oidc = createOidcClient({
       authorizationUrl: env.oidcAuthorizationUrl,
       tokenUrl: env.oidcTokenUrl,
@@ -264,8 +309,27 @@ class AppModule {
             }),
         },
         {
+          // CONN-4: pin states of MCP-backed operations; started by `createApp`, stopped first by `Resources`.
+          provide: PIN_MONITOR,
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT],
+          useFactory: (audit: AuditLog, vault: CredentialVault): PinMonitorRun | null => {
+            // Bound: an adapter may implement it as a method.
+            const listTools = adapter.listTools?.bind(adapter);
+            if (overrides.upstreamTools !== undefined || listTools === undefined) return null;
+            const monitor = new PinMonitor({
+              configuration: () => configuration.current,
+              lister: vaultToolLister({ listTools }, vault),
+              audit,
+              newId: randomUUID,
+              logger,
+              compile: createSchemaCompiler(),
+            });
+            return new PinMonitorRun(monitor);
+          },
+        },
+        {
           provide: MCP_HANDLER,
-          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE, WORKFLOW_STARTER, WIDGET_BUNDLES],
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE, WORKFLOW_STARTER, WIDGET_BUNDLES, PIN_MONITOR],
           useFactory: (
             audit: AuditLog,
             vault: CredentialVault,
@@ -275,9 +339,12 @@ class AppModule {
             approvals: ApprovalService,
             starter: WorkflowStarter,
             widgets: WidgetBundles,
+            pinMonitor: PinMonitorRun | null,
           ) => {
             // One task store for the write path that creates tasks and the handlers that read them.
             const tasks = overrides.tasks ?? new PostgresTaskRepository(database.db);
+            // Without either, MCP-backed operations are never listed and always refused (fail closed).
+            const upstreamTools = overrides.upstreamTools ?? pinMonitor?.monitor;
             const io: UpstreamIo = {
               vault,
               adapter,
@@ -285,6 +352,7 @@ class AppModule {
               log: (record) => {
                 logger.info(record, 'upstream call completed');
               },
+              upstreamTools,
             };
             return createMcpHandler(
               createServerFactory(
@@ -300,6 +368,7 @@ class AppModule {
                       audit,
                       approvals,
                       publicUrl: env.publicUrl,
+                      ...(upstreamTools === undefined ? {} : { upstreamTools }),
                     },
                     {
                       starter,
@@ -318,8 +387,17 @@ class AppModule {
                   widgets,
                   publicUrl: env.publicUrl,
                   telemetry: pipelineTelemetry,
+                  ...(upstreamTools === undefined ? {} : { upstreamTools }),
                 },
-                { tasks, repository: changesets, executor, audit, newId: randomUUID, publicUrl: env.publicUrl },
+                {
+                  tasks,
+                  repository: changesets,
+                  executor,
+                  audit,
+                  newId: randomUUID,
+                  publicUrl: env.publicUrl,
+                  kindOf: (operationId) => changesetKind(configuration.current.policy.operations.find((op) => op.id === operationId)),
+                },
               ),
               {
                 legacy: 'stateless',
@@ -349,7 +427,7 @@ class AppModule {
           provide: APP_GUARD,
           inject: [PAGE_SESSIONS],
           useFactory: (sessions: SessionService) =>
-            new PageAccessGuard(new Reflector(), sessions, (groups) => resolveRoles(groups, configuration.current.policy.roleMapping), pageChecks),
+            new PageAccessGuard(new Reflector(), sessions, (session) => rolesOf(session, configuration.current.policy), pageChecks),
         },
         Resources,
       ],
@@ -391,5 +469,12 @@ export async function createApp(options: CreateAppOptions): Promise<INestApplica
   app.use(bodyErrorHandler);
   // CFG-2, SEC-1: no request reaches a route that reads the configuration while none is active.
   app.use(configurationGate(options.configuration));
+  // CONN-4: pin checks start once a configuration is active (its first tick lists every mcp connection).
+  const pinMonitor = app.get<PinMonitorRun | null>(PIN_MONITOR);
+  if (pinMonitor !== null) {
+    void options.configuration.whenActive().then(() => {
+      pinMonitor.start();
+    });
+  }
   return app;
 }

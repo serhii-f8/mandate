@@ -104,6 +104,8 @@ export interface ChangeSetDetail {
   hash?: string;
   /** The change-set this one was derived from by an exclusion (CS-5). */
   derivedFrom?: string;
+  /** Absent means `diff`. */
+  kind?: 'opaque' | 'diff';
   operation: { id: string; title?: string; description?: string; risk?: string };
   connection: string;
   request: { args: Record<string, unknown>; requester: string; clientId?: string; createdAt: string; submittedAt?: string };

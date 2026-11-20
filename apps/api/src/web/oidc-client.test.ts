@@ -139,6 +139,11 @@ describe('AUTH-5 OIDC client for trusted pages', () => {
     expect(await clientWith(() => json(200, { id_token: token })).exchange({ code: 'c', codeVerifier: 'v', nonce: 'nonce-1' })).toEqual({ ok: false, reason: 'id_token_invalid' });
   });
 
+  it.each(['service:aiops-sa-ci', 'service:'])('AUTH-4 AUTH-5 an ID token whose sub starts with service: is refused (%s)', async (sub) => {
+    const token = await idToken({ sub });
+    expect(await clientWith(() => json(200, { id_token: token })).exchange({ code: 'c', codeVerifier: 'v', nonce: 'nonce-1' })).toEqual({ ok: false, reason: 'id_token_invalid' });
+  });
+
   it('AUTH-5 groups that are not a list of strings become no groups', async () => {
     const token = await idToken({ groups: 'admins' });
     const result = await clientWith(() => json(200, { id_token: token })).exchange({ code: 'c', codeVerifier: 'v', nonce: 'nonce-1' });

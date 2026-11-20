@@ -1,0 +1,253 @@
+# Gitea issues preset 0.1.0 (CONN-8, OPS-2, OPS-3, OPS-5, OPS-6; design phase-9-mcp-upstream-gitea,
+# ADR 0051 items 25-27). Bind it to an openapi connection whose base_url ends in /api/v1, for example
+#   base_url: http://gitea-sandbox:3000/api/v1
+# The credential is a bearer token (the bare 40-hex access token, scope write:issue).
+# The reads and the label writer are code (dist/index.js): the issue list is a root array, labels
+# arrive as objects but are compared as names, and Gitea drops unknown label names silently.
+# There is no `test:`: a preset cannot know a repository, so the connection names its own test.
+version: 1
+adapter: openapi
+spec: spec/gitea.swagger.json
+auth: { scheme: bearer }
+operations:
+  - id: issues.search
+    risk: read
+    title: Search issues
+    description: >-
+      List issues (no pull requests) of one repository, newest first, optionally by state,
+      label names (any of them) or a search text. Returns only the requested fields, at most
+      50 per page.
+    input_schema:
+      type: object
+      properties:
+        owner: &owner
+          type: string
+          pattern: '^[A-Za-z0-9_.-]{1,100}$'
+          description: The repository owner (user or organisation), exact and case-sensitive.
+        repo: &repo
+          type: string
+          pattern: '^[A-Za-z0-9_.-]{1,100}$'
+          description: The repository name, exact and case-sensitive.
+        fields: &fields
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Issue fields to return.
+          items:
+            type: string
+            enum: [number, title, state, labels, owner, repo, updated_at]
+        state:
+          type: string
+          enum: [open, closed, all]
+          default: open
+          description: Issue state (default open).
+        labels:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          description: Label names; an issue matches when it has any of them.
+          items: &label
+            type: string
+            minLength: 1
+            maxLength: 50
+            # No commas (the list is sent comma-joined) and no control characters.
+            pattern: '^[^,\x00-\x1f\x7f]{1,50}$'
+        q:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Search text matched against issue titles and bodies.
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+          description: Page number, starting at 1 (default 1).
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 30
+          description: Issues per page (1-50, default 30).
+      required: [owner, repo, fields]
+      additionalProperties: false
+    fields_arg: fields
+    upstream:
+      code: search_issues
+      response: { fields_from_arg: fields }
+
+  - id: issues.get_many
+    risk: read
+    title: Get issues by number
+    description: >-
+      Look up to 50 issues of one repository by number. Unknown numbers and pull requests are
+      skipped. Returns only the requested fields.
+    input_schema:
+      type: object
+      properties:
+        owner: *owner
+        repo: *repo
+        numbers:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          description: Issue numbers, as decimal strings (for example "12").
+          items: &number
+            type: string
+            pattern: '^[1-9][0-9]{0,9}$'
+        fields: *fields
+      required: [owner, repo, numbers, fields]
+      additionalProperties: false
+    fields_arg: fields
+    upstream:
+      code: get_issues
+      response: { fields_from_arg: fields }
+
+  - id: issues.update_fields
+    risk: write
+    title: Update issue title or state
+    description: >-
+      Change the title or state of issues of one repository, named by number or selected as the
+      open issues having any of the given labels. Prepared as a change-set for approval.
+    input_schema:
+      type: object
+      properties:
+        owner: *owner
+        repo: *repo
+        numbers: &numbers
+          type: array
+          minItems: 1
+          maxItems: 500
+          uniqueItems: true
+          description: Issue numbers, as decimal strings. Give this or with_labels, not both.
+          items: *number
+        with_labels: &with_labels
+          type: array
+          minItems: 1
+          maxItems: 10
+          uniqueItems: true
+          description: Select the open issues having any of these label names. Give this or numbers, not both.
+          items: *label
+        changes:
+          type: object
+          minProperties: 1
+          additionalProperties: false
+          description: Field to new value.
+          properties:
+            title: { type: string, minLength: 1, maxLength: 255, description: The new title. }
+            state: { type: string, enum: [open, closed], description: The new state. }
+      required: [owner, repo, changes]
+      additionalProperties: false
+      # Exactly one of numbers or with_labels: three properties are required and nothing else is
+      # allowed. A root combinator is refused by Claude clients (ADR 0026).
+      minProperties: 4
+      maxProperties: 4
+    upstream:
+      method: PATCH
+      path: /repos/{owner}/{repo}/issues/{index}
+      path_params:
+        owner: { arg: owner }
+        repo: { arg: repo }
+        index: { record: number }
+      # No body template: the body is the record without its path field `number`.
+    manifest:
+      id_field: number
+      ids_arg: numbers
+      values_arg: changes
+      fields: [title, state]
+      scope_args: { owner: owner, repo: repo }
+      read_before:
+        operation: issues.get_many
+        ids_arg: numbers
+        args: { owner: { arg: owner }, repo: { arg: repo } }
+      selector:
+        operation: issues.search
+        args: { owner: { arg: owner }, repo: { arg: repo }, labels: { arg: with_labels }, state: open }
+        page_arg: page
+        page_size_arg: limit
+        page_size: 50
+      batch_size: 50
+      max_targets: 500
+      rollback: { strategy: replay_previous_state }
+
+  - id: issues.set_labels
+    risk: write
+    title: Set issue labels
+    description: >-
+      Replace the labels of issues of one repository, named by number or selected as the open
+      issues having any of the given labels. Every name must be a label of the repository
+      (exact, case-sensitive); an issue with an unknown name fails and is not changed. Give the
+      labels sorted, so an unchanged set is not shown as a change.
+    input_schema:
+      type: object
+      properties:
+        owner: *owner
+        repo: *repo
+        numbers: *numbers
+        with_labels: *with_labels
+        changes:
+          type: object
+          additionalProperties: false
+          description: The new label set.
+          properties:
+            labels:
+              type: array
+              maxItems: 20
+              uniqueItems: true
+              description: Label names; an empty list removes every label.
+              items: *label
+          required: [labels]
+      required: [owner, repo, changes]
+      additionalProperties: false
+      minProperties: 4
+      maxProperties: 4
+    upstream: { code: set_labels }
+    manifest:
+      id_field: number
+      ids_arg: numbers
+      values_arg: changes
+      fields: [labels]
+      scope_args: { owner: owner, repo: repo }
+      # The code writer gets owner and repo only through carried fields.
+      write: { carry_fields: [owner, repo] }
+      read_before:
+        operation: issues.get_many
+        ids_arg: numbers
+        args: { owner: { arg: owner }, repo: { arg: repo } }
+      selector:
+        operation: issues.search
+        args: { owner: { arg: owner }, repo: { arg: repo }, labels: { arg: with_labels }, state: open }
+        page_arg: page
+        page_size_arg: limit
+        page_size: 50
+      batch_size: 50
+      max_targets: 500
+      rollback: { strategy: replay_previous_state }
+
+  - id: issues.comment
+    risk: write_opaque
+    title: Comment on an issue
+    description: Add a comment to one issue of a repository. Sent once after approval; it cannot be rolled back.
+    input_schema:
+      type: object
+      properties:
+        owner: *owner
+        repo: *repo
+        number: { type: integer, minimum: 1, description: The issue number. }
+        comment:
+          type: object
+          additionalProperties: false
+          description: The comment.
+          properties:
+            body: { type: string, minLength: 1, maxLength: 65535, description: The comment text (Markdown). }
+          required: [body]
+      required: [owner, repo, number, comment]
+      additionalProperties: false
+    upstream:
+      method: POST
+      path: /repos/{owner}/{repo}/issues/{index}/comments
+      path_params:
+        owner: { arg: owner }
+        repo: { arg: repo }
+        index: { arg: number }
+      body: { arg: comment }

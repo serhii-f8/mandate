@@ -769,3 +769,103 @@ describe('NFR-11 request instrumentation', () => {
     expect(badHeaderEnds).toEqual([{ status: 200 }]);
   });
 });
+
+describe('EXE-4 a pre-send hook for calls sent at most once', () => {
+  const post = (): HttpRequestSpec => ({
+    method: 'POST',
+    url: new URL(`${up.url}/calls`),
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: '{"a":1}',
+  });
+
+  it('EXE-4 beforeSend runs once after the credential and before the transport; no retry', async () => {
+    up.route('POST', '/calls', () => ({ status: 503, body: {} }));
+    const log: string[] = [];
+    const credential: CredentialSource = {
+      ref: 'test-cred',
+      scheme: 'bearer',
+      open: () => {
+        log.push('credential');
+        return Promise.resolve({ token: 'tok-1' });
+      },
+    };
+    const c = createConnectionClient(settings({ auth: { scheme: 'bearer' } }), noSleep);
+    const r = await c.send(post(), {
+      credential,
+      retryable: true,
+      beforeSend: () => {
+        log.push(`hook:${up.requests.length}`);
+        return Promise.resolve();
+      },
+    });
+    expect(r).toMatchObject({ ok: false, code: 'http_status', status: 503 });
+    expect(log).toEqual(['credential', 'hook:0']);
+    expect(up.requests).toHaveLength(1);
+    expect(up.requests[0]?.headers.authorization).toBe('Bearer tok-1');
+  });
+
+  it('EXE-4 a throwing beforeSend is rethrown, nothing is sent and the slot is released', async () => {
+    up.route('POST', '/calls', () => ({ status: 200, body: {} }));
+    const s = settings({ maxConcurrency: 1 });
+    const c = createConnectionClient(s);
+    const fenced = new Error('fenced');
+    await expect(c.send(post(), { retryable: false, beforeSend: () => Promise.reject(fenced) })).rejects.toBe(fenced);
+    expect(up.requests).toHaveLength(0);
+    // With one slot, a second send only succeeds if the first released it.
+    expect(await c.send(post(), { retryable: false })).toMatchObject({ ok: true, status: 200 });
+  });
+
+  it('EXE-4 CONN-5 a host outside the allow-list is egress_denied and beforeSend is not called', async () => {
+    let called = 0;
+    const c = createConnectionClient(settings({ allowPrivateNetwork: false }));
+    const r = await c.send(post(), {
+      retryable: false,
+      beforeSend: () => {
+        called += 1;
+        return Promise.resolve();
+      },
+    });
+    expect(r).toMatchObject({ ok: false, code: 'egress_denied' });
+    expect(called).toBe(0);
+    expect(up.requests).toHaveLength(0);
+  });
+
+  it('EXE-4 CONN-3 a missing credential is credential_missing and beforeSend is not called', async () => {
+    let called = 0;
+    const c = createConnectionClient(settings({ auth: { scheme: 'bearer' } }));
+    const r = await c.send(post(), {
+      retryable: false,
+      beforeSend: () => {
+        called += 1;
+        return Promise.resolve();
+      },
+    });
+    expect(r).toMatchObject({ ok: false, code: 'credential_missing' });
+    expect(called).toBe(0);
+    expect(up.requests).toHaveLength(0);
+  });
+
+  it('EXE-4 CONN-3 with beforeSend an OAuth 401 is returned as http_status 401 without a second request', async () => {
+    up.route('POST', '/token', () => ({ status: 200, body: { access_token: 'issued-1', token_type: 'Bearer', expires_in: 3600 } }));
+    up.route('POST', '/calls', () => ({ status: 401, body: {} }));
+    const c = createConnectionClient(settings({ auth: { scheme: 'oauth_client_credentials', tokenUrl: `${up.url}/token`, scopes: [] } }));
+    const r = await c.send(post(), {
+      credential: cred('oauth_client_credentials', { client_id: 'id', client_secret: 'secret' }),
+      retryable: false,
+      beforeSend: () => Promise.resolve(),
+    });
+    expect(r).toMatchObject({ ok: false, code: 'http_status', status: 401 });
+    expect(up.requests.filter((x) => x.path === '/calls')).toHaveLength(1);
+    expect(up.requests.filter((x) => x.path === '/token')).toHaveLength(1);
+  });
+
+  it.each([
+    ['a non-JSON body', { status: 200, headers: { 'content-type': 'text/html' }, body: '<html>ok</html>' }],
+    ['an empty JSON body', { status: 201, headers: { 'content-type': 'application/json' }, body: '' }],
+    ['a malformed JSON body', { status: 200, headers: { 'content-type': 'application/json' }, body: '{oops' }],
+  ])('EXE-4 SEC-3 with discardBody a 2xx with %s is a response with no JSON', async (_name, response) => {
+    up.route('POST', '/calls', () => response);
+    const r = await createConnectionClient(settings()).send(post(), { retryable: false, discardBody: true });
+    expect(r).toEqual({ ok: true, status: response.status, json: null, durationMs: expect.any(Number) as unknown });
+  });
+});

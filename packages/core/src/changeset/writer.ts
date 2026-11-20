@@ -14,7 +14,12 @@ export type WriteOutcomeCode =
   | 'upstream_failed'
   | 'upstream_retriable'
   | 'no_outcome'
-  | 'write_mode_unsupported';
+  | 'write_mode_unsupported'
+  | 'upstream_changed'
+  | 'upstream_unavailable'
+  | 'egress_denied'
+  | 'credential_missing'
+  | 'credential_unusable';
 
 export type WriteClassification =
   | { readonly action: 'write' }
@@ -86,13 +91,29 @@ export interface BulkWriter {
   submit(
     records: readonly Readonly<Record<string, unknown>>[],
   ): Promise<{ ok: true; batchId: string } | { ok: false; code: string; retriable: boolean }>;
-  /** `status` on a failure: the HTTP status of an `http_status` failure (a number, never upstream text). */
+  /**
+   * `keys`: the target IDs of the plan's `write` entries, in plan order, for an upstream that
+   * reports per-item state by key instead of index (`bulk.status.key`).
+   * `status` on a failure: the HTTP status of an `http_status` failure (a number, never upstream text).
+   */
   status(
     batchId: string,
+    keys: readonly string[],
   ): Promise<
     | { ok: true; items: readonly { index: number; state: BulkItemState }[] }
     | { ok: false; code: string; retriable: boolean; status?: number }
   >;
+}
+
+/** Per-record answer of a direct writer. */
+export type DirectRecordState = 'ok' | 'failed' | 'retriable';
+
+/** Per-record and code writers (OPS-5, OPS-6): one answer per record, in order; nothing to poll. */
+export interface DirectWriter {
+  write(
+    records: readonly Readonly<Record<string, unknown>>[],
+    heartbeat: () => void,
+  ): Promise<{ ok: true; states: readonly DirectRecordState[] } | { ok: false; code: string; retriable: boolean }>;
 }
 
 /**
@@ -115,7 +136,14 @@ export const POLL_FACTOR = 1.5;
 export const POLL_MAX_MS = 5000;
 export const POLL_GIVE_UP_MS = 600_000;
 
-export type RetryableWriteCode = 'read_failed' | 'incomplete_read' | 'submit_failed' | 'status_failed' | 'poll_timeout';
+export type RetryableWriteCode =
+  | 'read_failed'
+  | 'incomplete_read'
+  | 'submit_failed'
+  | 'status_failed'
+  | 'poll_timeout'
+  | 'write_failed'
+  | 'write_retriable';
 
 /** The batch was interrupted and the activity retries it (EXE-4). The message never carries upstream text (SEC-3). */
 export class RetryableWriteError extends Error {
@@ -125,16 +153,22 @@ export class RetryableWriteError extends Error {
   }
 }
 
-export interface ManifestBatchWriterDeps {
+interface ManifestBatchWriterBase {
   readonly operation: OperationDefinition & { readonly manifest: ManifestDefinition };
   /** `fields_arg` of `manifest.readBefore.operation`; undefined when that read takes no field list. */
   readonly readFieldsArg: string | undefined;
   readonly readerFor: (changeset: ChangeSetRecord) => UpstreamReader;
-  readonly bulkFor: (changeset: ChangeSetRecord) => BulkWriter;
   readonly clock: Clock;
   /** `reverse` writes the stored `before` back over the stored `after` (rollback, EXE-8). Default `forward`. */
   readonly direction?: WriteDirection;
 }
+
+/** Exactly one write mode: `bulkFor` (submit, record, poll) or `directFor` (one answer per record). */
+export type ManifestBatchWriterDeps = ManifestBatchWriterBase &
+  (
+    | { readonly bulkFor: (changeset: ChangeSetRecord) => BulkWriter; readonly directFor?: never }
+    | { readonly directFor: (changeset: ChangeSetRecord) => DirectWriter; readonly bulkFor?: never }
+  );
 
 type WriteInput = Parameters<ChangeWriter['writeBatch']>[0];
 type Current = ReadonlyMap<string, Readonly<Record<string, unknown>>>;
@@ -143,9 +177,16 @@ type Current = ReadonlyMap<string, Readonly<Record<string, unknown>>>;
 const STATE_RANK: Readonly<Record<BulkItemState, number>> = { ok: 0, open: 1, retriable: 2, failed: 3 };
 
 /**
- * Writes one batch of a manifest change-set through an upstream bulk API (design part 2 §4):
- * read current state, classify (CS-7), submit the items still at `before`, record the submission
- * before polling (EXE-4), poll, map states by index, and verify the `ok` items with one more read.
+ * Writes one batch of a manifest change-set (design part 2 §4) in one of two modes. Both read
+ * current state, classify (CS-7), write only the items still at `before`, and verify the `ok`
+ * items with one more read.
+ * - Bulk (`bulkFor`): submit, record the submission before polling (EXE-4), poll with the to-write
+ *   target IDs as keys, and map states by index.
+ * - Direct (`directFor`, per-record and code writers, OPS-5 and OPS-6): one answer per record and
+ *   nothing to poll, so no submission is recorded. A `retriable` record state throws
+ *   `write_retriable` and a retriable answer throws `write_failed`; the retry re-reads, so records
+ *   already written become `already_applied` (NFR-2). A recorded submission found in direct mode
+ *   (the mode changed under a running batch) ends every to-write item `no_outcome` unwritten.
  */
 export class ManifestBatchWriter implements ChangeWriter {
   private readonly manifest: ManifestDefinition;
@@ -170,8 +211,8 @@ export class ManifestBatchWriter implements ChangeWriter {
     // Resume (EXE-4): a recorded submission is never resubmitted and nothing is read before polling.
     if (batch.submission !== undefined) {
       const { upstreamBatchId, plan } = batch.submission;
-      const writeCount = plan.filter((e) => e.action === 'write').length;
-      const polled = await this.poll(this.deps.bulkFor(changeset), upstreamBatchId, writeCount, batch);
+      if (this.deps.bulkFor === undefined) return outcomesOf(plan, new Map(), 'no_outcome');
+      const polled = await this.poll(this.deps.bulkFor(changeset), upstreamBatchId, writeKeys(plan), batch);
       return this.finish(changeset, plan, polled, items, this.deps.readerFor(changeset));
     }
     const touched = touchedFields(this.manifest, changeset.args);
@@ -183,20 +224,49 @@ export class ManifestBatchWriter implements ChangeWriter {
     const { plan, records } = await this.classifyBatch(changeset, items, touched, reader);
     if (records.length === 0) return outcomesOf(plan, new Map());
 
+    if (this.deps.directFor !== undefined) {
+      const polled = await this.writeDirect(this.deps.directFor(changeset), records, batch);
+      if (!polled.ok) return outcomesOf(plan, new Map(), polled.error);
+      return this.finish(changeset, plan, polled.states, items, reader);
+    }
+
     const bulk = this.deps.bulkFor(changeset);
     const submitted = await this.submit(bulk, records);
-    if (!submitted.ok) {
-      const failed = new Map<string, ItemOutcome>();
-      for (const e of plan) {
-        if (e.action === 'write') failed.set(e.targetId, { targetId: e.targetId, status: 'failed', error: submitted.error });
-      }
-      return outcomesOf(plan, failed);
-    }
+    if (!submitted.ok) return outcomesOf(plan, new Map(), submitted.error);
     const batchId = submitted.batchId;
     // A fenced attempt throws BatchFenced here; it propagates and nothing is polled (EXE-4).
     await batch.recordSubmission({ upstreamBatchId: batchId, plan });
-    const polled = await this.poll(bulk, batchId, records.length, batch);
+    const polled = await this.poll(bulk, batchId, writeKeys(plan), batch);
     return this.finish(changeset, plan, polled, items, reader);
+  }
+
+  /**
+   * One direct write of the to-write records; answers their states by position. A retriable answer
+   * or any `retriable` state throws: the retry re-reads, so what was written reads `already_applied`
+   * and only the rest is sent again (NFR-2). That also covers records after a `retriable` one that
+   * the writer never started (the answer is shorter than the records). A non-retriable answer ends
+   * every to-write item: `invalid_response` came with a success status, so the upstream may have
+   * applied the records (`no_outcome`); any other was refused or never sent (`upstream_rejected`).
+   * A state missing from a shorter answer stays absent from the map and `finish` makes it `no_outcome`.
+   */
+  private async writeDirect(
+    direct: DirectWriter,
+    records: readonly Record<string, unknown>[],
+    batch: BatchContext,
+  ): Promise<{ ok: true; states: Map<number, BulkItemState> } | { ok: false; error: 'no_outcome' | 'upstream_rejected' }> {
+    const res = await direct.write(records, () => {
+      batch.heartbeat();
+    });
+    if (!res.ok) {
+      if (res.retriable) throw new RetryableWriteError('write_failed');
+      return { ok: false, error: res.code === 'invalid_response' ? 'no_outcome' : 'upstream_rejected' };
+    }
+    if (res.states.includes('retriable')) throw new RetryableWriteError('write_retriable');
+    const states = new Map<number, BulkItemState>();
+    res.states.forEach((state, index) => {
+      if (index < records.length) states.set(index, state);
+    });
+    return { ok: true, states };
   }
 
   private async classifyBatch(
@@ -253,7 +323,8 @@ export class ManifestBatchWriter implements ChangeWriter {
   }
 
   /**
-   * Polls until no submitted index is open; answers the worst state per index in 0..writeCount-1.
+   * Polls until no submitted index is open; answers the worst state per index in 0..keys.length-1.
+   * `keys` are the to-write target IDs in plan order, passed to every status call.
    * One heartbeat per round; waits 1 s growing x1.5 up to 5 s; still open after 10 min throws
    * `poll_timeout` (the retry resumes from the recorded submission). An empty item list counts as
    * still open. A non-retriable status failure (the upstream no longer knows the batch, or answers
@@ -263,15 +334,16 @@ export class ManifestBatchWriter implements ChangeWriter {
   private async poll(
     bulk: BulkWriter,
     batchId: string,
-    writeCount: number,
+    keys: readonly string[],
     batch: BatchContext,
   ): Promise<Map<number, BulkItemState>> {
+    const writeCount = keys.length;
     const clock = this.deps.clock;
     const start = clock.now();
     for (let round = 0; ; round++) {
       batch.heartbeat();
       await clock.sleep(Math.min(POLL_MAX_MS, POLL_INITIAL_MS * POLL_FACTOR ** round));
-      const res = await bulk.status(batchId);
+      const res = await bulk.status(batchId, keys);
       if (!res.ok) {
         if (res.retriable || authenticationFailure(res)) throw new RetryableWriteError('status_failed');
         return new Map();
@@ -382,14 +454,26 @@ function safeEquals(
   }
 }
 
-/** Outcomes in plan order: a decided outcome, else the plan's own classification. */
-function outcomesOf(plan: readonly PlanEntry[], decided: ReadonlyMap<string, ItemOutcome>): ItemOutcome[] {
+/** The target IDs of the plan's `write` entries, in plan order (the status keys). */
+function writeKeys(plan: readonly PlanEntry[]): string[] {
+  return plan.filter((e) => e.action === 'write').map((e) => e.targetId);
+}
+
+/**
+ * Outcomes in plan order: a decided outcome, else the plan's own classification. An undecided
+ * write entry fails with `undecided` (every to-write item ended by one answer); without it, every
+ * write entry is decided before this point, and `no_outcome` fails closed anyway.
+ */
+function outcomesOf(
+  plan: readonly PlanEntry[],
+  decided: ReadonlyMap<string, ItemOutcome>,
+  undecided: 'no_outcome' | 'upstream_rejected' = 'no_outcome',
+): ItemOutcome[] {
   return plan.map((e): ItemOutcome => {
     const d = decided.get(e.targetId);
     if (d !== undefined) return d;
     if (e.action === 'outcome') return { targetId: e.targetId, status: e.status, error: e.error };
-    // Unreachable: every write entry is decided before this point; fail closed anyway.
-    return { targetId: e.targetId, status: 'failed', error: 'no_outcome' };
+    return { targetId: e.targetId, status: 'failed', error: undecided };
   });
 }
 

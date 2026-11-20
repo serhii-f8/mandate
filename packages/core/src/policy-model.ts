@@ -63,6 +63,10 @@ export interface DisabledOperation {
   readonly path: string;
   readonly operationId?: string;
   readonly summary?: string;
+  /** CONN-1: the upstream tool of an MCP-backed entry (`method` is then `MCP`, `path` the tool name). */
+  readonly tool?: string;
+  /** CONN-4: the live tool hash, when the tool was listed. */
+  readonly hash?: string;
 }
 
 export interface GrantDefinition {
@@ -88,8 +92,16 @@ export interface RoleMappingEntry {
   readonly roles: readonly string[];
 }
 
+/** One OAuth client acting as a service account, holding exactly one role (AUTH-4). */
+export interface ServiceAccountEntry {
+  readonly clientId: string;
+  readonly role: string;
+}
+
 export interface PolicyConfiguration {
   readonly operations: readonly OperationDefinition[];
   readonly roles: readonly RoleDefinition[];
   readonly roleMapping: readonly RoleMappingEntry[];
+  /** Configured service accounts (AUTH-4); absent means none. */
+  readonly serviceAccounts?: readonly ServiceAccountEntry[];
 }

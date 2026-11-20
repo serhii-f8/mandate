@@ -1,9 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createOpenApiAdapter } from '@aiops/adapters';
-import type { LoadedConfiguration } from '@aiops/config';
+import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
+import {
+  mcpToolHash,
+  type BulkStatusOutcome,
+  type BulkSubmitOutcome,
+  type CallOutcome,
+  type McpToolDefinition,
+  type ReadAdapter,
+  type ReadOutcome,
+  type ScopeReport,
+  type ToolListOutcome,
+  type UpstreamResolver,
+  type WriteAdapter,
+} from '@aiops/connector-sdk';
 import {
   EMPTY_STATS,
   ManifestBatchWriter,
+  OpaqueCallWriter,
   UnsupportedWriter,
   type BatchContext,
   type BatchSubmission,
@@ -13,7 +27,7 @@ import {
   type RollbackStrategy,
 } from '@aiops/core';
 import { installFakeMagentoCatalog, startFakeUpstream, type FakeMagentoCatalog, type FakeUpstream } from '@aiops/testing';
-import { createBulkWriter, createUpstreamReader, type UpstreamCallLog } from '@aiops/upstream';
+import { createBulkWriter, createUpstreamReader, type ToolLister, type UpstreamCallLog } from '@aiops/upstream';
 import { loadMagentoPreset, MAGENTO_BASE_PATH, MemoryVault, vaultWithToken } from '../test/support/magento.js';
 import { createRollbackWriterFor, createWriterFor } from './writers.js';
 
@@ -48,6 +62,17 @@ operations:
       batch_size: 100
       rollback: { strategy: replay_previous_state }
 `;
+
+/** Only the read and bulk/opaque methods of `adapter`: no per-record writes, no code operations. */
+function bulkOnly(adapter: ReadAdapter & WriteAdapter & Required<Pick<WriteAdapter, 'callOnce'>>): ReadAdapter & WriteAdapter {
+  return {
+    read: (input) => adapter.read(input),
+    detectScopes: (input) => adapter.detectScopes(input),
+    submitBulk: (input) => adapter.submitBulk(input),
+    bulkStatus: (input) => adapter.bulkStatus(input),
+    callOnce: (input) => adapter.callOnce(input),
+  };
+}
 
 /** Advances virtual time instead of sleeping. */
 class FakeClock implements Clock {
@@ -140,8 +165,11 @@ describe('EXE-4 OPS-6 worker writerFor', () => {
     createWriterFor({ vault, adapter: createOpenApiAdapter(), clock: new FakeClock(), log: (l) => lines.push(l) });
   const statusPolls = (): number => up.requests.filter((r) => r.method === 'GET' && r.path.endsWith('/detailed-status')).length;
 
-  it('OPS-6 writerFor returns UnsupportedWriter without a bulk binding: every item failed/write_mode_unsupported', async () => {
-    const writer = writerFor()(configuration, 'catalog.update_content_plain');
+  it('OPS-6 writerFor returns UnsupportedWriter without a usable write binding: every item failed/write_mode_unsupported', async () => {
+    // A non-bulk HTTP write binding is a per-record write (OPS-6); an adapter that cannot write per
+    // record has no writer for it and fails closed (ruling F14).
+    expect(writerFor()(configuration, 'catalog.update_content_plain')).toBeInstanceOf(ManifestBatchWriter);
+    const writer = createWriterFor({ vault, adapter: bulkOnly(createOpenApiAdapter()) })(configuration, 'catalog.update_content_plain');
     expect(writer).toBeInstanceOf(UnsupportedWriter);
     expect(writerFor()(configuration, 'catalog.get_products_by_sku')).toBeInstanceOf(UnsupportedWriter);
     expect(writerFor()(configuration, 'catalog.unknown')).toBeInstanceOf(UnsupportedWriter);
@@ -316,10 +344,11 @@ describe('EXE-8 OPS-3 rollbackWriterFor', () => {
   it('OPS-3 strategy none gives no rollback writer', () => {
     const rollbackWriterFor = createRollbackWriterFor(deps());
     expect(rollbackWriterFor(withStrategy(configuration, { strategy: 'none' }), 'catalog.update_content')).toBeUndefined();
-    // An unknown operation, one without a manifest and one without a bulk binding get none either.
+    // An unknown operation, one without a manifest and one without a usable write binding get none either.
     expect(rollbackWriterFor(configuration, 'catalog.unknown')).toBeUndefined();
     expect(rollbackWriterFor(configuration, 'catalog.get_products_by_sku')).toBeUndefined();
-    expect(rollbackWriterFor(configuration, 'catalog.update_content_plain')).toBeUndefined();
+    expect(rollbackWriterFor(configuration, 'catalog.update_content_plain')).toBeInstanceOf(ManifestBatchWriter);
+    expect(createRollbackWriterFor({ ...deps(), adapter: bulkOnly(createOpenApiAdapter()) })(configuration, 'catalog.update_content_plain')).toBeUndefined();
     // An inverse operation that is not in the configuration has no binding.
     const dangling = withStrategy(configuration, { strategy: 'inverse_operation', operation: 'catalog.gone' });
     expect(rollbackWriterFor(dangling, 'catalog.update_content')).toBeUndefined();
@@ -382,5 +411,165 @@ describe('EXE-8 OPS-3 rollbackWriterFor', () => {
     });
     expect(lines.length).toBeGreaterThan(0);
     expect(new Set(lines.map((l) => l.correlationId))).toEqual(new Set(['corr-exec']));
+  });
+});
+
+/** An opaque operation on the preset's connection: one `POST /V1/notes` (design phase 9 §2). */
+const OPAQUE_OPERATIONS = `version: 1
+operations:
+  - id: catalog.notify_team
+    connection: magento
+    risk: write_opaque
+    description: Send a note to the catalog team.
+    upstream: { method: POST, path: /V1/notes, body: { arg: note } }
+    input_schema: { type: object, properties: { note: { type: string } }, required: [note] }
+`;
+
+const NOTE = 'a-distinctive-note-value';
+const CALL_ITEM: readonly ChangeItemRecord[] = [{ targetId: 'call', status: 'pending', before: null, after: { note: NOTE } }];
+
+function opaqueChangeset(operation: string): ChangeSetRecord {
+  return { ...changesetFor(operation), args: { note: NOTE }, executionRequest: EXECUTION_REQUEST };
+}
+
+describe('EXE-4 worker writerFor of opaque operations', () => {
+  let up: FakeUpstream;
+  let configuration: LoadedConfiguration;
+  let vault: MemoryVault;
+  let lines: UpstreamCallLog[];
+
+  beforeEach(async () => {
+    up = await startFakeUpstream();
+    up.route('POST', `${MAGENTO_BASE_PATH}/V1/notes`, () => ({ status: 201, body: { id: 7 } }));
+    configuration = await loadMagentoPreset(`${up.url}${MAGENTO_BASE_PATH}`, [{ file: 'operations.yaml', text: OPAQUE_OPERATIONS }]);
+    vault = await vaultWithToken(FAKE_TOKEN);
+    lines = [];
+  });
+  afterEach(async () => {
+    await up.close();
+  });
+
+  const writerFor = () => createWriterFor({ vault, adapter: createOpenApiAdapter(), log: (l) => lines.push(l) });
+
+  it('EXE-4 createWriterFor answers an OpaqueCallWriter for write_opaque and for destructive without a manifest', async () => {
+    const operations = configuration.policy.operations.map((o) => (o.id === 'catalog.notify_team' ? { ...o, risk: 'destructive' as const } : o));
+    const destructive = { ...configuration, policy: { ...configuration.policy, operations } };
+
+    for (const config of [configuration, destructive]) {
+      const writer = writerFor()(config, 'catalog.notify_team');
+      expect(writer).toBeInstanceOf(OpaqueCallWriter);
+      const batch = new FakeBatch(() => 0);
+      const outcomes = await writer.writeBatch({ changeset: opaqueChangeset('catalog.notify_team'), items: CALL_ITEM, batch });
+      expect(outcomes).toEqual([{ targetId: 'call', status: 'written' }]);
+      // Recorded once, before the request left (EXE-4).
+      expect(batch.recorded).toEqual([{ upstreamBatchId: 'opaque:cs-1:1', plan: [{ targetId: 'call', action: 'write' }] }]);
+    }
+    expect(up.requests.map((r) => [r.method, r.path])).toEqual([
+      ['POST', `${MAGENTO_BASE_PATH}/V1/notes`],
+      ['POST', `${MAGENTO_BASE_PATH}/V1/notes`],
+    ]);
+    expect(up.requests.every((r) => r.headers.authorization === `Bearer ${FAKE_TOKEN}`)).toBe(true);
+    // Forward calls run under the execution request; no argument or token reaches the log (SEC-3).
+    expect(new Set(lines.map((l) => l.correlationId))).toEqual(new Set(['corr-exec']));
+    expect(JSON.stringify(lines)).not.toContain(NOTE);
+    expect(JSON.stringify(lines)).not.toContain(FAKE_TOKEN);
+    // An opaque operation has no rollback writer (EXE-8).
+    expect(createRollbackWriterFor({ vault, adapter: createOpenApiAdapter() })(configuration, 'catalog.notify_team')).toBeUndefined();
+  });
+
+  it('EXE-4 an opaque operation whose binding is gone fails its call upstream_rejected and sends nothing', async () => {
+    const bindings = new Map(configuration.bindings);
+    bindings.delete('catalog.notify_team');
+    const writer = writerFor()({ ...configuration, bindings }, 'catalog.notify_team');
+    expect(writer).toBeInstanceOf(OpaqueCallWriter);
+    const batch = new FakeBatch(() => 0);
+    expect(await writer.writeBatch({ changeset: opaqueChangeset('catalog.notify_team'), items: CALL_ITEM, batch })).toEqual([
+      { targetId: 'call', status: 'failed', error: 'upstream_rejected' },
+    ]);
+    expect(batch.recorded).toEqual([]);
+    expect(up.requests).toEqual([]);
+  });
+});
+
+const SEND_V1: McpToolDefinition = { name: 'send', inputSchema: { type: 'object', properties: { to: { type: 'string' } } } };
+const SEND_V2: McpToolDefinition = { ...SEND_V1, description: 'Send, now also to everyone in copy.' };
+
+/** An MCP connection with one opaque operation pinned to `tool`, loaded while the server lists `tool`. */
+async function mcpConfiguration(tool: McpToolDefinition): Promise<LoadedConfiguration> {
+  const resolver: UpstreamResolver = {
+    resolveSpec: () => Promise.resolve({ ok: true, catalog: [] }),
+    resolveTools: () => Promise.resolve(toolList(tool)),
+  };
+  const loaded = await loadConfigurationSources(
+    [
+      {
+        file: 'connections.yaml',
+        text: 'version: 1\nconnections:\n  - { id: tools, adapter: mcp, mcp_url: http://tools.example.test/mcp }\n',
+      },
+      {
+        file: 'operations.yaml',
+        text: `version: 1\noperations:\n  - id: tools.send\n    connection: tools\n    risk: write_opaque\n    description: Send.\n    upstream: { tool: send, pin: ${mcpToolHash(tool)} }\n`,
+      },
+    ],
+    { resolver },
+  );
+  if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
+  return loaded.configuration;
+}
+
+function toolList(...definitions: McpToolDefinition[]): ToolListOutcome {
+  return { ok: true, tools: definitions.map((definition) => ({ definition, hash: mcpToolHash(definition) })), dropped: 0, durationMs: 1 };
+}
+
+/** Counts `callOnce` and honours its contract: the hook, then one send. */
+class CountingAdapter implements ReadAdapter, WriteAdapter {
+  sent = 0;
+  read(): Promise<ReadOutcome> {
+    throw new Error('not used');
+  }
+  detectScopes(): Promise<ScopeReport> {
+    throw new Error('not used');
+  }
+  submitBulk(): Promise<BulkSubmitOutcome> {
+    throw new Error('not used');
+  }
+  bulkStatus(): Promise<BulkStatusOutcome> {
+    throw new Error('not used');
+  }
+  async callOnce(input: Parameters<NonNullable<WriteAdapter['callOnce']>>[0]): Promise<CallOutcome> {
+    await input.beforeSend();
+    this.sent += 1;
+    return { result: 'accepted', durationMs: 1 };
+  }
+}
+
+describe('CONN-4 worker writerFor of opaque MCP operations', () => {
+  it('CONN-4 the pin of an opaque MCP call is checked against the configuration passed to writerFor', async () => {
+    // The worker started under v1; the server now lists v2, and a reload pinned v2.
+    const atStartup = await mcpConfiguration(SEND_V1);
+    const reloaded = await mcpConfiguration(SEND_V2);
+    const lister: ToolLister = () => Promise.resolve(toolList(SEND_V2));
+    const adapter = new CountingAdapter();
+    const writerFor = createWriterFor({ vault: new MemoryVault(), adapter, toolLister: lister });
+    const changeset = { ...opaqueChangeset('tools.send'), connection: 'tools' };
+
+    const stale = await writerFor(atStartup, 'tools.send').writeBatch({ changeset, items: CALL_ITEM, batch: new FakeBatch(() => 0) });
+    expect(stale).toEqual([{ targetId: 'call', status: 'failed', error: 'upstream_changed' }]);
+    expect(adapter.sent).toBe(0);
+
+    const current = await writerFor(reloaded, 'tools.send').writeBatch({ changeset, items: CALL_ITEM, batch: new FakeBatch(() => 0) });
+    expect(current).toEqual([{ targetId: 'call', status: 'written' }]);
+    expect(adapter.sent).toBe(1);
+  });
+
+  it('CONN-4 without a tool lister an opaque MCP call fails closed upstream_unavailable and sends nothing', async () => {
+    const adapter = new CountingAdapter();
+    const writer = createWriterFor({ vault: new MemoryVault(), adapter })(await mcpConfiguration(SEND_V1), 'tools.send');
+    const batch = new FakeBatch(() => 0);
+    expect(await writer.writeBatch({ changeset: opaqueChangeset('tools.send'), items: CALL_ITEM, batch })).toEqual([
+      { targetId: 'call', status: 'failed', error: 'upstream_unavailable' },
+    ]);
+    expect(batch.recorded).toEqual([]);
+    expect(adapter.sent).toBe(0);
   });
 });

@@ -6,6 +6,8 @@ export type AuthSettings =
 
 export interface ConnectionSettings {
   id: string;
+  /** Upstream protocol; absent means `openapi` (since 0.6.0, additive). */
+  kind?: 'openapi' | 'mcp';
   baseUrl: string;
   auth?: AuthSettings;
   credentialRef?: string;

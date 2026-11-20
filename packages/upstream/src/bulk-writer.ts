@@ -37,9 +37,11 @@ const statusFailure = (outcome: WriteFailure): Failure & { status?: number } =>
 export function createBulkWriter(deps: BulkWriterDeps): BulkWriter | undefined {
   const { configuration, adapter } = deps;
   const binding = configuration.bindings.get(deps.operationId);
-  const connection = binding === undefined ? undefined : configuration.connectionSettings.get(binding.connection);
-  const bulk = binding?.mapping.bulk;
-  if (binding === undefined || connection === undefined || bulk === undefined) return undefined;
+  // Bulk writes are HTTP only (OPS-6); an MCP tool has no bulk mapping.
+  if (binding?.kind !== 'http') return undefined;
+  const connection = configuration.connectionSettings.get(binding.connection);
+  const bulk = binding.mapping.bulk;
+  if (connection === undefined || bulk === undefined) return undefined;
   const { mapping } = binding;
 
   const log = (method: string, outcome: { readonly status?: number; readonly durationMs: number } & ({ ok: true } | WriteFailure)): void => {
@@ -62,10 +64,16 @@ export function createBulkWriter(deps: BulkWriterDeps): BulkWriter | undefined {
       log(mapping.method, outcome);
       return outcome.ok ? { ok: true, batchId: outcome.batchId } : failure(outcome);
     },
-    async status(batchId) {
+    async status(batchId, keys) {
       const credential = await connectionCredential(deps.vault, connection.credentialRef);
       if (credential === 'unusable') return UNUSABLE;
-      const outcome = await adapter.bulkStatus({ connection, mapping, batchId, ...(credential === undefined ? {} : { credential }) });
+      const outcome = await adapter.bulkStatus({
+        connection,
+        mapping,
+        batchId,
+        keys,
+        ...(credential === undefined ? {} : { credential }),
+      });
       log(bulk.status.method, outcome);
       return outcome.ok ? { ok: true, items: outcome.items.map(({ index, state }) => ({ index, state })) } : statusFailure(outcome);
     },

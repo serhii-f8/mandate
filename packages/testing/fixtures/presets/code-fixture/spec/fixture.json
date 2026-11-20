@@ -1,0 +1,61 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Fixture items", "version": "1.0.0" },
+  "paths": {
+    "/items": {
+      "get": {
+        "operationId": "listItems",
+        "parameters": [
+          { "name": "state", "in": "query", "schema": { "type": "string", "enum": ["open", "closed"] } },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100 } }
+        ],
+        "responses": { "200": { "description": "A bare array of items" } }
+      }
+    },
+    "/items/{id}": {
+      "get": {
+        "operationId": "getItem",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "The item" }, "404": { "description": "Not found" } }
+      },
+      "patch": {
+        "operationId": "updateItem",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "title": { "type": "string" }, "state": { "type": "string", "enum": ["open", "closed"] } },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "The updated item" }, "400": { "description": "Bad body" } }
+      }
+    },
+    "/items/{id}/tags": {
+      "put": {
+        "operationId": "setItemTags",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "tags": { "type": "array", "items": { "type": "string" } } }, "required": ["tags"] }
+            }
+          }
+        },
+        "responses": { "200": { "description": "The tags" }, "400": { "description": "Unknown tag" } }
+      }
+    },
+    "/ping": {
+      "post": {
+        "operationId": "ping",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Accepted" } }
+      }
+    }
+  }
+}

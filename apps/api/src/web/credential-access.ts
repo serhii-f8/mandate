@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Response } from 'express';
 import type { LoadedConfiguration } from '@aiops/config';
-import { resolveRoles, type AuditAction, type AuditLog } from '@aiops/core';
+import { rolesOf, type AuditAction, type AuditLog, type Caller } from '@aiops/core';
 import { deny, pageDenial, pageOf, type PageChecks, type PageContext, type PageDenial, type PageRequest, type RequiredChecks } from './access.js';
 import { pageCorrelation } from './correlation.js';
 
@@ -11,8 +11,8 @@ export interface CredentialAccess {
   readonly refs: ReadonlySet<string>;
 }
 
-export function credentialAccess(configuration: LoadedConfiguration, groups: readonly string[]): CredentialAccess {
-  const roles = resolveRoles(groups, configuration.policy.roleMapping);
+export function credentialAccess(configuration: LoadedConfiguration, caller: Pick<Caller, 'subject' | 'groups'>): CredentialAccess {
+  const roles = rolesOf(caller, configuration.policy);
   const listed = roles.flatMap((role) => configuration.credentialManagers.get(role) ?? []);
   const all = listed.includes('*');
   const refs = new Set([...configuration.credentialRefs.keys()].filter((ref) => all || listed.includes(ref)));
@@ -41,7 +41,7 @@ export interface CredentialRequest {
 
 export function credentialRequest(req: PageRequest, res: Response, configuration: LoadedConfiguration): CredentialRequest {
   const page = pageOf(req);
-  return { page, configuration, access: credentialAccess(configuration, page.session.groups), correlationId: pageCorrelation(req, res) };
+  return { page, configuration, access: credentialAccess(configuration, page.session), correlationId: pageCorrelation(req, res) };
 }
 
 /**

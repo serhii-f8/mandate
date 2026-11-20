@@ -37,8 +37,9 @@ export type {
   RoleDefinition,
   RoleMappingEntry,
   ScopeValue,
+  ServiceAccountEntry,
 } from './policy-model.js';
-export { resolveRoles } from './roles.js';
+export { callerKind, resolveRoles, rolesOf, SERVICE_SUBJECT_PREFIX, serviceClientOf, serviceSubject } from './roles.js';
 export {
   createPolicyEngine,
   type DenyReason,
@@ -110,6 +111,9 @@ export type {
   ItemsPageQuery,
   LimitName,
   NewChangeSet,
+  OpaqueCaller,
+  OpaqueCallOutcome,
+  OpaqueNotSentCode,
   PlanEntry,
   PreparationRepository,
   PrepareFailure,
@@ -145,6 +149,8 @@ export {
   classifyForRollback,
   classifyForWrite,
   type Clock,
+  type DirectRecordState,
+  type DirectWriter,
   ManifestBatchWriter,
   type ManifestBatchWriterDeps,
   POLL_FACTOR,
@@ -188,5 +194,14 @@ export {
   preparationErrorResult,
   preparedResult,
 } from './changeset/result.js';
+export {
+  OPAQUE_TARGET_ID,
+  changesetKind,
+  isOpaque,
+  runOpaquePreparation,
+  type ChangeSetKind,
+  type OpaquePreparationRequest,
+} from './changeset/opaque.js';
+export { OpaqueCallWriter, type OpaqueCallWriterDeps } from './changeset/opaque-writer.js';
 export * from './approval/index.js';
 export * from './notification/index.js';

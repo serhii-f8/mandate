@@ -2,16 +2,29 @@
  * The operation registry (design part 1 §3.2, §3.3, §5; OPS-1, MCP-9, CONN-2): turns
  * configured and preset operations into enabled operation definitions, input
  * validators and upstream bindings, applies overrides, checks tool names and lists
- * the catalog entries nothing enables as disabled operations.
+ * the catalog entries and listed MCP tools nothing binds as disabled operations.
  */
-import type { CatalogEntry, HttpMethod, UpstreamMapping } from '@aiops/connector-sdk';
-import type { DisabledOperation, OperationDefinition } from '@aiops/core';
+import type { CatalogEntry, CodeOperation, HttpMethod, PresetModule, ResponseMapping, UpstreamMapping } from '@aiops/connector-sdk';
+import { isOpaque, type DisabledOperation, type OperationDefinition } from '@aiops/core';
 import type { ArgumentValidator } from './argument-validators.js';
 import { pathToString } from './issues.js';
 import type { OverrideConfig, PresetOperationConfig } from './schema.js';
 import type { SourceDocument } from './yaml-source.js';
 import { toManifestDefinition } from './manifest.js';
-import { hasTemplates, pathPlaceholders, templateArgs, toBulkMapping, toResponse, toUpstreamMapping } from './upstream-schema.js';
+import { isMcpUpstream, type McpCatalogState, type McpUpstreamConfig } from './mcp.js';
+import {
+  hasTemplates,
+  isCodeUpstream,
+  pathPlaceholders,
+  templateArgs,
+  templateRecords,
+  toBulkMapping,
+  toCodeResponse,
+  toResponse,
+  toUpstreamMapping,
+  type CodeUpstreamConfig,
+  type UpstreamConfig,
+} from './upstream-schema.js';
 
 export interface Located<T> {
   readonly value: T;
@@ -36,11 +49,40 @@ export type CatalogState =
   | { readonly status: 'none' | 'skipped' | 'failed' }
   | { readonly status: 'resolved'; readonly entries: readonly CatalogEntry[] };
 
-/** The upstream call of an enabled operation: its connection and complete mapping. */
-export interface OperationBinding {
+/** The upstream call of an enabled operation of an `openapi` connection: its connection and complete mapping. */
+export interface HttpOperationBinding {
+  readonly kind: 'http';
   readonly connection: string;
   readonly mapping: UpstreamMapping & { method: HttpMethod; path: string };
 }
+
+/** The upstream tool of an enabled operation of an `mcp` connection (CONN-1, CONN-4). */
+export interface McpOperationBinding {
+  readonly kind: 'mcp';
+  readonly connection: string;
+  readonly tool: string;
+  /** The reviewed tool hash; the operation runs only while the live tool hashes to it. */
+  readonly pin: string;
+  /** True when `input_schema` is absent: the schema is derived from the pinned tool at run time. */
+  readonly schemaFromTool: boolean;
+}
+
+/**
+ * OPS-5: an enabled preset operation served by an operation of the preset's code module. It
+ * names the module operation and carries no function, so it stays plain data (`config diff`,
+ * `canonicalJson`); the function is in `Registry.codeOperations`.
+ */
+export interface CodeOperationBinding {
+  readonly kind: 'code';
+  readonly connection: string;
+  /** The preset ID whose code module serves the operation. */
+  readonly preset: string;
+  /** The operation name in the module's `operations`. */
+  readonly name: string;
+  readonly response: ResponseMapping;
+}
+
+export type OperationBinding = HttpOperationBinding | McpOperationBinding | CodeOperationBinding;
 
 export interface RegisteredOperation {
   readonly definition: OperationDefinition;
@@ -58,6 +100,8 @@ export interface Registry {
   readonly validators: ReadonlyMap<string, ArgumentValidator>;
   readonly bindings: ReadonlyMap<string, OperationBinding>;
   readonly disabled: readonly DisabledOperation[];
+  /** OPS-5: the module operation of each enabled code-bound operation, by operation ID. */
+  readonly codeOperations: ReadonlyMap<string, CodeOperation>;
 }
 
 export interface RegistryInput {
@@ -65,7 +109,13 @@ export interface RegistryInput {
   readonly operations: readonly OperationSource[];
   readonly overrides: readonly Located<OverrideConfig>[];
   readonly catalogs: ReadonlyMap<string, CatalogState>;
+  /** The tool list of each `mcp` connection at load (CONN-1); listed tools nothing binds become disabled entries. */
+  readonly mcpCatalogs?: ReadonlyMap<string, McpCatalogState>;
   readonly connectionIds: ReadonlySet<string>;
+  /** The adapter of each defined connection: decides which `upstream` variant its operations need. */
+  readonly connectionKinds: ReadonlyMap<string, 'openapi' | 'mcp'>;
+  /** OPS-5: the code module of each loaded preset that has one, by preset ID. */
+  readonly codeModules: ReadonlyMap<string, PresetModule>;
   /** A bound preset failed to load, so an unknown operation ID may be one of its operations. */
   readonly operationsIncomplete?: boolean;
   readonly reserved: ReadonlySet<string>;
@@ -84,8 +134,136 @@ export function buildRegistry(input: RegistryInput): Registry {
   const validators = new Map<string, ArgumentValidator>();
   const bindings = new Map<string, OperationBinding>();
   const disabled: DisabledOperation[] = [];
+  const codeOperations = new Map<string, CodeOperation>();
   /** Catalog entry keys already accounted for: used by an enabled operation, or listed with a disabled one. */
   const used = new Set<string>();
+  /** `<connection>\0<tool>` → the operation that binds it. */
+  const boundTools = new Map<string, string>();
+
+  /** Compiles an input schema whose root must be an object; reports at `schemaAt`. */
+  const compileAt = (schema: Readonly<Record<string, unknown>>, source: SourceDocument, schemaAt: readonly PropertyKey[], explicit: boolean): ArgumentValidator | undefined => {
+    if (schema.type !== 'object') {
+      at(source, schemaAt, explicit ? 'root must be type: object' : 'derived input schema root is not type: object');
+      return undefined;
+    }
+    try {
+      return input.compile(schema);
+    } catch (error) {
+      // Ajv's message names the schema problem (keyword, path), not argument data.
+      at(source, schemaAt, `is not a valid JSON Schema 2020-12: ${error instanceof Error ? error.message : 'compile failed'}`);
+      return undefined;
+    }
+  };
+
+  /** The policy definition with overrides applied (MCP-9, OPS-1). */
+  const definitionOf = (located: OperationSource, schema: Readonly<Record<string, unknown>>): { definition: OperationDefinition; enabled: boolean } => {
+    const op = located.value;
+    const override = overrideByOp.get(op.id)?.value;
+    // OPS-2: `fields_arg` of a manifest operation defaults to `values_arg`.
+    const fieldsArg = op.fields_arg ?? op.manifest?.values_arg;
+    const definition: OperationDefinition = {
+      id: op.id,
+      toolName: override?.tool_name ?? op.id,
+      source: located.origin,
+      connection: located.connection,
+      risk: op.risk,
+      ...(override?.title !== undefined ? { title: override.title } : op.title !== undefined ? { title: op.title } : {}),
+      description: override?.description ?? op.description,
+      inputSchema: schema,
+      ...(fieldsArg === undefined ? {} : { fieldsArg }),
+      ...(op.manifest === undefined ? {} : { manifest: toManifestDefinition(op.manifest) }),
+    };
+    return { definition, enabled: override?.enabled ?? true };
+  };
+
+  /**
+   * An MCP-backed operation (CONN-1). Without `input_schema` its schema is derived from the
+   * pinned tool at run time (ADR 0051 R2): a placeholder here, no validator, and grant
+   * scope checks skipped as for an unresolved spec.
+   */
+  const registerMcp = (located: OperationSource, u: McpUpstreamConfig): void => {
+    const { value: op, source, path, connection } = located;
+    const explicit = op.input_schema !== undefined;
+    const schema: Readonly<Record<string, unknown>> = op.input_schema ?? PLACEHOLDER_SCHEMA;
+    const validator = explicit ? compileAt(schema, source, [...path, 'input_schema'], true) : undefined;
+    const { definition, enabled } = definitionOf(located, schema);
+    all.set(op.id, { definition, located, enabled, schemaKnown: explicit, ...(validator === undefined ? {} : { validator }) });
+    if (enabled) {
+      if (validator !== undefined) validators.set(op.id, validator);
+      bindings.set(op.id, { kind: 'mcp', connection, tool: u.tool, pin: u.pin, schemaFromTool: !explicit });
+    } else {
+      disabled.push({ key: op.id, connection, method: 'MCP', path: u.tool, tool: u.tool });
+    }
+  };
+
+  /** An operation whose upstream is refused: its definition only, no binding. */
+  const registerUnbound = (located: OperationSource): void => {
+    const { value: op, source, path } = located;
+    const explicit = op.input_schema !== undefined;
+    const schema: Readonly<Record<string, unknown>> = op.input_schema ?? PLACEHOLDER_SCHEMA;
+    const validator = explicit ? compileAt(schema, source, [...path, 'input_schema'], true) : undefined;
+    const { definition, enabled } = definitionOf(located, schema);
+    all.set(op.id, { definition, located, enabled, schemaKnown: explicit, ...(validator === undefined ? {} : { validator }) });
+  };
+
+  /**
+   * OPS-5: an operation bound to a module operation of its preset's code module. Code receives
+   * the validated arguments, so the operation declares its own input schema; the module
+   * operation's kind must be the one its risk runs (read, manifest write, opaque call).
+   */
+  const registerCode = (located: OperationSource, u: CodeUpstreamConfig): void => {
+    const { value: op, source, path, connection } = located;
+    const codeAt = (message: string): void => {
+      at(source, [...path, 'upstream', 'code'], message);
+    };
+    const preset = located.origin.startsWith('preset:') ? located.origin.slice('preset:'.length) : undefined;
+    let operation: CodeOperation | undefined;
+    if (preset === undefined) codeAt('code operations are allowed in preset operations only');
+    else {
+      const module = input.codeModules.get(preset);
+      if (module === undefined) codeAt('the preset has no code module (package.json aiops.code)');
+      // Own keys only: a name such as `constructor` must not reach the prototype.
+      else if (!Object.hasOwn(module.operations, u.code)) codeAt('is not an operation of the preset code module');
+      else operation = module.operations[u.code];
+    }
+    if (operation !== undefined) {
+      const expected = op.risk === 'read' ? 'read' : op.risk === 'write' || (op.risk === 'destructive' && op.manifest !== undefined) ? 'write' : 'call';
+      if (operation.kind !== expected) at(source, [...path, 'risk'], `is a ${operation.kind} code operation; risk ${op.risk} needs a ${expected} code operation`);
+    }
+
+    const explicit = op.input_schema !== undefined;
+    if (!explicit) at(source, [...path, 'input_schema'], 'is required for a code operation');
+    const schema: Readonly<Record<string, unknown>> = op.input_schema ?? PLACEHOLDER_SCHEMA;
+    const validator = explicit ? compileAt(schema, source, [...path, 'input_schema'], true) : undefined;
+    const projectedBy = u.response?.fields_from_arg;
+    if (explicit) {
+      const properties = propertiesOf(schema);
+      if (projectedBy !== undefined && !properties.has(projectedBy)) {
+        at(source, [...path, 'upstream', 'response', 'fields_from_arg'], 'names an argument that is not in input_schema');
+      }
+      if (op.fields_arg !== undefined && (!properties.has(op.fields_arg) || !requiredOf(schema).has(op.fields_arg))) {
+        at(source, [...path, 'fields_arg'], 'must name a required property of input_schema');
+      }
+    }
+    // POL-3, as for HTTP reads: the field rules and the projection use the same argument.
+    if (op.manifest === undefined && op.fields_arg !== undefined && projectedBy !== op.fields_arg) {
+      at(source, [...path, 'fields_arg'], 'must equal upstream.response.fields_from_arg, so the response is projected by the same argument');
+    } else if (op.manifest === undefined && op.fields_arg === undefined && projectedBy !== undefined) {
+      at(source, [...path, 'upstream', 'response', 'fields_from_arg'], 'requires fields_arg naming the same argument');
+    }
+
+    const { definition, enabled } = definitionOf(located, schema);
+    all.set(op.id, { definition, located, enabled, schemaKnown: explicit, ...(validator === undefined ? {} : { validator }) });
+    if (!enabled) {
+      disabled.push({ key: op.id, connection, method: 'CODE', path: u.code });
+      return;
+    }
+    if (validator !== undefined) validators.set(op.id, validator);
+    if (preset !== undefined && operation !== undefined) {
+      bindings.set(op.id, { kind: 'code', connection, preset, name: u.code, response: toCodeResponse(u.response) });
+      codeOperations.set(op.id, operation);
+    }
+  };
 
   for (const located of input.operations) {
     const { value: op, source, path, connection } = located;
@@ -94,6 +272,33 @@ export function buildRegistry(input: RegistryInput): Registry {
       at(source, [...path, 'upstream', ...sub], message);
     };
     if (input.reserved.has(op.id)) at(source, [...path, 'id'], 'is reserved for a built-in tool');
+    const kind = input.connectionKinds.get(connection);
+
+    // Before any HTTP rule: none of them applies to an MCP tool (ADR 0050 decision 7).
+    if (isMcpUpstream(u)) {
+      if (kind === 'openapi') upstreamAt(['tool'], 'is allowed only for operations of an mcp connection');
+      if (op.risk === 'write') at(source, [...path, 'risk'], 'write needs a manifest, which MCP-backed operations cannot carry (use read, write_opaque or destructive)');
+      if (op.manifest !== undefined) at(source, [...path, 'manifest'], 'is not allowed on an MCP-backed operation');
+      if (op.fields_arg !== undefined) at(source, [...path, 'fields_arg'], 'is not allowed on an MCP-backed operation');
+      const toolKey = `${connection}\0${u.tool}`;
+      const boundBy = boundTools.get(toolKey);
+      if (boundBy !== undefined) upstreamAt(['tool'], `tool ${u.tool} of connection ${connection} is already bound by operation ${boundBy}`);
+      else boundTools.set(toolKey, op.id);
+      registerMcp(located, u);
+      continue;
+    }
+    if (kind === 'mcp') {
+      upstreamAt([], 'an operation of an mcp connection needs upstream: { tool, pin }');
+      // None of the HTTP rules below applies to an MCP connection: registered without a binding, so
+      // grants naming it are not also reported as naming an undefined operation.
+      registerUnbound(located);
+      continue;
+    }
+    // After the mcp-connection refusal (ledger F22): none of the HTTP rules below applies to code.
+    if (isCodeUpstream(u)) {
+      registerCode(located, u);
+      continue;
+    }
 
     // Resolve `upstream.operation` against the connection's catalog.
     let entry: CatalogEntry | undefined;
@@ -116,16 +321,7 @@ export function buildRegistry(input: RegistryInput): Registry {
     const schema: Readonly<Record<string, unknown>> = op.input_schema ?? entry?.inputSchema ?? PLACEHOLDER_SCHEMA;
     const schemaAt: readonly PropertyKey[] = explicit ? [...path, 'input_schema'] : [...path, 'upstream', 'operation'];
 
-    let validator: ArgumentValidator | undefined;
-    if (schema.type !== 'object') at(source, schemaAt, explicit ? 'root must be type: object' : 'derived input schema root is not type: object');
-    else {
-      try {
-        validator = input.compile(schema);
-      } catch (error) {
-        // Ajv's message names the schema problem (keyword, path), not argument data.
-        at(source, schemaAt, `is not a valid JSON Schema 2020-12: ${error instanceof Error ? error.message : 'compile failed'}`);
-      }
-    }
+    const validator = compileAt(schema, source, schemaAt, explicit);
 
     if (schemaKnown) {
       const properties = propertiesOf(schema);
@@ -161,35 +357,39 @@ export function buildRegistry(input: RegistryInput): Registry {
       upstreamAt(['response', 'fields_from_arg'], 'requires fields_arg naming the same argument');
     }
 
-    const binding = bindingOf(connection, op, entry);
+    const binding = bindingOf(connection, op, u, entry);
+    const { definition, enabled } = definitionOf(located, schema);
+    const opaque = isOpaque(definition);
     // A non-GET call labelled read would skip the change-set path (MCP-4).
     const method = binding?.mapping.method ?? u.method;
+    const methodAt = [u.method === undefined ? 'operation' : 'method'];
     if (op.risk === 'read' && method !== undefined && method !== 'GET') {
       at(source, [...path, 'risk'], 'read operations must use GET; writes need change-sets');
     }
+    // OPS-1: an opaque call is sent once as a write; a GET would be a read without a change-set.
+    if (opaque && method === 'GET') upstreamAt(methodAt, 'must not be GET for a write without a manifest');
+    // EXE-4: only an opaque call is resent with its key; a manifest write has its own submission record.
+    if (u.idempotency !== undefined && !opaque) {
+      upstreamAt(['idempotency'], 'is allowed only on write_opaque operations and destructive operations without a manifest');
+    }
+    // R9: the key header must not collide with a header the binding sends, spec-derived ones included.
+    const keyHeader = u.idempotency?.header.toLowerCase();
+    if (keyHeader !== undefined && Object.keys(binding?.mapping.headers ?? {}).some((name) => name.toLowerCase() === keyHeader)) {
+      upstreamAt(['idempotency', 'header'], 'is already declared in headers');
+    }
     if (u.bulk !== undefined) {
       if (op.risk !== 'write' && op.risk !== 'destructive') upstreamAt(['bulk'], 'is allowed on write and destructive operations only');
+      // A bulk binding writes per record, which needs the manifest's items (OPS-6).
+      else if (opaque) upstreamAt(['bulk'], 'requires a manifest');
       if (method !== undefined && method !== 'POST' && method !== 'PUT') {
-        upstreamAt([u.method === undefined ? 'operation' : 'method'], 'must be POST or PUT for a bulk binding');
+        upstreamAt(methodAt, 'must be POST or PUT for a bulk binding');
       }
       for (const ref of templateArgs(u)) upstreamAt(ref.path, 'cannot reference arguments in a bulk binding');
     }
-    const override = overrideByOp.get(op.id)?.value;
-    // OPS-2: `fields_arg` of a manifest operation defaults to `values_arg`.
-    const fieldsArg = op.fields_arg ?? op.manifest?.values_arg;
-    const enabled = override?.enabled ?? true;
-    const definition: OperationDefinition = {
-      id: op.id,
-      toolName: override?.tool_name ?? op.id,
-      source: located.origin,
-      connection,
-      risk: op.risk,
-      ...(override?.title !== undefined ? { title: override.title } : op.title !== undefined ? { title: op.title } : {}),
-      description: override?.description ?? op.description,
-      inputSchema: schema,
-      ...(fieldsArg === undefined ? {} : { fieldsArg }),
-      ...(op.manifest === undefined ? {} : { manifest: toManifestDefinition(op.manifest) }),
-    };
+    // OPS-6: a manifest write bound to HTTP without bulk sends one request per record.
+    const perRecord = (op.risk === 'write' || op.risk === 'destructive') && op.manifest !== undefined && u.bulk === undefined;
+    if (perRecord && method === 'GET') upstreamAt(methodAt, 'must not be GET for a per-record write binding');
+    checkRecordTemplates(u, perRecord ? op.manifest : undefined, upstreamAt);
     all.set(op.id, { definition, located, enabled, schemaKnown, ...(validator === undefined ? {} : { validator }) });
 
     if (enabled) {
@@ -230,8 +430,17 @@ export function buildRegistry(input: RegistryInput): Registry {
     }
   }
 
+  // Listed MCP tools no operation binds, enabled or disabled, are registered as disabled (CONN-1).
+  for (const [connection, catalog] of input.mcpCatalogs ?? []) {
+    if (catalog.status !== 'listed') continue;
+    for (const tool of catalog.tools) {
+      if (boundTools.has(`${connection}\0${tool.name}`)) continue;
+      disabled.push({ key: `${connection}.${tool.name}`, connection, method: 'MCP', path: tool.name, tool: tool.name, hash: tool.hash });
+    }
+  }
+
   const enabled = [...all.values()].filter((r) => r.enabled).map((r) => r.definition);
-  return { all, enabled, validators, bindings, disabled };
+  return { all, enabled, validators, bindings, disabled, codeOperations };
 }
 
 /**
@@ -241,21 +450,25 @@ export function buildRegistry(input: RegistryInput): Registry {
  * list argument counts too: the response is projected by it.
  */
 export function sentArguments(op: PresetOperationConfig): ReadonlySet<string> | undefined {
+  // An MCP tool receives the validated arguments as they are (CONN-1).
+  if (isMcpUpstream(op.upstream)) return undefined;
+  // OPS-5: a code operation receives every validated argument.
+  if (isCodeUpstream(op.upstream)) return undefined;
   if (op.input_schema === undefined && op.upstream.operation !== undefined) return undefined;
   return new Set(templateArgs(op.upstream).map((ref) => ref.arg));
 }
 
-function bindingOf(connection: string, op: PresetOperationConfig, entry: CatalogEntry | undefined): OperationBinding | undefined {
-  const u = op.upstream;
+function bindingOf(connection: string, op: PresetOperationConfig, u: UpstreamConfig, entry: CatalogEntry | undefined): HttpOperationBinding | undefined {
   if (u.method !== undefined && u.path !== undefined) {
-    return { connection, mapping: { ...toUpstreamMapping(u), method: u.method, path: u.path } };
+    return { kind: 'http', connection, mapping: { ...toUpstreamMapping(u), method: u.method, path: u.path } };
   }
   if (entry === undefined) return undefined; // spec not resolved: the api always resolves
   if (op.input_schema !== undefined) {
-    return { connection, mapping: { ...toUpstreamMapping(u), method: entry.method, path: entry.path } };
+    return { kind: 'http', connection, mapping: { ...toUpstreamMapping(u), method: entry.method, path: entry.path } };
   }
   const base = entry.defaultMapping;
   return {
+    kind: 'http',
     connection,
     mapping: {
       ...base,
@@ -264,8 +477,32 @@ function bindingOf(connection: string, op: PresetOperationConfig, entry: Catalog
       path: entry.path,
       response: u.response === undefined ? base.response : toResponse(u.response),
       ...(u.bulk === undefined ? {} : { bulk: toBulkMapping(u.bulk) }),
+      ...(u.idempotency === undefined ? {} : { idempotency: { header: u.idempotency.header } }),
     },
   };
+}
+
+/**
+ * OPS-6: `{ record }` templates appear only in a per-record write binding (`manifest` given) and
+ * name a field the written record carries. Records carry `id_field`, the carry fields and only
+ * the touched fields, so a path parameter takes only `id_field` or a carry field (ledger F20):
+ * a path built from an untouched field would fail per record depending on the change.
+ */
+function checkRecordTemplates(u: UpstreamConfig, manifest: PresetOperationConfig['manifest'], upstreamAt: (sub: readonly PropertyKey[], message: string) => void): void {
+  const refs = templateRecords(u);
+  if (manifest === undefined) {
+    for (const ref of refs) upstreamAt(ref.path, 'is allowed only in a per-record write binding');
+    return;
+  }
+  const always = new Set([manifest.id_field, ...(manifest.write?.carry_fields ?? [])]);
+  const written = new Set([...always, ...manifest.fields]);
+  for (const ref of refs) {
+    if (ref.path[0] === 'path_params') {
+      if (!always.has(ref.record)) upstreamAt(ref.path, 'names a field that is not always in the written record (id_field or write.carry_fields)');
+    } else if (!written.has(ref.record)) {
+      upstreamAt(ref.path, 'names a field that is not in the written record (id_field, fields or write.carry_fields)');
+    }
+  }
 }
 
 function indexOverrides(input: RegistryInput): Map<string, Located<OverrideConfig>> {

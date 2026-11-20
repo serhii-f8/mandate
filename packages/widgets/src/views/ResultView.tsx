@@ -2,6 +2,7 @@ import { type ReactElement, useCallback, useEffect, useRef, useState } from 'rea
 import { ActionBar } from '../components/ActionBar.js';
 import { ItemTable } from '../components/ItemTable.js';
 import { Notice } from '../components/Notice.js';
+import { RawArguments } from '../components/RawArguments.js';
 import { Pager } from '../components/Pager.js';
 import { RollbackCounts } from '../components/RollbackCounts.js';
 import { StatusBadge } from '../components/StatusBadge.js';
@@ -26,6 +27,13 @@ function summary(data: ChangeSetViewModel): string {
   return data.drift === undefined ? base : `${base} · ${String(data.drift)} changed upstream`;
 }
 
+/** The one call of an opaque change-set: its status and, when it failed, the error. */
+function callOutcome(data: ChangeSetViewModel): string {
+  const call = data.items.items[0];
+  const status = call?.status ?? data.status;
+  return call?.error === undefined ? `Call outcome: ${status}` : `Call outcome: ${status} (${call.error})`;
+}
+
 /** A finished change-set (UI-4): counts, drift, error code, and the failed and skipped items. */
 export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewModel, ChangeSetActions>): ReactElement {
   const loadItems = useCallback((q: Parameters<ChangeSetActions['loadItems']>[0]) => actions.loadItems(q), [actions]);
@@ -45,6 +53,19 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
     pages.setFilter(tab);
   }, [key]);
 
+  if (data.kind === 'opaque') {
+    return (
+      <section className="view result">
+        <header>
+          <h2>{data.operation.title ?? data.operation.id}</h2>
+          <StatusBadge status={data.status} />
+        </header>
+        <RawArguments args={data.args ?? {}} />
+        <p className="outcome">{callOutcome(data)}</p>
+        {data.errorCode === undefined ? null : <p className="error-code">{`Error: ${data.errorCode}`}</p>}
+      </section>
+    );
+  }
   return (
     <section className="view result">
       <header>

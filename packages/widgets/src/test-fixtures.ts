@@ -52,3 +52,15 @@ export function approvalModel(over: Partial<ApprovalViewModel> = {}): ApprovalVi
     ...over,
   };
 }
+
+/** An opaque change-set: one call, its arguments, no preview. */
+export function opaqueChangeSetModel(over: Partial<ChangeSetViewModel> = {}): ChangeSetViewModel {
+  return changeSetModel({
+    kind: 'opaque',
+    args: { text: '<img src=x onerror=alert(1)>', n: 2 },
+    stats: { total: 1, included: 1, excluded: {}, written: 0, failed: 0, skipped: 0 },
+    items: { items: [item('call', { before: null, after: { text: 'x' } })] },
+    permissions: { canExclude: false, canSubmit: true, canCancel: false },
+    ...over,
+  });
+}

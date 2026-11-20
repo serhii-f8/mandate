@@ -5,6 +5,7 @@
  */
 import {
   canView,
+  changesetKind,
   checkDecision,
   isExpiryDue,
   type ApprovalChannel,
@@ -13,6 +14,7 @@ import {
   type ApprovalRecord,
   type Approver,
   type ChangeItemRecord,
+  type ChangeSetKind,
   type ChangeSetRecord,
   type ChangeSetStats,
   type ChangeSetStatus,
@@ -84,6 +86,8 @@ export interface ApprovalStepView {
 
 export interface ChangeSetDetail {
   id: string;
+  /** `opaque`: one raw upstream call with no diff (R7); `request.args` holds the arguments. */
+  kind: ChangeSetKind;
   status: ChangeSetStatus;
   hash?: string;
   derivedFrom?: string;
@@ -241,8 +245,10 @@ export function changesetDetailWith(input: {
   const submission = cs.submission;
   const plan = cs.approvalPlan;
   const approval = approvalOf(cs, approvals);
+  const kind = changesetKind(input.operation);
   return {
     id: cs.id,
+    kind,
     status: cs.status,
     ...(cs.hash === undefined ? {} : { hash: cs.hash }),
     ...(cs.derivedFrom === undefined ? {} : { derivedFrom: cs.derivedFrom }),
@@ -281,6 +287,7 @@ export function changesetDetailWith(input: {
     ...(approval === undefined ? {} : { approval }),
     ...(input.drift === undefined ? {} : { drift: input.drift }),
     rollback: input.rollback,
-    viewer: input.viewer,
+    // CS-5: an opaque change-set has no items to exclude.
+    viewer: kind === 'opaque' ? { ...input.viewer, canExclude: false } : input.viewer,
   };
 }

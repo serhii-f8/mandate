@@ -1,6 +1,8 @@
 import type { LoadedConfiguration } from '@aiops/config';
 import {
   changesetTransitionEvent,
+  isOpaque,
+  runOpaquePreparation,
   runPreparation,
   type ChangeSetRecord,
   type ChangeSetRepository,
@@ -24,7 +26,8 @@ export interface InProcessStarterDeps {
  * Stands in for the Temporal workflow starter in the api e2e tests: `start` returns at once, as a
  * workflow start does, and the change-set is prepared in this process afterwards, the way the
  * worker's prepare activity does it (same configuration-hash and operation checks, same
- * `runPreparation`, actor = requester, the change-set's correlation ID). No Temporal involved.
+ * `runPreparation`, or `runOpaquePreparation` for an opaque operation, actor = requester, the
+ * change-set's correlation ID). No Temporal involved.
  */
 export class InProcessStarter implements WorkflowStarter {
   private readonly runs = new Set<Promise<void>>();
@@ -61,6 +64,16 @@ export class InProcessStarter implements WorkflowStarter {
     if (changeset?.status !== 'preparing') return;
     if (changeset.configHash !== configuration.hash) return this.fail(changeset, 'config_changed');
     const operation = configuration.policy.operations.find((o) => o.id === changeset.operation);
+    const actor = {
+      actor: changeset.requester,
+      ...(changeset.clientId === undefined ? {} : { clientId: changeset.clientId }),
+      correlationId: changeset.correlationId,
+    };
+    // CS-1: an opaque change-set is its one stored call; nothing is read upstream.
+    if (operation !== undefined && isOpaque(operation)) {
+      await runOpaquePreparation({ repository, newId: this.deps.newId, now: this.deps.now }, { changesetId, operation, ...actor });
+      return;
+    }
     const manifest = operation?.manifest;
     if (operation === undefined || manifest === undefined) return this.fail(changeset, 'operation_unavailable');
     await runPreparation(
@@ -69,9 +82,7 @@ export class InProcessStarter implements WorkflowStarter {
         changesetId,
         operation: { ...operation, manifest },
         readFieldsArg: (id) => configuration.policy.operations.find((o) => o.id === id)?.fieldsArg,
-        actor: changeset.requester,
-        ...(changeset.clientId === undefined ? {} : { clientId: changeset.clientId }),
-        correlationId: changeset.correlationId,
+        ...actor,
       },
     );
   }

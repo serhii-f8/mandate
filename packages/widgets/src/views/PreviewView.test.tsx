@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ActionResult, ChangeSetActions, ChangeSetViewModel, ItemsPageModel } from '../model.js';
-import { HASH, changeSetModel, item } from '../test-fixtures.js';
+import { HASH, changeSetModel, item, opaqueChangeSetModel } from '../test-fixtures.js';
 import { PreviewView } from './PreviewView.js';
 import { type Action, useAction } from './useAction.js';
 
@@ -273,5 +273,28 @@ describe('useAction', () => {
     });
     expect(get().message).toBe('Not cancelled: boom');
     expect(get().busy).toBe(false);
+  });
+
+  it('UI-2 APR-5 the opaque preview shows the raw arguments as text and no item table or exclusion', () => {
+    const { container } = setup(opaqueChangeSetModel());
+    expect(screen.getByRole('heading', { name: 'Raw arguments' })).toBeTruthy();
+    expect(screen.getByText('This call has no preview and cannot be rolled back.')).toBeTruthy();
+    expect(container.querySelector('pre')?.textContent).toContain('<img src=x onerror=alert(1)>');
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('table')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Exclude selected/ })).toBeNull();
+    expect(button('Submit 1 change')).toBeTruthy();
+  });
+
+  it('UI-3 CS-8 the opaque preview offers export of its one row', async () => {
+    const exportFn = vi
+      .fn<NonNullable<ChangeSetActions['export']>>()
+      .mockResolvedValue({ ok: true, value: undefined });
+    setup(opaqueChangeSetModel(), actionsWith({ export: exportFn }));
+    fireEvent.click(button('Export CSV'));
+    await flush();
+    fireEvent.click(button('Export XLSX'));
+    await flush();
+    expect(exportFn.mock.calls).toEqual([['csv'], ['xlsx']]);
   });
 });

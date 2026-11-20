@@ -272,6 +272,9 @@ importers:
       '@aiops/connector-sdk':
         specifier: workspace:*
         version: link:../connector-sdk
+      '@modelcontextprotocol/client':
+        specifier: 2.4.0
+        version: 2.4.0
       '@seriousme/openapi-schema-validator':
         specifier: 2.12.0
         version: 2.12.0
@@ -306,6 +309,9 @@ importers:
       ajv-formats:
         specifier: 3.0.1
         version: 3.0.1(ajv@8.20.0)
+      semver:
+        specifier: 7.8.6
+        version: 7.8.6
       yaml:
         specifier: 2.9.1
         version: 2.9.1
@@ -316,6 +322,9 @@ importers:
       '@aiops/testing':
         specifier: workspace:*
         version: link:../testing
+      '@types/semver':
+        specifier: 7.8.0
+        version: 7.8.0
 
   packages/connector-sdk:
     dependencies:
@@ -370,6 +379,12 @@ importers:
       '@aiops/core':
         specifier: workspace:*
         version: link:../core
+      '@modelcontextprotocol/node':
+        specifier: 2.1.2
+        version: 2.1.2(@modelcontextprotocol/server@2.4.0)
+      '@modelcontextprotocol/server':
+        specifier: 2.4.0
+        version: 2.4.0
       '@testcontainers/postgresql':
         specifier: 12.2.1
         version: 12.2.1(bare-buffer@3.7.2)(supports-color@8.1.1)
@@ -379,6 +394,10 @@ importers:
       testcontainers:
         specifier: 12.2.1
         version: 12.2.1(bare-buffer@3.7.2)(supports-color@8.1.1)
+    devDependencies:
+      '@modelcontextprotocol/client':
+        specifier: 2.4.0
+        version: 2.4.0
 
   packages/upstream:
     dependencies:
@@ -398,6 +417,9 @@ importers:
         specifier: 1.30.1
         version: 1.30.1(@opentelemetry/api@1.9.1)
     devDependencies:
+      '@aiops/testing':
+        specifier: workspace:*
+        version: link:../testing
       '@opentelemetry/context-async-hooks':
         specifier: 1.30.1
         version: 1.30.1(@opentelemetry/api@1.9.1)
@@ -453,6 +475,21 @@ importers:
       vite-plugin-singlefile:
         specifier: 2.3.4
         version: 2.3.4(vite@8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+
+  presets/gitea-issues:
+    devDependencies:
+      '@aiops/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
+      '@aiops/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@aiops/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connector-sdk
+      '@aiops/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
 
   presets/magento2-catalog:
     devDependencies:
@@ -1865,6 +1902,9 @@ packages:
 
   '@types/react@19.3.0':
     resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
+
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
   '@types/send@1.2.1':
     resolution: {integrity: sha512-arsCikDvlU99zl1g69TcAB3mzZPpxgw0UQnaHeC1Nwb015xp8bknZv5rIfri9xTOcMuaVgvabfIRA7PSZVuZIQ==}
@@ -5172,6 +5212,8 @@ snapshots:
   '@types/react@19.3.0':
     dependencies:
       csstype: 3.2.3
+
+  '@types/semver@7.8.0': {}
 
   '@types/send@1.2.1':
     dependencies:

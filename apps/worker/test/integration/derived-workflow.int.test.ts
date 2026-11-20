@@ -47,6 +47,7 @@ describe('changesetWorkflow derived change-sets', () => {
           include: [],
           caller: { subject: 'alice', groups: [EDITOR_GROUP] },
           correlationId: 'corr-derive',
+          excludable: () => true,
         },
       );
       if (!derivation.ok) throw new Error(`derivation refused: ${derivation.reason}`);

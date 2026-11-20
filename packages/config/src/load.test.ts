@@ -1,12 +1,16 @@
-import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { formatIssue, type ConfigIssue } from './issues.js';
 import { loadConfigurationDirectory, loadConfigurationSources, type LoadResult } from './load.js';
+import { resolvePreset } from './presets.js';
+import { loadCodeFixture, presetWithoutUpdate } from '../test/code-fixture.js';
 
 const VALID_DIR = fileURLToPath(new URL('../test/fixtures/valid', import.meta.url));
+const FIXTURES = fileURLToPath(new URL('../test/fixtures', import.meta.url));
 
 const CONNECTIONS = `version: 1
 connections:
@@ -283,6 +287,26 @@ describe('CFG-2 APR-3 POL-5 approval configuration', () => {
     expect(result.ok, JSON.stringify(result.ok ? [] : result.issues)).toBe(true);
   });
 
+  it('POL-5 a write_opaque grant needs an approval step unless required: never', async () => {
+    const SEND = `version: 1
+operations:
+  - id: mail.send
+    connection: magento
+    risk: write_opaque
+    description: Send.
+    upstream: { method: POST, path: /V1/send }
+    input_schema: { type: object, properties: { to: { type: string } } }
+`;
+    const granted = (roles: string): string => roles.replace('    grants:\n', '    grants:\n      - { operation: mail.send }\n');
+    const message = 'needs at least one step: a write or destructive grant requires approval by default (set steps, or required: never for write operations)';
+    const refused = issues(await load({ 'send.yaml': SEND, 'roles.yaml': granted(ROLES) }));
+    expect(refused).toEqual([expect.objectContaining({ path: 'roles[0].approval', message })]);
+    const never = await load({ 'send.yaml': SEND, 'roles.yaml': granted(withApproval('{ required: never }')) });
+    expect(never.ok, JSON.stringify(never.ok ? [] : never.issues)).toBe(true);
+    const stepped = await load({ 'send.yaml': SEND, 'roles.yaml': granted(withApproval('{ steps: [{ role: content_manager }] }')) });
+    expect(stepped.ok, JSON.stringify(stepped.ok ? [] : stepped.issues)).toBe(true);
+  });
+
   it('approver_role is no longer accepted', async () => {
     const found = issues(await load({ 'roles.yaml': withApproval('{ approver_role: content_manager }') }));
     expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval' }));
@@ -308,5 +332,263 @@ describe('AUD-7 SEC-1 audit configuration in the loaded configuration', () => {
     const plain = await load();
     if (!plain.ok) throw new Error(JSON.stringify(plain.issues));
     expect(plain.configuration.auditViewers.size).toBe(0);
+  });
+});
+
+describe('CONN-8 preset packages in the loaded configuration', () => {
+  const PRESET_DIRS = [join(FIXTURES, 'preset-dir')];
+
+  async function withConfig(config: string): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'aiops-load-preset-'));
+    await writeFile(join(dir, 'config.yaml'), config);
+    return dir;
+  }
+
+  it('CONN-8 a preset bound to a connection of another adapter is refused', async () => {
+    const dir = await withConfig(`version: 1
+presets:
+  - { id: fake, package: "@aiops/fake-preset" }
+connections:
+  - { id: shop, adapter: mcp, mcp_url: https://shop.example.test/mcp, preset: fake }
+`);
+    try {
+      expect(issues(await loadConfigurationDirectory(dir, { presetDirs: PRESET_DIRS }))).toEqual([
+        expect.objectContaining({ file: 'config.yaml', path: 'connections[0].preset', message: 'the preset is for openapi connections' }),
+      ]);
+    } finally {
+      await rm(dir, { recursive: true });
+    }
+
+    const presets = await mkdtemp(join(tmpdir(), 'aiops-load-mcp-preset-'));
+    const openapiDir = await withConfig(`version: 1
+presets:
+  - { id: tools, package: "@acme/mcp-preset" }
+connections:
+  - { id: shop, adapter: openapi, base_url: https://shop.example.test/api, preset: tools }
+`);
+    try {
+      await mkdir(join(presets, 'mcp-preset'));
+      await writeFile(join(presets, 'mcp-preset', 'package.json'), JSON.stringify({ name: '@acme/mcp-preset', version: '1.0.0', aiops: { sdk: '^0.6.0' } }));
+      await writeFile(join(presets, 'mcp-preset', 'preset.yaml'), 'version: 1\nadapter: mcp\n');
+      expect(issues(await loadConfigurationDirectory(openapiDir, { presetDirs: [presets] }))).toEqual([
+        expect.objectContaining({ file: 'config.yaml', path: 'connections[0].preset', message: 'the preset is for mcp connections' }),
+      ]);
+    } finally {
+      await rm(presets, { recursive: true });
+      await rm(openapiDir, { recursive: true });
+    }
+  });
+
+  it('OPS-5 OPS-6 CONN-8 the fixture preset loads with all six operations and four code bindings plus one per-record binding', async () => {
+    const dirs: string[] = [];
+    try {
+      const result = await loadCodeFixture(dirs);
+      if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+      const { configuration } = result;
+      expect(configuration.policy.operations.map((o) => o.id)).toEqual([
+        'fixture.search',
+        'fixture.get_many',
+        'fixture.update',
+        'fixture.set_tags',
+        'fixture.ping',
+        'fixture.boom',
+      ]);
+      expect(Object.fromEntries([...configuration.bindings].map(([id, b]) => [id, b.kind]))).toEqual({
+        'fixture.search': 'http',
+        'fixture.get_many': 'code',
+        'fixture.update': 'http',
+        'fixture.set_tags': 'code',
+        'fixture.ping': 'code',
+        'fixture.boom': 'code',
+      });
+      expect(configuration.codeOperations.size).toBe(4);
+      const update = configuration.bindings.get('fixture.update');
+      if (update?.kind !== 'http') throw new Error('fixture.update has no HTTP binding');
+      expect(update.mapping).toMatchObject({ method: 'PATCH', path: '/items/{id}', pathParams: { id: { record: 'id' } } });
+      expect(update.mapping.bulk).toBeUndefined();
+    } finally {
+      await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+    }
+  });
+
+  it('OPS-5 CONN-8 the fixture preset without fixture.update loads with five operations and four code bindings', async () => {
+    const dirs: string[] = [];
+    try {
+      const result = await loadCodeFixture(dirs, { preset: await presetWithoutUpdate() });
+      if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+      const { configuration } = result;
+      expect(configuration.policy.operations.map((o) => o.id)).toEqual(['fixture.search', 'fixture.get_many', 'fixture.set_tags', 'fixture.ping', 'fixture.boom']);
+      expect(Object.fromEntries([...configuration.bindings].map(([id, b]) => [id, b.kind]))).toEqual({
+        'fixture.search': 'http',
+        'fixture.get_many': 'code',
+        'fixture.set_tags': 'code',
+        'fixture.ping': 'code',
+        'fixture.boom': 'code',
+      });
+      expect(configuration.codeOperations.size).toBe(4);
+      expect(configuration.loadedPresets.get('fixture')).toMatchObject({ package: '@aiops/code-fixture-preset', version: '1.1.0' });
+    } finally {
+      await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+    }
+  });
+
+  it('CONN-8 loadedPresets reports the chosen version', async () => {
+    const result = await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { presetDirs: PRESET_DIRS });
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    const resolved = await resolvePreset({ id: 'fake', package: '@aiops/fake-preset' }, PRESET_DIRS);
+    if (!resolved.ok) throw new Error('fixture preset must resolve');
+    const digest = createHash('sha256');
+    for (const { file, text } of resolved.preset.files) digest.update(`preset:${file}`).update('\0').update(text).update('\0');
+    expect([...result.configuration.loadedPresets]).toEqual([
+      ['fake', { package: '@aiops/fake-preset', version: '0.1.0', adapter: 'openapi', filesDigest: digest.digest('hex') }],
+    ]);
+    expect(resolved.preset.files[0]?.text).toBe(await readFile(join(FIXTURES, 'preset-dir', 'fake-preset', 'package.json'), 'utf8'));
+    const skipped = await loadConfigurationDirectory(join(FIXTURES, 'with-preset'));
+    expect(skipped.ok && skipped.configuration.loadedPresets.size).toBe(0);
+  });
+});
+
+
+describe('CONN-8 preset aliases', () => {
+  const twoShops = (a: string, b: string, grants = '      - { operation: shop_a.search }\n'): string => `version: 1
+presets:
+  - { id: fixture, package: "@aiops/code-fixture-preset" }
+connections:
+  - { id: a, adapter: openapi, base_url: https://a.example.test/api, credential_ref: items-token, preset: fixture${a} }
+  - { id: b, adapter: openapi, base_url: https://b.example.test/api, credential_ref: items-token, preset: fixture${b} }
+roles:
+  - id: viewer
+    grants:
+${grants}  - id: integration_admin
+    grants: []
+    manage_credentials: [items-token]
+role_mapping:
+  - { group: viewers, roles: [viewer] }
+`;
+  const PREFIXED = twoShops(', operation_prefix: shop_a', ', operation_prefix: shop_b');
+
+  async function loadAliased(config: string, preset?: string): Promise<LoadResult> {
+    const dirs: string[] = [];
+    try {
+      return await loadCodeFixture(dirs, { preset: preset ?? (await presetWithoutUpdate()), config: { 'config.yaml': config } });
+    } finally {
+      await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+    }
+  }
+
+  it('CONN-8 one preset bound to two connections with distinct prefixes yields two operation sets, each bound to its connection', async () => {
+    const result = await loadAliased(PREFIXED);
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    const ops = result.configuration.policy.operations;
+    const names = ['search', 'get_many', 'set_tags', 'ping', 'boom'];
+    expect(ops.map((o) => o.id)).toEqual([...names.map((n) => `shop_a.${n}`), ...names.map((n) => `shop_b.${n}`)]);
+    for (const o of ops) {
+      expect(o.connection).toBe(o.id.startsWith('shop_a.') ? 'a' : 'b');
+      expect(o.toolName).toBe(o.id);
+      expect(o.source).toBe('preset:fixture');
+    }
+    expect([...result.configuration.bindings.keys()]).toContain('shop_b.get_many');
+    expect(result.configuration.codeOperations.size).toBe(8);
+  });
+
+  it('CONN-8 internal references follow the prefix', async () => {
+    const result = await loadAliased(PREFIXED);
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    const byId = new Map(result.configuration.policy.operations.map((o) => [o.id, o]));
+    for (const ns of ['shop_a', 'shop_b']) {
+      const manifest = byId.get(`${ns}.set_tags`)?.manifest;
+      expect(manifest?.readBefore.operation).toBe(`${ns}.get_many`);
+      expect(manifest?.selector?.operation).toBe(`${ns}.search`);
+    }
+    // inverse_operation rollback: set_tags is its own inverse.
+    const text = await presetWithoutUpdate();
+    const at = text.indexOf('  - id: fixture.set_tags\n');
+    const preset = text.slice(0, at) + text.slice(at).replace('rollback: { strategy: replay_previous_state }', 'rollback: { strategy: inverse_operation, operation: fixture.set_tags }');
+    const inverse = await loadAliased(PREFIXED, preset);
+    if (!inverse.ok) throw new Error(inverse.issues.map(formatIssue).join('\n'));
+    const rollbacks = inverse.configuration.policy.operations.filter((o) => o.id.endsWith('.set_tags')).map((o) => o.manifest?.rollback);
+    expect(rollbacks).toEqual([
+      { strategy: 'inverse_operation', operation: 'shop_a.set_tags' },
+      { strategy: 'inverse_operation', operation: 'shop_b.set_tags' },
+    ]);
+  });
+
+  it('CONN-8 the preset test operation follows the prefix', async () => {
+    const preset = (await presetWithoutUpdate()).replace('operations:\n', 'test: { operation: fixture.search, args: { page: 1, per_page: 1, fields: [id] } }\noperations:\n');
+    const result = await loadAliased(PREFIXED, preset);
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    expect(result.configuration.connectionTests.get('a')).toEqual({ operation: 'shop_a.search', args: { page: 1, per_page: 1, fields: ['id'] } });
+    expect(result.configuration.connectionTests.get('b')).toEqual({ operation: 'shop_b.search', args: { page: 1, per_page: 1, fields: ['id'] } });
+  });
+
+  it('CONN-8 binding a preset twice without distinct prefixes is refused', async () => {
+    const message = 'the preset is already bound to connection a with the same operation prefix';
+    for (const config of [
+      twoShops('', '', '      - { operation: fixture.search }\n'),
+      twoShops(', operation_prefix: x', ', operation_prefix: x', '      - { operation: x.search }\n'),
+      twoShops(', operation_prefix: fixture', '', '      - { operation: fixture.search }\n'),
+    ]) {
+      expect(issues(await loadAliased(config))).toEqual([expect.objectContaining({ file: 'config.yaml', path: 'connections[1].preset', message })]);
+    }
+  });
+
+  it('CONN-8 operation_prefix without preset is refused', async () => {
+    const result = await load({
+      'connections.yaml': CONNECTIONS.replace('auth: { scheme: bearer } }', 'auth: { scheme: bearer }, operation_prefix: shop }'),
+    });
+    expect(issues(result)).toEqual([expect.objectContaining({ file: 'connections.yaml', path: 'connections[0].operation_prefix', message: 'requires preset' })]);
+  });
+
+  it('POL-1 a grant naming the unprefixed ID of an aliased preset is an unknown operation', async () => {
+    const result = await loadAliased(twoShops(', operation_prefix: shop_a', ', operation_prefix: shop_b', '      - { operation: fixture.search }\n'));
+    expect(issues(result)).toEqual([expect.objectContaining({ file: 'config.yaml', path: 'roles[0].grants[0].operation', message: 'names an operation that is not defined' })]);
+  });
+});
+
+describe('AUTH-4 service_accounts', () => {
+  const SUPPORT_ROLE = 'version: 1\nroles:\n  - { id: support_agent, grants: [] }\n';
+  const accounts = (entries: string): string => `version: 1\nservice_accounts:\n${entries}`;
+  const CI = '  - { client_id: aiops-sa-ci, role: support_agent, description: CI }\n';
+
+  it('AUTH-4 a service account maps its client to one role', async () => {
+    const result = await load({ 'support.yaml': SUPPORT_ROLE, 'sa.yaml': accounts(CI) });
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    expect(result.configuration.serviceAccounts.get('aiops-sa-ci')).toEqual({ role: 'support_agent', description: 'CI' });
+    expect(result.configuration.policy.serviceAccounts).toEqual([{ clientId: 'aiops-sa-ci', role: 'support_agent' }]);
+  });
+
+  it('AUTH-4 without service_accounts the maps are empty', async () => {
+    const result = await load();
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    expect(result.configuration.serviceAccounts.size).toBe(0);
+    expect(result.configuration.policy.serviceAccounts).toEqual([]);
+  });
+
+  it.each([
+    ['an unknown role', { 'sa.yaml': accounts('  - { client_id: aiops-sa-ci, role: ghost }\n') }, 'sa.yaml', 'service_accounts[0].role', 'names a role that is not defined'],
+    [
+      'a duplicate client_id across two files',
+      { 'sa-a.yaml': accounts(CI), 'sa-b.yaml': accounts('  - { client_id: aiops-sa-ci, role: support_agent }\n') },
+      'sa-b.yaml',
+      'service_accounts[0].client_id',
+      'duplicate client_id; first defined in sa-a.yaml at service_accounts[0]',
+    ],
+  ])('AUTH-4 rejects %s', async (_name, files, file, path, message) => {
+    const found = issues(await load({ 'support.yaml': SUPPORT_ROLE, ...files }));
+    expect(found).toEqual([expect.objectContaining({ file, path, message })]);
+  });
+
+  it.each([
+    ['an empty client_id', '{ client_id: "", role: support_agent }', 'service_accounts[0].client_id'],
+    ['a control character in client_id', '{ client_id: "a\\u0007b", role: support_agent }', 'service_accounts[0].client_id'],
+    ['a 256-character client_id', `{ client_id: ${'a'.repeat(256)}, role: support_agent }`, 'service_accounts[0].client_id'],
+    ['an extra key', '{ client_id: aiops-sa-ci, role: support_agent, roles: [x] }', 'service_accounts[0]'],
+    ['role given as a list', '{ client_id: aiops-sa-ci, role: [support_agent] }', 'service_accounts[0].role'],
+    ['a description over 500 characters', `{ client_id: aiops-sa-ci, role: support_agent, description: ${'d'.repeat(501)} }`, 'service_accounts[0].description'],
+  ])('AUTH-4 rejects %s as a schema error', async (_name, entry, path) => {
+    const found = issues(await load({ 'support.yaml': SUPPORT_ROLE, 'sa.yaml': accounts(`  - ${entry}\n`) }));
+    // An empty client_id fails both the length and the format check: every issue is on that path.
+    expect(found.length).toBeGreaterThan(0);
+    expect(found.map((i) => [i.file, i.path])).toEqual(found.map(() => ['sa.yaml', path]));
   });
 });

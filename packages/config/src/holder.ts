@@ -249,7 +249,11 @@ export class ConfigurationHolder implements ConfigurationStateSource {
     const waiters = this.waiters;
     this.waiters = [];
     for (const resolve of waiters) resolve();
-    await this.audit(options, 'ok', base);
+    // AUD-1 CONN-8: the preset versions this load chose.
+    const presets = [...result.configuration.loadedPresets]
+      .map(([id, preset]) => ({ id, package: preset.package, version: preset.version }))
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    await this.audit(options, 'ok', { ...base, presets });
     options.logger.info({ revision: revision.id, hash: computedHash, trigger }, 'configuration loaded');
     return { outcome: 'loaded', revision: revision.id, hash: computedHash };
   }

@@ -144,7 +144,7 @@ describe('CFG-3 CFG-4 the api follows applied revisions', () => {
       ['system:api', 'ok', 'notify'],
     ]);
     const notify = rows[1];
-    expect(notify?.details).toEqual({ revision: appliedRevision?.id, hash: appliedRevision?.hash, service: 'api', trigger: 'notify' });
+    expect(notify?.details).toEqual({ revision: appliedRevision?.id, hash: appliedRevision?.hash, service: 'api', trigger: 'notify', presets: [] });
     expect(notify?.subject).toBeNull();
   });
 

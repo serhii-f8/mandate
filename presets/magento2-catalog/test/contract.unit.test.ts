@@ -5,13 +5,13 @@
  * pins the exact request the preset must send and the response it must map. With
  * MAGENTO_SANDBOX_URL and MAGENTO_SANDBOX_TOKEN set, the same cases run against the sandbox.
  */
-import { readdir, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildBulkBody, buildRequest, createOpenApiAdapter, mapBulkStatus, mapResponse } from '@aiops/adapters';
-import { loadConfigurationSources, type LoadedConfiguration, type OperationBinding } from '@aiops/config';
+import { loadConfigurationSources, type HttpOperationBinding, type LoadedConfiguration } from '@aiops/config';
 import type { BulkItemState, BulkMapping, ConnectionSettings, CredentialSource } from '@aiops/connector-sdk';
-import { startFakeUpstream, type FakeUpstream } from '@aiops/testing';
+import { contractRead, presetConnectionYaml, recordingsFreeOf, replayRecordings, startFakeUpstream, type FakeUpstream } from '@aiops/testing';
 import { PRESET_DIR } from '../src/index.js';
 
 interface RecordedRequest {
@@ -50,19 +50,14 @@ const recordingOf = (c: ContractCase): Recording => {
 
 /** The preset bound to connection `magento`, loaded with the real resolver (CONN-2). */
 async function loadPreset(baseUrl: string): Promise<LoadedConfiguration> {
-  const config = [
-    'version: 1',
-    'presets:',
-    "  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '0.3.0' }",
-    'connections:',
-    '  - id: magento',
-    '    adapter: openapi',
-    `    base_url: ${baseUrl}`,
-    '    credential_ref: magento-token',
-    '    preset: magento-catalog',
-    '    allow_private_network: true',
-    '',
-  ].join('\n');
+  const config = presetConnectionYaml({
+    presetId: 'magento-catalog',
+    package: '@aiops/magento2-catalog',
+    version: '0.3.0',
+    connectionId: 'magento',
+    baseUrl,
+    credentialRef: 'magento-token',
+  });
   const result = await loadConfigurationSources([{ file: 'config.yaml', text: config }], {
     resolver: createOpenApiAdapter().resolver,
     presetDirs: [resolve(PRESET_DIR, '..')],
@@ -71,9 +66,9 @@ async function loadPreset(baseUrl: string): Promise<LoadedConfiguration> {
   return result.configuration;
 }
 
-function bindingOf(config: LoadedConfiguration, operation: string): OperationBinding {
+function bindingOf(config: LoadedConfiguration, operation: string): HttpOperationBinding {
   const binding = config.bindings.get(operation);
-  if (binding === undefined) throw new Error(`no binding for ${operation}`);
+  if (binding?.kind !== 'http') throw new Error(`no HTTP binding for ${operation}`);
   return binding;
 }
 
@@ -266,49 +261,41 @@ describe('NFR-17 magento2-catalog contract', () => {
   });
 
   it('NFR-17 SEC-3 no recording or the vendored spec contains a token', async () => {
-    // The read recordings and the Phase 5 write recordings (recordings/write/).
-    const paths = [
-      ...(await readdir(RECORDINGS)).filter((n) => n.endsWith('.json')).map((n) => join(RECORDINGS, n)),
-      ...(await readdir(join(RECORDINGS, 'write'))).map((n) => join(RECORDINGS, 'write', n)),
-    ];
-    expect(paths.length).toBeGreaterThan(0);
-    const files = [
-      ...(await Promise.all(paths.map((p) => readFile(p, 'utf8')))),
-      await readFile(join(PRESET_DIR, 'spec', 'magento2-catalog.swagger.json'), 'utf8'),
-    ];
-    for (const text of files) {
-      expect(text).not.toContain('eyJ');
-      expect(text.toLowerCase()).not.toContain('"authorization"');
-    }
+    // The read recordings and the Phase 5 write recordings (recordings/write/), below one directory.
+    await recordingsFreeOf(RECORDINGS, ['eyJ', '"authorization"']);
+    const spec = await readFile(join(PRESET_DIR, 'spec', 'magento2-catalog.swagger.json'), 'utf8');
+    expect(spec).not.toContain('eyJ');
+    expect(spec.toLowerCase()).not.toContain('"authorization"');
   });
 
   describe('NFR-17 replay through the adapter read path (fake upstream)', () => {
     let upstream: FakeUpstream;
     let replay: LoadedConfiguration;
+    let replayed: Awaited<ReturnType<typeof replayRecordings>>;
 
     beforeAll(async () => {
       upstream = await startFakeUpstream();
       replay = await loadPreset(`${upstream.url}${BASE_PATH}`);
+      replayed = await replayRecordings(upstream, RECORDINGS, { basePath: BASE_PATH });
     });
     afterAll(async () => {
+      replayed.assertAllUsed();
       await upstream.close();
     });
 
     it.each(cases)('NFR-17 $name: the adapter sends the recorded request with the bearer token and maps the recorded response', async (c) => {
       const recording = recordingOf(c);
-      upstream.route(recording.request.method, `${BASE_PATH}${recording.request.path}`, () => ({
-        status: recording.response.status,
-        body: recording.response.body,
-      }));
       const before = upstream.requests.length;
-      const outcome = await createOpenApiAdapter().read({
+      const outcome = await contractRead({
+        adapter: createOpenApiAdapter(),
         connection: settingsOf(replay),
-        mapping: bindingOf(replay, c.operation).mapping,
+        binding: bindingOf(replay, c.operation),
         args: c.args,
         credential: bearer(FAKE_TOKEN),
       });
       const sent = upstream.requests.slice(before);
       expect(sent).toHaveLength(1);
+      expect(replayed.unexpected).toEqual([]);
       expect(sent[0]?.method).toBe(recording.request.method);
       expect(Object.fromEntries(sent[0]?.query ?? [])).toEqual(recording.request.query);
       expect(sent[0]?.headers.authorization).toBe(`Bearer ${FAKE_TOKEN}`);

@@ -17,6 +17,8 @@ const CONFIG_DIR = fileURLToPath(new URL('../../../../deploy/config', import.met
 const PRESET_DIRS = fileURLToPath(new URL('../../../../presets', import.meta.url));
 /** A read operation of the Magento preset that `support_agent` is not granted in `deploy/config`. */
 const GRANTED = 'catalog.get_product';
+/** AUD-1 CONN-8: `config.load` names the preset version each load chose. */
+const MAGENTO_PRESETS = [{ id: 'magento-catalog', package: '@aiops/magento2-catalog', version: '0.3.0' }];
 const MASTER_KEYS = '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=';
 const TEMPORAL_KEYS = '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=';
 
@@ -69,7 +71,7 @@ describe('CFG-3 CFG-4 AUD-1 the worker follows applied revisions', () => {
         expect(holder.current.policy.roles.find((r) => r.id === 'support_agent')?.grants.map((g) => g.operation)).not.toContain(GRANTED);
         const started = await loadRows(database);
         expect(started.map((r) => [r.actor, r.outcome, r.details])).toEqual([
-          ['system:worker', 'ok', { revision: start.revision, hash: start.hash, service: 'worker', trigger: 'start' }],
+          ['system:worker', 'ok', { revision: start.revision, hash: start.hash, service: 'worker', trigger: 'start', presets: MAGENTO_PRESETS }],
         ]);
 
         // A temp copy of deploy/config whose support_agent is granted one more read operation.
@@ -113,8 +115,8 @@ describe('CFG-3 CFG-4 AUD-1 the worker follows applied revisions', () => {
 
         const afterApply = await loadRows(database);
         expect(afterApply.map((r) => [r.actor, r.outcome, r.details])).toEqual([
-          ['system:worker', 'ok', { revision: start.revision, hash: start.hash, service: 'worker', trigger: 'start' }],
-          ['system:worker', 'ok', { revision: id, hash: loaded.configuration.hash, service: 'worker', trigger: 'notify' }],
+          ['system:worker', 'ok', { revision: start.revision, hash: start.hash, service: 'worker', trigger: 'start', presets: MAGENTO_PRESETS }],
+          ['system:worker', 'ok', { revision: id, hash: loaded.configuration.hash, service: 'worker', trigger: 'notify', presets: MAGENTO_PRESETS }],
         ]);
 
         // SIGHUP finds the same seq: unchanged, no row. Refreshes run one after another, so the

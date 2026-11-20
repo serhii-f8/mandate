@@ -1,17 +1,23 @@
 /**
  * OpenAPI adapter facade (CONN-2, CONN-7, SEC-7): the spec resolver the configuration loader uses,
- * the read path the api uses, scope detection for the connection test, and the bulk write path the
- * worker uses (OPS-6, EXE-4).
+ * the read path the api uses, scope detection for the connection test, and the bulk and opaque write
+ * paths and the per-record write the worker uses (OPS-6, EXE-4), and the runner of preset code
+ * operations, whose requests share the connection's client (OPS-5).
  */
+import { validateHeaderName, validateHeaderValue } from 'node:http';
 import {
   parseSecret,
   type BulkStatusOutcome,
   type BulkSubmitOutcome,
+  type CallOutcome,
+  type CodeAdapter,
   type ConnectionSettings,
   type CredentialSource,
   type HttpMethod,
   type ReadAdapter,
   type ReadOutcome,
+  type RecordSendOutcome,
+  type RecordWriteAdapter,
   type RequestInstrumentation,
   type ScopeReport,
   type SpecIssue,
@@ -19,9 +25,12 @@ import {
   type UpstreamResolver,
   type WriteAdapter,
   type WriteFailure,
+  type WriteRecord,
 } from '@aiops/connector-sdk';
+import { createCodeRunner, type CodeRunnerDeps } from '../code/runner.js';
 import { createConnectionClient, createTransport, type ConnectionClient, type SendResult, type Transport } from '../http/client.js';
 import { createGuardedLookup } from '../http/egress.js';
+import { FORBIDDEN_HEADERS } from '../http/headers.js';
 import { clientCredentialsToken, lastTokenScopes } from '../http/oauth.js';
 import { buildBulkBody, extractBatchId, isSafeBatchId, mapBulkStatus } from './bulk.js';
 import { deriveCatalog } from './derive.js';
@@ -38,9 +47,13 @@ export interface OpenApiAdapterDeps {
   transportFor?: (settings: ConnectionSettings) => Transport;
   /** Hook around each upstream attempt of the default client, also for the spec fetch (NFR-11). With a custom `clientFor` the caller wires it. */
   readonly instrumentation?: RequestInstrumentation;
+  /** Receives the scrubbed, cut message of a code operation that threw (OPS-5, SEC-3). */
+  readonly onCodeError?: CodeRunnerDeps['onCodeError'];
+  /** Code operation deadlines; default 60 s for reads, 300 s for writes and calls (OPS-5). */
+  readonly codeDeadlines?: CodeRunnerDeps['codeDeadlines'];
 }
 
-export type OpenApiAdapter = ReadAdapter & WriteAdapter & { resolver: UpstreamResolver };
+export type OpenApiAdapter = ReadAdapter & WriteAdapter & Required<Pick<WriteAdapter, 'callOnce'>> & RecordWriteAdapter & CodeAdapter & { resolver: UpstreamResolver };
 
 const NOT_DETECTABLE: ScopeReport = { detectable: false, source: 'none', values: [] };
 /** RFC 6749 §3.3 scope-token characters; anything else is not reported. */
@@ -104,6 +117,53 @@ function classify(r: SendResult & { ok: false }, kind: 'submit' | 'status'): Wri
     return { ...base, code: retriable || kind === 'status' ? 'http_status' : 'rejected', retriable };
   }
   return { ...base, code: r.code, retriable: r.code === 'timeout' || r.code === 'network' || r.code === 'busy' };
+}
+
+/** The record minus the fields the path takes with `{ record }` (OPS-6); keys stay plain data. */
+function recordWithoutPathFields(record: WriteRecord, mapping: UpstreamMapping): Record<string, unknown> {
+  const pathFields = new Set<string>();
+  for (const tpl of Object.values(mapping.pathParams)) {
+    if (typeof tpl === 'object' && 'record' in tpl) pathFields.add(tpl.record);
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(record)) {
+    // defineProperty keeps a key like "__proto__" as a data property, so it is serialised as sent.
+    if (!pathFields.has(k)) Object.defineProperty(out, k, { value: v, enumerable: true, writable: true, configurable: true });
+  }
+  return out;
+}
+
+const callNotSent: CallOutcome = { result: 'not_sent', code: 'mapping', durationMs: 0 };
+
+/** True when node would send every header as is; checked before the hook so a bad value records nothing. */
+function headersSendable(headers: Readonly<Record<string, string>>): boolean {
+  try {
+    for (const [name, value] of Object.entries(headers)) {
+      validateHeaderName(name);
+      validateHeaderValue(name, value);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Outcome of a failed opaque call (EXE-4, R10), codes only (SEC-3). A failure before the hook ran
+ * sent nothing. After it: a status decides (3xx and 5xx unknown, 4xx a refusal); an egress refusal
+ * at connect sent nothing (R4); timeouts, network errors and broken responses may have been applied.
+ */
+function classifyCall(r: SendResult & { ok: false }, hookRan: boolean): CallOutcome {
+  const { code, durationMs } = r;
+  if (!hookRan || code === 'egress_denied' || code === 'busy' || code === 'mapping' || code === 'credential_missing' || code === 'credential_unusable') {
+    return { result: 'not_sent', code, durationMs };
+  }
+  if (code === 'http_status' && r.status !== undefined) {
+    const status = r.status;
+    if (status >= 400 && status < 500) return { result: 'refused', code: 'rejected', status, durationMs };
+    return { result: 'unknown', code, status, durationMs };
+  }
+  return { result: 'unknown', code, ...(r.status === undefined ? {} : { status: r.status }), durationMs };
 }
 
 async function openSecret(
@@ -247,6 +307,8 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
     const bulk = mapping.bulk;
     // The batch ID came from the upstream: it goes into the path only when it is a plain token (SEC-5).
     if (bulk === undefined || !isSafeBatchId(batchId)) return mappingFailure();
+    // Key mode maps entries by target ID: without the IDs nothing can be mapped, so nothing is asked (F19).
+    if (bulk.status.key !== undefined && input.keys === undefined) return mappingFailure();
     let req: HttpRequestSpec;
     try {
       req = buildRequest(
@@ -261,11 +323,85 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
     // A status read changes nothing upstream, so the client may retry it.
     const r = await clientOf(connection).send(req, { retryable: true, ...(credential ? { credential } : {}) });
     if (!r.ok) return classify(r, 'status');
-    const items = mapBulkStatus(bulk.status, r.json);
+    const items = mapBulkStatus(bulk.status, r.json, input.keys);
     if (items === undefined) return { ok: false, code: 'invalid_response', status: r.status, durationMs: r.durationMs, retriable: false };
     return { ok: true, items, durationMs: r.durationMs };
   }
 
-  return { resolver, read, detectScopes, submitBulk, bulkStatus };
+  /**
+   * One request for one record of a per-record write binding (OPS-6). `{ arg }` templates come
+   * from the change-set arguments and `{ record }` templates from the record; without a `body`
+   * template the body is the record minus the fields the path takes with `{ record }`. Never
+   * retried by the client (EXE-4). The body is discarded unread: any 2xx is `ok` with its status
+   * and the verify read decides (F18). 429, 5xx, timeouts, network errors and a full semaphore
+   * are retriable; every other failure is not. Codes only (SEC-3, SEC-5).
+   */
+  async function writeRecord(input: Parameters<RecordWriteAdapter['writeRecord']>[0]): Promise<RecordSendOutcome> {
+    const { connection, mapping, record, args, credential } = input;
+    const { method, path } = mapping;
+    // A per-record write changes upstream state: never a GET, never a bulk submission.
+    if (method === undefined || method === 'GET' || path === undefined || mapping.bulk !== undefined) return mappingFailure();
+    let req: HttpRequestSpec;
+    try {
+      req = buildRequest(connection.baseUrl, { ...mapping, method, path }, args, record);
+      if (mapping.body === undefined) {
+        req.body = JSON.stringify(recordWithoutPathFields(record, mapping));
+        req.headers['content-type'] = 'application/json';
+      }
+    } catch (err) {
+      if (err instanceof MappingError) return mappingFailure();
+      throw err;
+    }
+    // A body template that renders nothing would send an empty write, which an upstream may read as "clear".
+    if (mapping.body !== undefined && req.body === undefined) return mappingFailure();
+    if (!headersSendable(req.headers)) return mappingFailure();
+    const r = await clientOf(connection).send(req, { retryable: false, discardBody: true, ...(credential ? { credential } : {}) });
+    if (r.ok) return { ok: true, status: r.status, durationMs: r.durationMs };
+    return classify(r, 'submit');
+  }
+
+  async function callOnce(input: Parameters<NonNullable<WriteAdapter['callOnce']>>[0]): Promise<CallOutcome> {
+    const { connection, target, args, credential, idempotencyKey, beforeSend } = input;
+    if (target.kind !== 'http') return callNotSent;
+    const { mapping } = target;
+    const { method, path } = mapping;
+    // An opaque call is a write sent once: never a GET, never a bulk submission (R9).
+    if (method === undefined || method === 'GET' || path === undefined || mapping.bulk !== undefined) return callNotSent;
+    let req: HttpRequestSpec;
+    try {
+      req = buildRequest(connection.baseUrl, { ...mapping, method, path }, args);
+    } catch (err) {
+      if (err instanceof MappingError) return callNotSent;
+      throw err;
+    }
+    const keyHeader = mapping.idempotency?.header.toLowerCase();
+    if (keyHeader !== undefined && idempotencyKey !== undefined) {
+      if (FORBIDDEN_HEADERS.has(keyHeader)) return callNotSent;
+      req.headers[keyHeader] = idempotencyKey;
+    }
+    if (!headersSendable(req.headers)) return callNotSent;
+    let hookRan = false;
+    const r = await clientOf(connection).send(req, {
+      retryable: false,
+      discardBody: true,
+      beforeSend: async () => {
+        await beforeSend();
+        hookRan = true;
+      },
+      ...(credential ? { credential } : {}),
+    });
+    // The body was discarded unread: any 2xx is accepted, whatever it carried (R10).
+    if (r.ok) return { result: 'accepted', status: r.status, durationMs: r.durationMs };
+    return classifyCall(r, hookRan);
+  }
+
+  // Code requests go through `clientOf`, so they share the connection's semaphore, token cache and instrumentation.
+  const code = createCodeRunner({
+    clientOf,
+    ...(deps.onCodeError === undefined ? {} : { onCodeError: deps.onCodeError }),
+    ...(deps.codeDeadlines === undefined ? {} : { codeDeadlines: deps.codeDeadlines }),
+  });
+
+  return { resolver, read, detectScopes, submitBulk, bulkStatus, callOnce, writeRecord, ...code };
 }
 

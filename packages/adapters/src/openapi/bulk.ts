@@ -52,18 +52,43 @@ export function isSafeBatchId(id: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(id);
 }
 
+/**
+ * Maps a bulk status answer to `{ index, state }` per entry (OPS-6).
+ *
+ * Index mode (`status.index`): the entry's field is its position; entries without a
+ * non-negative integer are dropped. Key mode (`status.key`): the entry's field is a target ID
+ * (string, or finite number compared as its decimal string) looked up in `keys`, the to-write
+ * target IDs in plan order. An unknown or unreadable key is emitted as `index: keys.length`,
+ * out of range, so core skips it exactly like an out-of-range index instead of reading an
+ * answer of foreign keys as "still open". Key mode without `keys` answers undefined.
+ */
 export function mapBulkStatus(
   status: BulkMapping['status'],
   json: unknown,
+  keys?: readonly string[],
 ): { index: number; state: BulkItemState }[] | undefined {
+  const keyField = status.key;
+  const indexField = status.index;
+  if (keyField === undefined && indexField === undefined) return undefined;
+  if (keyField !== undefined && keys === undefined) return undefined;
   const list = dotted(json, status.items);
   if (!Array.isArray(list)) return undefined;
   const out: { index: number; state: BulkItemState }[] = [];
   const has = (set_: readonly unknown[], v: unknown): boolean => set_.some((x) => x === v);
+  const positionOf = (e: Obj): number | undefined => {
+    if (keyField !== undefined && keys !== undefined) {
+      const k = e[keyField];
+      const id = typeof k === 'string' ? k : typeof k === 'number' && Number.isFinite(k) ? String(k) : undefined;
+      const at = id === undefined ? -1 : keys.indexOf(id);
+      return at === -1 ? keys.length : at;
+    }
+    const index = indexField === undefined ? undefined : e[indexField];
+    return typeof index === 'number' && Number.isInteger(index) && index >= 0 ? index : undefined;
+  };
   for (const e of list) {
     if (!isObj(e)) continue;
-    const index = e[status.index];
-    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) continue;
+    const index = positionOf(e);
+    if (index === undefined) continue;
     const raw = e[status.state];
     // A state in no list is failed, never open.
     let state: BulkItemState = 'failed';

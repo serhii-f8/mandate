@@ -5,6 +5,7 @@
  */
 import type { AuthSettings, BulkMapping, ResponseMapping, TemplateValue, UpstreamMapping } from '@aiops/connector-sdk';
 import { z } from 'zod';
+import { mcpUpstreamSchema, type McpUpstreamConfig } from './mcp.js';
 
 export const id = z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/);
 /** Operation IDs are also MCP tool names. */
@@ -76,7 +77,13 @@ export const openApiSchema = z.strictObject({
 });
 
 const literal = z.union([z.string().max(4000), z.number(), z.boolean()]);
-const templateValue = z.union([literal, z.strictObject({ arg: z.string().min(1).max(128), default: literal.optional(), join: z.string().min(1).max(8).optional() })]);
+const templateJoin = z.string().min(1).max(8).optional();
+/** A literal, an argument of the call (`{ arg }`), or a field of the written record (`{ record }`, OPS-6). */
+const templateValue = z.union([
+  literal,
+  z.strictObject({ arg: z.string().min(1).max(128), default: literal.optional(), join: templateJoin }),
+  z.strictObject({ record: z.string().min(1).max(128), default: literal.optional(), join: templateJoin }),
+]);
 const templateMap = z.record(z.string().min(1).max(256), templateValue);
 const dottedPath = z.string().min(1).max(256);
 
@@ -113,7 +120,9 @@ const bulkSchema = z.strictObject({
       method: z.literal('GET').default('GET'),
       path: z.string().min(1).max(2048).regex(/^\//),
       items: bulkPath,
-      index: bulkPath,
+      /** OPS-6: the entry's position, or (`key`) its target ID; exactly one. */
+      index: bulkPath.optional(),
+      key: bulkPath.optional(),
       state: bulkPath,
       states: z.strictObject({
         ok: z.array(stateValue).min(1),
@@ -123,6 +132,11 @@ const bulkSchema = z.strictObject({
       }),
     })
     .superRefine((status, ctx) => {
+      if (status.index !== undefined && status.key !== undefined) {
+        ctx.addIssue({ code: 'custom', path: ['index'], message: 'give either index or key, not both' });
+      } else if (status.index === undefined && status.key === undefined) {
+        ctx.addIssue({ code: 'custom', path: ['index'], message: 'is required (or give key)' });
+      }
       const placeholders = pathPlaceholders(status.path);
       if (placeholders.length !== 1 || placeholders[0] !== 'batch_id') {
         ctx.addIssue({ code: 'custom', path: ['path'], message: 'must contain {batch_id} and no other placeholder' });
@@ -144,12 +158,16 @@ export type BulkConfig = z.output<typeof bulkSchema>;
 
 /**
  * Headers the platform sets itself. `authorization`, `proxy-authorization` and `cookie` are
- * caught by the CFG-5 key scan. Keep in step with `FORBIDDEN_HEADERS` in
+ * caught by the CFG-5 key scan when they are keys of `headers`; `idempotency.header` names a
+ * header in a value, so it is checked against `CREDENTIAL_HEADERS` too. Keep in step with `FORBIDDEN_HEADERS` in
  * `@aiops/adapters` (src/http/headers.ts); this package cannot import the adapters.
  */
 const PLATFORM_HEADERS: ReadonlySet<string> = new Set(['host', 'content-length', 'transfer-encoding', 'connection']);
+/** Headers that carry credentials (SEC-2): the platform's own, never a configured value. */
+const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set(['authorization', 'proxy-authorization', 'cookie']);
 
-export const upstreamSchema = z
+/** The HTTP mapping of an operation of an `openapi` connection. */
+export const httpUpstreamSchema = z
   .strictObject({
     operation: z.string().min(1).max(512).optional(),
     method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
@@ -160,6 +178,8 @@ export const upstreamSchema = z
     body: templateValue.optional(),
     response: responseSchema.optional(),
     bulk: bulkSchema.optional(),
+    /** EXE-4: the header of the idempotency key of an opaque write. */
+    idempotency: z.strictObject({ header: headerName }).optional(),
   })
   .superRefine((u, ctx) => {
     const byPath = u.method !== undefined || u.path !== undefined;
@@ -173,8 +193,76 @@ export const upstreamSchema = z
     for (const name of Object.keys(u.headers ?? {})) {
       if (PLATFORM_HEADERS.has(name.toLowerCase())) ctx.addIssue({ code: 'custom', path: ['headers', name], message: 'is set by the platform' });
     }
+    if (u.idempotency !== undefined) {
+      const header = u.idempotency.header.toLowerCase();
+      if (PLATFORM_HEADERS.has(header) || CREDENTIAL_HEADERS.has(header)) {
+        ctx.addIssue({ code: 'custom', path: ['idempotency', 'header'], message: 'is set by the platform' });
+      } else if (Object.keys(u.headers ?? {}).some((name) => name.toLowerCase() === header)) {
+        ctx.addIssue({ code: 'custom', path: ['idempotency', 'header'], message: 'is already declared in headers' });
+      }
+      if (u.bulk !== undefined) ctx.addIssue({ code: 'custom', path: ['idempotency'], message: 'is not allowed together with bulk' });
+    }
   });
-export type UpstreamConfig = z.output<typeof upstreamSchema>;
+/** Alias of `httpUpstreamSchema`, kept for existing importers (new code uses the new name). */
+export const upstreamSchema = httpUpstreamSchema;
+export type UpstreamConfig = z.output<typeof httpUpstreamSchema>;
+
+/** OPS-5: a code operation name, as `parsePresetModule` of `@aiops/connector-sdk` accepts it. */
+export const CODE_OPERATION_NAME = /^[a-z][a-z0-9_]{0,62}$/;
+
+/** OPS-5: the upstream of a preset operation served by an operation of the preset's code module. */
+export const codeUpstreamSchema = z.strictObject({
+  code: z.string().regex(CODE_OPERATION_NAME),
+  response: z
+    .strictObject({
+      fields_from_arg: z.string().min(1).max(128).optional(),
+      max_items: z.number().int().min(1).max(500).default(100),
+    })
+    .optional(),
+});
+export type CodeUpstreamConfig = z.output<typeof codeUpstreamSchema>;
+
+/** True for the `{ code }` variant (OPS-5). */
+export function isCodeUpstream(u: UpstreamConfig | McpUpstreamConfig | CodeUpstreamConfig): u is CodeUpstreamConfig {
+  return Object.hasOwn(u, 'code');
+}
+
+/** The response mapping of a code binding: the projection argument and the item cap. */
+export function toCodeResponse(r: CodeUpstreamConfig['response']): ResponseMapping {
+  if (r === undefined) return { maxItems: 100 };
+  return { ...(r.fields_from_arg === undefined ? {} : { fieldsFromArg: r.fields_from_arg }), maxItems: r.max_items };
+}
+
+/** True when the input is an object with an own `tool` or `pin` key: the MCP variant. */
+function isMcpShaped(input: unknown): boolean {
+  return typeof input === 'object' && input !== null && !Array.isArray(input) && (Object.hasOwn(input, 'tool') || Object.hasOwn(input, 'pin'));
+}
+
+/** True when the input is an object with an own `code` key: the code variant (OPS-5). */
+function isCodeShaped(input: unknown): boolean {
+  return typeof input === 'object' && input !== null && !Array.isArray(input) && Object.hasOwn(input, 'code');
+}
+
+/**
+ * An operation's `upstream`: `{ tool, pin }` (CONN-1) when the object has a `tool` or `pin`
+ * key, `{ code }` (OPS-5) when it has a `code` key, the HTTP mapping otherwise. Choosing by key, not `z.union`, keeps each variant's
+ * issues at their own paths (`upstream.pin`, `upstream: unknown key: method`) instead of
+ * one "does not match any allowed form". `reportInput` as `PARSE_PARAMS` of `schema.ts`
+ * (not imported: `schema.ts` imports this module), so a missing key still reads "is required".
+ */
+export const operationUpstreamSchema = z.unknown().transform((input, ctx): UpstreamConfig | McpUpstreamConfig | CodeUpstreamConfig => {
+  const result = isMcpShaped(input)
+    ? mcpUpstreamSchema.safeParse(input, { reportInput: true })
+    : isCodeShaped(input)
+      ? codeUpstreamSchema.safeParse(input, { reportInput: true })
+      : httpUpstreamSchema.safeParse(input, { reportInput: true });
+  if (result.success) return result.data;
+  // Re-raised as they are: Zod prefixes their paths with `upstream`, as it does for nested
+  // schemas. The cast only widens `input` (reported because of `reportInput`) to the raw-issue
+  // type; undefined still marks a missing key ("is required").
+  for (const issue of result.error.issues) ctx.issues.push(issue as z.core.$ZodRawIssue);
+  return z.NEVER;
+});
 type TemplateConfig = z.output<typeof templateValue>;
 
 /** True when the block declares request templates, which only an explicit `input_schema` can back. */
@@ -187,17 +275,30 @@ export function hasTemplates(u: UpstreamConfig): boolean {
   );
 }
 
-/** Every `{ arg }` reference of the block with its path inside `upstream`. */
-export function templateArgs(u: UpstreamConfig): { arg: string; path: readonly PropertyKey[] }[] {
-  const found: { arg: string; path: readonly PropertyKey[] }[] = [];
-  const visit = (value: TemplateConfig, path: readonly PropertyKey[]): void => {
-    if (typeof value === 'object') found.push({ arg: value.arg, path });
-  };
+/** Calls `visit` with every request template of the block and its path inside `upstream`. */
+function eachTemplate(u: UpstreamConfig, visit: (value: TemplateConfig, path: readonly PropertyKey[]) => void): void {
   for (const key of ['path_params', 'query', 'headers'] as const) {
     for (const [name, value] of Object.entries(u[key] ?? {})) visit(value, [key, name]);
   }
   if (u.body !== undefined) visit(u.body, ['body']);
+}
+
+/** Every `{ arg }` reference of the block with its path inside `upstream`; `{ record }` templates are not arguments. */
+export function templateArgs(u: UpstreamConfig): { arg: string; path: readonly PropertyKey[] }[] {
+  const found: { arg: string; path: readonly PropertyKey[] }[] = [];
+  eachTemplate(u, (value, path) => {
+    if (typeof value === 'object' && 'arg' in value) found.push({ arg: value.arg, path });
+  });
   if (u.response?.fields_from_arg !== undefined) found.push({ arg: u.response.fields_from_arg, path: ['response', 'fields_from_arg'] });
+  return found;
+}
+
+/** OPS-6: every `{ record }` reference of the block with its path inside `upstream`. */
+export function templateRecords(u: UpstreamConfig): { record: string; path: readonly PropertyKey[] }[] {
+  const found: { record: string; path: readonly PropertyKey[] }[] = [];
+  eachTemplate(u, (value, path) => {
+    if (typeof value === 'object' && 'record' in value) found.push({ record: value.record, path });
+  });
   return found;
 }
 
@@ -209,7 +310,7 @@ export function pathPlaceholders(path: string): string[] {
 function toTemplate(value: TemplateConfig): TemplateValue {
   if (typeof value !== 'object') return value;
   return {
-    arg: value.arg,
+    ...('arg' in value ? { arg: value.arg } : { record: value.record }),
     ...(value.default === undefined ? {} : { default: value.default }),
     ...(value.join === undefined ? {} : { join: value.join }),
   };
@@ -245,7 +346,8 @@ export function toBulkMapping(b: BulkConfig): BulkMapping {
       method: b.status.method,
       path: b.status.path,
       items: b.status.items,
-      index: b.status.index,
+      ...(b.status.index === undefined ? {} : { index: b.status.index }),
+      ...(b.status.key === undefined ? {} : { key: b.status.key }),
       state: b.status.state,
       states: {
         ok: [...b.status.states.ok],
@@ -269,6 +371,7 @@ export function toUpstreamMapping(u: UpstreamConfig): UpstreamMapping {
     ...(u.body === undefined ? {} : { body: toTemplate(u.body) }),
     response: toResponse(u.response),
     ...(u.bulk === undefined ? {} : { bulk: toBulkMapping(u.bulk) }),
+    ...(u.idempotency === undefined ? {} : { idempotency: { header: u.idempotency.header } }),
   };
 }
 

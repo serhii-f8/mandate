@@ -170,6 +170,7 @@ async function setup(status: ChangeSetStatus = 'prepared') {
     include: [],
     caller: alice,
     correlationId: 'corr-derive',
+    excludable: () => true,
     ...over,
   });
   return { repo, deps, req, source };
@@ -219,6 +220,26 @@ describe('CS-5 derived change-sets', () => {
     expect(isValidTargetId('x'.repeat(512))).toBe(true);
     expect(isValidTargetId('😀 SKU-1')).toBe(true);
     for (const bad of ['', 'x'.repeat(513), 'a\u0007', 'a\u007f', 'a\n', 'a\uD800', '\uDC00b']) expect(isValidTargetId(bad)).toBe(false);
+  });
+
+  it('CS-5 an opaque change-set cannot be derived: not_excludable', async () => {
+    const s = await setup();
+    const asked: string[] = [];
+    const excludable = (id: string) => {
+      asked.push(id);
+      return false;
+    };
+    expect(await deriveChangeSet(s.deps, s.req({ exclude: ['t-0001'], excludable }))).toEqual({ ok: false, reason: 'not_excludable' });
+    expect(asked).toEqual(['catalog.update_content']);
+    expect(s.repo.sets.size).toBe(1);
+  });
+
+  it('SEC-1 a foreign opaque change-set still reads not_found', async () => {
+    const s = await setup();
+    expect(await deriveChangeSet(s.deps, s.req({ caller: bob, exclude: ['t-0001'], excludable: () => false }))).toEqual({
+      ok: false,
+      reason: 'not_found',
+    });
   });
 
   it('CS-5 CS-4 the derived change-set has its own id and hash, the source is unchanged', async () => {

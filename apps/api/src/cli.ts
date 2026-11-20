@@ -9,8 +9,10 @@
  *   aiops audit retention --now                    runs the audit retention job once with the active revision (AUD-7, CFG-3)
  *   aiops config diff <dir> [--preset-dir <dir>]...                 compares <dir> with the active revision (CFG-3)
  *   aiops config apply <dir> [--preset-dir <dir>]... [--actor <n>]  stores <dir> as the new active revision (CFG-3, CFG-4)
- *   aiops config explain --operation <id> --groups <g,...> [--subject <s>] [--args <json>] [--records <n>]
+ *   aiops config explain --operation <id> (--groups <g,...> | --service <client_id>) [--subject <s>] [--args <json>] [--records <n>]
  *                                                  dry policy evaluation against the active revision (POL-7)
+ *   aiops mcp tools <connection> [--show <tool>]   lists an mcp connection's tools live with hashes and pin states;
+ *                                                  --show prints one definition for review and a pinned skeleton (CONN-4, SEC-6)
  *
  * Exit codes: 0 success (explain: allow), 1 failed, invalid or denied, 2 usage or environment. Each command parses
  * only the environment it needs; errors name variables, never values (SEC-3).
@@ -19,7 +21,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { createOpenApiAdapter, type OpenApiAdapter } from '@aiops/adapters';
+import { createAdapters, type OpenApiAdapter } from '@aiops/adapters';
+import type { McpToolAdapter } from '@aiops/connector-sdk';
 import {
   diffConfigurations,
   diffCounts,
@@ -34,6 +37,7 @@ import {
   type LoadResult,
 } from '@aiops/config';
 import type { AuditLog, ConfigRevision, ConfigRevisionStore, CredentialVault } from '@aiops/core';
+import { SERVICE_SUBJECT_PREFIX } from '@aiops/core';
 import {
   createDb,
   type Db,
@@ -50,6 +54,7 @@ import {
 } from '@aiops/db';
 import type pg from 'pg';
 import { explainCall, formatExplain, type ExplainInput } from './config/explain.js';
+import { MCP_TOOLS_USAGE, mcpConnectionOf, parseMcpToolsArgs, runMcpTools } from './mcp-tools-cli.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
 
 const USAGE = [
@@ -60,7 +65,8 @@ const USAGE = [
   '       aiops audit retention --now',
   '       aiops config diff <dir> [--preset-dir <dir>]...',
   '       aiops config apply <dir> [--preset-dir <dir>]... [--actor <name>]',
-  '       aiops config explain --operation <id> --groups <g1,g2,...> [--subject <s>] [--args <json>] [--records <n>]',
+  '       aiops config explain --operation <id> (--groups <g1,g2,...> | --service <client_id>) [--subject <s>] [--args <json>] [--records <n>]',
+  MCP_TOOLS_USAGE,
 ].join('\n');
 
 /** The actor and client the CLI audits as. */
@@ -82,9 +88,16 @@ export interface StoreInput {
   readonly sensitiveKeys?: ReadonlySet<string>;
 }
 
+/** What the CLI needs of an adapter: the OpenAPI parts, and the MCP tool methods when present. */
+export type CliAdapter = OpenApiAdapter & Partial<McpToolAdapter>;
+
 export interface CliDeps {
   readonly env: Readonly<Record<string, string | undefined>>;
-  readonly adapter?: OpenApiAdapter;
+  /**
+   * The upstream adapter; defaults to `createAdapters()` without a credential lookup, so an `mcp`
+   * connection with a credential may load `unlisted` (R10). The MCP methods are optional (ruling F5).
+   */
+  readonly adapter?: CliAdapter;
   /** Opens the database and vault; the default connects to PostgreSQL (already migrated). */
   readonly openStore?: (input: StoreInput) => Promise<CliStore>;
   /** Opens the database for the audit commands; the default connects to PostgreSQL (already migrated). */
@@ -139,7 +152,7 @@ function presetDirsOf(flagged: readonly string[], env: Readonly<Record<string, s
 async function loadChecked(
   dir: string,
   presetDirs: string[] | undefined,
-  adapter: OpenApiAdapter,
+  adapter: CliAdapter,
   out: (line: string) => void,
 ): Promise<Extract<LoadResult, { ok: true }>['configuration'] | undefined> {
   const result = await loadConfigurationDirectory(dir, { resolver: adapter.resolver, ...(presetDirs === undefined ? {} : { presetDirs }) });
@@ -173,7 +186,7 @@ async function validate(args: readonly string[], out: (line: string) => void, de
     out(USAGE);
     return 2;
   }
-  const configuration = await loadChecked(parsed.dir, presetDirsOf(parsed.presetDirs, deps.env, deps), deps.adapter ?? createOpenApiAdapter(), out);
+  const configuration = await loadChecked(parsed.dir, presetDirsOf(parsed.presetDirs, deps.env, deps), deps.adapter ?? createAdapters(), out);
   if (configuration === undefined) return 1;
   const { policy, connections } = configuration;
   out(`Configuration valid: ${String(connections.length)} connections, ${String(policy.operations.length)} operations, ${String(policy.roles.length)} roles`);
@@ -329,7 +342,7 @@ async function testConnection(args: readonly string[], out: (line: string) => vo
     return 2;
   }
   const env = parseEnv({ AIOPS_CONFIG_DIR: nonEmpty, DATABASE_URL: postgresUrl, AIOPS_MASTER_KEYS: nonEmpty }, deps.env);
-  const adapter = deps.adapter ?? createOpenApiAdapter();
+  const adapter = deps.adapter ?? createAdapters();
   const configuration = await loadChecked(env.AIOPS_CONFIG_DIR, presetDirsOf([], deps.env, deps), adapter, out);
   if (configuration === undefined) return 1;
   return withStore(deps, env, configuration.sensitiveFields, async (store) => {
@@ -454,7 +467,7 @@ async function configChange(kind: 'diff' | 'apply', args: readonly string[], out
   }
   const env = parseEnv({ DATABASE_URL: postgresUrl }, deps.env);
   const actor = applyActor(parsed.actor, deps.env);
-  const adapter = deps.adapter ?? createOpenApiAdapter();
+  const adapter = deps.adapter ?? createAdapters();
   const presetDirs = presetDirsOf(parsed.presetDirs, deps.env, deps);
   const configuration = await loadChecked(parsed.dir, presetDirs, adapter, out);
   if (configuration === undefined) return 1;
@@ -504,11 +517,11 @@ async function configChange(kind: 'diff' | 'apply', args: readonly string[], out
   });
 }
 
-const EXPLAIN_FLAGS = ['--operation', '--groups', '--subject', '--args', '--records'] as const;
+const EXPLAIN_FLAGS = ['--operation', '--groups', '--service', '--subject', '--args', '--records'] as const;
 const MAX_RECORDS = 1_000_000;
 const NO_ACTIVE_CONFIGURATION = 'no active configuration: start the api once or run aiops config apply';
 
-/** `--operation <id> --groups <g1,...> [--subject <s>] [--args <json>] [--records <n>]`; undefined is a usage error. */
+/** `--operation <id> (--groups <g1,...> | --service <client_id>) [--subject <s>] [--args <json>] [--records <n>]`; undefined is a usage error. */
 function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
   const values = new Map<string, string>();
   for (let i = 0; i < args.length; i += 2) {
@@ -519,7 +532,9 @@ function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
   }
   const operationId = values.get('--operation');
   const groups = (values.get('--groups') ?? '').split(',').map((g) => g.trim()).filter((g) => g.length > 0);
-  if (operationId === undefined || groups.length === 0) return undefined;
+  const service = values.get('--service');
+  // Exactly one of --groups and --service; a service account has no IdP subject to override.
+  if (operationId === undefined || (groups.length === 0) === (service === undefined) || (service !== undefined && values.has('--subject')) || (values.get('--subject') ?? '').startsWith(SERVICE_SUBJECT_PREFIX)) return undefined;
 
   // Neither message quotes the value: it is operator input of unknown content (SEC-3).
   let parsedArgs: unknown = {};
@@ -537,13 +552,13 @@ function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
   if (!(records >= 1 && records <= MAX_RECORDS)) throw new CliError(`--records: must be an integer from 1 to ${String(MAX_RECORDS)}`, 2);
 
   const subject = values.get('--subject');
-  return { operationId, groups, args: parsedArgs as Record<string, unknown>, records, ...(subject === undefined ? {} : { subject }) };
+  return { operationId, groups, args: parsedArgs as Record<string, unknown>, records, ...(subject === undefined ? {} : { subject }), ...(service === undefined ? {} : { service }) };
 }
 
 /** The adapter's resolver and the preset directories of `AIOPS_PRESET_DIRS` or the default, for loading the active revision. */
 function activeLoadOptions(deps: CliDeps): LoadOptions {
   const presetDirs = presetDirsOf([], deps.env, deps);
-  return { resolver: (deps.adapter ?? createOpenApiAdapter()).resolver, ...(presetDirs === undefined ? {} : { presetDirs }) };
+  return { resolver: (deps.adapter ?? createAdapters()).resolver, ...(presetDirs === undefined ? {} : { presetDirs }) };
 }
 
 /**
@@ -580,6 +595,28 @@ async function configExplain(args: readonly string[], out: (line: string) => voi
   });
 }
 
+/**
+ * `aiops mcp tools`: the active revision names the connection; the list is live, with the
+ * stored credential, which only the adapter opens (CONN-4, SEC-2, SEC-3).
+ */
+async function mcpTools(args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
+  const parsed = parseMcpToolsArgs(args);
+  if (parsed === undefined) {
+    out(USAGE);
+    return 2;
+  }
+  const env = parseEnv({ DATABASE_URL: postgresUrl, AIOPS_MASTER_KEYS: nonEmpty }, deps.env);
+  const adapter = deps.adapter ?? createAdapters();
+  const configuration = await withConfigStore(deps, env.DATABASE_URL, (store) => loadActiveChecked(store, activeLoadOptions({ ...deps, adapter })));
+  const connection = mcpConnectionOf(configuration, parsed.connection);
+  if (typeof connection === 'string') throw new CliError(connection, 2);
+  const listTools = adapter.listTools?.bind(adapter);
+  if (listTools === undefined) throw new CliError('the upstream adapter cannot list MCP tools', 2);
+  return withStore(deps, env, configuration.sensitiveFields, (store) =>
+    runMcpTools({ configuration, connection, vault: store.vault, listTools, ...(parsed.show === undefined ? {} : { show: parsed.show }) }, out),
+  );
+}
+
 export async function runApiCli(argv: readonly string[], out: (line: string) => void, deps: CliDeps = { env: process.env }): Promise<number> {
   const [command, ...rest] = argv;
   try {
@@ -589,6 +626,7 @@ export async function runApiCli(argv: readonly string[], out: (line: string) => 
     if (command === 'audit') return await audit(rest, out, deps);
     if (command === 'config' && (rest[0] === 'diff' || rest[0] === 'apply')) return await configChange(rest[0], rest.slice(1), out, deps);
     if (command === 'config' && rest[0] === 'explain') return await configExplain(rest.slice(1), out, deps);
+    if (command === 'mcp' && rest[0] === 'tools') return await mcpTools(rest.slice(1), out, deps);
     out(USAGE);
     return 2;
   } catch (error) {

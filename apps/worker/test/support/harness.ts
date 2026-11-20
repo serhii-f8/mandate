@@ -124,6 +124,11 @@ export interface TestWorkerOptions {
   /** Default: the production guard over the test configuration. */
   readonly guard?: ExecutionGuard;
   readonly settings?: Partial<ExecutionSettings>;
+  /**
+   * Replaces the settings factory (default: `settings` over `TEST_SETTINGS` for every operation),
+   * e.g. the production `executionSettings` for a production-path case.
+   */
+  readonly settingsFor?: ActivityDeps['settingsFor'];
   readonly tuning?: Partial<ActivityTuning>;
   readonly taskQueue?: string;
   readonly shutdownForceTime?: Duration;
@@ -194,7 +199,7 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
     rollbackWriterFor: opts.rollbackWriterFor ?? (() => rollbackWriter),
     readerFor: opts.readerFor ?? (() => reader),
     guardFor,
-    settingsFor: () => settings,
+    settingsFor: opts.settingsFor ?? (() => settings),
     tuning: { ...FAST_TUNING, ...opts.tuning },
     newId: randomUUID,
     now: opts.now ?? (() => new Date()),

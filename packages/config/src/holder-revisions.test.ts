@@ -12,6 +12,7 @@ import { loadConfigurationDirectory } from './load.js';
 import { revisionFilesOf, revisionSummary } from './revision-files.js';
 
 const VALID_DIR = fileURLToPath(new URL('../test/fixtures/valid', import.meta.url));
+const FIXTURES = fileURLToPath(new URL('../test/fixtures', import.meta.url));
 const EXTRA_ROLES = 'version: 1\nroles:\n  - id: content_manager\n    grants: []\n  - id: support_agent\n    grants: []\n  - id: extra\n    grants: []\n';
 const BROKEN_ROLES = 'version: 1\nroles: nope\n';
 const MISMATCH = 'f'.repeat(64);
@@ -151,6 +152,17 @@ async function dirHash(): Promise<string> {
 }
 
 describe('CFG-4 AUD-1 configuration from revisions', () => {
+  it('AUD-1 CONN-8 config.load details name the loaded presets and versions', async () => {
+    const presetConfig = await mkdtemp(join(tmpdir(), 'aiops-holder-rev-preset-'));
+    try {
+      await cp(join(FIXTURES, 'with-preset'), presetConfig, { recursive: true });
+      await ConfigurationHolder.fromRevisions(options({ fallbackDir: presetConfig, load: { presetDirs: [join(FIXTURES, 'preset-dir')] } }));
+      expect(loads().map((e) => [e.outcome, e.details.presets])).toEqual([['ok', [{ id: 'fake', package: '@aiops/fake-preset', version: '0.1.0' }]]]);
+    } finally {
+      await rm(presetConfig, { recursive: true });
+    }
+  });
+
   it('CFG-4 an empty store is bootstrapped from the directory and loaded', async () => {
     const holder = await ConfigurationHolder.fromRevisions(options());
     const stored = await store.active();
@@ -159,7 +171,7 @@ describe('CFG-4 AUD-1 configuration from revisions', () => {
     expect(holder.state()).toEqual({ status: 'active', revision: stored?.id, hash });
     expect(holder.current.hash).toBe(hash);
     expect(loads()).toEqual([
-      expect.objectContaining({ actor: 'system:api', outcome: 'ok', details: { revision: stored?.id, hash, service: 'api', trigger: 'start' } }),
+      expect.objectContaining({ actor: 'system:api', outcome: 'ok', details: { revision: stored?.id, hash, service: 'api', trigger: 'start', presets: [] } }),
     ]);
     expect(loads()[0]?.subject).toBeUndefined();
     expect(logger.calls.filter((c) => c.message === 'configuration_files_differ')).toEqual([]);

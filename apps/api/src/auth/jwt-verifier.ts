@@ -1,8 +1,9 @@
 import { OAuthError, OAuthErrorCode, type AuthInfo, type OAuthTokenVerifier } from '@modelcontextprotocol/server';
 import { errors, jwtVerify, type JWTVerifyGetKey } from 'jose';
+import { SERVICE_SUBJECT_PREFIX } from '@aiops/core';
 
 /** Fixed, value-free reasons recorded in `auth.rejected` events (AUD-1). */
-export const REJECTION_REASONS = ['expired', 'invalid_signature', 'invalid_issuer', 'invalid_audience', 'malformed'] as const;
+export const REJECTION_REASONS = ['expired', 'invalid_signature', 'invalid_issuer', 'invalid_audience', 'malformed', 'service_account_mismatch', 'reserved_subject'] as const;
 export type RejectionReason = (typeof REJECTION_REASONS)[number];
 
 const ALGORITHMS = ['RS256', 'PS256', 'ES256'];
@@ -31,8 +32,20 @@ export function rejectionReason(error: unknown): RejectionReason {
  * against the issuer's JWKS, issuer, audience equal to the canonical MCP URL,
  * expiry with no clock tolerance, and a subject. The returned `AuthInfo` never
  * carries the token itself (AUTH-7).
+ *
+ * After those checks the token is classified (AUTH-4): a client-credentials token
+ * (`client_id` = `azp`, no `sid`) of a configured service account carries
+ * `extra.service`; any other token of a configured service client is
+ * `service_account_mismatch`; a `sub` in the reserved `service:` namespace is
+ * `reserved_subject`; a client-credentials token of an unconfigured client keeps
+ * no groups (POL-1). `preferred_username` is never read.
  */
-export function createJwtVerifier(options: { issuer: string; audience: string; jwks: JWTVerifyGetKey }): OAuthTokenVerifier {
+export function createJwtVerifier(options: {
+  issuer: string;
+  audience: string;
+  jwks: JWTVerifyGetKey;
+  isServiceAccount: (clientId: string) => boolean;
+}): OAuthTokenVerifier {
   const resource = new URL(options.audience);
   return {
     async verifyAccessToken(token: string): Promise<AuthInfo> {
@@ -52,6 +65,21 @@ export function createJwtVerifier(options: { issuer: string; audience: string; j
       if (typeof sub !== 'string' || sub === '' || typeof exp !== 'number') {
         throw new OAuthError(OAuthErrorCode.InvalidToken, 'token rejected: malformed');
       }
+      let extra: Record<string, unknown>;
+      if (typeof azp === 'string' && options.isServiceAccount(azp)) {
+        if (payload.client_id !== azp || 'sid' in payload) {
+          throw new OAuthError(OAuthErrorCode.InvalidToken, 'token rejected: service_account_mismatch');
+        }
+        extra = { sub, groups: [], service: azp };
+      } else if (sub.startsWith(SERVICE_SUBJECT_PREFIX)) {
+        throw new OAuthError(OAuthErrorCode.InvalidToken, 'token rejected: reserved_subject');
+      } else if ('client_id' in payload && !('sid' in payload)) {
+        // A client-credentials token of a client that is not a configured service account:
+        // its groups never grant a role (POL-1).
+        extra = { sub, groups: [] };
+      } else {
+        extra = { sub, groups };
+      }
       return {
         token: '',
         clientId: typeof azp === 'string' ? azp : '',
@@ -59,7 +87,7 @@ export function createJwtVerifier(options: { issuer: string; audience: string; j
         expiresAt: exp,
         // jose has verified that `aud` contains exactly this value.
         resource,
-        extra: { sub, groups },
+        extra,
       };
     },
   };

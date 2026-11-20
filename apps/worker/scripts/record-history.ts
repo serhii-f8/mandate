@@ -17,8 +17,10 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import {
   BatchFenced,
+  createChangeSet,
   type ExecutionGuard,
   type ItemOutcome,
+  OpaqueCallWriter,
   type ReadPage,
   ROLLBACK_REQUEST_MARGIN_MS,
   rollbackRequestEvents,
@@ -34,8 +36,9 @@ import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors
 import { historyToJSON } from '@temporalio/common/lib/proto-utils';
 import { createTracingPlugin } from '../src/telemetry/tracing.js';
 import type { changesetWorkflow } from '../src/workflows/changeset.js';
-import { createPrepared } from '../test/support/changesets.js';
-import { APPROVING_GROUP, EDITOR_GROUP, REVIEWER_GROUP } from '../test/support/configuration.js';
+import { createPrepared, startExecutionOf } from '../test/support/changesets.js';
+import { APPROVING_GROUP, EDITOR_GROUP, OPAQUE_OPERATION, REVIEWER_GROUP } from '../test/support/configuration.js';
+import { ScriptedOpaqueCaller } from '../test/support/opaque.js';
 import {
   created,
   preparedByWorkflow,
@@ -594,6 +597,48 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
         const last = run3.events?.at(-1);
         if (last?.workflowExecutionCompletedEventAttributes == null) throw new Error('third run did not complete (more than three runs?)');
         return { 'rollback-continued-run2': run2, 'rollback-continued-run3': run3 };
+      });
+    },
+  },
+
+  /**
+   * An opaque change-set (design phase 9 §3, §5; EXE-4, CS-1): created as the api does, prepared by
+   * its workflow without a read (the one `call` item), started and woken, written by the production
+   * `OpaqueCallWriter` over a scripted caller answering `accepted`; completed. The 1 h window shows
+   * `openRollbackWindow` answering null: an opaque call cannot be rolled back (EXE-8).
+   */
+  'opaque-executed': {
+    files: ['opaque-executed'],
+    async run(infra) {
+      const operation = infra.configuration.policy.operations.find((o) => o.id === OPAQUE_OPERATION);
+      if (operation === undefined) throw new Error('opaque operation missing');
+      const result = await createChangeSet(
+        { repository: infra.repository, newId: randomUUID, now: () => new Date() },
+        {
+          operation,
+          args: { note: 'restock the blue mugs' },
+          caller: { subject: 'alice', groups: [EDITOR_GROUP] },
+          correlationId: 'corr-create',
+          configHash: infra.configuration.hash,
+          expireAfterHours: 1,
+        },
+      );
+      if (!result.ok) throw new Error(`change-set not created: ${result.code}`);
+      const { id } = result.changeset;
+      const caller = new ScriptedOpaqueCaller();
+      const writer = new OpaqueCallWriter({ callerFor: () => caller });
+      return withWorker(infra, { writer, settings: WINDOW_1H }, async (worker) => {
+        const handle = await signalWithStart(infra, worker, id);
+        await waitForWorkflowStatus(infra, id, 'prepared');
+        const prepared = await infra.repository.get(id);
+        if (prepared === undefined) throw new Error('change-set missing');
+        await startExecutionOf(infra.repository, prepared);
+        await worker.executor.wake(id);
+        await expectResult(handle, 'completed');
+        if (caller.sends !== 1) throw new Error(`expected one send, got ${String(caller.sends)}`);
+        const record = await infra.repository.get(id);
+        if (record?.rollbackUntil !== undefined) throw new Error('an opaque change-set opened a rollback window');
+        return { 'opaque-executed': await handle.fetchHistory() };
       });
     },
   },

@@ -27,6 +27,11 @@ export function createUpstreamReader(deps: UpstreamReaderDeps): UpstreamReader {
     async read(operationId, args) {
       const operation = configuration.policy.operations.find((o) => o.id === operationId);
       if (operation?.risk !== 'read') return { ok: false, code: 'not_readable' };
+      // Manifests read HTTP GET and code read bindings only; an MCP tool's result has no item shape to diff (R11).
+      const binding = configuration.bindings.get(operationId);
+      if (binding?.kind === 'mcp') return { ok: false, code: 'not_readable' };
+      // A code binding reads only through a module operation of kind `read` (OPS-5).
+      if (binding?.kind === 'code' && configuration.codeOperations.get(operationId)?.kind !== 'read') return { ok: false, code: 'not_readable' };
       // A manifest cannot produce a request the read operation itself would refuse.
       const check = configuration.validators.get(operationId)?.(args);
       if (check?.ok !== true) return { ok: false, code: 'invalid_read_arguments' };

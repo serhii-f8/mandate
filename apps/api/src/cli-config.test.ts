@@ -33,7 +33,7 @@ const CONFIG_YAML = [
   '',
 ].join('\n');
 
-const rolesYaml = (operations: readonly string[]): string =>
+const rolesYaml = (operations: readonly string[], serviceAccounts: readonly string[] = []): string =>
   [
     'version: 1',
     'roles:',
@@ -43,6 +43,7 @@ const rolesYaml = (operations: readonly string[]): string =>
     'role_mapping:',
     '  - group: viewers',
     '    roles: [viewer]',
+    ...(serviceAccounts.length === 0 ? [] : ['service_accounts:', ...serviceAccounts.map((c) => `  - { client_id: ${c}, role: viewer }`)]),
     '',
   ].join('\n');
 
@@ -62,13 +63,13 @@ afterEach(async () => {
 });
 
 /** A configuration directory whose role `viewer` holds the given grants. */
-async function configDir(grants: readonly string[] = ['shop.list_items']): Promise<string> {
+async function configDir(grants: readonly string[] = ['shop.list_items'], serviceAccounts: readonly string[] = []): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'aiops-cli-config-'));
   dirs.push(dir);
   await mkdir(join(dir, 'specs'));
   await cp(SHOP_SPEC, join(dir, 'specs', 'shop.json'));
   await writeFile(join(dir, 'config.yaml'), CONFIG_YAML);
-  await writeFile(join(dir, 'roles.yaml'), rolesYaml(grants));
+  await writeFile(join(dir, 'roles.yaml'), rolesYaml(grants, serviceAccounts));
   return dir;
 }
 
@@ -334,6 +335,32 @@ describe('CFG-3 POL-7 aiops config explain', () => {
     expect((await run(explain('--operation', 'shop.list_items', '--groups', 'viewers', '--records', '1000000'), store)).code).toBe(0);
     const secret = await run(explain('--operation', 'shop.list_items', '--groups', 'viewers', '--args', '{"secret-value"'), store);
     expect(secret.lines.join('\n')).not.toContain('secret-value');
+  });
+
+  it('POL-7 AUTH-4 explain --service gives the service account role decision', async () => {
+    const { store } = fixture();
+    await bootstrap(store, await configDir(['shop.list_items'], ['sa']));
+    const allowed = await run(explain('--operation', 'shop.list_items', '--service', 'sa'), store);
+    expect(allowed.lines.slice(0, 3)).toEqual(['effect: allow', 'rule: role:viewer/grant:0', 'roles: viewer']);
+    expect(allowed.code).toBe(0);
+    const other = await run(explain('--operation', 'shop.list_items', '--service', 'other'), store);
+    expect(other.lines).toContain('effect: deny');
+    expect(other.lines).toContain('roles: -');
+    expect(other.code).toBe(1);
+  });
+
+  it('POL-7 AUTH-4 explain needs exactly one of --groups and --service', async () => {
+    const { store } = fixture();
+    await bootstrap(store, await configDir(['shop.list_items'], ['sa']));
+    for (const flags of [
+      ['--operation', 'shop.list_items', '--groups', 'viewers', '--service', 'sa'],
+      ['--operation', 'shop.list_items'],
+      ['--operation', 'shop.list_items', '--service', 'sa', '--subject', 'alice'],
+      ['--operation', 'shop.list_items', '--groups', 'viewers', '--subject', 'service:sa'],
+      ['--operation', 'shop.list_items', '--service', ''],
+    ]) {
+      expect((await run(explain(...flags), store)).code).toBe(2);
+    }
   });
 
   it('CFG-3 POL-7 config explain writes no audit row and no revision', async () => {

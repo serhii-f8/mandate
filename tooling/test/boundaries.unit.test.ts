@@ -14,7 +14,11 @@ beforeAll(() => {
   eslint = new ESLint({
     cwd: repoRoot,
     overrideConfigFile: true,
-    overrideConfig: [{ files: ['**/*.ts', '**/*.tsx'], languageOptions: { parser: tseslint.parser } }, ...boundaryRules],
+    overrideConfig: [
+      // The plugin is registered here: eslint.config.js gets it from strictTypeChecked (F17).
+      { files: ['**/*.ts', '**/*.tsx'], languageOptions: { parser: tseslint.parser }, plugins: { '@typescript-eslint': tseslint.plugin } },
+      ...boundaryRules,
+    ],
   });
 });
 
@@ -72,6 +76,66 @@ describe('package boundaries (CLAUDE.md engineering conventions)', () => {
     expect(await restrictedImportErrors('packages/adapters/src/http/probe.test.ts', '@aiops/testing')).toBe(0);
     expect(await restrictedImportErrors('packages/adapters/src/http/probe.test.ts', '@aiops/core')).toBe(1);
     expect(await restrictedImportErrors('packages/adapters/test/probe.ts', '@aiops/testing')).toBe(0);
+  });
+
+  it('CONN-1 the MCP client is imported only under packages/adapters/src/mcp/', async () => {
+    const sdk = '@modelcontextprotocol/client';
+    for (const file of [
+      'packages/adapters/src/probe.ts',
+      'packages/adapters/src/http/probe.ts',
+      'packages/upstream/src/probe.ts',
+      'packages/config/src/probe.ts',
+      'packages/connector-sdk/src/probe.ts',
+    ]) {
+      expect(await restrictedImportErrors(file, sdk), file).toBe(1);
+    }
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', sdk)).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/test/integration/probe.ts', sdk)).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', '@aiops/core')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', '@aiops/testing')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', '@opentelemetry/api')).toBe(1);
+    // Ruling F19: MCP adapter tests keep the shared fakes, and the SDK.
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', '@aiops/testing')).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', sdk)).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', '@aiops/core')).toBe(1);
+  });
+
+  it('CONN-1 the apps, the presets and packages/upstream never import the MCP client, statically or dynamically', async () => {
+    const sdk = '@modelcontextprotocol/client';
+    const dynamic = (specifier: string) => `export const m = import('${specifier}');\n`;
+    for (const file of [
+      'apps/api/src/probe.ts',
+      'apps/api/src/mcp/probe.test.ts',
+      'apps/worker/src/probe.ts',
+      'apps/worker/src/workflows/probe.ts',
+      'apps/web/src/probe.tsx',
+      'presets/magento2-catalog/src/probe.ts',
+      'presets/magento2-catalog/src/probe.test.ts',
+      'packages/upstream/src/probe.ts',
+      'packages/upstream/src/probe.test.ts',
+      'packages/upstream/test/integration/probe.ts',
+    ]) {
+      expect(await restrictedImportErrors(file, sdk), file).toBe(1);
+      expect(await restrictedImportErrors(file, `${sdk}/stdio`), file).toBe(1);
+      expect(await ruleErrors(file, dynamic(sdk), 'no-restricted-syntax'), file).toBe(1);
+    }
+    // The api serves MCP: the server SDK stays allowed.
+    expect(await restrictedImportErrors('apps/api/src/probe.ts', '@modelcontextprotocol/server')).toBe(0);
+    expect(await ruleErrors('apps/api/src/probe.ts', dynamic('@modelcontextprotocol/server'), 'no-restricted-syntax')).toBe(0);
+    // The MCP adapter itself keeps the client, statically and dynamically.
+    expect(await ruleErrors('packages/adapters/src/mcp/probe.ts', dynamic(sdk), 'no-restricted-syntax')).toBe(0);
+    // apps/web keeps its raw-HTML ban next to the new selector.
+    expect(await ruleErrors('apps/web/src/probe.tsx', 'export const e = <div dangerouslySetInnerHTML={{ __html: "" }} />;\n', 'no-restricted-syntax')).toBe(1);
+  });
+
+  it('CONN-8 OPS-5 preset src imports @aiops packages as types only', async () => {
+    const rule = '@typescript-eslint/no-restricted-imports';
+    const file = 'presets/magento2-catalog/src/probe.ts';
+    expect(await ruleErrors(file, "import { CONNECTOR_SDK_VERSION } from '@aiops/connector-sdk';\nexport const v: unknown = CONNECTOR_SDK_VERSION;\n", rule)).toBe(1);
+    expect(await ruleErrors(file, "import type { PresetModule } from '@aiops/connector-sdk';\nexport type P = PresetModule;\n", rule)).toBe(0);
+    // Tests run in the workspace and may import values.
+    const test = 'presets/magento2-catalog/src/probe.test.ts';
+    expect(await ruleErrors(test, "import { CONNECTOR_SDK_VERSION } from '@aiops/connector-sdk';\nexport const v: unknown = CONNECTOR_SDK_VERSION;\n", rule)).toBe(0);
   });
 
   it('presets use only the connector SDK and the configuration schema', async () => {

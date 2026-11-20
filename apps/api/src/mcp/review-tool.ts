@@ -8,7 +8,7 @@
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { createSchemaCompiler, type LoadedConfiguration } from '@aiops/config';
-import { canView, currentStep, encodeCursor, resolveRoles, type ApprovalRecord, type Approver, type Caller, type ChangeSetRecord, type ItemStatus } from '@aiops/core';
+import { callerKind, canView, currentStep, encodeCursor, rolesOf, type ApprovalRecord, type Approver, type Caller, type ChangeSetRecord, type ItemStatus } from '@aiops/core';
 import { changesetDetailWith, itemRow, widgetViewerBlock, type ViewerBlock } from '../approvals/detail.js';
 import { decodeCursor, newSeed } from '../approvals/page-query.js';
 import { rollbackBlock } from '../changesets/rollback.js';
@@ -41,9 +41,11 @@ export function approvalStepRoles(configuration: LoadedConfiguration): ReadonlyS
   return roles;
 }
 
+/** A service account never decides an approval step (AUTH-4, APR-2), so it never sees the review. */
 function holdsStepRole(caller: Caller, configuration: LoadedConfiguration): boolean {
+  if (callerKind(caller) === 'service') return false;
   const steps = approvalStepRoles(configuration);
-  return resolveRoles(caller.groups, configuration.policy.roleMapping).some((role) => steps.has(role));
+  return rolesOf(caller, configuration.policy).some((role) => steps.has(role));
 }
 
 /** The role `checkDecision` waits for (F11): the stored one, else the current step's, else the first. */
@@ -80,7 +82,7 @@ export function reviewChangesetTool(deps: BuiltinToolDeps): BuiltinTool {
         if (after === undefined) return inputError(`Input validation error: Invalid arguments for tool ${REVIEW_TOOL}: cursor is not valid`);
       }
       const configuration = snapshot.configuration;
-      const roles = resolveRoles(caller.groups, configuration.policy.roleMapping);
+      const roles = rolesOf(caller, configuration.policy);
       const cs = await deps.repository.get(id);
       if (cs === undefined) return notFound(id);
       const approvals = await deps.repository.approvals(id);

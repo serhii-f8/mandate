@@ -1,0 +1,11 @@
+# Opaque e2e (CS-1, MCP-1, POL-5). The test replaces __UPSTREAM_URL__ with the fake upstream's URL.
+version: 1
+connections:
+  - id: shop
+    adapter: openapi
+    base_url: __UPSTREAM_URL__/rest
+    credential_ref: shop-token
+    auth: { scheme: bearer }
+    allow_private_network: true
+    timeout_ms: 2000
+    retry: { max_attempts: 1 }

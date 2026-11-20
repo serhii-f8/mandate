@@ -4,6 +4,7 @@ import type { ItemRowModel } from '../model.js';
 import { ItemTable } from './ItemTable.js';
 import { Notice } from './Notice.js';
 import { Pager } from './Pager.js';
+import { RawArguments } from './RawArguments.js';
 import { StatsSummary } from './StatsSummary.js';
 
 afterEach(cleanup);
@@ -123,5 +124,23 @@ describe('pager', () => {
     rerender(<Pager hasPrevious hasNext busy onPrevious={onPrevious} onNext={onNext} />);
     expect(screen.getByText<HTMLButtonElement>('Next').disabled).toBe(true);
     expect(screen.getByText<HTMLButtonElement>('Previous').disabled).toBe(true);
+  });
+
+  it('APR-5 SEC-5 raw arguments show invisible, bidi and control characters as visible escapes', () => {
+    // RLO reverses what follows; a zero-width space and NUL are invisible; a tag character smuggles ASCII.
+    const hostile = `pay\u202Eevil\u200Bx\u0000y\u{E0041}z\u2066`;
+    const { container } = render(<RawArguments args={{ to: hostile, plain: 'café ok' }} />);
+    const pre = container.querySelector('pre');
+    const text = pre?.textContent ?? '';
+    for (const c of ['\u202E', '\u200B', '\u0000', '\u{E0041}', '\u2066']) expect(text).not.toContain(c);
+    expect(text).toContain('"pay\\u202Eevil\\u200Bx\\u0000y\\u{E0041}z\\u2066"');
+    // The escapes are marked so the approver can tell them from typed text.
+    const marked = [...(pre?.querySelectorAll('.invisible-char') ?? [])].map((e) => e.textContent);
+    expect(marked).toEqual(['\\u202E', '\\u200B', '\\u{E0041}', '\\u2066']);
+    expect(pre?.querySelector('.invisible-char')?.getAttribute('title')).toBe('U+202E');
+    // Ordinary text, the layout's newlines and indentation are unchanged.
+    expect(text).toContain('"plain": "café ok"');
+    expect(text.split('\n')).toHaveLength(4);
+    expect(container.querySelector('img')).toBeNull();
   });
 });

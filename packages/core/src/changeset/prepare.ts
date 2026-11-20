@@ -4,6 +4,7 @@ import { changesetTransitionEvent } from './audit.js';
 import { normalizeArgs } from './canonical.js';
 import { buildItems, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStatus } from './model.js';
+import { isOpaque } from './opaque.js';
 import type { PreparationRepository, PrepareFailure, ReadPage, UpstreamReader } from './ports.js';
 import { hashStoredItems } from './verify.js';
 
@@ -38,8 +39,13 @@ export type PrepareOutcome =
       readonly status?: number;
     };
 
-/** Everything `createChangeSet` needs: a prepare request without the read-operation lookup. */
-export type CreateRequest = Omit<PrepareRequest, 'readFieldsArg'>;
+/**
+ * Everything `createChangeSet` needs: a prepare request without the read-operation lookup, for any
+ * operation. An opaque one needs no manifest; any other without a manifest is refused.
+ */
+export type CreateRequest = Omit<PrepareRequest, 'readFieldsArg' | 'operation'> & {
+  readonly operation: OperationDefinition;
+};
 
 export interface RunPreparationRequest {
   readonly changesetId: string;
@@ -95,6 +101,24 @@ function okPage(page: ReadPage): Extract<ReadPage, { ok: true }> {
 }
 
 /**
+ * The normalized arguments of a manifest operation, or the refusal: no manifest means the operation
+ * cannot prepare a change-set; no ids and no selector means no targets.
+ */
+function manifestArgs(
+  manifest: ManifestDefinition | undefined,
+  raw: Readonly<Record<string, unknown>>,
+): Record<string, unknown> | 'operation_unavailable' | 'targets_missing' {
+  if (manifest === undefined) return 'operation_unavailable';
+  const args = normalizeArgs(raw, manifest.idsArg);
+  const rawIds = manifest.idsArg === undefined ? undefined : args[manifest.idsArg];
+  // normalizeArgs turned a present ids argument into a string array; an empty one names no targets (no selector fallback).
+  const explicitIds = Array.isArray(rawIds) ? (rawIds as string[]) : undefined;
+  if (explicitIds?.length === 0) return 'targets_missing';
+  if (explicitIds === undefined && manifest.selector === undefined) return 'targets_missing';
+  return args;
+}
+
+/**
  * Creates the change-set row in `preparing` and audits `null -> preparing` (EXE-1). Reads nothing,
  * so it can run in the API call while `runPreparation` runs later, in a workflow activity.
  */
@@ -103,13 +127,8 @@ export async function createChangeSet(
   req: CreateRequest,
 ): Promise<{ ok: true; changeset: ChangeSetRecord } | { ok: false; code: PrepareFailure }> {
   const { operation, caller, correlationId } = req;
-  const manifest = operation.manifest;
-  const args = normalizeArgs(req.args, manifest.idsArg);
-  const rawIds = manifest.idsArg === undefined ? undefined : args[manifest.idsArg];
-  // normalizeArgs turned a present ids argument into a string array; an empty one names no targets (no selector fallback).
-  const explicitIds = Array.isArray(rawIds) ? (rawIds as string[]) : undefined;
-  if (explicitIds?.length === 0) return { ok: false, code: 'targets_missing' };
-  if (explicitIds === undefined && manifest.selector === undefined) return { ok: false, code: 'targets_missing' };
+  const args = isOpaque(operation) ? normalizeArgs(req.args, undefined) : manifestArgs(operation.manifest, req.args);
+  if (typeof args === 'string') return { ok: false, code: args };
 
   const id = deps.newId();
   const createdAt = deps.now();

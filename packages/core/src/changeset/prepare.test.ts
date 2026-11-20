@@ -175,6 +175,13 @@ function operation(manifest: Partial<ManifestDefinition> = {}): OperationDefinit
   };
 }
 
+/** The operation of `operation()` without a manifest. */
+function bareOperation(): OperationDefinition {
+  const op: Partial<ReturnType<typeof operation>> = operation();
+  delete op.manifest;
+  return op as OperationDefinition;
+}
+
 const caller: Caller = { subject: 'alice', clientId: 'client-1', groups: [] };
 
 function product(sku: string, description = 'old'): Record<string, unknown> {
@@ -671,6 +678,43 @@ describe('EXE-1 preparation split', () => {
       code: 'targets_missing',
     });
     expect(repository.sets.size).toBe(0);
+  });
+
+  it('CS-1 createChangeSet accepts an opaque operation without targets and stores the arguments', async () => {
+    const reader = new ScriptedReader({});
+    const { deps, repository } = setup(reader);
+    const opaqueArgs = { order: '100', lines: [{ sku: 'B' }, { sku: 'A' }] };
+    const out = await createChangeSet(deps, {
+      ...request(opaqueArgs),
+      operation: { ...bareOperation(), id: 'orders.cancel', risk: 'write_opaque' },
+    });
+    if (!out.ok) throw new Error(`expected created, got ${out.code}`);
+    expect(out.changeset.status).toBe('preparing');
+    expect(out.changeset.operation).toBe('orders.cancel');
+    expect(out.changeset.args).toEqual(opaqueArgs);
+    expect(repository.sets.get(out.changeset.id)?.args).toEqual(opaqueArgs);
+    expect(reader.calls).toHaveLength(0);
+  });
+
+  it('CS-1 createChangeSet refuses a non-opaque operation without a manifest with operation_unavailable', async () => {
+    const { deps, repository } = setup(new ScriptedReader({}));
+    expect(await createChangeSet(deps, { ...request(explicitArgs), operation: bareOperation() })).toEqual({
+      ok: false,
+      code: 'operation_unavailable',
+    });
+    expect(repository.sets.size).toBe(0);
+  });
+
+  it('CS-1 a write operation with a manifest still takes the manifest path in createChangeSet', async () => {
+    const { deps, repository } = setup(new ScriptedReader({}));
+    const out = await createChangeSet(deps, request({ ...explicitArgs, skus: ['B', 'A', 'A'] }));
+    if (!out.ok) throw new Error(`expected created, got ${out.code}`);
+    expect(out.changeset.args).toEqual({ ...explicitArgs, skus: ['A', 'B'] });
+    expect(await createChangeSet(deps, request({ ...explicitArgs, skus: [] }))).toEqual({
+      ok: false,
+      code: 'targets_missing',
+    });
+    expect(repository.sets.size).toBe(1);
   });
 
   it('EXE-1 runPreparation prepares a created change-set with the same hash as prepareChangeSet', async () => {

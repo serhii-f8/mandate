@@ -12,6 +12,7 @@ import {
   type AuditLog,
   type Caller,
   type ChangeSetExecutor,
+  type ChangeSetKind,
   type ChangeSetRecord,
   type ChangeSetRepository,
   type InvocationResult,
@@ -38,6 +39,8 @@ export interface TaskHandlerDeps {
   readonly newId: () => string;
   /** `AIOPS_PUBLIC_URL`, the base of the change-set page link in final results (MCP-6). */
   readonly publicUrl: URL;
+  /** The kind of a change-set's operation under the current configuration (R7, R8). */
+  readonly kindOf: (operationId: string) => ChangeSetKind;
 }
 
 export interface TaskRequestContext {
@@ -81,7 +84,7 @@ export function createTaskHandlers(deps: TaskHandlerDeps): TaskHandlers {
   async function answerOf(state: TaskState, record: ChangeSetRecord): Promise<InvocationResult | undefined> {
     switch (state.answer) {
       case 'prepared':
-        return preparedAnswer(deps.repository, record);
+        return preparedAnswer(deps.repository, record, deps.kindOf(record.operation));
       case 'preparation_error':
         return preparationErrorAnswer(record);
       case 'expired':

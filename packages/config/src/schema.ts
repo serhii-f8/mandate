@@ -13,7 +13,7 @@ import {
   openObject,
   operationId,
   OPERATION_ID,
-  upstreamSchema,
+  operationUpstreamSchema,
 } from './upstream-schema.js';
 import { changesetsSchema, manifestSchema } from './manifest.js';
 
@@ -21,10 +21,23 @@ export { OPERATION_ID };
 const credentialRef = id;
 const positiveInt = z.number().int().positive();
 
-const connectionBase = { id, credential_ref: credentialRef.optional(), preset: id.optional(), ...connectionSettingsFields };
+const connectionBase = {
+  id,
+  credential_ref: credentialRef.optional(),
+  preset: id.optional(),
+  /** CONN-8: the preset's operation IDs `<ns>.<op>` become `<operation_prefix>.<op>` on this connection. */
+  operation_prefix: z.string().regex(/^[a-z][a-z0-9_]{0,30}$/).optional(),
+  ...connectionSettingsFields,
+};
 const connection = z.discriminatedUnion('adapter', [
   z.strictObject({ ...connectionBase, adapter: z.literal('openapi'), base_url: httpUrl, openapi: openApiSchema.optional() }),
-  z.strictObject({ ...connectionBase, adapter: z.literal('mcp'), mcp_url: httpUrl }),
+  z.strictObject({
+    ...connectionBase,
+    adapter: z.literal('mcp'),
+    mcp_url: httpUrl,
+    /** CONN-4: seconds between checks of the pinned tools. */
+    pin_check_seconds: z.number().int().min(10).max(86_400).default(300),
+  }),
 ]);
 
 const title = z.string().min(1).max(200);
@@ -34,7 +47,8 @@ const operationFields = {
   risk: z.enum(['read', 'write', 'write_opaque', 'destructive']),
   title: title.optional(),
   description,
-  upstream: upstreamSchema,
+  /** HTTP mapping, or `{ tool, pin }` on an mcp connection (CONN-1). */
+  upstream: operationUpstreamSchema,
   /** Absent: derived from the connection's spec (CONN-2). */
   input_schema: openObject.optional(),
   fields_arg: z.string().min(1).max(128).optional(),
@@ -94,6 +108,13 @@ const role = z.strictObject({
 
 const roleMapping = z.strictObject({ group: z.string().min(1).max(255), roles: z.array(id).min(1) });
 
+/** AUTH-4: an OAuth client (`azp`) that calls as a service account, with exactly one role. */
+const serviceAccount = z.strictObject({
+  client_id: z.string().min(1).max(255).regex(/^[^\p{Cc}]+$/u),
+  role: id,
+  description: z.string().max(500).optional(),
+});
+
 const preset = z.strictObject({ id, package: z.string().min(1).max(214), version: z.string().min(1).max(64).optional() });
 
 /** A lower-case host name or IPv4 address, without port (CONN-5). */
@@ -117,6 +138,8 @@ export const configDocumentSchema = z.strictObject({
   operations: z.array(operation).optional(),
   roles: z.array(role).optional(),
   role_mapping: z.array(roleMapping).optional(),
+  /** AUTH-4: collected across documents like role_mapping; a client_id appears once. */
+  service_accounts: z.array(serviceAccount).optional(),
   presets: z.array(preset).optional(),
   notifications: z.array(notification).optional(),
   overrides: z.array(override).optional(),
@@ -131,6 +154,7 @@ export type ConnectionConfig = z.output<typeof connection>;
 export type OperationConfig = z.output<typeof operation>;
 export type RoleConfig = z.output<typeof role>;
 export type RoleLimits = z.output<typeof limits>;
+export type ServiceAccountConfig = z.output<typeof serviceAccount>;
 export type RoleApproval = z.output<typeof approval>;
 export type PresetConfig = z.output<typeof preset>;
 export type PresetOperationConfig = z.output<typeof presetOperationSchema>;

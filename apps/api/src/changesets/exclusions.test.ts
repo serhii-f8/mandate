@@ -55,7 +55,7 @@ async function setup() {
       failures.push({ id, error });
     },
   };
-  const request = (exclude: string[], hash = HASH) => ({ sourceId: SOURCE, hash, exclude, include: [], caller: alice, correlationId: 'corr-1' });
+  const request = (exclude: string[], hash = HASH) => ({ sourceId: SOURCE, hash, exclude, include: [], caller: alice, correlationId: 'corr-1', excludable: () => true });
   return { repository, starter, failures, deps, request };
 }
 

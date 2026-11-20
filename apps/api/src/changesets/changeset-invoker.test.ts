@@ -78,6 +78,13 @@ function op(id: string): OperationDefinition {
   return found;
 }
 
+/** The manifest write turned destructive with its manifest removed: opaque by the global rule. */
+function bareDestructive(): OperationDefinition {
+  const bare: OperationDefinition = { ...op('catalog.update_content'), risk: 'destructive' };
+  delete (bare as { manifest?: unknown }).manifest;
+  return bare;
+}
+
 const caller: Caller = { subject: 'alice-id', clientId: 'aiops-mcp', groups: ['content'] };
 const NOW = new Date('2026-11-17T10:00:00.000Z');
 
@@ -418,21 +425,33 @@ describe('MCP-7 MCP-1 EXE-1 asynchronous write call', () => {
     expect((await repository.get(ID))?.status).toBe('prepared');
   });
 
-  it('CS-1 a destructive operation without a manifest stays refused', async () => {
-    const { invoker, starter } = setup();
-    const bare: OperationDefinition = { ...op('catalog.update_content'), risk: 'destructive' };
-    delete (bare as { manifest?: unknown }).manifest;
-    const result = await invoker.invoke({ operation: bare, args: WRITE_ARGS, caller });
-    expect(result.auditDetails).toMatchObject({ errorCode: 'risk_not_supported' });
-    expect(starter.started).toEqual([]);
+  it.each([
+    ['write_opaque', op('catalog.update_product')],
+    ['destructive without a manifest', bareDestructive()],
+  ])('CS-1 an opaque call creates a change-set and starts its workflow (%s)', async (_label, operation) => {
+    const { invoker, starter, repository, reader, tasks } = setup();
+    const args = { sku: 'a', note: { text: 'x' } };
+    const result = await invoker.invoke({ operation, args, caller, asTask: true });
+    expect(result.isError).toBeUndefined();
+    expect(result.auditDetails).toEqual({ operation: operation.id, connection: 'magento', changesetId: ID });
+    expect(starter.started).toEqual([ID]);
+    expect(tasks.created.map((t) => t.changesetId)).toEqual([ID]);
+    const stored = await repository.get(ID);
+    expect(stored?.status).toBe('preparing');
+    expect(stored?.operation).toBe(operation.id);
+    // The raw call arguments are stored as given (normalized, no manifest); nothing is read (CS-1).
+    expect(stored?.args).toEqual(args);
+    expect(reader.calls).toEqual([]);
   });
 
-  it('CS-1 operations without a manifest are still refused by risk, without reading or starting anything', async () => {
-    const { invoker, starter, reader } = setup();
-    const result = await invoker.invoke({ operation: op('catalog.update_product'), args: { sku: 'a' }, caller, asTask: true });
+  it('CS-1 a write operation without a manifest stays refused by risk, without starting anything (fail closed)', async () => {
+    const { invoker, starter, repository } = setup();
+    const bare: OperationDefinition = { ...op('catalog.update_content') };
+    delete (bare as { manifest?: unknown }).manifest;
+    const result = await invoker.invoke({ operation: bare, args: WRITE_ARGS, caller, asTask: true });
     expect(result.isError).toBe(true);
     expect(result.auditDetails).toMatchObject({ errorCode: 'risk_not_supported' });
-    expect(reader.calls).toEqual([]);
     expect(starter.started).toEqual([]);
+    expect(await repository.get(ID)).toBeUndefined();
   });
 });

@@ -39,8 +39,13 @@ export interface ApprovalStateModel {
   steps: { step: number; role: string; decision?: StepDecisionModel }[];
   awaitingRole?: string;
 }
+/** `opaque`: a single upstream call with no preview; absent means `diff`. */
+export type ChangeSetKind = 'opaque' | 'diff';
 export interface ChangeSetViewModel {
   id: string;
+  kind?: ChangeSetKind;
+  /** The stored arguments of an opaque change-set. */
+  args?: Record<string, unknown>;
   operation: { id: string; title?: string };
   status: string;
   hash?: string;
@@ -60,6 +65,7 @@ export interface ChangeSetViewModel {
 }
 export interface ApprovalViewModel {
   id: string;
+  kind?: ChangeSetKind;
   status: string;
   hash?: string;
   operation: { id: string; title?: string; description?: string; risk?: string };

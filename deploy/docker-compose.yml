@@ -138,6 +138,8 @@ services:
       AIOPS_CIMD_EXTRA_DOMAINS: ${AIOPS_CIMD_EXTRA_DOMAINS:-localhost,127.0.0.1}
       AIOPS_DCR: ${AIOPS_DCR:-off}
       AIOPS_DCR_REDIRECT_HOSTS: ${AIOPS_DCR_REDIRECT_HOSTS:-claude.ai,chatgpt.com,localhost,127.0.0.1}
+      # Service-account clients (AUTH-4); `-` not `:-`, so an empty value creates none.
+      AIOPS_KEYCLOAK_SERVICE_ACCOUNTS: ${AIOPS_KEYCLOAK_SERVICE_ACCOUNTS-aiops-sa-ci}
     volumes:
       - ./keycloak/bootstrap.mjs:/scripts/bootstrap.mjs:ro
     entrypoint: ["node", "/scripts/bootstrap.mjs"]

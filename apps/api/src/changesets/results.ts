@@ -7,6 +7,7 @@ import {
   encodeCursor,
   preparationErrorResult,
   preparedResult,
+  type ChangeSetKind,
   type ChangeSetRecord,
   type ChangeSetRepository,
   type ChangeSetStats,
@@ -17,11 +18,11 @@ import {
 const FIRST_ITEMS = 20;
 
 /** The prepared result: counts, hash and the first 20 items with the cursor for the rest. */
-export async function preparedAnswer(repository: Pick<ChangeSetRepository, 'itemsPage'>, record: ChangeSetRecord): Promise<InvocationResult> {
+export async function preparedAnswer(repository: Pick<ChangeSetRepository, 'itemsPage'>, record: ChangeSetRecord, kind?: ChangeSetKind): Promise<InvocationResult> {
   const items = await repository.itemsPage(record.id, { limit: FIRST_ITEMS });
   const last = items.at(-1);
   const nextCursor = items.length === FIRST_ITEMS && record.stats.total > FIRST_ITEMS && last !== undefined ? encodeCursor(last.targetId) : undefined;
-  return preparedResult(record, items, nextCursor);
+  return preparedResult(record, items, nextCursor, kind);
 }
 
 /** A change-set that failed, or was cancelled, while preparing. */

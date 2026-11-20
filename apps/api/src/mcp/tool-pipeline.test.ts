@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { ProtocolError, type CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import type { AuditEventInput, Caller, DenyReason, OperationDefinition, PolicyDecision, RateCounter, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
+import { READ_RESULT_TEXT, type AuditEventInput, type Caller, type DenyReason, type OperationDefinition, type PolicyDecision, type RateCounter, type InvocationRequest, type InvocationResult, type OperationInvoker } from '@aiops/core';
+import { createSchemaCompiler, loadConfigurationSources, type LoadedConfiguration, type PinEvaluation } from '@aiops/config';
+import type { UpstreamToolView } from '@aiops/upstream';
 import {
   FakeInvoker,
   InMemoryAuditLog,
@@ -13,9 +14,11 @@ import {
   ScriptedWriter,
 } from '@aiops/testing';
 import { ApprovalService } from '../approvals/approval-service.js';
+import { OperationRouter } from '../upstream/operation-router.js';
 import { callerFromAuthInfo } from '../auth/caller-from-auth.js';
 import { pingTool, type BuiltinToolDeps } from './builtin-tools.js';
 import { DECIDE_TOOL, decideChangesetTool } from './decide-tool.js';
+import { REVIEW_TOOL, reviewChangesetTool } from './review-tool.js';
 import { WidgetBundles, type WidgetCatalog, type WidgetKind } from './widget-bundles.js';
 import type { BuiltinTool } from './tool-catalog.js';
 import { callTool, linksChangeset, listTools, minuteWindow, snapshotOf, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
@@ -585,7 +588,7 @@ function widgetSetup() {
     approvals,
     publicUrl: new URL('https://aiops.example.test'),
   };
-  return { audit, repository, deps: { ...deps, builtins: [pingTool, decideChangesetTool(toolDeps)] }, req };
+  return { audit, repository, toolDeps, deps: { ...deps, builtins: [pingTool, decideChangesetTool(toolDeps)] }, req };
 }
 
 const dave: Caller = { subject: 'dave-id', clientId: 'aiops-mcp', groups: ['leads'] };
@@ -665,6 +668,15 @@ describe('MCP-5 tools link their widget', () => {
     const destructive = operation('shop.retire', 'destructive', true);
     expect(linksChangeset(write) && linksChangeset(destructive)).toBe(true);
     const { deps, req } = linkSetup(catalog(), [write, destructive]);
+    const tools = await listTools(deps, req(alice));
+    expect(tools.map((t) => t._meta)).toEqual([LINKED, LINKED]);
+  });
+
+  it('MCP-5 an opaque operation tool links ui://aiops/changeset.html', async () => {
+    const opaque = operation('shop.post_note', 'write_opaque', false);
+    const destructive = operation('shop.purge', 'destructive', false);
+    expect([opaque, destructive].map(linksChangeset)).toEqual([true, true]);
+    const { deps, req } = linkSetup(catalog(), [opaque, destructive]);
     const tools = await listTools(deps, req(alice));
     expect(tools.map((t) => t._meta)).toEqual([LINKED, LINKED]);
   });
@@ -877,5 +889,179 @@ describe('NFR-12 tool call metrics', () => {
     }
     expect(actions(observed.audit.events)).toEqual(['policy.decision:allow', 'tool.call:ok', 'policy.decision:deny']);
     expect(observed.audit.events).toEqual(plainRun.audit.events);
+  });
+});
+
+const MCP_PIN = `sha256:${'b'.repeat(64)}`;
+const MCP_SOURCES = {
+  'connections.yaml': `version: 1
+connections:
+  - { id: tools, adapter: mcp, mcp_url: http://tools.example.test/mcp }
+`,
+  'operations.yaml': `version: 1
+operations:
+  - { id: tools.echo, connection: tools, risk: read, description: Echo a message back., upstream: { tool: echo, pin: '${MCP_PIN}' } }
+`,
+  'roles.yaml': `version: 1
+roles:
+  - id: support_agent
+    grants:
+      - { operation: tools.echo }
+role_mapping:
+  - { group: support, roles: [support_agent] }
+`,
+};
+const mcpLoaded = await loadConfigurationSources(Object.entries(MCP_SOURCES).map(([file, text]) => ({ file, text })));
+if (!mcpLoaded.ok) throw new Error(JSON.stringify(mcpLoaded.issues));
+const MCP_LOADED: LoadedConfiguration = mcpLoaded.configuration;
+const DERIVED = { type: 'object', properties: { message: { type: 'string' } }, additionalProperties: false };
+
+/** A tool view answering one evaluation; records refreshes and touches. */
+function toolView(evaluation: PinEvaluation): UpstreamToolView & { touched: string[][]; refreshed: string[] } {
+  const touched: string[][] = [];
+  const refreshed: string[] = [];
+  return {
+    touched,
+    refreshed,
+    view: () => evaluation,
+    current: (_c, id) => {
+      refreshed.push(id);
+      return Promise.resolve(evaluation);
+    },
+    touch: (_c, ids) => {
+      touched.push([...ids]);
+    },
+  };
+}
+
+const OK: PinEvaluation = { state: 'ok', liveHash: MCP_PIN, inputSchema: DERIVED, validator: createSchemaCompiler()(DERIVED) };
+
+describe('CONN-4 MCP-backed operations in the pipeline', () => {
+  it('CONN-4 without a tool view an MCP-backed operation is never listed (fail closed)', async () => {
+    const { deps, req } = setupWith(MCP_LOADED, new FakeInvoker());
+    expect((await listTools(deps, req(bob))).map((t) => t.name)).toEqual(['ping']);
+  });
+
+  it('CONN-4 an ok operation is listed with the derived schema and its connection is touched (R9)', async () => {
+    const view = toolView(OK);
+    const { deps, req } = setupWith(MCP_LOADED, new FakeInvoker());
+    const tools = await listTools({ ...deps, upstreamTools: view }, req(bob));
+    expect(tools.map((t) => t.name)).toEqual(['ping', 'tools.echo']);
+    expect(tools[1]?.inputSchema).toEqual(DERIVED);
+    expect(tools[1]?.description).toBe('Echo a message back.');
+    expect(view.touched).toEqual([['tools.echo']]);
+  });
+
+  it.each(['changed', 'missing', 'unverified', 'schema_invalid'] as const)('CONN-4 a %s operation is not listed but still touched', async (state) => {
+    const view = toolView({ state, liveHash: null });
+    const { deps, req } = setupWith(MCP_LOADED, new FakeInvoker());
+    expect((await listTools({ ...deps, upstreamTools: view }, req(bob))).map((t) => t.name)).toEqual(['ping']);
+    expect(view.touched).toEqual([['tools.echo']]);
+  });
+
+  it('CONN-4 an ok view without a derived schema is not listed, and its call is not validated against it (the router refuses it)', async () => {
+    const view = toolView({ state: 'ok', liveHash: MCP_PIN });
+    const { deps, req } = setupWith(MCP_LOADED, new FakeInvoker());
+    expect((await listTools({ ...deps, upstreamTools: view }, req(bob))).map((t) => t.name)).toEqual(['ping']);
+  });
+
+  it('MCP-3 an ok call is validated against the derived schema after a refresh', async () => {
+    const view = toolView(OK);
+    const invoker = new FakeInvoker();
+    const { deps, req, audit } = setupWith(MCP_LOADED, invoker);
+    const result = plain(await callTool({ ...deps, upstreamTools: view }, req(bob), 'tools.echo', { message: 5 }));
+    expect(text(result)).toContain('Input validation error');
+    expect(view.refreshed).toEqual(['tools.echo']);
+    expect(invoker.calls).toEqual([]);
+    expect(audit.events.map((e) => e.details.errorCode)).toEqual(['invalid_arguments']);
+  });
+
+  it('CONN-4 a not-ok call passes an object-only check and reaches policy, then is refused before the invoker (R8)', async () => {
+    const view = toolView({ state: 'changed', liveHash: `sha256:${'c'.repeat(64)}` });
+    const invoker = new FakeInvoker();
+    const { deps, req, audit } = setupWith(MCP_LOADED, invoker);
+    const result = plain(await callTool({ ...deps, upstreamTools: view }, req(bob), 'tools.echo', { message: 5 }));
+    expect(result.isError).toBe(true);
+    expect(actions(audit.events)).toEqual(['policy.decision:allow', 'tool.call:error']);
+    expect(audit.events[1]?.details).toMatchObject({ operation: 'tools.echo', connection: 'tools', errorCode: 'upstream_changed', pinState: 'changed' });
+    expect(invoker.calls).toEqual([]);
+  });
+
+  it('MCP-3 CONN-4 a derived-schema call validated while the pin was not ok is refused even if the pin is ok at the router', async () => {
+    // The pin flips between validation (`current`) and the router's check (`view`).
+    const view: UpstreamToolView = {
+      view: () => OK,
+      current: () => Promise.resolve({ state: 'changed', liveHash: `sha256:${'c'.repeat(64)}` }),
+      touch: () => undefined,
+    };
+    const read = new FakeInvoker();
+    const changeset = new FakeInvoker();
+    const { deps, req, audit } = setupWith(MCP_LOADED, read);
+    const routed: PipelineDeps = {
+      ...deps,
+      upstreamTools: view,
+      invokerFor: (configuration) => new OperationRouter({ read, changeset }, { configuration, upstreamTools: view }),
+    };
+    // Valid against the object-only check, invalid against the derived schema.
+    const result = plain(await callTool(routed, req(bob), 'tools.echo', { message: 5 }));
+    expect(result.isError).toBe(true);
+    expect(text(result)).toBe(READ_RESULT_TEXT.errors.upstream_changed('tools.echo'));
+    expect(read.calls).toEqual([]);
+    expect(changeset.calls).toEqual([]);
+    expect(actions(audit.events)).toEqual(['policy.decision:allow', 'tool.call:error']);
+    expect(audit.events[1]?.details).toMatchObject({ operation: 'tools.echo', errorCode: 'upstream_changed', pinState: 'changed' });
+  });
+});
+
+/** A configuration with the service account `sa` holding `role` (AUTH-4). */
+async function withServiceAccount(sources: Readonly<Record<string, string>>, role: string): Promise<LoadedConfiguration> {
+  const result = await loadConfigurationSources(
+    [...Object.entries(sources), ['service-accounts.yaml', `version: 1\nservice_accounts:\n  - { client_id: sa, role: ${role} }\n`] as const].map(([file, text]) => ({ file, text })),
+  );
+  if (!result.ok) throw new Error(JSON.stringify(result.issues));
+  return result.configuration;
+}
+
+const sa: Caller = { subject: 'service:sa', clientId: 'sa', groups: [] };
+
+describe('AUTH-4 service-account callers', () => {
+  it('AUTH-4 a service caller lists its role tools and is denied outside its grant, audited with its subject', async () => {
+    const invoker = new FakeInvoker();
+    const { deps, req, audit } = setupWith(await withServiceAccount(SOURCES, 'content_manager'), invoker);
+    expect((await listTools(deps, req(sa))).map((t) => t.name)).toEqual(['ping', 'catalog.search_products']);
+    const error = await callTool(deps, req(sa), 'support.lookup_order', { order_number: '1' }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProtocolError);
+    expect((error as ProtocolError).message).toBe('Tool support.lookup_order not found');
+    const decisions = audit.events.filter((e) => e.action === 'policy.decision');
+    expect(decisions).toEqual([
+      expect.objectContaining({
+        actor: 'service:sa',
+        clientId: 'sa',
+        decision: 'deny',
+        subject: 'support.lookup_order',
+        details: { rule: 'default-deny', reason: 'no_grant', roles: ['content_manager'] },
+      }),
+    ]);
+    expect(invoker.calls).toEqual([]);
+  });
+
+  it('AUTH-4 APR-8 a service caller holding a step role neither lists nor calls review_changeset and decide_changeset', async () => {
+    const config = await withServiceAccount(WIDGET_SOURCES, 'lead');
+    const base = widgetSetup();
+    const { deps, req, audit } = setupWith(config, new FakeInvoker());
+    const builtins = [pingTool, reviewChangesetTool(base.toolDeps), decideChangesetTool(base.toolDeps)];
+    const pipeline = { ...deps, builtins };
+    // The same holder by group sees both tools.
+    expect((await listTools(pipeline, req(dave))).map((t) => t.name)).toEqual(['ping', REVIEW_TOOL, DECIDE_TOOL]);
+    expect((await listTools(pipeline, req(sa))).map((t) => t.name)).toEqual(['ping']);
+    for (const tool of [REVIEW_TOOL, DECIDE_TOOL]) {
+      const args = tool === REVIEW_TOOL ? { changeset_id: DECIDE_ARGS.changeset_id } : DECIDE_ARGS;
+      await expect(callTool(pipeline, req(sa), tool, args)).rejects.toThrow(`Tool ${tool} not found`);
+    }
+    expect(audit.events.filter((e) => e.action === 'policy.decision')).toEqual([
+      expect.objectContaining({ actor: 'service:sa', subject: REVIEW_TOOL, details: { rule: 'default-deny', reason: 'unknown_tool', roles: ['lead'] } }),
+      expect.objectContaining({ actor: 'service:sa', subject: DECIDE_TOOL, details: { rule: 'default-deny', reason: 'unknown_tool', roles: ['lead'] } }),
+    ]);
+    expect(await base.repository.approvals(DECIDE_ARGS.changeset_id)).toEqual([]);
   });
 });

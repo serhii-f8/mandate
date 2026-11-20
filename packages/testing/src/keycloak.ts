@@ -24,6 +24,12 @@ export interface StartedKeycloak {
   readonly jwksUrl: string;
   /** Runs `deploy/keycloak/bootstrap.mjs` against this Keycloak with extra environment. */
   bootstrap(env?: Record<string, string>): Promise<string>;
+  /** A client-credentials access token for a confidential service client (AUTH-4). */
+  clientCredentialsToken(clientId: string, options?: { resource?: string }): Promise<{ accessToken: string } | { error: string }>;
+  /** The client's secret, read through the admin API; never log it. */
+  clientSecret(clientId: string): Promise<string>;
+  /** The realm's clients with exactly this `clientId`, as the Admin REST API returns them. */
+  clients(clientId: string): Promise<Record<string, unknown>[]>;
   stop(): Promise<void>;
 }
 
@@ -55,6 +61,29 @@ export async function startKeycloak(options: StartKeycloakOptions): Promise<Star
     .start();
   const baseUrl = `http://localhost:${String(container.getMappedPort(8080))}`;
   const issuer = `${baseUrl}/realms/aiops`;
+  const adminToken = async (): Promise<string> => {
+    const r = await fetch(`${baseUrl}/realms/master/protocol/openid-connect/token`, {
+      method: 'POST',
+      body: new URLSearchParams({ grant_type: 'password', client_id: 'admin-cli', username: 'admin', password: ADMIN_PASSWORD }),
+    });
+    if (!r.ok) throw new Error(`admin token request failed: ${String(r.status)}`);
+    return ((await r.json()) as { access_token: string }).access_token;
+  };
+  const adminClients = `${baseUrl}/admin/realms/aiops/clients`;
+  const clients = async (clientId: string, token?: string): Promise<Record<string, unknown>[]> => {
+    const headers = { authorization: `Bearer ${token ?? (await adminToken())}` };
+    const r = await fetch(`${adminClients}?${new URLSearchParams({ clientId, search: 'false' }).toString()}`, { headers });
+    if (!r.ok) throw new Error(`client lookup failed: ${String(r.status)}`);
+    return (await r.json()) as Record<string, unknown>[];
+  };
+  const clientSecret = async (clientId: string): Promise<string> => {
+    const token = await adminToken();
+    const uuid = (await clients(clientId, token))[0]?.id;
+    if (typeof uuid !== 'string') throw new Error(`client ${clientId} not found`);
+    const r = await fetch(`${adminClients}/${uuid}/client-secret`, { headers: { authorization: `Bearer ${token}` } });
+    if (!r.ok) throw new Error(`client secret request failed: ${String(r.status)}`);
+    return ((await r.json()) as { value: string }).value;
+  };
   return {
     baseUrl,
     issuer,
@@ -71,6 +100,19 @@ export async function startKeycloak(options: StartKeycloakOptions): Promise<Star
         },
       });
       return stdout.trim();
+    },
+    clientSecret,
+    clients: (clientId) => clients(clientId),
+    async clientCredentialsToken(clientId, tokenOptions = {}) {
+      const body = new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: clientId,
+        client_secret: await clientSecret(clientId),
+        resource: tokenOptions.resource ?? options.mcpResource,
+      });
+      const r = await fetch(`${issuer}/protocol/openid-connect/token`, { method: 'POST', body });
+      const json = (await r.json()) as { access_token?: string; error?: string };
+      return r.ok && json.access_token !== undefined ? { accessToken: json.access_token } : { error: json.error ?? `status ${String(r.status)}` };
     },
     async stop() {
       await container.stop();
