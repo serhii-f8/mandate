@@ -49,7 +49,7 @@ const MAPPING = {
 
 const ARGS = { order_id: '42', payload: { reason: 'customer request' } };
 
-type CallInput = Parameters<WriteAdapter['callOnce']>[0];
+type CallInput = Parameters<NonNullable<WriteAdapter['callOnce']>>[0];
 
 /** A hook that counts its calls and the requests the fake upstream had seen at that moment. */
 function hook(): { beforeSend: () => Promise<void>; seen: number[] } {
@@ -63,7 +63,7 @@ function hook(): { beforeSend: () => Promise<void>; seen: number[] } {
   };
 }
 
-function call(over: Partial<CallInput> = {}): ReturnType<WriteAdapter['callOnce']> {
+function call(over: Partial<CallInput> = {}): ReturnType<NonNullable<WriteAdapter['callOnce']>> {
   return createOpenApiAdapter().callOnce({
     connection: settings(),
     target: { kind: 'http', mapping: MAPPING },

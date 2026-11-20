@@ -32,6 +32,8 @@ import { createOpenApiAdapter } from './openapi/adapter.js';
 
 export type UpstreamAdapters = ReadAdapter &
   WriteAdapter &
+  // The bundled adapters implement the optional SDK method (NFR-18).
+  Required<Pick<WriteAdapter, 'callOnce'>> &
   RecordWriteAdapter &
   CodeAdapter &
   McpToolAdapter & { resolver: UpstreamResolver & Required<Pick<UpstreamResolver, 'resolveTools'>> };

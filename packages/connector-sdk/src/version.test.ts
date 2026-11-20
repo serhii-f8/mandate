@@ -62,12 +62,20 @@ describe('NFR-18 connector SDK 0.6.0 is additive', () => {
     >();
     expectTypeOf<'upstream_error'>().toExtend<ReadErrorCode>();
   });
+  it('NFR-18 EXE-4 WriteAdapter.callOnce is optional: a 0.5.x write adapter still type-checks', () => {
+    expectTypeOf<undefined>().toExtend<WriteAdapter['callOnce']>();
+    const legacy: WriteAdapter = {
+      submitBulk: () => Promise.reject(new Error('not used')),
+      bulkStatus: () => Promise.reject(new Error('not used')),
+    };
+    expect('callOnce' in legacy).toBe(false);
+  });
   it('NFR-18 EXE-4 WriteAdapter.callOnce takes an HTTP or MCP target and answers codes only', () => {
     expectTypeOf<CallTarget>().toEqualTypeOf<
       { readonly kind: 'http'; readonly mapping: UpstreamMapping } | { readonly kind: 'mcp'; readonly tool: string }
     >();
-    expectTypeOf<Parameters<WriteAdapter['callOnce']>[0]['target']>().toEqualTypeOf<CallTarget>();
-    expectTypeOf<Parameters<WriteAdapter['callOnce']>[0]['beforeSend']>().toEqualTypeOf<() => Promise<void>>();
+    expectTypeOf<Parameters<NonNullable<WriteAdapter['callOnce']>>[0]['target']>().toEqualTypeOf<CallTarget>();
+    expectTypeOf<Parameters<NonNullable<WriteAdapter['callOnce']>>[0]['beforeSend']>().toEqualTypeOf<() => Promise<void>>();
     expectTypeOf<CallOutcome['result']>().toEqualTypeOf<'accepted' | 'refused' | 'unknown' | 'not_sent'>();
     expectTypeOf<CallOutcome['code']>().toEqualTypeOf<WriteErrorCode | undefined>();
   });

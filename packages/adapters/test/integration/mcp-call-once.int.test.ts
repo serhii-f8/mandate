@@ -71,7 +71,7 @@ function settings(baseUrl: string, over: Partial<ConnectionSettings> = {}): Conn
 const rpcMethods = (requests: readonly RecordedMcpRequest[]): string[] => requests.map((r) => r.rpcMethod ?? r.httpMethod);
 const toolCalls = (server: FakeMcpServer): number => rpcMethods(server.requests).filter((m) => m === 'tools/call').length;
 
-type CallInput = Parameters<WriteAdapter['callOnce']>[0];
+type CallInput = Parameters<NonNullable<WriteAdapter['callOnce']>>[0];
 
 /** A hook that counts its calls and the tools/call requests the server had seen at that moment. */
 function hook(server: FakeMcpServer, run: () => void = () => undefined): { beforeSend: () => Promise<void>; seen: number[] } {

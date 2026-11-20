@@ -2,7 +2,7 @@
  * The worker implementation of the core `OpaqueCaller` port (design phase 9 §5): one upstream
  * call of an opaque operation through the connection's `WriteAdapter.callOnce`, or for a code
  * binding through `CodeAdapter.codeCall` after `beforeSend` (ruling F3), sent at most once
- * (EXE-4, NFR-2). Pre-flight (credential; for an MCP tool a fresh pin check, CONN-4) answers
+ * (EXE-4, NFR-2). Pre-flight (an adapter with `callOnce`, NFR-18; credential; for an MCP tool a fresh pin check, CONN-4) answers
  * `not_sent` without calling the adapter. The credential is opened only inside the adapter
  * (SEC-2); each call logs identifiers, method, status and timing only, never arguments (SEC-3).
  */
@@ -127,6 +127,8 @@ export function createOpaqueCaller(deps: OpaqueCallerDeps): OpaqueCaller | undef
   return {
     ...(idempotencyHeader === undefined ? {} : { idempotencyHeader }),
     async call({ args, idempotencyKey, beforeSend }) {
+      // An adapter written against connector-sdk 0.5.x has no callOnce (NFR-18): fail closed, nothing sent.
+      if (adapter.callOnce === undefined) return refuse('upstream_unavailable');
       const credential = await connectionCredential(deps.vault, connection.credentialRef);
       if (credential === 'unusable') return refuse('credential_unusable');
       if (binding.kind === 'mcp') {

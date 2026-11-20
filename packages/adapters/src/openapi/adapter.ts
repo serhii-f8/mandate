@@ -53,7 +53,7 @@ export interface OpenApiAdapterDeps {
   readonly codeDeadlines?: CodeRunnerDeps['codeDeadlines'];
 }
 
-export type OpenApiAdapter = ReadAdapter & WriteAdapter & RecordWriteAdapter & CodeAdapter & { resolver: UpstreamResolver };
+export type OpenApiAdapter = ReadAdapter & WriteAdapter & Required<Pick<WriteAdapter, 'callOnce'>> & RecordWriteAdapter & CodeAdapter & { resolver: UpstreamResolver };
 
 const NOT_DETECTABLE: ScopeReport = { detectable: false, source: 'none', values: [] };
 /** RFC 6749 §3.3 scope-token characters; anything else is not reported. */
@@ -360,7 +360,7 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
     return classify(r, 'submit');
   }
 
-  async function callOnce(input: Parameters<WriteAdapter['callOnce']>[0]): Promise<CallOutcome> {
+  async function callOnce(input: Parameters<NonNullable<WriteAdapter['callOnce']>>[0]): Promise<CallOutcome> {
     const { connection, target, args, credential, idempotencyKey, beforeSend } = input;
     if (target.kind !== 'http') return callNotSent;
     const { mapping } = target;

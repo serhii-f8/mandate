@@ -57,13 +57,14 @@ export interface WriteAdapter {
     keys?: readonly string[];
   }): Promise<BulkStatusOutcome>;
   /**
-   * since 0.6.0, additive. Sends one call at most once, never retried (EXE-4, NFR-2). Every
+   * since 0.6.0, additive and optional (NFR-18): an adapter written against 0.5.x need not have it,
+   * and the worker then answers an opaque call `not_sent/upstream_unavailable`. Sends one call at most once, never retried (EXE-4, NFR-2). Every
    * check that can refuse without sending (mapping, credential, egress, a free slot) runs first
    * and answers `not_sent` without calling `beforeSend`; then `beforeSend` runs immediately
    * before the request leaves. If it throws, nothing is sent and the error is rethrown. The
    * response body is discarded unread: the outcome depends on the status only.
    */
-  callOnce(input: {
+  callOnce?(input: {
     connection: ConnectionSettings;
     target: CallTarget;
     args: Readonly<Record<string, unknown>>;

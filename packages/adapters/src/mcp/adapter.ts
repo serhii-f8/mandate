@@ -134,7 +134,7 @@ interface EraEntry {
 }
 
 /** The MCP adapter: the SDK's tool adapter plus the opaque call path (ruling F5). */
-export type McpAdapter = McpToolAdapter & Pick<WriteAdapter, 'callOnce'>;
+export type McpAdapter = McpToolAdapter & Required<Pick<WriteAdapter, 'callOnce'>>;
 
 /** An opaque call's settled exchange, told apart from a `Failure` by `outcome`. */
 interface CallSettled {
@@ -303,7 +303,7 @@ export function createMcpToolAdapter(deps: McpAdapterDeps = {}): McpAdapter {
    * refresh, and the SDK's header-mismatch re-call is off because a tool definition is passed.
    * No idempotency key is sent; the result's content is never read.
    */
-  async function callOnce(input: Parameters<WriteAdapter['callOnce']>[0]): Promise<CallOutcome> {
+  async function callOnce(input: Parameters<NonNullable<WriteAdapter['callOnce']>>[0]): Promise<CallOutcome> {
     const { connection, target, credential, beforeSend } = input;
     if (target.kind !== 'mcp' || !MCP_TOOL_NAME.test(target.tool)) return { result: 'not_sent', code: 'mapping', durationMs: 0 };
     const name = target.tool;

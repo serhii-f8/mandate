@@ -120,7 +120,7 @@ class MemoryVault implements CredentialVault {
   }
 }
 
-type CallInput = Parameters<WriteAdapter['callOnce']>[0];
+type CallInput = Parameters<NonNullable<WriteAdapter['callOnce']>>[0];
 
 /** Honours the `callOnce` contract: `not_sent` without calling `beforeSend`; otherwise the hook, then one send. */
 class FakeWriteAdapter implements WriteAdapter {
@@ -208,6 +208,20 @@ describe('EXE-4 CONN-4 createOpaqueCaller', () => {
     expect(pinChecks).toEqual(['tools.send']);
     expect(adapter.calls[0]?.target).toEqual({ kind: 'mcp', tool: 'send' });
     expect(adapter.calls[0]).not.toHaveProperty('idempotencyKey');
+  });
+
+  it('NFR-18 EXE-4 an adapter without callOnce is not_sent/upstream_unavailable and beforeSend never runs', async () => {
+    for (const operationId of ['shop.plain', 'shop.keyed', 'tools.send']) {
+      const legacy: WriteAdapter = {
+        submitBulk: () => Promise.reject(new Error('not used')),
+        bulkStatus: () => Promise.reject(new Error('not used')),
+      };
+      const { caller, lines } = await setup(operationId, { adapter: legacy });
+      const { seen, beforeSend } = hooked();
+      await expect(caller.call({ args: ARGS, idempotencyKey: KEY, beforeSend }), operationId).resolves.toEqual({ kind: 'not_sent', code: 'upstream_unavailable' });
+      expect(seen.calls).toBe(0);
+      expect(lines.map((l) => l.errorCode)).toEqual(['upstream_unavailable']);
+    }
   });
 
   it('CONN-4 a changed or missing pin is not_sent/upstream_changed and the adapter is not called', async () => {

@@ -64,7 +64,7 @@ operations:
 `;
 
 /** Only the read and bulk/opaque methods of `adapter`: no per-record writes, no code operations. */
-function bulkOnly(adapter: ReadAdapter & WriteAdapter): ReadAdapter & WriteAdapter {
+function bulkOnly(adapter: ReadAdapter & WriteAdapter & Required<Pick<WriteAdapter, 'callOnce'>>): ReadAdapter & WriteAdapter {
   return {
     read: (input) => adapter.read(input),
     detectScopes: (input) => adapter.detectScopes(input),
@@ -536,7 +536,7 @@ class CountingAdapter implements ReadAdapter, WriteAdapter {
   bulkStatus(): Promise<BulkStatusOutcome> {
     throw new Error('not used');
   }
-  async callOnce(input: Parameters<WriteAdapter['callOnce']>[0]): Promise<CallOutcome> {
+  async callOnce(input: Parameters<NonNullable<WriteAdapter['callOnce']>>[0]): Promise<CallOutcome> {
     await input.beforeSend();
     this.sent += 1;
     return { result: 'accepted', durationMs: 1 };
