@@ -11,6 +11,7 @@ import { CONNECTOR_SDK_VERSION } from '@aiops/connector-sdk';
 import semver from 'semver';
 import { z } from 'zod';
 import { pathToString, type ConfigIssue } from './issues.js';
+import { loadPresetCode, type ImportModule, type LoadedPresetCode } from './preset-code.js';
 import { parseAiopsField, selectPackage } from './preset-package.js';
 import { PARSE_PARAMS, presetOperationSchema, schemaIssues, type PresetConfig, type PresetOperationConfig } from './schema.js';
 import { findSecretKeys, SECRET_MESSAGE } from './secrets.js';
@@ -48,6 +49,8 @@ export interface LoadedPreset {
   readonly operations: readonly PresetOperationConfig[];
   /** `package.json`, the preset file and the spec (openapi only), in this order; covered by the configuration hash. */
   readonly files: readonly { readonly file: string; readonly text: string }[];
+  /** The code module of `aiops.code` (OPS-5); its tree digest is covered by the configuration hash (CFG-4). */
+  readonly code?: LoadedPresetCode;
 }
 
 export type PresetResult = { ok: true; preset: LoadedPreset } | { ok: false; issues: ConfigIssue[] };
@@ -73,7 +76,17 @@ export async function readSpecFile(path: string): Promise<{ ok: true; text: stri
   }
 }
 
-export async function resolvePreset(entry: PresetConfig, dirs: readonly string[], declared?: PresetEntryLocation): Promise<PresetResult> {
+export interface ResolvePresetOptions {
+  /** How the code module is imported; native `import()` when absent (see `LoadOptions.importModule`). */
+  readonly importModule?: ImportModule;
+}
+
+export async function resolvePreset(
+  entry: PresetConfig,
+  dirs: readonly string[],
+  declared?: PresetEntryLocation,
+  options: ResolvePresetOptions = {},
+): Promise<PresetResult> {
   const entryIssue = (key: 'package' | 'version', message: string): ConfigIssue => {
     if (declared === undefined) return { file: '.', path: pathToString(['presets', entry.id, key]), message };
     const path = [...declared.path, key];
@@ -144,6 +157,18 @@ export async function resolvePreset(entry: PresetConfig, dirs: readonly string[]
   }
   if (issues.length > 0) return { ok: false, issues };
 
+  let code: LoadedPresetCode | undefined;
+  if (aiops?.code !== undefined) {
+    const loaded = await loadPresetCode({
+      packageName: entry.package,
+      dir: found.dir,
+      code: aiops.code,
+      ...(options.importModule === undefined ? {} : { importModule: options.importModule }),
+    });
+    if (!loaded.ok) return loaded;
+    code = loaded.code;
+  }
+
   return {
     ok: true,
     preset: {
@@ -159,6 +184,7 @@ export async function resolvePreset(entry: PresetConfig, dirs: readonly string[]
       ...(doc.test === undefined ? {} : { test: doc.test }),
       operations: doc.operations,
       files,
+      ...(code === undefined ? {} : { code }),
     },
   };
 }

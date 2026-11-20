@@ -137,6 +137,12 @@ export interface LoadOptions {
   readonly baseDir?: string;
   /** Clock for `listedAt` of the MCP tool catalogs; defaults to `Date.now`. */
   readonly now?: () => number;
+  /**
+   * How preset code modules are imported (OPS-5). Production leaves it unset: native
+   * `import()`. Tests pass Node's own loader, because Vitest's module runner resolves and
+   * reports differently (F23).
+   */
+  readonly importModule?: (url: string) => Promise<unknown>;
 }
 
 const YAML_FILE = /\.ya?ml$/i;
@@ -250,7 +256,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   const resolvedPresets = new Map<string, LoadedPreset>();
   if (options.presetDirs !== undefined) {
     for (const [presetId, entry] of presetById) {
-      const result = await resolvePreset(entry.value, options.presetDirs, entry);
+      const result = await resolvePreset(entry.value, options.presetDirs, entry, options.importModule === undefined ? {} : { importModule: options.importModule });
       if (result.ok) resolvedPresets.set(presetId, result.preset);
       else issues.push(...result.issues);
     }
@@ -553,7 +559,18 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       hash.update(`preset:${file}`).update('\0').update(text).update('\0');
       filesDigest.update(`preset:${file}`).update('\0').update(text).update('\0');
     }
-    loadedPresets.set(presetId, { package: preset.package, version: preset.version, adapter: preset.adapter, filesDigest: filesDigest.digest('hex') });
+    // CFG-4: the code tree's digest, after that preset's files.
+    if (preset.code !== undefined) {
+      hash.update(`preset-code:${preset.package}`).update('\0').update(preset.code.digest).update('\0');
+      filesDigest.update(`preset-code:${preset.package}`).update('\0').update(preset.code.digest).update('\0');
+    }
+    loadedPresets.set(presetId, {
+      package: preset.package,
+      version: preset.version,
+      adapter: preset.adapter,
+      filesDigest: filesDigest.digest('hex'),
+      ...(preset.code === undefined ? {} : { codeDigest: preset.code.digest }),
+    });
   }
   for (const { file, text } of specTexts) hash.update(`spec:${file}`).update('\0').update(text).update('\0');
 
