@@ -12,11 +12,13 @@
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { RateCounter } from '@aiops/core';
 import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { createLogger } from '../../src/logger.js';
 import { auditRows, modernRequest, rawPost, startApi, startDatabase, tokenFor, vaultOf, type RunningApi } from './helpers.js';
 
 const RATE_LIMIT_CONFIG = fileURLToPath(new URL('./fixtures/rate-limit-config', import.meta.url));
@@ -31,8 +33,10 @@ let upstream: FakeUpstream;
 let configDir: string;
 /** Trusts one proxy hop (AIOPS_TRUST_PROXY=1). */
 let api: RunningApi;
-/** Trusts no proxy (AIOPS_TRUST_PROXY=0), as in production by default. */
+/** Trusts no proxy (AIOPS_TRUST_PROXY=0), as in production by default; serves as the same MCP resource as `api`. */
 let direct: RunningApi;
+/** Every line the main instance logged. */
+const logLines: string[] = [];
 
 beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
@@ -42,8 +46,15 @@ beforeAll(async () => {
   await cp(RATE_LIMIT_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));
-  api = await startApi(databaseUrl, { issuer, configDir, trustProxy: 1, wallClock });
-  direct = await startApi(databaseUrl, { issuer, configDir, trustProxy: 0, wallClock });
+  const stream = new Writable({
+    write(chunk: Buffer, _encoding, done) {
+      logLines.push(chunk.toString('utf8'));
+      done();
+    },
+  });
+  api = await startApi(databaseUrl, { issuer, configDir, trustProxy: 1, wallClock, logger: createLogger('debug', stream) });
+  // Same canonical MCP URL: a second instance behind the same load balancer, so one token serves both (NFR-3).
+  direct = await startApi(databaseUrl, { issuer, configDir, trustProxy: 0, wallClock, resource: api.resource });
   await vaultOf(api).put({ ref: 'shop-token', scheme: 'bearer', secret: { token: 'e2e-only-upstream-token-rate-limits' }, actor: 'e2e-setup' });
 });
 
@@ -100,6 +111,23 @@ async function bucketCount(key: string): Promise<number | undefined> {
   } finally {
     await client.end();
   }
+}
+
+async function webLoginRows(): Promise<number> {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const { rows } = await client.query<{ n: string }>('select count(*) as n from web_login');
+    return Number(rows[0]?.n);
+  } finally {
+    await client.end();
+  }
+}
+
+/** `GET <path>` on `target` without following redirects, from `address` when the instance trusts the proxy. */
+async function page(target: RunningApi, path: string, address?: string): Promise<{ status: number; retryAfter: string | null; body: string }> {
+  const response = await fetch(`${target.url}${path}`, { redirect: 'manual', headers: address === undefined ? {} : { 'x-forwarded-for': address } });
+  return { status: response.status, retryAfter: response.headers.get('retry-after'), body: await response.text() };
 }
 
 const RATE_LIMITED = (id: number) => ({
@@ -203,6 +231,81 @@ describe('SEC-10 MCP endpoint rate limits', () => {
   });
 });
 
+describe('SEC-10 SEC-1 unauthenticated limits and shared counters', () => {
+  const garbage = (address: string, id = 1) => send(api, 'tools/list', {}, { id, headers: { authorization: 'Bearer not-a-token', 'x-forwarded-for': address } });
+
+  it('SEC-10 SEC-1 anonymous requests over the limit get 429 and write no auth.rejected row', async () => {
+    const address = '192.0.2.10';
+    const answers = [await garbage(address, 1), await garbage(address, 2), await garbage(address, 3), await garbage(address, 4)];
+    expect(answers.map((a) => a.status)).toEqual([401, 401, 429, 429]);
+    const ids = answers.map((a) => a.correlationId);
+    const rejected = await auditRows(databaseUrl, "action = 'auth.rejected' and correlation_id = any($1)", [ids]);
+    expect(rejected).toHaveLength(2);
+    const limited = await auditRows(databaseUrl, "action = 'rate.limited' and correlation_id = any($1)", [ids]);
+    expect(limited).toEqual([expect.objectContaining({ actor: 'unknown', outcome: 'denied', details: { scope: 'unauthenticated', limit: 2 } })]);
+    expect(await bucketCount(`anon:${address}`)).toBe(4);
+  });
+
+  it('SEC-10 /auth/login over the limit answers 429 and inserts no web_login row', async () => {
+    const address = '192.0.2.20';
+    expect((await page(api, '/auth/login?return_to=/app/', address)).status).toBe(302);
+    expect((await page(api, '/auth/login?return_to=/app/', address)).status).toBe(302);
+    const before = await webLoginRows();
+    const third = await page(api, '/auth/login?return_to=/app/', address);
+    expect(third.status).toBe(429);
+    expect(third.retryAfter).toBe('30');
+    expect(JSON.parse(third.body)).toEqual({ error: 'rate_limited', retryAfterSeconds: 30 });
+    expect(await webLoginRows()).toBe(before);
+
+    // The callback shares the budget and is refused before it reads or deletes a login.
+    const callback = await page(api, '/auth/callback?state=s&code=c', address);
+    expect(callback.status).toBe(429);
+    expect(JSON.parse(callback.body)).toEqual({ error: 'rate_limited', retryAfterSeconds: 30 });
+    expect(await webLoginRows()).toBe(before);
+    const limited = await auditRows(databaseUrl, "action = 'rate.limited' and actor = 'unknown'");
+    expect(JSON.stringify(limited)).not.toContain(address);
+  });
+
+  it('SEC-10 /mcp 401s and /auth/login share one anonymous budget per address', async () => {
+    const address = '192.0.2.30';
+    expect((await garbage(address)).status).toBe(401);
+    expect((await page(api, '/auth/login?return_to=/app/', address)).status).toBe(302);
+    expect((await page(api, '/auth/login?return_to=/app/', address)).status).toBe(429);
+    expect((await garbage(address)).status).toBe(429);
+    expect(await bucketCount(`anon:${address}`)).toBe(4);
+    // Another address keeps its own budget.
+    expect((await page(api, '/auth/login?return_to=/app/', '192.0.2.31')).status).toBe(302);
+  });
+
+  it('SEC-10 NFR-3 two api instances on one database share the counter', async () => {
+    const token = await tokenFor(issuer, api, 'user-two-instances', ['catalog']);
+    const statuses = [];
+    for (const [id, target] of [api, direct, api, direct].entries()) statuses.push((await send(target, 'tools/list', {}, { token, id: id + 1 })).status);
+    expect(statuses).toEqual([200, 200, 200, 429]);
+    expect((await send(api, 'tools/list', {}, { token, id: 5 })).status).toBe(429);
+    expect(await bucketCount('mcp:user:user-two-instances')).toBe(5);
+  });
+
+  it('SEC-10 a 256-character subject is limited and appears in no log line', async () => {
+    const subject = `long-${'x'.repeat(251)}`;
+    expect(subject).toHaveLength(256);
+    const token = await tokenFor(issuer, api, subject, ['catalog']);
+    const statuses = [];
+    for (let id = 1; id <= 4; id += 1) statuses.push((await send(api, 'tools/list', {}, { token, id })).status);
+    expect(statuses).toEqual([200, 200, 200, 429]);
+    const client = new pg.Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      const { rows } = await client.query<{ key: string; count: number }>("select key, count from rate_bucket where key like 'mcp:user:sha256:%'");
+      expect(rows).toEqual([{ key: expect.stringMatching(/^mcp:user:sha256:[0-9a-f]{64}$/) as unknown, count: 4 }]);
+    } finally {
+      await client.end();
+    }
+    expect(logLines.length).toBeGreaterThan(0);
+    expect(logLines.filter((line) => line.includes(subject))).toEqual([]);
+  });
+});
+
 describe('SEC-10 MCP endpoint when the rate counter fails', () => {
   let failing: RunningApi;
   const brokenCounter: RateCounter = {
@@ -241,5 +344,16 @@ describe('SEC-10 MCP endpoint when the rate counter fails', () => {
     expect(anonymous.retryAfter).toBe('5');
     expect(anonymous.json).toEqual(unavailable(10));
     expect(await auditRows(databaseUrl, 'correlation_id = $1', [anonymous.correlationId])).toEqual([]);
+  });
+
+  it('SEC-10 a failing counter answers 503 on /auth/login and /auth/callback and inserts no web_login row', async () => {
+    const before = await webLoginRows();
+    for (const path of ['/auth/login?return_to=/app/', '/auth/callback?state=s&code=c']) {
+      const answer = await page(failing, path);
+      expect(answer.status).toBe(503);
+      expect(answer.retryAfter).toBe('5');
+      expect(JSON.parse(answer.body)).toEqual({ error: 'rate_limit_unavailable' });
+    }
+    expect(await webLoginRows()).toBe(before);
   });
 });
