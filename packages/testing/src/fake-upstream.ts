@@ -42,8 +42,11 @@ function flattenHeaders(req: IncomingMessage): Record<string, string> {
   return out;
 }
 
-/** An HTTP server on 127.0.0.1 with a random port, for adapter tests. Unrouted requests get 404 JSON. */
-export async function startFakeUpstream(): Promise<FakeUpstream> {
+/**
+ * An HTTP server for adapter tests, on 127.0.0.1 with a random port unless `host` / `port` say otherwise
+ * (the acceptance containers listen on 0.0.0.0). Unrouted requests get 404 JSON.
+ */
+export async function startFakeUpstream(opts: { readonly host?: string; readonly port?: number } = {}): Promise<FakeUpstream> {
   const routes = new Map<string, FakeHandler>();
   const patterns: { method: string; pattern: RegExp; handler: FakeHandler }[] = [];
   const requests: RecordedRequest[] = [];
@@ -112,14 +115,14 @@ export async function startFakeUpstream(): Promise<FakeUpstream> {
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(opts.port ?? 0, opts.host ?? '127.0.0.1', () => {
       resolve();
     });
   });
   const { port } = server.address() as AddressInfo; // listen() on a TCP port yields AddressInfo
 
   return {
-    url: `http://127.0.0.1:${port}`,
+    url: `http://${opts.host === undefined || opts.host === '0.0.0.0' ? '127.0.0.1' : opts.host}:${port}`,
     port,
     requests,
     get maxInFlight() {
