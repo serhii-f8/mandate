@@ -14,7 +14,11 @@ beforeAll(() => {
   eslint = new ESLint({
     cwd: repoRoot,
     overrideConfigFile: true,
-    overrideConfig: [{ files: ['**/*.ts', '**/*.tsx'], languageOptions: { parser: tseslint.parser } }, ...boundaryRules],
+    overrideConfig: [
+      // The plugin is registered here: eslint.config.js gets it from strictTypeChecked (F17).
+      { files: ['**/*.ts', '**/*.tsx'], languageOptions: { parser: tseslint.parser }, plugins: { '@typescript-eslint': tseslint.plugin } },
+      ...boundaryRules,
+    ],
   });
 });
 
@@ -94,6 +98,16 @@ describe('package boundaries (CLAUDE.md engineering conventions)', () => {
     expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', '@aiops/testing')).toBe(0);
     expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', sdk)).toBe(0);
     expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', '@aiops/core')).toBe(1);
+  });
+
+  it('CONN-8 OPS-5 preset src imports @aiops packages as types only', async () => {
+    const rule = '@typescript-eslint/no-restricted-imports';
+    const file = 'presets/magento2-catalog/src/probe.ts';
+    expect(await ruleErrors(file, "import { CONNECTOR_SDK_VERSION } from '@aiops/connector-sdk';\nexport const v: unknown = CONNECTOR_SDK_VERSION;\n", rule)).toBe(1);
+    expect(await ruleErrors(file, "import type { PresetModule } from '@aiops/connector-sdk';\nexport type P = PresetModule;\n", rule)).toBe(0);
+    // Tests run in the workspace and may import values.
+    const test = 'presets/magento2-catalog/src/probe.test.ts';
+    expect(await ruleErrors(test, "import { CONNECTOR_SDK_VERSION } from '@aiops/connector-sdk';\nexport const v: unknown = CONNECTOR_SDK_VERSION;\n", rule)).toBe(0);
   });
 
   it('presets use only the connector SDK and the configuration schema', async () => {

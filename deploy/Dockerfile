@@ -14,19 +14,22 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm fetch
 COPY . .
 RUN pnpm install --offline --frozen-lockfile
-RUN pnpm turbo run build --filter=@aiops/api... --filter=@aiops/worker... --filter=@aiops/web --filter=@aiops/widgets
+RUN pnpm turbo run build --filter=@aiops/api... --filter=@aiops/worker... --filter=@aiops/web --filter=@aiops/widgets --filter='./presets/*'
 # Self-contained production trees (workspace packages copied in, dev dependencies dropped).
 RUN pnpm --filter @aiops/api deploy --prod --legacy /out/api \
  && pnpm --filter @aiops/worker deploy --prod --legacy /out/worker
 # The api serves the trusted pages from the built bundle (AIOPS_WEB_DIR), the MCP Apps widget
 # bundles (AIOPS_WIDGET_DIR) and loads presets
 # from their package.json, preset.yaml and vendored spec alone (AIOPS_PRESET_DIRS).
+# Every presets/* directory is built and packed with its own `files` list (dist, preset.yaml, spec, code),
+# so a new preset needs no Dockerfile edit. `npm pack` is the fallback should `pnpm pack` refuse a private package.
 RUN cp -r apps/web/dist /out/web \
  && cp -r packages/widgets/dist/ui /out/widgets \
+ && mkdir -p /tmp/packs /out/presets \
  && for dir in presets/*/; do \
-      name="$(basename "$dir")"; mkdir -p "/out/presets/$name"; \
-      cp "$dir/package.json" "$dir/preset.yaml" "/out/presets/$name/"; \
-      cp -r "$dir/spec" "/out/presets/$name/spec"; \
+      name="$(basename "$dir")"; mkdir -p "/tmp/packs/$name" "/out/presets/$name"; \
+      (cd "$dir" && (pnpm pack --pack-destination "/tmp/packs/$name" || npm pack --pack-destination "/tmp/packs/$name")); \
+      tar -xzf "/tmp/packs/$name"/*.tgz -C "/out/presets/$name" --strip-components=1; \
     done
 
 FROM node:22-bookworm-slim AS runtime

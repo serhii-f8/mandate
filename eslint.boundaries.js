@@ -138,6 +138,29 @@ export const boundaryRules = [
     },
   },
   {
+    // Preset code runs from a preset directory outside the app's node_modules (CONN-8, OPS-5): at run time it
+    // imports only `node:` built-ins and its own relative files, so @aiops/* is imported as types only.
+    // Not linted: a relative or file: import that leaves the code directory (`../` out of dist, an absolute
+    // file: URL). The src-to-dist mapping makes that inexact; the loader refuses a path outside the package
+    // and docs/commands.md states the rule.
+    files: ['presets/*/src/**/*.ts'],
+    ignores: ['**/*.test.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@aiops/*'],
+              allowTypeImports: true,
+              message: 'Preset code runs outside the app’s node_modules: import @aiops packages as types only (CONN-8, OPS-5).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Contract tests (NFR-17) run the preset through the real adapter and the shared fakes.
     files: ['presets/*/src/**/*.test.ts', 'presets/*/test/**/*.ts'],
     rules: {
