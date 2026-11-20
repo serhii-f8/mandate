@@ -51,7 +51,7 @@ describe('NFR-11 api tracing', () => {
     });
     try {
       telemetry.tracer.startSpan('probe').end();
-      expect(memory.getFinishedSpans()[0]?.resource.attributes['service.name']).toBe('aiops-api');
+      expect(memory.getFinishedSpans()[0]?.resource.attributes).toMatchObject({ 'service.name': 'aiops-api', 'telemetry.sdk.language': 'nodejs', 'telemetry.sdk.name': 'opentelemetry' });
     } finally {
       await telemetry.shutdown();
       sink.closeAllConnections();
@@ -68,8 +68,7 @@ describe('NFR-11 api tracing', () => {
     telemetry.tracer.startSpan('probe').end();
     await expect(telemetry.shutdown()).resolves.toBeUndefined();
     await expect(telemetry.shutdown()).resolves.toBeUndefined();
-    // The 2.x OTLP exporter retries a refused export with backoff until its 10 s timeout (ADR 0054).
-  }, 20_000);
+  });
 
   it('NFR-11 without an endpoint nothing is exported and spans still carry attributes', async () => {
     const telemetry = startApiTelemetry({ serviceName: 'aiops-api', register: false });
@@ -106,6 +105,8 @@ describe('NFR-12 api metrics endpoint', () => {
       const ok = await call(server.port, 'GET', '/metrics');
       expect(ok.status).toBe(200);
       expect(ok.body).toContain('aiops_tool_calls_total{');
+      // As with 0.57: the resource is the SDK default merged with service.name (ADR 0054).
+      expect(ok.body).toMatch(/^target_info\{service_name="aiops-api",telemetry_sdk_language="nodejs",telemetry_sdk_name="opentelemetry",telemetry_sdk_version="[^"]+"\} 1$/m);
       const other = await call(server.port, 'GET', '/other');
       expect(other.status).toBe(404);
       expect(other.body).toBe('');

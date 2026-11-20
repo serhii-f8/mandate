@@ -29,6 +29,9 @@ type PluginSpanProcessor = PluginOptions['spanProcessor'];
 /** A workflow span as the plugin's sink passes it to `onEnd` (1.x `ReadableSpan`). */
 export type WorkflowSinkSpan = Parameters<PluginSpanProcessor['onEnd']>[0];
 
+/** The scope of the plugin's workflow tracer, for a sink span that carries none. */
+const WORKFLOW_SCOPE = { name: '@temporalio/interceptor-workflow' } as const;
+
 /** The 2.x form of a sink span: the parent becomes a span context of the same trace, the library a scope. */
 function toReadableSpan(span: WorkflowSinkSpan, resource: Resource): ReadableSpan {
   const own = span.spanContext();
@@ -48,7 +51,10 @@ function toReadableSpan(span: WorkflowSinkSpan, resource: Resource): ReadableSpa
     duration: span.duration,
     ended: span.ended,
     resource,
-    instrumentationScope: span.instrumentationLibrary,
+    // Typed as required, but the span crossed the isolate as plain data; a missing scope would make
+    // the OTLP serializer throw and drop the whole batch, api and activity spans included.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    instrumentationScope: span.instrumentationLibrary ?? WORKFLOW_SCOPE,
     droppedAttributesCount: span.droppedAttributesCount,
     droppedEventsCount: span.droppedEventsCount,
     droppedLinksCount: span.droppedLinksCount,

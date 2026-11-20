@@ -27,6 +27,7 @@
   "devDependencies": {
     "@aiops/magento2-catalog": "workspace:*",
     "@aiops/testing": "workspace:*",
+    "@opentelemetry/otlp-transformer": "0.223.0",
     "@temporalio/testing": "1.25.0",
     "tsx": "4.23.15"
   },

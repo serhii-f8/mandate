@@ -10,7 +10,7 @@ import type { Context, Exception, Meter } from '@opentelemetry/api';
 import { globalErrorHandler, W3CTraceContextPropagator } from '@opentelemetry/core';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
-import { resourceFromAttributes } from '@opentelemetry/resources';
+import { defaultResource, resourceFromAttributes } from '@opentelemetry/resources';
 import { MeterProvider } from '@opentelemetry/sdk-metrics';
 import { BatchSpanProcessor, NoopSpanProcessor, type ReadableSpan, type Span, type SpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
@@ -88,11 +88,18 @@ function combined(processors: readonly SpanProcessor[]): SpanProcessor {
 /** The 0.57 exposition: no `otel_scope_*` labels on each series, which 0.200+ add by default (ADR 0054). */
 const PROMETHEUS_FORMAT = { withoutScopeInfo: true } as const;
 
+/**
+ * One export, retries included, ends within 2 s, so the final flush on shutdown stays well inside
+ * a 10 s stop grace when the collector is down (the 2.x default is 10 s with retries; ADR 0054).
+ */
+const OTLP_EXPORT_TIMEOUT_MS = 2_000;
+
 export function startWorkerTelemetry(options: WorkerTelemetryOptions): WorkerTelemetry {
-  const resource = resourceFromAttributes({ 'service.name': SERVICE_NAME });
+  // The SDK default (telemetry.sdk.*) merged with service.name, as 1.x providers did themselves (ADR 0054).
+  const resource = defaultResource().merge(resourceFromAttributes({ 'service.name': SERVICE_NAME }));
   const processors: SpanProcessor[] = [];
   if (options.otlpEndpoint !== undefined) {
-    processors.push(new BatchSpanProcessor(new OTLPTraceExporter({ url: otlpTracesUrl(options.otlpEndpoint) })));
+    processors.push(new BatchSpanProcessor(new OTLPTraceExporter({ url: otlpTracesUrl(options.otlpEndpoint), timeoutMillis: OTLP_EXPORT_TIMEOUT_MS })));
   }
   if (options.spanProcessor !== undefined) processors.push(options.spanProcessor);
   const spanProcessor = combined(processors);

@@ -77,7 +77,7 @@ describe('NFR-11 worker tracing', () => {
         span.end();
       });
       const [span] = memory.getFinishedSpans();
-      expect(span?.resource.attributes['service.name']).toBe('aiops-worker');
+      expect(span?.resource.attributes).toMatchObject({ 'service.name': 'aiops-worker', 'telemetry.sdk.language': 'nodejs', 'telemetry.sdk.name': 'opentelemetry' });
     } finally {
       // Shutdown flushes the batch processor to the endpoint.
       await telemetry.shutdown();
@@ -98,6 +98,8 @@ describe('NFR-12 worker metrics', () => {
       const res = await get(port, '/metrics');
       expect(res.status).toBe(200);
       expect(res.body).toContain('aiops_probe_total{phase="execute"} 2');
+      // As with 0.57: the resource is the SDK default merged with service.name (ADR 0054).
+      expect(res.body).toMatch(/^target_info\{service_name="aiops-worker",telemetry_sdk_language="nodejs",telemetry_sdk_name="opentelemetry",telemetry_sdk_version="[^"]+"\} 1$/m);
     } finally {
       await close(server);
       await telemetry.shutdown();
@@ -124,8 +126,7 @@ describe('NFR-11 NFR-12 worker telemetry failures', () => {
       unregister();
       await close(metrics);
     }
-    // The 2.x OTLP exporter retries a refused export with backoff until its 10 s timeout (ADR 0054).
-  }, 20_000);
+  });
 
   it('NFR-11 a throwing processor does not keep the span from the other one, and flush and shutdown resolve', async () => {
     const memory = new InMemorySpanExporter();
