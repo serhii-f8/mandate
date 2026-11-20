@@ -16,6 +16,7 @@ import {
   type CodeOperation,
   type CodeReadOperation,
   type CodeReadResult,
+  type CodeWriteContext,
   type CodeWriteOperation,
   type CodeWriteOutcome,
   type PresetModule,
@@ -74,7 +75,7 @@ describe('NFR-18 connector SDK 0.6.0 is additive', () => {
 
 describe('NFR-18 connector SDK 0.6.0 code operations are additive', () => {
   it('NFR-18 OPS-5 the code types are exported and CodeWriteOperation.write takes records and arguments', () => {
-    expectTypeOf<Parameters<CodeWriteOperation['write']>>().toEqualTypeOf<[CodeContext, readonly WriteRecord[], CodeArgs]>();
+    expectTypeOf<Parameters<CodeWriteOperation['write']>>().toEqualTypeOf<[CodeWriteContext, readonly WriteRecord[], CodeArgs]>();
     expectTypeOf<ReturnType<CodeWriteOperation['write']>>().toEqualTypeOf<Promise<readonly RecordOutcome[]>>();
     expectTypeOf<Parameters<CodeReadOperation['read']>>().toEqualTypeOf<[CodeContext, CodeArgs]>();
     expectTypeOf<ReturnType<CodeReadOperation['read']>>().toEqualTypeOf<Promise<CodeReadResult>>();

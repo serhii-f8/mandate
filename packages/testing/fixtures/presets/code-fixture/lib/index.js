@@ -3,6 +3,7 @@
 // The JSDoc types name the connector SDK as types only.
 
 /** @typedef {import('@aiops/connector-sdk').CodeContext} CodeContext */
+/** @typedef {import('@aiops/connector-sdk').CodeWriteContext} CodeWriteContext */
 /** @typedef {import('@aiops/connector-sdk').CodeArgs} CodeArgs */
 /** @typedef {import('@aiops/connector-sdk').WriteRecord} WriteRecord */
 /** @typedef {import('@aiops/connector-sdk').RecordOutcome} RecordOutcome */
@@ -43,11 +44,16 @@ export default {
         return { items };
       },
     },
-    /** `PUT /items/{id}/tags` per record; a refused tag set (4xx) fails that record. */
+    /**
+     * `PUT /items/{id}/tags` per record; a refused tag set (4xx) fails that record. The tags come
+     * from the record in both directions (in a rollback they are the values to restore; `args`
+     * still describe the forward change), and a PUT of the full set is idempotent, so a retried
+     * batch may send a record again. The direction header lets tests observe `ctx.direction`.
+     */
     set_tags: {
       kind: 'write',
       /**
-       * @param {CodeContext} ctx
+       * @param {CodeWriteContext} ctx
        * @param {readonly WriteRecord[]} records
        * @returns {Promise<RecordOutcome[]>}
        */
@@ -58,6 +64,7 @@ export default {
           const res = await ctx.http.send({
             method: 'PUT',
             path: `/items/${encodeURIComponent(String(record.id))}/tags`,
+            headers: { 'x-write-direction': ctx.direction },
             body: { tags: record.tags },
           });
           outcomes.push(res.ok ? 'ok' : retriable(res) ? 'retriable' : 'failed');

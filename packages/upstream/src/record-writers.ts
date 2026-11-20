@@ -4,7 +4,7 @@
  * the preset's code module (OPS-5). The credential is opened only inside the adapter (SEC-2);
  * each request logs identifiers, method, status and timing only, never records (SEC-3).
  */
-import type { CodeAdapter, CodeWriteOperation, RecordSendOutcome, RecordWriteAdapter } from '@aiops/connector-sdk';
+import type { CodeAdapter, CodeWriteDirection, CodeWriteOperation, RecordSendOutcome, RecordWriteAdapter } from '@aiops/connector-sdk';
 import type { LoadedConfiguration } from '@aiops/config';
 import type { CredentialVault, DirectRecordState, DirectWriter } from '@aiops/core';
 import { connectionCredential, type UpstreamCallLog } from './read.js';
@@ -25,6 +25,11 @@ export interface DirectWriterDeps {
   readonly correlationId: string;
   /** The change-set's validated arguments, for `{ arg }` templates and the code module. */
   readonly args: Readonly<Record<string, unknown>>;
+  /**
+   * Why the records are written: `rollback` when they carry the values to restore (EXE-8). Handed
+   * to a code module as `ctx.direction`; default `forward`.
+   */
+  readonly direction?: CodeWriteDirection;
   readonly log?: (record: UpstreamCallLog) => void;
 }
 
@@ -161,6 +166,7 @@ export function createCodeRecordWriter(deps: DirectWriterDeps): DirectWriter | u
         operation,
         records,
         args: deps.args,
+        direction: deps.direction ?? 'forward',
         ...(credential === undefined ? {} : { credential }),
         onProgress: heartbeat,
       });

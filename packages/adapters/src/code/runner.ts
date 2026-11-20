@@ -8,6 +8,7 @@ import type {
   CodeAdapter,
   CodeCallResult,
   CodeContext,
+  CodeWriteContext,
   CodeWriteOutcome,
   ConnectionSettings,
   CredentialSource,
@@ -69,6 +70,9 @@ function messageOf(err: unknown): string {
   }
 }
 
+/** The context of a read or a call: nothing beyond the base. */
+const plain = (base: CodeContext): CodeContext => base;
+
 export function createCodeRunner(deps: CodeRunnerDeps): CodeAdapter {
   const readMs = deps.codeDeadlines?.readMs ?? DEFAULT_READ_MS;
   const writeMs = deps.codeDeadlines?.writeMs ?? DEFAULT_WRITE_MS;
@@ -100,10 +104,11 @@ export function createCodeRunner(deps: CodeRunnerDeps): CodeAdapter {
    * at the deadline before `timeout` is answered, and in every case once the run ends, so a send
    * the code starts afterwards is refused without a request (F26).
    */
-  async function invoke(
+  async function invoke<C extends CodeContext>(
     kind: Kind,
     input: { connection: ConnectionSettings; name: string; credential?: CredentialSource; onProgress?: () => void },
-    fn: (ctx: CodeContext) => Promise<unknown>,
+    extend: (base: CodeContext) => C,
+    fn: (ctx: C) => Promise<unknown>,
   ): Promise<Run & { durationMs: number }> {
     const start = Date.now();
     const elapsed = (): number => Math.max(0, Date.now() - start);
@@ -120,7 +125,7 @@ export function createCodeRunner(deps: CodeRunnerDeps): CodeAdapter {
       ...(credential === undefined ? {} : { credential }),
       ...(input.onProgress === undefined ? {} : { onSend: input.onProgress }),
     });
-    const ctx: CodeContext = Object.freeze({ http, signal: controller.signal, connection: Object.freeze({ id: connection.id }) });
+    const ctx: C = Object.freeze(extend({ http, signal: controller.signal, connection: Object.freeze({ id: connection.id }) }));
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<'timeout'>((resolve) => {
       timer = setTimeout(() => {
@@ -150,7 +155,7 @@ export function createCodeRunner(deps: CodeRunnerDeps): CodeAdapter {
 
   const codeRead: CodeAdapter['codeRead'] = async (input) => {
     const { operation, args, response, exactValues } = input;
-    const run = await invoke('read', input, (ctx) => operation.read(ctx, args));
+    const run = await invoke('read', input, plain, (ctx) => operation.read(ctx, args));
     const { durationMs } = run;
     const invalid: ReadOutcome = { ok: false, code: 'invalid_response', durationMs, message: 'preset code returned an invalid result' };
     switch (run.end) {
@@ -180,7 +185,9 @@ export function createCodeRunner(deps: CodeRunnerDeps): CodeAdapter {
 
   const codeWrite: CodeAdapter['codeWrite'] = async (input): Promise<CodeWriteOutcome> => {
     const { operation, records, args } = input;
-    const run = await invoke('write', input, (ctx) => operation.write(ctx, records, args));
+    const direction = input.direction ?? 'forward';
+    const withDirection = (base: CodeContext): CodeWriteContext => ({ ...base, direction });
+    const run = await invoke('write', input, withDirection, (ctx) => operation.write(ctx, records, args));
     const { durationMs } = run;
     switch (run.end) {
       case 'mcp':
@@ -203,7 +210,7 @@ export function createCodeRunner(deps: CodeRunnerDeps): CodeAdapter {
 
   const codeCall: CodeAdapter['codeCall'] = async (input): Promise<CodeCallResult> => {
     const { operation, args } = input;
-    const run = await invoke('call', input, (ctx) => operation.call(ctx, args));
+    const run = await invoke('call', input, plain, (ctx) => operation.call(ctx, args));
     const { durationMs } = run;
     switch (run.end) {
       case 'mcp':

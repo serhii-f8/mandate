@@ -57,10 +57,35 @@ export interface CodeReadOperation {
   read(ctx: CodeContext, args: CodeArgs): Promise<CodeReadResult>;
 }
 
-/** since 0.6.0, additive. `args` are the change-set's validated arguments. */
+/**
+ * since 0.6.0, additive. Why a code write runs: `forward` executes the change-set, `rollback`
+ * puts back the values the change-set replaced (EXE-8).
+ */
+export type CodeWriteDirection = 'forward' | 'rollback';
+
+/** since 0.6.0, additive. The context of a code write: the code context plus its direction. */
+export interface CodeWriteContext extends CodeContext {
+  readonly direction: CodeWriteDirection;
+}
+
+/**
+ * since 0.6.0, additive. Writes `records` and answers one outcome per record, in record order.
+ *
+ * - `records` carry the values to write, in both directions: going forward, the new values;
+ *   in a rollback (`ctx.direction === 'rollback'`), the values read before execution, to restore.
+ *   Build every request from the records.
+ * - `args` are the change-set's original validated arguments, also in a rollback: they describe
+ *   the forward change (for example the new values in `changes`), so a request built from them in
+ *   a rollback re-applies the change instead of undoing it. Use them for context such as a scope
+ *   or a parent identifier only.
+ * - The write may be invoked again for records it already applied: after a sibling answered
+ *   `retriable`, after a throw or after the deadline, the batch is retried and the records not yet
+ *   confirmed are sent again. Each record write must therefore be idempotent (a PUT of the full
+ *   value, not an append or a toggle).
+ */
 export interface CodeWriteOperation {
   readonly kind: 'write';
-  write(ctx: CodeContext, records: readonly WriteRecord[], args: CodeArgs): Promise<readonly RecordOutcome[]>;
+  write(ctx: CodeWriteContext, records: readonly WriteRecord[], args: CodeArgs): Promise<readonly RecordOutcome[]>;
 }
 
 /** since 0.6.0, additive. */

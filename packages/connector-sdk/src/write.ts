@@ -1,6 +1,6 @@
 import type { ConnectionSettings } from './connection.js';
 import type { CredentialSource } from './credentials.js';
-import type { CodeArgs, CodeCallOperation, CodeReadOperation, CodeWriteOperation, RecordOutcome, WriteRecord } from './code.js';
+import type { CodeArgs, CodeCallOperation, CodeReadOperation, CodeWriteDirection, CodeWriteOperation, RecordOutcome, WriteRecord } from './code.js';
 import type { ResponseMapping, UpstreamMapping } from './mapping.js';
 import type { ReadErrorCode, ReadOutcome } from './read.js';
 
@@ -112,6 +112,8 @@ export interface CodeAdapter {
     operation: CodeWriteOperation;
     records: readonly WriteRecord[];
     args: CodeArgs;
+    /** since 0.6.0, additive. Handed to the code as `ctx.direction`; absent means `forward`. */
+    direction?: CodeWriteDirection;
     credential?: CredentialSource;
     onProgress?: () => void;
   }): Promise<CodeWriteOutcome>;

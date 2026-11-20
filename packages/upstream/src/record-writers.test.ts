@@ -238,6 +238,16 @@ describe('OPS-5 OPS-6 direct writers', () => {
     expect(JSON.stringify(s.lines)).not.toContain(SECRET);
   });
 
+  it('OPS-5 EXE-8 the code writer hands the code module its direction: forward by default, rollback for a rollback writer', async () => {
+    const s = await setup('fixture.set_tags');
+    s.adapter.codeOutcome = { ok: true, outcomes: ['ok'], durationMs: 1 };
+    const sent = [{ id: '1', tags: ['a'] }];
+    await createCodeRecordWriter(s.deps)?.write(sent, s.heartbeat);
+    await createCodeRecordWriter({ ...s.deps, direction: 'forward' })?.write(sent, s.heartbeat);
+    await createCodeRecordWriter({ ...s.deps, direction: 'rollback' })?.write(sent, s.heartbeat);
+    expect(s.adapter.codeWrites.map((w) => w.direction)).toEqual(['forward', 'forward', 'rollback']);
+  });
+
   it('OPS-3 EXE-8 an inverse-operation rollback writes through a write binding without a manifest of its own', async () => {
     const s = await setup('fixture.update');
     // The inverse operations as load accepts them: risk write, no manifest (records come from the original's).

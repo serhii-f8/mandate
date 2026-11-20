@@ -99,6 +99,7 @@ function writeModeOf(
   configuration: LoadedConfiguration,
   writeOperationId: string,
   manifestOperationId: string,
+  direction: WriteDirection,
   correlation: (cs: ChangeSetRecord) => string,
 ): WriteMode | undefined {
   const { vault, adapter } = deps;
@@ -119,8 +120,10 @@ function writeModeOf(
   }
   if (binding === undefined || binding.kind === 'mcp' || !directCapable(adapter)) return undefined;
   const create = binding.kind === 'code' ? createCodeRecordWriter : createPerRecordWriter;
+  // A code module learns it is restoring values: its `args` are still the forward change (OPS-5, EXE-8).
+  const codeDirection = direction === 'reverse' ? 'rollback' : 'forward';
   const directFor = (correlationId: string, args: Readonly<Record<string, unknown>>) =>
-    create({ configuration, vault, adapter, operationId: writeOperationId, manifestOperationId, correlationId, args, ...log });
+    create({ configuration, vault, adapter, operationId: writeOperationId, manifestOperationId, correlationId, args, direction: codeDirection, ...log });
   // Checked once here: a GET binding, a code operation of another kind or a missing connection answers undefined.
   if (directFor('', {}) === undefined) return undefined;
   return {
@@ -153,7 +156,7 @@ function manifestWriter(
   const manifest = operation?.manifest;
   if (operation === undefined || manifest === undefined) return undefined;
   // The records come from this operation's manifest; the write binding only sends them (T11 I1).
-  const mode = writeModeOf(deps, configuration, input.writeOperationId, input.operationId, input.correlation);
+  const mode = writeModeOf(deps, configuration, input.writeOperationId, input.operationId, input.direction, input.correlation);
   if (mode === undefined) return undefined;
   const readOperation = configuration.policy.operations.find((o) => o.id === manifest.readBefore.operation);
 

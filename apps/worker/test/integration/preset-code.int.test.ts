@@ -231,7 +231,7 @@ describe('OPS-5 OPS-6 preset code and per-record writes through changesetWorkflo
     expect(up.requests.every((r) => r.headers.authorization === `Bearer ${FAKE_TOKEN}`)).toBe(true);
   });
 
-  it('OPS-5 OPS-3 a code write executes and rolls back through the workflow', async () => {
+  it('OPS-5 OPS-3 EXE-8 a code write executes and rolls back through the workflow, told its direction', async () => {
     windowHours = 1;
     const cs = await prepared('fixture.set_tags', { ids: ['1', '2', '3'], changes: { tags: ['new', 'shiny'] } });
     await executeWithWindow(cs);
@@ -243,6 +243,9 @@ describe('OPS-5 OPS-6 preset code and per-record writes through changesetWorkflo
     expect(['1', '2', '3'].map((id) => fake.items.get(id)?.tags)).toEqual([['red'], ['green'], []]);
     expect((await itemsOf(cs.id)).map((i) => i.rollbackStatus)).toEqual(['restored', 'restored', 'restored']);
     expect(fake.requestsTo('PUT', '/items/1/tags')).toBe(2);
+    // The code module learns the direction: forward for the execution, rollback for the restore.
+    const directions = up.requests.filter((r) => r.method === 'PUT' && r.path === '/items/1/tags').map((r) => r.headers['x-write-direction']);
+    expect(directions).toEqual(['forward', 'rollback']);
 
     // Ruling F9: a change-set applies one `changes` to every item, so the refused tag is a second change-set.
     windowHours = 0;

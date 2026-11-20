@@ -210,6 +210,32 @@ describe('OPS-5 code runner', () => {
     expect(seen).toEqual({ owner: 'acme' });
   });
 
+  it('OPS-5 EXE-8 codeWrite hands the code its direction: forward by default, rollback when asked', async () => {
+    const seen: unknown[] = [];
+    const operation = writeOp((ctx, records) => {
+      seen.push(ctx.direction);
+      return Promise.resolve(records.map(() => 'ok' as const));
+    });
+    const base = { connection: settings(), name: 'dir', operation, records: [{ id: '1' }], args: {} };
+    await runner().codeWrite(base);
+    await runner().codeWrite({ ...base, direction: 'forward' });
+    await runner().codeWrite({ ...base, direction: 'rollback' });
+    expect(seen).toEqual(['forward', 'forward', 'rollback']);
+    // Read and call contexts carry no direction.
+    let readCtx: object = {};
+    await runner().codeRead({
+      connection: settings(),
+      name: 'r',
+      operation: readOp((ctx) => {
+        readCtx = ctx;
+        return Promise.resolve({ items: [] });
+      }),
+      args: {},
+      response: { maxItems: 10 },
+    });
+    expect('direction' in readCtx).toBe(false);
+  });
+
   it('OPS-5 codeWrite calls onProgress for every send', async () => {
     let progress = 0;
     await runner().codeWrite({

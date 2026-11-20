@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'vitest';
-import { parsePresetModule, type CodeContext, type PresetModule } from './index.js';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import {
+  parsePresetModule,
+  type CodeAdapter,
+  type CodeArgs,
+  type CodeContext,
+  type CodeWriteContext,
+  type CodeWriteDirection,
+  type CodeWriteOperation,
+  type PresetModule,
+  type RecordOutcome,
+  type WriteRecord,
+} from './index.js';
 
 const read = { kind: 'read', read: () => Promise.resolve({ items: [] }) };
 const write = { kind: 'write', write: () => Promise.resolve([]) };
@@ -41,5 +52,20 @@ describe('OPS-5 parsePresetModule', () => {
     expect(message({ operations: { ['a'.repeat(63)]: read } })).toBe(undefined);
     expect(message({ operations: { ['a'.repeat(64)]: read } })).toBe(`operation name ${'a'.repeat(64)} is invalid`);
     expect(message({ operations: { ['a'.repeat(65)]: read } })).toBe('operation name (value) is invalid');
+  });
+});
+
+describe('OPS-5 EXE-8 code write direction', () => {
+  it('OPS-5 EXE-8 NFR-18 a code write receives a context with a forward or rollback direction (additive in 0.6.0)', () => {
+    expectTypeOf<CodeWriteDirection>().toEqualTypeOf<'forward' | 'rollback'>();
+    expectTypeOf<CodeWriteContext['direction']>().toEqualTypeOf<CodeWriteDirection>();
+    expectTypeOf<CodeWriteContext>().toExtend<CodeContext>();
+    expectTypeOf<Parameters<CodeWriteOperation['write']>[0]>().toEqualTypeOf<CodeWriteContext>();
+    // A write declared against the plain CodeContext still satisfies the interface.
+    expectTypeOf<(ctx: CodeContext, records: readonly WriteRecord[], args: CodeArgs) => Promise<readonly RecordOutcome[]>>().toExtend<
+      CodeWriteOperation['write']
+    >();
+    // The adapter input names the direction; absent means forward.
+    expectTypeOf<Parameters<CodeAdapter['codeWrite']>[0]['direction']>().toEqualTypeOf<CodeWriteDirection | undefined>();
   });
 });
