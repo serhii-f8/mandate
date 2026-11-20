@@ -55,6 +55,8 @@ export interface ApiEnv {
   readonly otlpEndpoint?: URL;
   /** Port of the Prometheus metrics listener; 0 picks a free port (NFR-12). */
   readonly metricsPort: number;
+  /** Proxy hops in front of the api whose `X-Forwarded-For` is trusted (`AIOPS_TRUST_PROXY`, 0..10); 0 trusts none (SEC-10). */
+  readonly trustProxy: number;
 }
 
 /** Activity timeouts and retries of the operation workflow (same shape as `ActivityTuning` of `@aiops/temporal`). */
@@ -201,6 +203,7 @@ const apiSchema = z.object({
   AIOPS_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: otlpEndpoint,
   AIOPS_METRICS_PORT: portOrZero(9464),
+  AIOPS_TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
 });
 
 /**
@@ -308,6 +311,7 @@ export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
     ...(e.AIOPS_AUDIT_ARCHIVE_DIR === undefined ? {} : { auditArchiveDir: e.AIOPS_AUDIT_ARCHIVE_DIR }),
     ...(e.OTEL_EXPORTER_OTLP_ENDPOINT === undefined ? {} : { otlpEndpoint: new URL(e.OTEL_EXPORTER_OTLP_ENDPOINT) }),
     metricsPort: e.AIOPS_METRICS_PORT,
+    trustProxy: e.AIOPS_TRUST_PROXY,
   };
 }
 

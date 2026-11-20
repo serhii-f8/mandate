@@ -189,6 +189,8 @@ services:
       AIOPS_TEMPORAL_KEYS: ${AIOPS_TEMPORAL_KEYS:-1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=}
       # How long a write call without Tasks waits for its preparation (MCP-7).
       AIOPS_PREPARE_WAIT_MS: ${AIOPS_PREPARE_WAIT_MS:-20000}
+      # Proxy hops whose X-Forwarded-For is trusted for client addresses (SEC-10); 0 trusts none.
+      AIOPS_TRUST_PROXY: ${AIOPS_TRUST_PROXY:-0}
       # Audit archive files written by retention and read by `aiops audit verify --archive` (AUD-7).
       AIOPS_AUDIT_ARCHIVE_DIR: /var/lib/aiops/audit-archive
       # Traces (NFR-11): empty means no export; with `--profile observability` set http://jaeger:4318.

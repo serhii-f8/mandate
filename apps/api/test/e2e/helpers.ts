@@ -81,6 +81,8 @@ export interface StartApiOptions {
   readonly configuration?: ConfigurationHolder;
   /** `AIOPS_PRESET_DIRS`; none by default. */
   readonly presetDirs?: readonly string[];
+  /** `AIOPS_TRUST_PROXY`; 0 (trust no proxy) by default, as in production. */
+  readonly trustProxy?: number;
 }
 
 /** Obviously fake Temporal payload key, same format as the master keys (never reaches Temporal here). */
@@ -90,7 +92,7 @@ const TEST_TEMPORAL_KEYS = '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=';
 export function testApiEnv(
   databaseUrl: string,
   port: number,
-  options: Pick<StartApiOptions, 'issuer' | 'configDir' | 'resource' | 'webDir' | 'widgetDir' | 'prepareWaitMs' | 'presetDirs'>,
+  options: Pick<StartApiOptions, 'issuer' | 'configDir' | 'resource' | 'webDir' | 'widgetDir' | 'prepareWaitMs' | 'presetDirs' | 'trustProxy'>,
 ): ApiEnv {
   const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
   return {
@@ -119,6 +121,7 @@ export function testApiEnv(
     temporalKeys: TEST_TEMPORAL_KEYS,
     prepareWaitMs: options.prepareWaitMs ?? 20_000,
     metricsPort: 0,
+    trustProxy: options.trustProxy ?? 0,
   };
 }
 

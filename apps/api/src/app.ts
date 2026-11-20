@@ -463,6 +463,8 @@ export async function createApp(options: CreateAppOptions): Promise<INestApplica
     // eslint-disable-next-line @typescript-eslint/no-unsafe-class-instance-assignment
     { logger: new PinoNestLogger(logger), bodyParser: false },
   );
+  // SEC-10: `req.ip` honours X-Forwarded-For only across the configured number of proxy hops (0: none).
+  app.set('trust proxy', options.env.trustProxy);
   // MCP request bodies up to 4 MiB, the SDK's default bound (ADR 0013).
   app.useBodyParser('json', { limit: '4mb' });
   // Directly after the parser: its errors quote the body, so they get fixed bodies (SEC-3).
