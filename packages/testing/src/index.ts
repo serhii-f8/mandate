@@ -62,3 +62,12 @@ export {
   type FakeMcpTool,
   type RecordedMcpRequest,
 } from './fake-mcp-server.js';
+export {
+  contractRead,
+  contractWrite,
+  presetConnectionYaml,
+  recordingsFreeOf,
+  replayRecordings,
+  type ContractBinding,
+  type RecordedExchange,
+} from './preset-contract.js';
