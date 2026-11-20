@@ -10,7 +10,8 @@
  *   - anonymous Dynamic Client Registration off by default; AIOPS_DCR=on admits
  *     registrations whose redirect URIs are on AIOPS_DCR_REDIRECT_HOSTS
  *   - one confidential client-credentials client per AIOPS_KEYCLOAK_SERVICE_ACCOUNTS
- *     name (AUTH-4); created once, updated in place, its secret left alone
+ *     name (AUTH-4); created once, updated in place, its secret left alone; a name of
+ *     a bundled or built-in client (aiops-mcp, aiops-web, admin-cli, ...) is refused
  *
  * Environment (defaults in brackets):
  *   KEYCLOAK_URL [http://localhost:8080], KEYCLOAK_REALM [aiops],
@@ -39,6 +40,21 @@ function required(/** @type {string} */ name) {
 }
 
 const sleep = (/** @type {number} */ ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Clients a service-account name must never be (AUTH-4): the bundled realm's user-facing clients,
+ * whose login flow the service-account update would switch off, and Keycloak's own clients.
+ */
+const RESERVED_CLIENTS = new Set([
+  'aiops-mcp',
+  'aiops-web',
+  'account',
+  'account-console',
+  'admin-cli',
+  'broker',
+  'realm-management',
+  'security-admin-console',
+]);
 
 /** Waits until the realm is served, then returns an admin access token. */
 async function adminToken() {
@@ -118,6 +134,13 @@ async function main() {
   if (dcr !== 'on' && dcr !== 'off') throw new Error('AIOPS_DCR must be on or off');
   const dcrHosts = list(env.AIOPS_DCR_REDIRECT_HOSTS, 'claude.ai,chatgpt.com,localhost,127.0.0.1');
   const serviceAccounts = [...new Set(list(env.AIOPS_KEYCLOAK_SERVICE_ACCOUNTS, ''))];
+  // Refused before any call, so a misconfiguration changes nothing in the realm.
+  const reserved = serviceAccounts.filter((clientId) => RESERVED_CLIENTS.has(clientId));
+  if (reserved.length > 0) {
+    throw new Error(
+      `AIOPS_KEYCLOAK_SERVICE_ACCOUNTS names a client the realm already uses (${reserved.join(', ')}); choose another service-account client id`,
+    );
+  }
 
   const token = await adminToken();
 
