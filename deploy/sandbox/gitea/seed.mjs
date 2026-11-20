@@ -66,15 +66,21 @@ async function labelIds(repo) {
   return ids;
 }
 
-async function ensureLabel(repo, name) {
-  const created = await call('POST', `/repos/${ORG}/${repo}/labels`, { name, color: '#ee0701' });
-  if (created.status === 201) return created.json;
-  if (created.status === 409 || created.status === 422) {
-    const list = must(await call('GET', `/repos/${ORG}/${repo}/labels?limit=50`), 'label list');
-    const found = list.find((l) => l.name === name);
-    if (found) return found;
+// Gitea 28.3.0 answers 201 and creates a duplicate when a label name already exists, so list
+// first (paged, 50 per page) and create only a missing name. The first label of a name wins.
+async function listLabels(repo) {
+  const all = [];
+  for (let page = 1; ; page += 1) {
+    const batch = must(await call('GET', `/repos/${ORG}/${repo}/labels?page=${page}&limit=50`), 'label list');
+    all.push(...batch);
+    if (batch.length < 50) return all;
   }
-  return must(created, `label ${name}`);
+}
+
+async function ensureLabel(repo, name) {
+  const found = (await listLabels(repo)).find((l) => l.name === name);
+  if (found) return found;
+  return must(await call('POST', `/repos/${ORG}/${repo}/labels`, { name, color: '#ee0701' }), `label ${name}`);
 }
 
 async function seedRepo(repo, count, titleOf, labelsOf, closed) {
