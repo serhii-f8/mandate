@@ -19,14 +19,20 @@
 #   approves there, and the change-set runs; the fake received exactly one tools/call of create_note; rollback is
 #   refused; the audit has the transitions and the batch and never the argument text. It runs alone
 #   or after group 1 (it attaches the connections itself when group 1 did not).
+# Setup before the groups: sandbox-gitea-ready (deploy/sandbox/gitea up, seeded, a write:issue token
+# in GTOKEN), presets-packed (every preset of the built image is packed with `npm pack` and extracted
+# into a node_modules tree that the api and the worker mount as their only preset directory, so every
+# group loads presets from tarballs, CONN-8), stack-healthy, presets-dir-env.
 # AIOPS_ACCEPT9_GROUPS selects the groups (default "1 2"); a selected group that is not defined is a
 # FAIL (ADR 0043).
 # Tests the committed HEAD (a fresh clone sees only commits), with a Compose override that mounts a
-# generated configuration and adds the two MCP containers. No Magento sandbox.
+# generated configuration and the packed presets, joins the api and the worker to the sandbox network
+# `aiops-sandbox` and adds the two MCP containers. No Magento sandbox; the Gitea sandbox (port
+# AIOPS_GITEA_PORT, default 4391) is brought up and seeded idempotently.
 # Prints one PASS/FAIL line per check and `# RESULT: PASS|FAIL`; exits non-zero if any fails.
 # Not part of CI: pulls node:24-bookworm-slim and fetches the everything server with npx.
-# Secrets: access tokens and session cookies travel through variables and the environment of node
-# only, never argv.
+# Secrets: access tokens, the Gitea tokens and session cookies travel through variables, stdin and the
+# environment of node only, never argv; they are never printed or written to a file.
 # Needs: docker with compose v2, git, node, curl, and `pnpm install` in this checkout.
 # The functions run through the trap and the group dispatch, which shellcheck cannot follow.
 # shellcheck disable=SC2317
@@ -46,6 +52,10 @@ export AIOPS_KEYCLOAK_PUBLIC_URL="http://localhost:${AIOPS_KEYCLOAK_PORT}"
 export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
 export AIOPS_PUBLIC_URL="http://localhost:${AIOPS_API_PORT}"
 export AIOPS_ACCEPT_CONFIG_DIR="$WORK/config"
+# The packed presets (presets-packed); the overlay requires it for every compose call, the cleanup's
+# `compose down` included.
+export AIOPS_ACCEPT_PRESET_DIR="$WORK/presets"
+GITEA="http://127.0.0.1:${AIOPS_GITEA_PORT:-4391}"
 MCP="http://127.0.0.1:${AIOPS_API_PORT}/mcp"
 API="$AIOPS_PUBLIC_URL"
 FAKE="http://127.0.0.1:${AIOPS_FAKE_MCP_PORT}"
@@ -103,6 +113,58 @@ cli() { compose exec -T api node dist/cli.js "$@"; }
 apply_config() { cli config apply /etc/aiops/config --actor acceptance 2>&1; }
 # The hash of the tool in `mcp tools` output (`<tool> <hash> <operation|-> <state|unreferenced>`).
 hash_of() { sed -n "s/^$2 \(sha256:[0-9a-f]\{64\}\) .*$/\1/p" <<<"$1" | head -1; }
+
+# Enters the Gitea token (GTOKEN, on stdin) as the credential gitea-integration with the page session
+# COOKIE of a user who may manage it; prints page-api's {"status":n}. The preset authenticates with
+# `Authorization: Bearer <token>`, so the credential is the bare token.
+put_gitea_credential() { page_api "$1" put-credential gitea-integration <<<"$GTOKEN"; }
+
+# The Gitea configuration of group 3, written to FILE (applied there, not at start).
+write_gitea_config() {
+  cat >"$1" <<'YAML'
+version: 1
+presets:
+  - { id: gitea-issues, package: '@aiops/gitea-issues', version: '^0.1.0' }
+connections:
+  - id: gitea
+    adapter: openapi
+    base_url: http://gitea-sandbox:3000/api/v1
+    credential_ref: gitea-integration
+    preset: gitea-issues
+    allow_private_network: true
+    test: { operation: issues.search, args: { owner: acme, repo: website, fields: [number], limit: 1 } }
+roles:
+  - id: issue_manager
+    grants:
+      - { operation: issues.search, id: website-issues, scope: { owner: [acme], repo: [website] } }
+      - { operation: issues.get_many, id: website-get, scope: { owner: [acme], repo: [website] } }
+      - { operation: issues.set_labels, id: website-labels, scope: { owner: [acme], repo: [website] } }
+    approval: { required: always, steps: [{ role: content_lead }], allow_widget: false }
+  - { id: gitea_admin, grants: [], manage_credentials: [gitea-integration] }
+role_mapping:
+  - { group: content, roles: [issue_manager] }
+  - { group: admins, roles: [gitea_admin] }
+YAML
+}
+
+# The labels of acme/website issues NUMS (space-separated), read from the sandbox with GTOKEN, as
+# {"<n>": [names sorted by code point]}; {"error": ...} when a read fails.
+# shellcheck disable=SC2086
+gitea_labels() {
+  GITEA_TOKEN="$GTOKEN" node -e '
+    const [base, ...nums] = process.argv.slice(1);
+    (async () => {
+      const out = {};
+      for (const n of nums) {
+        const res = await fetch(`${base}/api/v1/repos/acme/website/issues/${n}`, { headers: { authorization: `Bearer ${process.env.GITEA_TOKEN}` } });
+        if (!res.ok) throw new Error(`issue ${n}: HTTP ${res.status}`);
+        const issue = await res.json();
+        out[n] = issue.labels.map((l) => l.name).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      }
+      console.log(JSON.stringify(out));
+    })().catch((e) => console.log(JSON.stringify({ error: String(e.message ?? e) })));
+  ' "$GITEA" $1 # word splitting on purpose: one argument per issue number
+}
 
 # roles.yaml as in phase-8.sh (alice content, bob support), with extra grants for support_agent ($1)
 # and content_manager ($2), each a list of flow-mapping lines.
@@ -198,6 +260,55 @@ if grep -lE 'adapter: mcp' "$AIOPS_ACCEPT_CONFIG_DIR"/*.yaml >/dev/null; then
 fi
 write_roles "" ""
 
+# The Gitea sandbox is up (idempotent; it creates the network aiops-sandbox the overlay joins) and
+# seeded (idempotent) with a seeding-scope token; GTOKEN is a write:issue token, the credential of
+# group 3. Neither token is printed.
+if bash "$REPO/deploy/sandbox/gitea/up.sh" >"$WORK/gitea.log" 2>&1 &&
+  SEED_TOKEN="$(bash "$REPO/deploy/sandbox/gitea/token.sh" write:organization,write:repository,write:issue 2>>"$WORK/gitea.log")" &&
+  GITEA_SANDBOX_TOKEN="$SEED_TOKEN" node "$REPO/deploy/sandbox/gitea/seed.mjs" "$GITEA" >>"$WORK/gitea.log" 2>&1 &&
+  GTOKEN="$(bash "$REPO/deploy/sandbox/gitea/token.sh" write:issue 2>>"$WORK/gitea.log")" && [[ "$GTOKEN" =~ ^[0-9a-f]{40}$ ]]; then
+  unset SEED_TOKEN
+  if docker network inspect aiops-sandbox >/dev/null 2>&1; then
+    pass sandbox-gitea-ready "$(grep -o 'GITEA UP.*' "$WORK/gitea.log" | tail -1); $(grep -o 'SEEDED gitea.*' "$WORK/gitea.log" | tail -1); write:issue token present; network aiops-sandbox present"
+  else
+    fail sandbox-gitea-ready "network aiops-sandbox missing"; exit 1
+  fi
+else
+  fail sandbox-gitea-ready "see sandbox output below"; tail -30 "$WORK/gitea.log"; exit 1
+fi
+
+# Every preset of the built image, packed with `npm pack` and extracted into the node_modules tree
+# that the api and the worker mount as their only preset directory (CONN-8).
+pack_presets() {
+  local dir tgz name
+  mkdir -p "$WORK/image-presets" "$WORK/tarballs" "$AIOPS_ACCEPT_PRESET_DIR/node_modules"
+  compose build api >"$WORK/build.log" 2>&1 || { echo "compose build api failed:"; tail -30 "$WORK/build.log"; return 1; }
+  compose run --rm --no-deps --user "$(id -u):$(id -g)" -v "$WORK/image-presets:/out" --entrypoint sh api \
+    -c 'cp -R /app/presets/. /out/' >>"$WORK/build.log" 2>&1 || { echo "copy of /app/presets failed:"; tail -30 "$WORK/build.log"; return 1; }
+  for dir in "$WORK"/image-presets/*/; do
+    npm pack --ignore-scripts --pack-destination "$WORK/tarballs" "$dir" >>"$WORK/build.log" 2>&1 ||
+      { echo "npm pack $dir failed:"; tail -30 "$WORK/build.log"; return 1; }
+  done
+  for tgz in "$WORK"/tarballs/*.tgz; do
+    name="$(tar -xzOf "$tgz" package/package.json | node -e 'let s="";process.stdin.on("data",(d)=>(s+=d)).on("end",()=>console.log(JSON.parse(s).name))')"
+    [[ "$name" =~ ^(@[a-z0-9._-]+/)?[a-z0-9._-]+$ ]] || { echo "unexpected package name in $tgz: $name"; return 1; }
+    mkdir -p "$AIOPS_ACCEPT_PRESET_DIR/node_modules/$name"
+    tar -xzf "$tgz" -C "$AIOPS_ACCEPT_PRESET_DIR/node_modules/$name" --strip-components=1
+  done
+}
+if pack_out="$(pack_presets 2>&1)"; then
+  nm="$AIOPS_ACCEPT_PRESET_DIR/node_modules"
+  gitea_sdk="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).aiops?.sdk??"")}catch{console.log("")}' "$nm/@aiops/gitea-issues/package.json")"
+  if [[ -f "$nm/@aiops/gitea-issues/dist/index.js" && -f "$nm/@aiops/gitea-issues/preset.yaml" &&
+    -f "$nm/@aiops/gitea-issues/spec/gitea.swagger.json" && -n "$gitea_sdk" && -f "$nm/@aiops/magento2-catalog/package.json" ]]; then
+    pass presets-packed "tarballs $(cd "$WORK/tarballs" && ls -- *.tgz | xargs); @aiops/gitea-issues has dist/index.js, preset.yaml, spec/gitea.swagger.json, aiops.sdk $gitea_sdk; @aiops/magento2-catalog present"
+  else
+    fail presets-packed "tarballs: $(cd "$WORK/tarballs" 2>/dev/null && ls -- *.tgz 2>/dev/null | xargs); extracted: $(cd "$nm" 2>/dev/null && find . -maxdepth 3 | sort | tr '\n' ' ' | head -c 1500)"; exit 1
+  fi
+else
+  fail presets-packed "$(tr '\n' '|' <<<"$pack_out" | head -c 2000)"; exit 1
+fi
+
 # One command from a fresh clone; both MCP containers healthy.
 if compose up -d --build --wait >"$WORK/up.log" 2>&1; then
   health="$(for s in mcp-everything mcp-fake; do docker inspect -f '{{.State.Health.Status}}' "$(compose ps -q "$s")"; done | xargs)"
@@ -208,6 +319,16 @@ if compose up -d --build --wait >"$WORK/up.log" 2>&1; then
   fi
 else
   fail stack-healthy "see compose output below"; tail -40 "$WORK/up.log"; compose ps -a; compose logs --no-color api worker mcp-everything mcp-fake | tail -40; exit 1
+fi
+
+# The api and the worker read presets only from the mounted tarball tree.
+want_dirs=/etc/aiops/presets/node_modules
+api_dirs="$(compose exec -T api printenv AIOPS_PRESET_DIRS 2>&1 || true)"
+worker_dirs="$(compose exec -T worker printenv AIOPS_PRESET_DIRS 2>&1 || true)"
+if [[ "$api_dirs" == "$want_dirs" && "$worker_dirs" == "$want_dirs" ]]; then
+  pass presets-dir-env "api and worker AIOPS_PRESET_DIRS=$want_dirs"
+else
+  fail presets-dir-env "api: '${api_dirs:0:200}'; worker: '${worker_dirs:0:200}'; want $want_dirs"
 fi
 
 # ---- Group 1: MCP upstream attach, grants and pinning (CONN-1, CONN-4, SEC-5, SEC-6) ------------
