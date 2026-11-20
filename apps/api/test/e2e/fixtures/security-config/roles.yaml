@@ -13,6 +13,29 @@ roles:
         allow_fields: [name, description]
   - id: nogrant
     grants: []
+  # SEC-11 POL-4: calls_per_minute on a read, with its own role (every call counts against it).
+  - id: ratelimited
+    grants:
+      - { operation: catalog.search_products, id: any-brand }
+    limits: { calls_per_minute: 2 }
+  # SEC-11 POL-4: the execution limits; no approval, so a submit starts at once.
+  - id: limited
+    grants:
+      - { operation: catalog.update_content, id: limited-writes }
+    limits: { records_per_operation: 3, records_per_day: 5, concurrent_executions: 1 }
+    approval: { required: never }
+  # SEC-11 POL-5: approval above one record, decided by role `approver`.
+  - id: gated
+    grants:
+      - { operation: catalog.update_content, id: gated-writes }
+    approval: { required: above_threshold, record_threshold: 1, steps: [{ role: approver }] }
+  - id: approver
+    grants: []
+  # SEC-11 POL-6: the test rewrites this file without this grant between prepare and submit.
+  - id: revocable
+    grants:
+      - { operation: catalog.update_content, id: revocable-writes }
+    approval: { required: never }
 role_mapping:
   - group: scoped
     roles: [scoped]
@@ -20,3 +43,13 @@ role_mapping:
     roles: [allowlisted]
   - group: nogrant
     roles: [nogrant]
+  - group: ratelimited
+    roles: [ratelimited]
+  - group: limited
+    roles: [limited]
+  - group: gated
+    roles: [gated]
+  - group: approvers
+    roles: [approver]
+  - group: revocable
+    roles: [revocable]
