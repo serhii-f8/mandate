@@ -20,6 +20,15 @@ describe('test issuer', () => {
     expect(payload).toMatchObject({ sub: 'alice', groups: ['content'], aud: 'http://127.0.0.1:1/mcp', azp: 'aiops-mcp' });
   });
 
+  it('AUTH-4 the test issuer writes sid and client_id when given', async () => {
+    const both = decodeJwt(await issuer.token({ sub: 'service:sa', aud: 'x', sid: 's-1', client_id: 'sa' }));
+    expect(both.sid).toBe('s-1');
+    expect(both.client_id).toBe('sa');
+    const none = decodeJwt(await issuer.token({ sub: 'a', aud: 'x' }));
+    expect('sid' in none).toBe(false);
+    expect('client_id' in none).toBe(false);
+  });
+
   it('defaults to a five-minute lifetime and honours an override', async () => {
     const now = Math.floor(Date.now() / 1000);
     expect(decodeJwt(await issuer.token({ sub: 'a', aud: 'x' })).exp).toBeGreaterThanOrEqual(now + 299);

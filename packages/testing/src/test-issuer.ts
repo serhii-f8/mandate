@@ -15,6 +15,10 @@ export interface TestTokenClaims {
   readonly groups?: unknown;
   readonly aud?: string | string[];
   readonly azp?: string;
+  /** Session id; user tokens carry one, client-credentials tokens do not. */
+  readonly sid?: string;
+  /** Present on client-credentials tokens. */
+  readonly client_id?: string;
   /** Seconds from now; negative for an expired token. Default 300. */
   readonly expiresIn?: number;
   /** Overrides the issuer claim. */
@@ -223,6 +227,8 @@ export async function startTestIssuer(): Promise<TestIssuer> {
       const payload: Record<string, unknown> = {};
       if (claims.groups !== undefined) payload.groups = claims.groups;
       if (claims.azp !== undefined) payload.azp = claims.azp;
+      if (claims.sid !== undefined) payload.sid = claims.sid;
+      if (claims.client_id !== undefined) payload.client_id = claims.client_id;
       const now = Math.floor(Date.now() / 1000);
       let jwt = new SignJWT(payload)
         .setProtectedHeader({ alg: 'RS256', kid, typ: 'JWT' })
