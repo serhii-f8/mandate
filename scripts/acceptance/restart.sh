@@ -23,8 +23,9 @@
 #   change-set is still `pending_approval`; Mailpit starts, dave approves on the page, and the
 #   change-set completes with the exactly-once and the common checks (100 items, 1 batch), and the
 #   outbox delivers exactly one approval-request e-mail after the restart (NTF-3):
-#   restart-worker-pending, restart-temporal-pending; then restart-no-secret (the api and worker logs
-#   never contain the fake bearer value, SEC-3).
+#   restart-worker-pending, restart-temporal-pending;
+#   after all selected groups, whatever the selection: restart-no-secret (the api and worker logs are
+#   not empty and never contain the fake bearer value, SEC-3).
 # Every group runs over its own SKU range so counts stay attributable (ledger ruling P1): baseline
 # 1-100, api 101-400, worker 401-700, postgres 701-1000, temporal 1001-1300, pending 1301-1400 and
 # 1401-1500. The fake is never reset between groups; the exactly-once check compares every SKU with
@@ -483,9 +484,13 @@ pending_group() {
   dave="$(page_login dave 2>&1)" || { fail "restart-$name" "dave page login: $dave"; return 0; }
   view="$(page_api "$dave" changeset "$id" 2>&1 || true)"
   v_hash="$(json "$view" '.body.hash')" v_count="$(json "$view" '.body.stats.included')"
-  dec="$(page_api "$dave" decide "$id" approve "${v_hash:-x}" "${v_count:-0}" 2>&1 || true)"
-  if [[ "$v_hash" != "$hash" || "$v_count" != 100 || "$(json "$dec" '.status')" != 200 || ! "$(json "$dec" '.body.status')" =~ ^(approved|executing)$ ]]; then
-    fail "restart-$name" "dave: view hash '$v_hash' (want $hash), included '$v_count' (want 100); decide → ${dec:0:600}"; return 0
+  # dave approves only what was prepared: the page view must show the prepared hash and 100 items.
+  if [[ -z "$hash" || "$v_hash" != "$hash" || "$v_count" != 100 ]]; then
+    fail "restart-$name" "dave's page view: hash '$v_hash' (want $hash), included '$v_count' (want 100); not approved: ${view:0:600}"; return 0
+  fi
+  dec="$(page_api "$dave" decide "$id" approve "$hash" 100 2>&1 || true)"
+  if [[ "$(json "$dec" '.status')" != 200 || ! "$(json "$dec" '.body.status')" =~ ^(approved|executing)$ ]]; then
+    fail "restart-$name" "dave: decide approve $hash 100 → ${dec:0:600}"; return 0
   fi
   if ! wait_status "$id" completed 300 bob; then
     fail "restart-$name" "change-set $id is '$WAIT_STATUS' 300 s after the approval: ${WAIT_ANSWER:0:1500}"
@@ -504,7 +509,8 @@ pending_group() {
   pass "restart-$name" "change-set $id: pending_approval with the approval request failed in the outbox ($(tr '\n' '|' <<<"$outbox_before")); killed $svc (SIGKILL, 0 containers left running); $up; still pending_approval; dave approved $v_hash $v_count → $(json "$dec" '.body.status'); $once; $common; outbox $(tr '\n' '|' <<<"$OUTBOX_SEEN"), approval-request e-mails $mails; wall time $((SECONDS - t0)) s"
 }
 
-# no_secret: the api and worker logs never contain the fake bearer value (SEC-3); the logs must not
+# no_secret: runs once after all selected groups, whatever the selection. The api and worker logs
+# never contain the fake bearer value (SEC-3); the logs must not
 # be empty, so the check is not vacuous.
 no_secret() {
   local logs lines hits
@@ -521,7 +527,6 @@ no_secret() {
 group_pending() {
   pending_group worker-pending worker 1301 v-worker-pending
   pending_group temporal-pending temporal 1401 v-temporal-pending
-  no_secret
 }
 
 # ---- Group selection: every selected group must be defined (ADR 0043), before any Docker work ----
@@ -628,5 +633,8 @@ fi
 for g in $RUN_GROUPS; do
   "group_$g"
 done
+
+# After every selected group, so the logs of every restart are searched.
+no_secret
 
 result
