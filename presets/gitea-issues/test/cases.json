@@ -1,0 +1,40 @@
+[
+  {
+    "name": "search-website-bug-open",
+    "operation": "issues.search",
+    "args": { "owner": "acme", "repo": "website", "labels": ["bug"], "fields": ["number", "title", "state", "labels"], "limit": 50 },
+    "exchanges": [
+      { "method": "GET", "path": "/repos/acme/website/issues", "query": { "state": "open", "type": "issues", "labels": "bug", "page": "1", "limit": "50" } }
+    ],
+    "expect": { "numbers": [28, 26, 18, 16, 13, 11, 8, 6, 3, 1] }
+  },
+  {
+    "name": "search-website-all-page-2",
+    "operation": "issues.search",
+    "args": { "owner": "acme", "repo": "website", "state": "all", "page": 2, "limit": 10, "fields": ["number"] },
+    "exchanges": [
+      { "method": "GET", "path": "/repos/acme/website/issues", "query": { "state": "all", "type": "issues", "page": "2", "limit": "10" } }
+    ],
+    "expect": { "numbers": [20, 19, 18, 17, 16, 15, 14, 13, 12, 11] }
+  },
+  {
+    "name": "get-many-website",
+    "operation": "issues.get_many",
+    "args": { "owner": "acme", "repo": "website", "numbers": ["1", "3", "999"], "fields": ["number", "title", "state", "labels"] },
+    "exchanges": [
+      { "method": "GET", "path": "/repos/acme/website/issues/1" },
+      { "method": "GET", "path": "/repos/acme/website/issues/3" },
+      { "method": "GET", "path": "/repos/acme/website/issues/999" }
+    ],
+    "expect": { "numbers": [1, 3], "labels": { "3": ["bug", "triage"] } }
+  },
+  {
+    "name": "labels-website",
+    "operation": "set_labels.resolve",
+    "args": { "owner": "acme", "repo": "website" },
+    "exchanges": [
+      { "method": "GET", "path": "/repos/acme/website/labels", "query": { "page": "1", "limit": "50" } }
+    ],
+    "expect": { "names": ["bug", "docs", "feature", "triage", "wontfix"] }
+  }
+]

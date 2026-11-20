@@ -1,0 +1,184 @@
+{
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/repos/acme/website/issues/1"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": 1,
+          "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/issues/1",
+          "html_url": "http://127.0.0.1:4391/acme/website/issues/1",
+          "number": 1,
+          "user": {
+            "id": 1,
+            "login": "aiops-admin",
+            "type": "User",
+            "login_name": "",
+            "source_id": 0,
+            "full_name": "",
+            "email": "admin@example.invalid",
+            "avatar_url": "http://127.0.0.1:4391/avatars/f4f2d8791f3568d098508a57e75c80a2b9bf70e4f894662014c2f3c8c5c5aac5",
+            "html_url": "http://127.0.0.1:4391/aiops-admin",
+            "language": "",
+            "is_admin": true,
+            "last_login": "1970-01-01T00:00:00Z",
+            "created": "2026-11-20T11:04:17Z",
+            "restricted": false,
+            "active": true,
+            "prohibit_login": false,
+            "location": "",
+            "website": "",
+            "description": "",
+            "visibility": "public",
+            "followers_count": 0,
+            "following_count": 0,
+            "starred_repos_count": 0,
+            "username": "aiops-admin"
+          },
+          "original_author": "",
+          "original_author_id": 0,
+          "title": "Website issue 01",
+          "body": "",
+          "ref": "",
+          "assets": [],
+          "labels": [
+            {
+              "id": 1,
+              "name": "bug",
+              "exclusive": false,
+              "is_archived": false,
+              "color": "ee0701",
+              "description": "",
+              "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/labels/1"
+            }
+          ],
+          "milestone": null,
+          "projects": null,
+          "assignee": null,
+          "assignees": null,
+          "state": "open",
+          "is_locked": false,
+          "comments": 0,
+          "created_at": "2026-11-20T11:04:17Z",
+          "updated_at": "2026-11-20T11:04:17Z",
+          "closed_at": null,
+          "due_date": null,
+          "time_estimate": 0,
+          "pull_request": null,
+          "repository": {
+            "id": 1,
+            "name": "website",
+            "owner": "acme",
+            "full_name": "acme/website"
+          },
+          "pin_order": 0,
+          "content_version": 0
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/repos/acme/website/issues/3"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": 3,
+          "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/issues/3",
+          "html_url": "http://127.0.0.1:4391/acme/website/issues/3",
+          "number": 3,
+          "user": {
+            "id": 1,
+            "login": "aiops-admin",
+            "type": "User",
+            "login_name": "",
+            "source_id": 0,
+            "full_name": "",
+            "email": "admin@example.invalid",
+            "avatar_url": "http://127.0.0.1:4391/avatars/f4f2d8791f3568d098508a57e75c80a2b9bf70e4f894662014c2f3c8c5c5aac5",
+            "html_url": "http://127.0.0.1:4391/aiops-admin",
+            "language": "",
+            "is_admin": true,
+            "last_login": "1970-01-01T00:00:00Z",
+            "created": "2026-11-20T11:04:17Z",
+            "restricted": false,
+            "active": true,
+            "prohibit_login": false,
+            "location": "",
+            "website": "",
+            "description": "",
+            "visibility": "public",
+            "followers_count": 0,
+            "following_count": 0,
+            "starred_repos_count": 0,
+            "username": "aiops-admin"
+          },
+          "original_author": "",
+          "original_author_id": 0,
+          "title": "Website issue 03",
+          "body": "",
+          "ref": "",
+          "assets": [],
+          "labels": [
+            {
+              "id": 1,
+              "name": "bug",
+              "exclusive": false,
+              "is_archived": false,
+              "color": "ee0701",
+              "description": "",
+              "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/labels/1"
+            },
+            {
+              "id": 4,
+              "name": "triage",
+              "exclusive": false,
+              "is_archived": false,
+              "color": "ee0701",
+              "description": "",
+              "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/labels/4"
+            }
+          ],
+          "milestone": null,
+          "projects": null,
+          "assignee": null,
+          "assignees": null,
+          "state": "open",
+          "is_locked": false,
+          "comments": 0,
+          "created_at": "2026-11-20T11:04:17Z",
+          "updated_at": "2026-11-20T11:04:17Z",
+          "closed_at": null,
+          "due_date": null,
+          "time_estimate": 0,
+          "pull_request": null,
+          "repository": {
+            "id": 1,
+            "name": "website",
+            "owner": "acme",
+            "full_name": "acme/website"
+          },
+          "pin_order": 0,
+          "content_version": 0
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/repos/acme/website/issues/999"
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "message": "issue does not exist [id: 0, repo_id: 1, index: 999]",
+          "url": "http://gitea-sandbox:3000/api/swagger"
+        }
+      }
+    }
+  ]
+}

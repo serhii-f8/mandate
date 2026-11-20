@@ -1,0 +1,33 @@
+[
+  {
+    "name": "set-labels-30",
+    "steps": [
+      { "method": "GET", "path": "/repos/acme/website/labels", "query": { "page": "1", "limit": "50" } },
+      { "method": "PUT", "path": "/repos/acme/website/issues/30/labels", "body": { "labels": [{ "$label": "bug" }, { "$label": "docs" }] } }
+    ]
+  },
+  {
+    "name": "set-labels-unknown-name",
+    "steps": [
+      { "method": "GET", "path": "/repos/acme/website/labels", "query": { "page": "1", "limit": "50" } }
+    ]
+  },
+  {
+    "name": "put-names-drops-unknown",
+    "steps": [
+      { "method": "PUT", "path": "/repos/acme/website/issues/30/labels", "body": { "labels": ["feature", "no-such-label"] } }
+    ]
+  },
+  {
+    "name": "update-fields-30",
+    "steps": [
+      { "method": "PATCH", "path": "/repos/acme/website/issues/30", "body": { "title": "Website issue 30 (recorded)" } }
+    ]
+  },
+  {
+    "name": "comment-30",
+    "steps": [
+      { "method": "POST", "path": "/repos/acme/website/issues/30/comments", "body": { "body": "Recorded comment" } }
+    ]
+  }
+]

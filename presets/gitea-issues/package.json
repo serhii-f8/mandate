@@ -1,0 +1,39 @@
+{
+  "name": "@aiops/gitea-issues",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Curated operations and manifests for Gitea issues (second preset, code read and write).",
+  "license": "Apache-2.0",
+  "aiops": {
+    "preset": "preset.yaml",
+    "sdk": "^0.6.0",
+    "code": "dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "@aiops/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "preset.yaml",
+    "spec",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "tsc -p tsconfig.build.json && vitest run --project unit --passWithNoTests",
+    "record": "node scripts/record.mjs"
+  },
+  "devDependencies": {
+    "@aiops/adapters": "workspace:*",
+    "@aiops/config": "workspace:*",
+    "@aiops/connector-sdk": "workspace:*",
+    "@aiops/testing": "workspace:*"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "exchanges": [
+    {
+      "request": {
+        "method": "PUT",
+        "path": "/repos/acme/website/issues/30/labels",
+        "body": {
+          "labels": [
+            "feature",
+            "no-such-label"
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 3,
+            "name": "feature",
+            "exclusive": false,
+            "is_archived": false,
+            "color": "ee0701",
+            "description": "",
+            "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/labels/3"
+          }
+        ]
+      }
+    }
+  ]
+}

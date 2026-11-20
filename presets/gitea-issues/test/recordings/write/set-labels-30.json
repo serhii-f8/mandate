@@ -1,0 +1,99 @@
+{
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/repos/acme/website/labels",
+        "query": {
+          "page": "1",
+          "limit": "50"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 1,
+            "name": "bug",
+            "exclusive": false,
+            "is_archived": false,
+            "color": "ee0701",
+            "description": "",
+            "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/labels/1"
+          },
+          {
+            "id": 2,
+            "name": "docs",
+            "exclusive": false,
+            "is_archived": false,
+            "color": "ee0701",
+            "description": "",
+            "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/labels/2"
+          },
+          {
+            "id": 3,
+            "name": "feature",
+            "exclusive": false,
+            "is_archived": false,
+            "color": "ee0701",
+            "description": "",
+            "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/labels/3"
+          },
+          {
+            "id": 4,
+            "name": "triage",
+            "exclusive": false,
+            "is_archived": false,
+            "color": "ee0701",
+            "description": "",
+            "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/labels/4"
+          },
+          {
+            "id": 5,
+            "name": "wontfix",
+            "exclusive": false,
+            "is_archived": false,
+            "color": "ee0701",
+            "description": "",
+            "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/labels/5"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "method": "PUT",
+        "path": "/repos/acme/website/issues/30/labels",
+        "body": {
+          "labels": [
+            1,
+            2
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": 1,
+            "name": "bug",
+            "exclusive": false,
+            "is_archived": false,
+            "color": "ee0701",
+            "description": "",
+            "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/labels/1"
+          },
+          {
+            "id": 2,
+            "name": "docs",
+            "exclusive": false,
+            "is_archived": false,
+            "color": "ee0701",
+            "description": "",
+            "url": "http://gitea-sandbox:3000/api/v1/repos/acme/website/labels/2"
+          }
+        ]
+      }
+    }
+  ]
+}
