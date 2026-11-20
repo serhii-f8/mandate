@@ -175,9 +175,9 @@ const hooked = () => {
 };
 
 describe('EXE-4 CONN-4 createOpaqueCaller', () => {
-  it('HTTP: passes the key and beforeSend through; idempotent only with an idempotency header', async () => {
+  it('EXE-4 HTTP: passes the key and beforeSend through; names the lower-case header only with an idempotency header', async () => {
     const keyed = await setup('shop.keyed');
-    expect(keyed.caller.idempotent).toBe(true);
+    expect(keyed.caller.idempotencyHeader).toBe('idempotency-key');
     const { seen, beforeSend } = hooked();
     await expect(keyed.caller.call({ args: ARGS, idempotencyKey: KEY, beforeSend })).resolves.toEqual({ kind: 'accepted' });
     const binding = CONFIG.bindings.get('shop.keyed');
@@ -196,14 +196,14 @@ describe('EXE-4 CONN-4 createOpaqueCaller', () => {
     expect(keyed.pinChecks).toEqual([]);
 
     const plain = await setup('shop.plain');
-    expect(plain.caller.idempotent).toBe(false);
+    expect(plain.caller.idempotencyHeader).toBeUndefined();
     await plain.caller.call({ args: ARGS, idempotencyKey: KEY, beforeSend: hooked().beforeSend });
     expect(plain.adapter.calls[0]).not.toHaveProperty('idempotencyKey');
   });
 
   it('MCP: the tool target after an ok fresh pin check, never idempotent and no key', async () => {
     const { adapter, caller, pinChecks } = await setup('tools.send');
-    expect(caller.idempotent).toBe(false);
+    expect(caller.idempotencyHeader).toBeUndefined();
     await expect(caller.call({ args: ARGS, idempotencyKey: KEY, beforeSend: hooked().beforeSend })).resolves.toEqual({ kind: 'accepted' });
     expect(pinChecks).toEqual(['tools.send']);
     expect(adapter.calls[0]?.target).toEqual({ kind: 'mcp', tool: 'send' });
@@ -413,7 +413,7 @@ describe('OPS-5 EXE-4 createOpaqueCaller for a code binding', () => {
 
   it('OPS-5 EXE-4 a code call is sent once; a definite refusal and an indefinite failure map to plan 2 outcomes', async () => {
     const s = await setupCode();
-    expect(s.caller.idempotent).toBe(false);
+    expect(s.caller.idempotencyHeader).toBeUndefined();
     await expect(s.caller.call({ args: PING_ARGS, idempotencyKey: KEY, beforeSend: s.beforeSend })).resolves.toEqual({ kind: 'accepted' });
     // The submission is recorded (beforeSend) before the code module runs (EXE-4).
     expect(s.events).toEqual(['beforeSend', 'codeCall']);

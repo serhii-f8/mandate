@@ -349,8 +349,12 @@ export type OpaqueCallOutcome =
 
 /** One upstream call of an opaque operation, bound to one operation and correlation (design §5). */
 export interface OpaqueCaller {
-  /** True when the upstream deduplicates by key (OpenAPI `idempotency`), so a resumed call may be resent. */
-  readonly idempotent: boolean;
+  /**
+   * The lower-case header that carries `idempotencyKey` when the upstream deduplicates by key
+   * (OpenAPI `idempotency`); absent when no key is sent. A resumed call is resent only when the
+   * recorded submission carried a key under this same header (EXE-4).
+   */
+  readonly idempotencyHeader?: string;
   /**
    * Pre-flight, then `beforeSend()` immediately before the request leaves, then one send without retry.
    * Pre-flight failure answers `not_sent` without calling `beforeSend`. If `beforeSend` throws, nothing is

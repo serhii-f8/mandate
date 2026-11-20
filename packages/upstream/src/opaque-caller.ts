@@ -100,19 +100,20 @@ export function createOpaqueCaller(deps: OpaqueCallerDeps): OpaqueCaller | undef
 
   let target: CallTarget;
   let method: string;
-  let idempotent: boolean;
+  let idempotencyHeader: string | undefined;
   switch (binding.kind) {
     case 'http':
       // An opaque call is one request; a bulk mapping is never one (OPS-6).
       if (binding.mapping.bulk !== undefined) return undefined;
       target = { kind: 'http', mapping: binding.mapping };
       method = binding.mapping.method;
-      idempotent = binding.mapping.idempotency !== undefined;
+      // Header names are case-insensitive; the recorded submission names the lower-case form (EXE-4).
+      idempotencyHeader = binding.mapping.idempotency?.header.toLowerCase();
       break;
     case 'mcp':
       target = { kind: 'mcp', tool: binding.tool };
       method = 'tools/call';
-      idempotent = false;
+      idempotencyHeader = undefined;
       break;
   }
 
@@ -124,7 +125,7 @@ export function createOpaqueCaller(deps: OpaqueCallerDeps): OpaqueCaller | undef
   };
 
   return {
-    idempotent,
+    ...(idempotencyHeader === undefined ? {} : { idempotencyHeader }),
     async call({ args, idempotencyKey, beforeSend }) {
       const credential = await connectionCredential(deps.vault, connection.credentialRef);
       if (credential === 'unusable') return refuse('credential_unusable');
@@ -139,7 +140,7 @@ export function createOpaqueCaller(deps: OpaqueCallerDeps): OpaqueCaller | undef
         target,
         args,
         ...(credential === undefined ? {} : { credential }),
-        ...(idempotent ? { idempotencyKey } : {}),
+        ...(idempotencyHeader === undefined ? {} : { idempotencyKey }),
         beforeSend,
       });
       log({
@@ -153,7 +154,7 @@ export function createOpaqueCaller(deps: OpaqueCallerDeps): OpaqueCaller | undef
 }
 
 /**
- * The code branch (OPS-5, ruling F3): never idempotent, logged as `CODE`. Pre-flight answers
+ * The code branch (OPS-5, ruling F3): never idempotent (no `idempotencyHeader`), logged as `CODE`. Pre-flight answers
  * `not_sent` without calling `beforeSend`: an adapter without `codeCall` (`upstream_unavailable`),
  * an unusable credential, a module operation that is absent or not a `call` (`upstream_rejected`).
  * Then `beforeSend` records the submission; if it throws, the error propagates and the code module
@@ -172,7 +173,6 @@ function createCodeCaller(
     return { kind: 'not_sent', code };
   };
   return {
-    idempotent: false,
     async call({ args, beforeSend }) {
       const { adapter } = deps;
       const { codeCall } = adapter;

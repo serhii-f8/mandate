@@ -17,11 +17,14 @@ type CallInput = Parameters<OpaqueCaller['call']>[0];
 /** Honours the port contract: pre-flight (`not_sent` answers before `beforeSend`), then `beforeSend`, then one send. */
 class ScriptedCaller implements OpaqueCaller {
   readonly calls: { args: Readonly<Record<string, unknown>>; idempotencyKey: string }[] = [];
+  readonly idempotencyHeader?: string;
   constructor(
     private readonly events: string[],
     private readonly outcome: OpaqueCallOutcome,
-    readonly idempotent = false,
-  ) {}
+    idempotencyHeader?: string,
+  ) {
+    if (idempotencyHeader !== undefined) this.idempotencyHeader = idempotencyHeader;
+  }
   async call(input: CallInput): Promise<OpaqueCallOutcome> {
     this.calls.push({ args: input.args, idempotencyKey: input.idempotencyKey });
     if (this.outcome.kind === 'not_sent') return this.outcome;
@@ -70,10 +73,13 @@ const changeset: ChangeSetRecord = {
 const callItem: ChangeItemRecord = { targetId: 'call', status: 'pending', before: null, after: { scope: 'all' } };
 
 const RECORDED: BatchSubmission = { upstreamBatchId: 'opaque:cs-1:1', plan: [{ targetId: 'call', action: 'write' }] };
+/** A submission recorded by an attempt that sent the key under `idempotency-key`. */
+const RECORDED_KEYED: BatchSubmission = { upstreamBatchId: 'opaque-key:idempotency-key:cs-1:1', plan: [{ targetId: 'call', action: 'write' }] };
+const HEADER = 'idempotency-key';
 
-function setup(outcome: OpaqueCallOutcome, opts: { idempotent?: boolean; fenced?: boolean } = {}) {
+function setup(outcome: OpaqueCallOutcome, opts: { idempotencyHeader?: string; fenced?: boolean } = {}) {
   const events: string[] = [];
-  const caller = new ScriptedCaller(events, outcome, opts.idempotent ?? false);
+  const caller = new ScriptedCaller(events, outcome, opts.idempotencyHeader);
   const batch = new FakeBatch(events, opts.fenced ?? false);
   const seen: ChangeSetRecord[] = [];
   const writer = new OpaqueCallWriter({
@@ -116,14 +122,60 @@ describe('EXE-4 NFR-2 OpaqueCallWriter', () => {
     expect(seen.length).toBeLessThanOrEqual(1);
   });
 
-  it('a recorded submission with idempotency is resent with the same key and not recorded again', async () => {
-    const { events, caller, batch, writer } = setup({ kind: 'accepted' }, { idempotent: true });
-    batch.submission = RECORDED;
+  it('EXE-4 a fresh keyed call records the header it sends with the submission', async () => {
+    const { events, batch, writer } = setup({ kind: 'accepted' }, { idempotencyHeader: HEADER });
+    const outcomes = await writer.writeBatch({ changeset, items: [callItem], batch });
+    expect(events).toEqual(['record', 'send']);
+    expect(batch.recorded).toEqual([RECORDED_KEYED]);
+    expect(outcomes).toEqual([{ targetId: 'call', status: 'written' }]);
+  });
+
+  it('a recorded keyed submission is resent with the same key under the same header and not recorded again', async () => {
+    const { events, caller, batch, writer } = setup({ kind: 'accepted' }, { idempotencyHeader: HEADER });
+    batch.submission = RECORDED_KEYED;
     const outcomes = await writer.writeBatch({ changeset, items: [callItem], batch });
     expect(events).toEqual(['send']);
     expect(batch.recorded).toEqual([]);
     expect(caller.calls).toEqual([{ args: { scope: 'all' }, idempotencyKey: 'cs-1:call' }]);
     expect(outcomes).toEqual([{ targetId: 'call', status: 'written' }]);
+  });
+
+  it('EXE-4 a resumed call is not resent when the recorded submission carried no key', async () => {
+    // Attempt 1 ran without idempotency; a reload since added it. The upstream never saw a key.
+    const { events, caller, batch, writer } = setup({ kind: 'accepted' }, { idempotencyHeader: HEADER });
+    batch.submission = RECORDED;
+    const outcomes = await writer.writeBatch({ changeset, items: [callItem], batch });
+    expect(outcomes).toEqual([{ targetId: 'call', status: 'failed', error: 'no_outcome' }]);
+    expect(caller.calls).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it('EXE-4 a resumed call is not resent when the current caller sends the key under another header', async () => {
+    const { events, caller, batch, writer } = setup({ kind: 'accepted' }, { idempotencyHeader: 'x-request-id' });
+    batch.submission = RECORDED_KEYED;
+    const outcomes = await writer.writeBatch({ changeset, items: [callItem], batch });
+    expect(outcomes).toEqual([{ targetId: 'call', status: 'failed', error: 'no_outcome' }]);
+    expect(caller.calls).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it('EXE-4 a resumed keyed call is not resent when the current caller sends no key', async () => {
+    const { caller, batch, writer } = setup({ kind: 'accepted' });
+    batch.submission = RECORDED_KEYED;
+    expect(await writer.writeBatch({ changeset, items: [callItem], batch })).toEqual([{ targetId: 'call', status: 'failed', error: 'no_outcome' }]);
+    expect(caller.calls).toEqual([]);
+  });
+
+  it('EXE-4 a resumed idempotent call whose resend is not_sent or refused ends failed/no_outcome', async () => {
+    const answers: OpaqueCallOutcome[] = [{ kind: 'refused' }, { kind: 'unknown' }, ...NOT_SENT_CODES.map((code) => ({ kind: 'not_sent' as const, code }))];
+    for (const answer of answers) {
+      const { caller, batch, writer } = setup(answer, { idempotencyHeader: HEADER });
+      batch.submission = RECORDED_KEYED;
+      const outcomes = await writer.writeBatch({ changeset, items: [callItem], batch });
+      expect(outcomes, answer.kind).toEqual([{ targetId: 'call', status: 'failed', error: 'no_outcome' }]);
+      expect(caller.calls).toHaveLength(1);
+      expect(batch.recorded).toEqual([]);
+    }
   });
 
   it('refused is failed/upstream_rejected; unknown is failed/no_outcome', async () => {
@@ -157,7 +209,7 @@ describe('EXE-4 NFR-2 OpaqueCallWriter', () => {
   });
 
   it('the idempotency key is <changeset-id>:call', async () => {
-    const { caller, batch, writer } = setup({ kind: 'accepted' }, { idempotent: true });
+    const { caller, batch, writer } = setup({ kind: 'accepted' }, { idempotencyHeader: HEADER });
     await writer.writeBatch({ changeset: { ...changeset, id: 'cs-42' }, items: [callItem], batch });
     expect(caller.calls.map((c) => c.idempotencyKey)).toEqual(['cs-42:call']);
   });
@@ -194,7 +246,7 @@ describe('EXE-4 NFR-2 OpaqueCallWriter', () => {
     const boom = new Error('transport bug');
     const batch = new FakeBatch(events);
     const writer = new OpaqueCallWriter({
-      callerFor: () => ({ idempotent: false, call: () => Promise.reject(boom) }),
+      callerFor: () => ({ call: () => Promise.reject(boom) }),
     });
     await expect(writer.writeBatch({ changeset, items: [callItem], batch })).rejects.toBe(boom);
   });

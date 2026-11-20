@@ -172,7 +172,6 @@ function manifestWriter(
 
 /** The caller of an opaque operation whose binding is gone from the snapshot: refused, nothing sent. */
 const unavailableCaller: OpaqueCaller = {
-  idempotent: false,
   call: () => Promise.resolve({ kind: 'not_sent', code: 'upstream_rejected' }),
 };
 
