@@ -1,0 +1,20 @@
+version: 1
+operations:
+  - id: catalog.search_products
+    connection: shop
+    risk: read
+    title: Search products
+    description: Search the catalog by brand.
+    upstream:
+      method: GET
+      path: /V1/products
+      query: { brand: { arg: brand } }
+      response: { items: items, total: total_count, fields_from_arg: fields }
+    input_schema:
+      type: object
+      properties:
+        brand: { type: string }
+        fields: { type: array, items: { type: string } }
+      required: [fields]
+      additionalProperties: false
+    fields_arg: fields
