@@ -6,6 +6,7 @@ import { parse } from 'yaml';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const read = (p: string): string => readFileSync(join(root, p), 'utf8');
+const codeLines = (p: string): string => read(p).split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
 const walk = (dir: string): string[] =>
   readdirSync(join(root, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
 
@@ -19,7 +20,7 @@ const jobRuns = (): Record<string, string[]> => {
 
 describe('NFR-15 ci.sh runs the integration tests against real PostgreSQL and the Temporal test server', () => {
   it('NFR-15 ci.sh runs pnpm test:int', () => {
-    expect(read('scripts/ci.sh')).toContain('pnpm test:int');
+    expect(codeLines('scripts/ci.sh')).toMatch(/\bpnpm test:int\b/);
   });
   it('NFR-15 the shared fixture starts a Testcontainers PostgreSQL and the worker harness the Temporal test server', () => {
     expect(read('packages/testing/src/postgres.ts')).toMatch(/from '@testcontainers\/postgresql'/);
@@ -29,7 +30,14 @@ describe('NFR-15 ci.sh runs the integration tests against real PostgreSQL and th
     const dir = 'packages/db/test/integration';
     const files = readdirSync(join(root, dir)).filter((f) => f.endsWith('.int.test.ts'));
     expect(files.length).toBeGreaterThan(0);
-    const bad = files.filter((f) => !/\bstartPostgres\b|from '\.\.\/support\//.test(read(join(dir, f))));
+    const importsFixture = (src: string): boolean =>
+      src
+        .split('\n')
+        .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+        .join('\n')
+        .match(/import\s*\{([^}]*)\}\s*from\s*'@aiops\/testing'/g)
+        ?.some((m) => /\bstartPostgres\b/.test(m)) ?? false;
+    const bad = files.filter((f) => !importsFixture(read(join(dir, f))));
     expect(bad).toEqual([]);
   });
 });
@@ -41,7 +49,7 @@ describe('NFR-16 the conformance suite runs in the e2e project', () => {
     expect(shared).toContain("name: 'e2e'");
     expect(shared).toContain("include: ['test/e2e/**/*.e2e.test.ts']");
     expect(existsSync(join(root, 'apps/api/test/e2e/conformance.e2e.test.ts'))).toBe(true);
-    expect(read('scripts/ci.sh')).toContain('pnpm test:e2e');
+    expect(codeLines('scripts/ci.sh')).toMatch(/\bpnpm test:e2e\b/);
   });
 });
 
