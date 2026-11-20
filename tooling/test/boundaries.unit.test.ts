@@ -100,6 +100,34 @@ describe('package boundaries (CLAUDE.md engineering conventions)', () => {
     expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', '@aiops/core')).toBe(1);
   });
 
+  it('CONN-1 the apps, the presets and packages/upstream never import the MCP client, statically or dynamically', async () => {
+    const sdk = '@modelcontextprotocol/client';
+    const dynamic = (specifier: string) => `export const m = import('${specifier}');\n`;
+    for (const file of [
+      'apps/api/src/probe.ts',
+      'apps/api/src/mcp/probe.test.ts',
+      'apps/worker/src/probe.ts',
+      'apps/worker/src/workflows/probe.ts',
+      'apps/web/src/probe.tsx',
+      'presets/magento2-catalog/src/probe.ts',
+      'presets/magento2-catalog/src/probe.test.ts',
+      'packages/upstream/src/probe.ts',
+      'packages/upstream/src/probe.test.ts',
+      'packages/upstream/test/integration/probe.ts',
+    ]) {
+      expect(await restrictedImportErrors(file, sdk), file).toBe(1);
+      expect(await restrictedImportErrors(file, `${sdk}/stdio`), file).toBe(1);
+      expect(await ruleErrors(file, dynamic(sdk), 'no-restricted-syntax'), file).toBe(1);
+    }
+    // The api serves MCP: the server SDK stays allowed.
+    expect(await restrictedImportErrors('apps/api/src/probe.ts', '@modelcontextprotocol/server')).toBe(0);
+    expect(await ruleErrors('apps/api/src/probe.ts', dynamic('@modelcontextprotocol/server'), 'no-restricted-syntax')).toBe(0);
+    // The MCP adapter itself keeps the client, statically and dynamically.
+    expect(await ruleErrors('packages/adapters/src/mcp/probe.ts', dynamic(sdk), 'no-restricted-syntax')).toBe(0);
+    // apps/web keeps its raw-HTML ban next to the new selector.
+    expect(await ruleErrors('apps/web/src/probe.tsx', 'export const e = <div dangerouslySetInnerHTML={{ __html: "" }} />;\n', 'no-restricted-syntax')).toBe(1);
+  });
+
   it('CONN-8 OPS-5 preset src imports @aiops packages as types only', async () => {
     const rule = '@typescript-eslint/no-restricted-imports';
     const file = 'presets/magento2-catalog/src/probe.ts';

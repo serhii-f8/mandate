@@ -42,6 +42,15 @@ const noTelemetryInAdapters = { group: ['@opentelemetry/*'], message: 'Adapters 
 /** Only the MCP adapter talks to the MCP SDK; every other production package never imports it. */
 const noMcpOutsideAdapter = { group: mcpSdk, message: 'Only packages/adapters/src/mcp/ talks to the MCP SDK (ADR 0050).' };
 
+/**
+ * The MCP client in the apps, the presets and packages/upstream, statically and through `import()` (design §6, ADR 0050).
+ * The api still serves MCP with `@modelcontextprotocol/server`. Added to every entry that sets the same rule for those files,
+ * because the last matching entry's options win.
+ */
+const mcpClientMessage = 'Only packages/adapters/src/mcp/ imports the MCP client (ADR 0050).';
+const noMcpClient = { group: ['@modelcontextprotocol/client', '@modelcontextprotocol/client/*'], message: mcpClientMessage };
+const noDynamicMcpClient = { selector: 'ImportExpression[source.value=/^@modelcontextprotocol\\/client(\\/|$)/]', message: mcpClientMessage };
+
 /** @type {import('eslint').Linter.Config[]} */
 export const boundaryRules = [
   {
@@ -123,6 +132,10 @@ export const boundaryRules = [
     },
   },
   {
+    files: ['packages/upstream/test/**/*.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: [noMcpOutsideAdapter] }] },
+  },
+  {
     files: ['packages/temporal/src/**/*.ts'],
     rules: {
       'no-restricted-imports': ['error', { patterns: [workspaceExcept(['core'], 'packages/temporal depends on @aiops/core only.')] }],
@@ -133,7 +146,7 @@ export const boundaryRules = [
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [workspaceExcept(['connector-sdk', 'config'], 'Presets use only @aiops/connector-sdk and @aiops/config.')] },
+        { patterns: [workspaceExcept(['connector-sdk', 'config'], 'Presets use only @aiops/connector-sdk and @aiops/config.'), noMcpClient] },
       ],
     },
   },
@@ -172,6 +185,7 @@ export const boundaryRules = [
               ['connector-sdk', 'config', 'adapters', 'testing'],
               'Preset tests use only @aiops/connector-sdk, @aiops/config, @aiops/adapters and @aiops/testing.',
             ),
+            noMcpClient,
           ],
         },
       ],
@@ -234,6 +248,15 @@ export const boundaryRules = [
     },
   },
   {
+    files: ['apps/api/src/**/*.ts', 'apps/worker/src/**/*.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: [noMcpClient] }] },
+  },
+  {
+    // Dynamic imports of the client; apps/web repeats the selector because its own entry sets this rule.
+    files: ['apps/*/src/**/*.{ts,tsx}', 'presets/*/src/**/*.ts', 'packages/upstream/**/*.ts'],
+    rules: { 'no-restricted-syntax': ['error', noDynamicMcpClient] },
+  },
+  {
     // W3: the trusted page uses the widgets library over REST, never the widget entries or the MCP SDK.
     files: ['apps/web/src/**/*.{ts,tsx}'],
     rules: {
@@ -246,7 +269,7 @@ export const boundaryRules = [
           ],
         },
       ],
-      'no-restricted-syntax': ['error', noDangerousHtml],
+      'no-restricted-syntax': ['error', noDangerousHtml, noDynamicMcpClient],
     },
   },
   {
@@ -265,6 +288,7 @@ export const boundaryRules = [
             { regex: '^@temporalio/(?!workflow$|common$)', message: 'Workflow code may import only @temporalio/workflow and @temporalio/common.' },
             // `(/|$)` rejects the package root and every other subpath of @aiops/temporal.
             workspaceExcept(['temporal/contract'], 'Workflow code may import only @aiops/temporal/contract (it re-exports the core types it needs).'),
+            noMcpClient,
           ],
         },
       ],
