@@ -91,9 +91,6 @@ function expectOneDeny(answer: Answer, subject: string, rule: string, reason: st
   expect(answer.rows[0]).toMatchObject({ action: 'policy.decision', decision: 'deny', outcome: 'denied', subject, details: { rule, reason } });
 }
 
-/** Every denial row the suite caused: aggregated by POL-8 test. */
-const denials: { answer: Answer; rule: string; reason: string }[] = [];
-
 describe('SEC-11 MCP-3 argument validation', () => {
   it('SEC-11 MCP-3 invalid_arguments are refused before policy', async () => {
     const answer = await withoutUpstream(() => callAs('mcp3-user', 'scoped', TOOL, { brand: ['acme'], fields: [] }));
@@ -114,14 +111,12 @@ describe('SEC-11 POL-1 grants', () => {
     const answer = await withoutUpstream(() => callAs('pol1-unknown', 'nogrant', 'catalog.nothing', {}));
     expect(answer.error).toMatchObject({ code: -32602, message: 'Tool catalog.nothing not found' });
     expectOneDeny(answer, 'catalog.nothing', 'default-deny', 'unknown_tool');
-    denials.push({ answer, rule: 'default-deny', reason: 'unknown_tool' });
   });
 
   it('SEC-11 POL-1 no_grant: an existing ungranted tool is refused over MCP with default-deny', async () => {
     const answer = await withoutUpstream(() => callAs('pol1-nogrant', 'nogrant', TOOL, { brand: 'acme' }));
     expect(answer.error).toMatchObject({ code: -32602, message: `Tool ${TOOL} not found` });
     expectOneDeny(answer, TOOL, 'default-deny', 'no_grant');
-    denials.push({ answer, rule: 'default-deny', reason: 'no_grant' });
   });
 });
 
@@ -133,14 +128,12 @@ describe('SEC-11 POL-2 scope', () => {
     expect(answer.result?.isError).toBe(true);
     expect(answer.result?.content?.[0]?.text).toContain(`rule ${rule}`);
     expectOneDeny(answer, TOOL, rule, 'out_of_scope');
-    denials.push({ answer, rule, reason: 'out_of_scope' });
   });
 
   it('SEC-11 POL-2 scope_argument_missing', async () => {
     const answer = await withoutUpstream(() => callAs('pol2-missing', 'scoped', TOOL, { fields: ['name'] }));
     expect(answer.result?.isError).toBe(true);
     expectOneDeny(answer, TOOL, rule, 'scope_argument_missing');
-    denials.push({ answer, rule, reason: 'scope_argument_missing' });
   });
 });
 
@@ -151,7 +144,6 @@ describe('SEC-11 POL-3 fields', () => {
     expect(answer.result?.isError).toBe(true);
     expectOneDeny(answer, TOOL, rule, 'denied_field');
     expect(answer.rows[0]?.details).toMatchObject({ detail: 'cost' });
-    denials.push({ answer, rule, reason: 'denied_field' });
   });
 
   it('SEC-11 POL-3 field_not_allowed', async () => {
@@ -160,21 +152,28 @@ describe('SEC-11 POL-3 fields', () => {
     expect(answer.result?.isError).toBe(true);
     expectOneDeny(answer, TOOL, rule, 'field_not_allowed');
     expect(answer.rows[0]?.details).toMatchObject({ detail: 'price' });
-    denials.push({ answer, rule, reason: 'field_not_allowed' });
   });
 });
 
 describe('SEC-11 POL-8 decisions', () => {
-  it('SEC-11 POL-8 every MCP denial above wrote exactly one policy.decision row naming its rule', async () => {
-    expect(denials.map((d) => d.reason).sort()).toEqual(['denied_field', 'field_not_allowed', 'no_grant', 'out_of_scope', 'scope_argument_missing', 'unknown_tool']);
-    for (const { answer, rule, reason } of denials) {
-      const row = answer.rows[0];
-      const stored = await auditRows(databaseUrl, 'seq = $1', [row?.seq]);
-      expect(stored).toHaveLength(1);
-      expect(stored[0]).toMatchObject({ action: 'policy.decision', decision: 'deny', details: { rule, reason } });
-      const sameRequest = await auditRows(databaseUrl, "correlation_id = $1 and action = 'policy.decision'", [row?.correlation_id]);
-      expect(sameRequest).toHaveLength(1);
-    }
+  const cases = [
+    { sub: 'pol8-unknown', group: 'nogrant', tool: 'catalog.nothing', args: {}, subject: 'catalog.nothing', rule: 'default-deny', reason: 'unknown_tool' },
+    { sub: 'pol8-nogrant', group: 'nogrant', tool: TOOL, args: { brand: 'acme' }, subject: TOOL, rule: 'default-deny', reason: 'no_grant' },
+    { sub: 'pol8-scope', group: 'scoped', tool: TOOL, args: { brand: 'initech', fields: ['name'] }, subject: TOOL, rule: 'role:scoped/grant:acme-only/scope:brand', reason: 'out_of_scope' },
+    { sub: 'pol8-missing', group: 'scoped', tool: TOOL, args: { fields: ['name'] }, subject: TOOL, rule: 'role:scoped/grant:acme-only/scope:brand', reason: 'scope_argument_missing' },
+    { sub: 'pol8-denied', group: 'scoped', tool: TOOL, args: { brand: 'acme', fields: ['cost'] }, subject: TOOL, rule: 'role:scoped/grant:acme-only/deny_fields', reason: 'denied_field' },
+    { sub: 'pol8-allow', group: 'allowlisted', tool: TOOL, args: { brand: 'acme', fields: ['price'] }, subject: TOOL, rule: 'role:allowlisted/grant:name-and-description/allow_fields', reason: 'field_not_allowed' },
+  ];
+
+  it.each(cases)('SEC-11 POL-8 an MCP denial ($reason) writes exactly one policy.decision row naming its rule', async ({ sub, group, tool, args, subject, rule, reason }) => {
+    const answer = await withoutUpstream(() => callAs(sub, group, tool, args));
+    expectOneDeny(answer, subject, rule, reason);
+    const row = answer.rows[0];
+    const stored = await auditRows(databaseUrl, 'seq = $1', [row?.seq]);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ action: 'policy.decision', decision: 'deny', details: { rule, reason } });
+    const sameRequest = await auditRows(databaseUrl, "correlation_id = $1 and action = 'policy.decision'", [row?.correlation_id]);
+    expect(sameRequest).toHaveLength(1);
   });
 });
 
@@ -219,6 +218,8 @@ describe('SEC-11 POL-4 limits', () => {
   // The first execution of the file is held by the writer, so this test runs before every other one that executes.
   it('SEC-11 POL-4 limit_exceeded/concurrent_executions', async () => {
     const sub = 'pol4-concurrent';
+    // pauseAt(0) holds the first batch the writer ever sees: nothing may have executed before this test.
+    expect(writer.calls).toBe(0);
     const first = await prepare(sub, 'limited', ['conc-1']);
     const second = await prepare(sub, 'limited', ['conc-2']);
     const hold = writer.pauseAt(0);
@@ -268,7 +269,7 @@ describe('SEC-11 POL-4 limits', () => {
 });
 
 describe('SEC-11 POL-5 approval', () => {
-  it('SEC-11 POL-5 approval_required: a change-set above the threshold does not execute', async () => {
+  it('SEC-11 POL-5 pending_approval: a change-set above the threshold does not execute', async () => {
     const sub = 'pol5-gated';
     const prepared = await prepare(sub, 'gated', ['gate-1', 'gate-2']);
     const answer = await withoutUpstream(() => submit(sub, 'gated', prepared));
@@ -337,7 +338,7 @@ describe('SEC-11 POL-6 re-evaluation', () => {
       expect(await changeSetRow(prepared.id)).toEqual({ status: 'prepared', execution_actor: null });
     } finally {
       await writeFile(roles, original);
-      await reloadConfiguration(api);
+      expect(await reloadConfiguration(api)).toEqual({ ok: true });
     }
   });
 });
