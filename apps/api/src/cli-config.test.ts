@@ -356,6 +356,8 @@ describe('CFG-3 POL-7 aiops config explain', () => {
       ['--operation', 'shop.list_items', '--groups', 'viewers', '--service', 'sa'],
       ['--operation', 'shop.list_items'],
       ['--operation', 'shop.list_items', '--service', 'sa', '--subject', 'alice'],
+      ['--operation', 'shop.list_items', '--groups', 'viewers', '--subject', 'service:sa'],
+      ['--operation', 'shop.list_items', '--service', ''],
     ]) {
       expect((await run(explain(...flags), store)).code).toBe(2);
     }

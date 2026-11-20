@@ -37,6 +37,7 @@ import {
   type LoadResult,
 } from '@aiops/config';
 import type { AuditLog, ConfigRevision, ConfigRevisionStore, CredentialVault } from '@aiops/core';
+import { SERVICE_SUBJECT_PREFIX } from '@aiops/core';
 import {
   createDb,
   type Db,
@@ -533,7 +534,7 @@ function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
   const groups = (values.get('--groups') ?? '').split(',').map((g) => g.trim()).filter((g) => g.length > 0);
   const service = values.get('--service');
   // Exactly one of --groups and --service; a service account has no IdP subject to override.
-  if (operationId === undefined || (groups.length === 0) === (service === undefined) || (service !== undefined && values.has('--subject'))) return undefined;
+  if (operationId === undefined || (groups.length === 0) === (service === undefined) || (service !== undefined && values.has('--subject')) || (values.get('--subject') ?? '').startsWith(SERVICE_SUBJECT_PREFIX)) return undefined;
 
   // Neither message quotes the value: it is operator input of unknown content (SEC-3).
   let parsedArgs: unknown = {};
