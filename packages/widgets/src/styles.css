@@ -14,6 +14,14 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* An invisible, bidi or control character in raw arguments, shown as its escape (APR-5, SEC-5). */
+.aiops .invisible-char {
+  padding: 0 2px;
+  border-radius: 3px;
+  color: var(--color-text-danger, light-dark(#c62828, #ff6b6b));
+  background: var(--color-background-secondary, light-dark(#f4f4f4, #2a2a2a));
+  outline: 1px dashed currentColor;
+}
 .aiops .status {
   display: inline-block;
   padding: 1px 8px;
