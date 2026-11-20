@@ -1,6 +1,6 @@
 import type { CodeHttpRequest, ConnectionSettings, CredentialSource } from '@aiops/connector-sdk';
 import { startFakeUpstream, type FakeUpstream } from '@aiops/testing';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createConnectionClient } from '../http/client.js';
 import { clearTokenCache } from '../http/oauth.js';
 import { createCodeHttpClient } from './http.js';
@@ -160,6 +160,24 @@ describe('OPS-5 CONN-5 SEC-2 code http client', () => {
     expect(await http.send({ method: 'GET', path: '/x' })).toEqual({ ok: false, code: 'timeout' });
     expect(await http.send({ method: 'POST', path: '/x', body: {} })).toEqual({ ok: false, code: 'timeout' });
     expect(up.requests.length).toBe(0);
+  });
+
+  it('OPS-5 a write queued for a connection slot when the signal aborts is never sent and answers timeout', async () => {
+    up.route('PUT', '/api/slow', () => ({ status: 200, body: {}, delayMs: 1000 }));
+    up.route('PUT', '/api/queued', () => ({ status: 200, body: {} }));
+    const controller = new AbortController();
+    const http = httpFor(settings({ maxConcurrency: 1, timeoutMs: 5000 }), { signal: controller.signal });
+    const slow = http.send({ method: 'PUT', path: '/slow', body: {} });
+    // The slow write holds the only slot once the upstream has it.
+    await vi.waitFor(() => {
+      expect(up.requests).toHaveLength(1);
+    });
+    // Entered before the abort: it passes the entry check and waits for the slot.
+    const queued = http.send({ method: 'PUT', path: '/queued', body: {} });
+    controller.abort();
+    expect(await slow).toEqual({ ok: true, status: 200, json: {} });
+    expect(await queued).toEqual({ ok: false, code: 'timeout' });
+    expect(up.requests.map((r) => r.path)).toEqual(['/api/slow']);
   });
 
   it('SEC-3 a non-2xx answer carries the status only, never the body', async () => {

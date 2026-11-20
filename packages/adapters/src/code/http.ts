@@ -24,6 +24,11 @@ const MAX_PATH_LENGTH = 2048;
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 const HEADER_VALUE = /^[\t\x20-\x7e]*$/;
 
+/** Thrown by the pre-send hook of a write whose signal aborted while it waited (F26). */
+class CodeSendAborted extends Error {
+  override readonly name = 'CodeSendAborted';
+}
+
 const MAPPING: CodeHttpResponse = Object.freeze({ ok: false, code: 'mapping' });
 const BUSY: CodeHttpResponse = Object.freeze({ ok: false, code: 'busy' });
 const TIMEOUT: CodeHttpResponse = Object.freeze({ ok: false, code: 'timeout' });
@@ -148,8 +153,26 @@ export function createCodeHttpClient(input: {
     const spec = toSpec(request, connection);
     if (spec === undefined) return MAPPING;
     onSend?.();
-    // Only GET is retried: a resent write could apply twice (CONN-6, EXE-4).
-    const r = await client.send(spec, { retryable: spec.method === 'GET', ...(credential === undefined ? {} : { credential }) });
+    const auth = credential === undefined ? {} : { credential };
+    let r: Awaited<ReturnType<ConnectionClient['send']>>;
+    if (spec.method === 'GET') {
+      // Only GET is retried (CONN-6). A read may still leave after the deadline (credential, slot
+      // or retry wait); it changes nothing upstream and its answer reaches no one.
+      r = await client.send(spec, { retryable: true, ...auth });
+    } else {
+      // A write is sent once (EXE-4). It may wait for the credential and a connection slot; the hook
+      // runs immediately before it leaves, so a write still waiting at the deadline is never sent (F26).
+      try {
+        r = await client.send(spec, {
+          retryable: false,
+          beforeSend: () => (signal.aborted ? Promise.reject(new CodeSendAborted()) : Promise.resolve()),
+          ...auth,
+        });
+      } catch (err) {
+        if (err instanceof CodeSendAborted) return TIMEOUT;
+        throw err;
+      }
+    }
     // `r.json` is already scrubbed by the client; a failure carries its code and status, never the message (SEC-3).
     if (r.ok) return { ok: true, status: r.status, json: r.json };
     return { ok: false, code: r.code, ...(r.status === undefined ? {} : { status: r.status }) };
