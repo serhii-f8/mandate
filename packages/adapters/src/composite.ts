@@ -13,6 +13,8 @@ import type {
   McpToolAdapter,
   ReadAdapter,
   ReadOutcome,
+  RecordSendOutcome,
+  RecordWriteAdapter,
   RequestInstrumentation,
   ScopeReport,
   ToolListOutcome,
@@ -25,6 +27,7 @@ import { createOpenApiAdapter } from './openapi/adapter.js';
 
 export type UpstreamAdapters = ReadAdapter &
   WriteAdapter &
+  RecordWriteAdapter &
   McpToolAdapter & { resolver: UpstreamResolver & Required<Pick<UpstreamResolver, 'resolveTools'>> };
 
 export interface AdaptersDeps {
@@ -72,6 +75,8 @@ export function createAdapters(deps: AdaptersDeps = {}): UpstreamAdapters {
     bulkStatus: (input): Promise<BulkStatusOutcome> => (isMcp(input.connection) ? Promise.resolve(writeMismatch()) : openapi.bulkStatus(input)),
     // Each adapter answers not_sent/mapping for a target of the other kind (EXE-4).
     callOnce: (input): Promise<CallOutcome> => (isMcp(input.connection) ? mcp.callOnce(input) : openapi.callOnce(input)),
+    // A per-record write is an HTTP binding of an OpenAPI connection (OPS-6).
+    writeRecord: (input): Promise<RecordSendOutcome> => (isMcp(input.connection) ? Promise.resolve(writeMismatch()) : openapi.writeRecord(input)),
     listTools: (input) => (isMcp(input.connection) ? mcp.listTools(input) : Promise.resolve(readMismatch('tool listing needs an mcp connection'))),
     callTool: (input) => (isMcp(input.connection) ? mcp.callTool(input) : Promise.resolve(readMismatch('a tool call needs an mcp connection'))),
   };

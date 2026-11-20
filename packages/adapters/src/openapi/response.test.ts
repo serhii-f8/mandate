@@ -102,3 +102,13 @@ describe('POL-3 projection keeps unrequested fields out', () => {
     expect(r.value).toEqual({ sku: 'A', brand: 'x' });
   });
 });
+
+describe('CONN-2 root-array responses', () => {
+  it('CONN-2 items $ maps a root JSON array, and a non-array root is a mapping error', () => {
+    const r = mapResponse({ items: '$', total: 'total', maxItems: 2 }, [{ id: 1 }, { id: 2 }, { id: 3 }], {});
+    expect(r.items).toEqual([{ id: 1 }, { id: 2 }]);
+    expect(r.truncated).toBe(true);
+    expect(r.total).toBeUndefined();
+    expect(() => mapResponse({ items: '$', maxItems: 10 }, { items: [] }, {})).toThrow(MappingError);
+  });
+});

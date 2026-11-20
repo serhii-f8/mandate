@@ -1,7 +1,7 @@
 /**
  * OpenAPI adapter facade (CONN-2, CONN-7, SEC-7): the spec resolver the configuration loader uses,
  * the read path the api uses, scope detection for the connection test, and the bulk and opaque write
- * paths the worker uses (OPS-6, EXE-4).
+ * paths and the per-record write the worker uses (OPS-6, EXE-4).
  */
 import { validateHeaderName, validateHeaderValue } from 'node:http';
 import {
@@ -14,6 +14,8 @@ import {
   type HttpMethod,
   type ReadAdapter,
   type ReadOutcome,
+  type RecordSendOutcome,
+  type RecordWriteAdapter,
   type RequestInstrumentation,
   type ScopeReport,
   type SpecIssue,
@@ -21,6 +23,7 @@ import {
   type UpstreamResolver,
   type WriteAdapter,
   type WriteFailure,
+  type WriteRecord,
 } from '@aiops/connector-sdk';
 import { createConnectionClient, createTransport, type ConnectionClient, type SendResult, type Transport } from '../http/client.js';
 import { createGuardedLookup } from '../http/egress.js';
@@ -43,7 +46,7 @@ export interface OpenApiAdapterDeps {
   readonly instrumentation?: RequestInstrumentation;
 }
 
-export type OpenApiAdapter = ReadAdapter & WriteAdapter & { resolver: UpstreamResolver };
+export type OpenApiAdapter = ReadAdapter & WriteAdapter & RecordWriteAdapter & { resolver: UpstreamResolver };
 
 const NOT_DETECTABLE: ScopeReport = { detectable: false, source: 'none', values: [] };
 /** RFC 6749 §3.3 scope-token characters; anything else is not reported. */
@@ -107,6 +110,20 @@ function classify(r: SendResult & { ok: false }, kind: 'submit' | 'status'): Wri
     return { ...base, code: retriable || kind === 'status' ? 'http_status' : 'rejected', retriable };
   }
   return { ...base, code: r.code, retriable: r.code === 'timeout' || r.code === 'network' || r.code === 'busy' };
+}
+
+/** The record minus the fields the path takes with `{ record }` (OPS-6); keys stay plain data. */
+function recordWithoutPathFields(record: WriteRecord, mapping: UpstreamMapping): Record<string, unknown> {
+  const pathFields = new Set<string>();
+  for (const tpl of Object.values(mapping.pathParams)) {
+    if (typeof tpl === 'object' && 'record' in tpl) pathFields.add(tpl.record);
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(record)) {
+    // defineProperty keeps a key like "__proto__" as a data property, so it is serialised as sent.
+    if (!pathFields.has(k)) Object.defineProperty(out, k, { value: v, enumerable: true, writable: true, configurable: true });
+  }
+  return out;
 }
 
 const callNotSent: CallOutcome = { result: 'not_sent', code: 'mapping', durationMs: 0 };
@@ -283,6 +300,8 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
     const bulk = mapping.bulk;
     // The batch ID came from the upstream: it goes into the path only when it is a plain token (SEC-5).
     if (bulk === undefined || !isSafeBatchId(batchId)) return mappingFailure();
+    // Key mode maps entries by target ID: without the IDs nothing can be mapped, so nothing is asked (F19).
+    if (bulk.status.key !== undefined && input.keys === undefined) return mappingFailure();
     let req: HttpRequestSpec;
     try {
       req = buildRequest(
@@ -297,9 +316,39 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
     // A status read changes nothing upstream, so the client may retry it.
     const r = await clientOf(connection).send(req, { retryable: true, ...(credential ? { credential } : {}) });
     if (!r.ok) return classify(r, 'status');
-    const items = mapBulkStatus(bulk.status, r.json);
+    const items = mapBulkStatus(bulk.status, r.json, input.keys);
     if (items === undefined) return { ok: false, code: 'invalid_response', status: r.status, durationMs: r.durationMs, retriable: false };
     return { ok: true, items, durationMs: r.durationMs };
+  }
+
+  /**
+   * One request for one record of a per-record write binding (OPS-6). `{ arg }` templates come
+   * from the change-set arguments and `{ record }` templates from the record; without a `body`
+   * template the body is the record minus the fields the path takes with `{ record }`. Never
+   * retried by the client (EXE-4). The body is discarded unread: any 2xx is `ok` with its status
+   * and the verify read decides (F18). 429, 5xx, timeouts, network errors and a full semaphore
+   * are retriable; every other failure is not. Codes only (SEC-3, SEC-5).
+   */
+  async function writeRecord(input: Parameters<RecordWriteAdapter['writeRecord']>[0]): Promise<RecordSendOutcome> {
+    const { connection, mapping, record, args, credential } = input;
+    const { method, path } = mapping;
+    // A per-record write changes upstream state: never a GET, never a bulk submission.
+    if (method === undefined || method === 'GET' || path === undefined || mapping.bulk !== undefined) return mappingFailure();
+    let req: HttpRequestSpec;
+    try {
+      req = buildRequest(connection.baseUrl, { ...mapping, method, path }, args, record);
+      if (mapping.body === undefined) {
+        req.body = JSON.stringify(recordWithoutPathFields(record, mapping));
+        req.headers['content-type'] = 'application/json';
+      }
+    } catch (err) {
+      if (err instanceof MappingError) return mappingFailure();
+      throw err;
+    }
+    if (!headersSendable(req.headers)) return mappingFailure();
+    const r = await clientOf(connection).send(req, { retryable: false, discardBody: true, ...(credential ? { credential } : {}) });
+    if (r.ok) return { ok: true, status: r.status, durationMs: r.durationMs };
+    return classify(r, 'submit');
   }
 
   async function callOnce(input: Parameters<WriteAdapter['callOnce']>[0]): Promise<CallOutcome> {
@@ -337,6 +386,6 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
     return classifyCall(r, hookRan);
   }
 
-  return { resolver, read, detectScopes, submitBulk, bulkStatus, callOnce };
+  return { resolver, read, detectScopes, submitBulk, bulkStatus, callOnce, writeRecord };
 }
 

@@ -83,6 +83,22 @@ describe('CONN-1 composite adapter', () => {
     expect(mcp.requests).toHaveLength(0);
   });
 
+  it('OPS-6 CONN-1 writeRecord goes to the OpenAPI adapter, and an mcp connection is refused without a request', async () => {
+    const patch: UpstreamMapping = { method: 'PATCH', path: '/items/{id}', pathParams: { id: { record: 'id' } }, query: {}, headers: {}, response: { maxItems: 1 } };
+    up.route('PATCH', '/items/7', () => ({ status: 200, body: {} }));
+    const adapters = createAdapters();
+    expect(await adapters.writeRecord({ connection: openapi(), mapping: patch, record: { id: 7, title: 'x' }, args: {} })).toMatchObject({ ok: true, status: 200 });
+    expect(up.requests).toHaveLength(1);
+    expect(await adapters.writeRecord({ connection: mcpConnection(), mapping: patch, record: { id: 7 }, args: {} })).toEqual({
+      ok: false,
+      code: 'mapping',
+      durationMs: 0,
+      retriable: false,
+    });
+    expect(mcp.requests).toHaveLength(0);
+    expect(up.requests).toHaveLength(1);
+  });
+
   it('CONN-1 listTools and callTool on an mcp connection hit the MCP server', async () => {
     const adapters = createAdapters();
     const connection = mcpConnection();

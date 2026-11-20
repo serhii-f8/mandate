@@ -39,8 +39,35 @@ describe('OPS-6 bulk body and status mapping', () => {
   it('OPS-6 answers undefined when the items path is not an array', () => {
     expect(mapBulkStatus(STATUS, { operations_list: null })).toBeUndefined();
   });
-  it('OPS-6 answers undefined for a key-mode status (no index field) until key mapping is read', () => {
-    const keyed = { method: STATUS.method, path: STATUS.path, items: STATUS.items, key: 'id', state: STATUS.state, states: STATUS.states };
-    expect(mapBulkStatus(keyed, { operations_list: [{ id: 0, status: 1 }] })).toBeUndefined();
+  it('OPS-6 status by key maps entries to the position of their key; unknown keys are skipped; numbers match their string', () => {
+    const keyed = { method: STATUS.method, path: STATUS.path, items: 'items', key: 'sku', state: STATUS.state, states: STATUS.states };
+    const keys = ['A', '42', 'C'];
+    const json = {
+      items: [
+        { sku: 'C', status: 1 },
+        { sku: 42, status: 4 },
+        { sku: 'A', status: 3 },
+        { sku: 'Z', status: 1 },
+        { sku: { x: 1 }, status: 1 },
+        { sku: Number.NaN, status: 1 },
+        { status: 1 },
+        'not-an-object',
+      ],
+    };
+    // F19: an unknown or unreadable key is emitted out of range (index keys.length), so core
+    // skips it as it skips an out-of-range index, instead of reading the answer as "still open".
+    expect(mapBulkStatus(keyed, json, keys)).toEqual([
+      { index: 2, state: 'ok' },
+      { index: 1, state: 'open' },
+      { index: 0, state: 'failed' },
+      { index: 3, state: 'ok' },
+      { index: 3, state: 'ok' },
+      { index: 3, state: 'ok' },
+      { index: 3, state: 'ok' },
+    ]);
+    // Key mode without the keys cannot map anything.
+    expect(mapBulkStatus(keyed, json)).toBeUndefined();
+    // An index-mode status ignores keys.
+    expect(mapBulkStatus(STATUS, { operations_list: [{ id: 0, status: 1 }] }, keys)).toEqual([{ index: 0, state: 'ok' }]);
   });
 });
