@@ -113,6 +113,8 @@ export interface AppOverrides {
   readonly tasks?: TaskRepository;
   /** Rate-limit counters; defaults to `PostgresRateCounter` on the api database (POL-4, NFR-3). */
   readonly rateCounter?: RateCounter;
+  /** Wall-clock time of the rate-limit windows, endpoint (SEC-10) and pipeline (POL-4); the real clock by default. */
+  readonly wallClock?: () => Date;
   /** Runs after the api's own resources closed; `main.ts` stops the configuration sync and its database here. */
   readonly onShutdown?: () => Promise<void>;
 }
@@ -201,6 +203,8 @@ class AppModule {
     // Likewise the Temporal payload keys (SEC-4), whenever a Temporal client is built.
     const temporalKeys = overrides.executor === undefined || overrides.starter === undefined ? parseTemporalKeys(env.temporalKeys) : undefined;
     const adapter = overrides.adapter ?? createAdapters();
+    // One wall clock for the endpoint limits and the pipeline's calls_per_minute: the same windows.
+    const wallClock = overrides.wallClock ?? ((): Date => new Date());
     // Without telemetry the api's spans go to the global tracer (a no-op unless one is registered) and no metric is counted.
     const pipelineTelemetry: PipelineTelemetry = telemetry === undefined ? NO_TELEMETRY : createPipelineTelemetry({ tracer: telemetry.tracer, meter: telemetry.meter });
     // One key set for MCP access tokens and page ID tokens: same issuer.
@@ -272,7 +276,7 @@ class AppModule {
         {
           provide: RATE_LIMITER,
           inject: [RATE_COUNTER, AUDIT_LOG],
-          useFactory: (rateCounter: RateCounter, audit: AuditLog) => new EndpointRateLimiter({ rateCounter, audit, wallClock: () => new Date(), logger }),
+          useFactory: (rateCounter: RateCounter, audit: AuditLog) => new EndpointRateLimiter({ rateCounter, audit, wallClock, logger }),
         },
         {
           provide: CREDENTIAL_VAULT,
@@ -398,7 +402,7 @@ class AppModule {
                   newId: randomUUID,
                   now: () => performance.now(),
                   rateCounter,
-                  wallClock: () => new Date(),
+                  wallClock,
                   widgets,
                   publicUrl: env.publicUrl,
                   telemetry: pipelineTelemetry,

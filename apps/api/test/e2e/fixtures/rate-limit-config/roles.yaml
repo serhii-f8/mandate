@@ -1,0 +1,8 @@
+version: 1
+roles:
+  - id: catalog_reader
+    grants:
+      - operation: catalog.search_products
+role_mapping:
+  - group: catalog
+    roles: [catalog_reader]
