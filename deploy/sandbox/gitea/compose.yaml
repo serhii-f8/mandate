@@ -1,0 +1,36 @@
+# Gitea 28.3.0 sandbox for acceptance runs and the gitea-issues preset's contract recordings (Phase 9).
+# Development only: the admin password is a visibly fake default. SQLite, no SSH, no registration.
+#   bash deploy/sandbox/gitea/up.sh                       # idempotent; prints "GITEA UP <s> <version>"
+#   GITEA_SANDBOX_TOKEN=<token> node deploy/sandbox/gitea/seed.mjs   # org acme, repos, labels, issues
+#   bash deploy/sandbox/gitea/token.sh [scopes]           # prints a fresh admin token
+#   bash deploy/sandbox/gitea/down.sh                     # stop (add -v to drop the data)
+# The container joins the external network `aiops-sandbox` as `gitea-sandbox`, so an api
+# container on that network reaches http://gitea-sandbox:3000/api/v1.
+name: aiops-gitea-sandbox
+services:
+  gitea:
+    image: gitea/gitea:28.3.0
+    environment:
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__server__ROOT_URL: http://gitea-sandbox:3000/
+      GITEA__server__DISABLE_SSH: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+    ports:
+      - "127.0.0.1:${AIOPS_GITEA_PORT:-4391}:3000"
+    volumes:
+      - gitea-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/healthz"]
+      interval: 3s
+      retries: 40
+    networks:
+      default: {}
+      aiops-sandbox:
+        aliases: [gitea-sandbox]
+    restart: unless-stopped
+networks:
+  aiops-sandbox:
+    external: true
+volumes:
+  gitea-data:
