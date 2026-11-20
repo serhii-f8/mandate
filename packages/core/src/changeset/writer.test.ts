@@ -6,6 +6,8 @@ import {
   type BulkItemState,
   type BulkWriter,
   type Clock,
+  type DirectRecordState,
+  type DirectWriter,
   ManifestBatchWriter,
   POLL_GIVE_UP_MS,
   RetryableWriteError,
@@ -36,6 +38,7 @@ class FakeReader implements UpstreamReader {
 class FakeBulk implements BulkWriter {
   readonly submitted: Readonly<Record<string, unknown>>[][] = [];
   readonly statusCalls: string[] = [];
+  readonly statusKeys: (readonly string[])[] = [];
   submits: SubmitResult[] = [{ ok: true, batchId: 'u-1' }];
   statuses: StatusResult[] = [{ ok: true, items: [{ index: 0, state: 'ok' }] }];
   constructor(private readonly events: string[]) {}
@@ -46,9 +49,10 @@ class FakeBulk implements BulkWriter {
     if (next === undefined) throw new Error('FakeBulk: no submit answer');
     return Promise.resolve(next);
   }
-  status(batchId: string): Promise<StatusResult> {
+  status(batchId: string, keys: readonly string[]): Promise<StatusResult> {
     this.events.push('status');
     this.statusCalls.push(batchId);
+    this.statusKeys.push([...keys]);
     const next = this.statuses.length > 1 ? this.statuses.shift() : this.statuses[0];
     if (next === undefined) throw new Error('FakeBulk: no status answer');
     return Promise.resolve(next);
@@ -843,6 +847,209 @@ describe('EXE-8 ManifestBatchWriter reverse', () => {
       { targetId: 'B', status: 'written', error: 'already_applied' },
       { targetId: 'C', status: 'skipped', error: 'drift' },
       { targetId: 'D', status: 'skipped', error: 'gone' },
+    ]);
+  });
+});
+
+// ---- Direct write mode (OPS-5, OPS-6): per-record and code writers answer one state per record. ----
+
+type DirectResult = Awaited<ReturnType<DirectWriter['write']>>;
+
+class FakeDirect implements DirectWriter {
+  readonly written: Readonly<Record<string, unknown>>[][] = [];
+  readonly heartbeats: (() => void)[] = [];
+  /** One answer per call; the last one repeats. */
+  answers: DirectResult[] = [{ ok: true, states: ['ok'] }];
+  constructor(private readonly events: string[]) {}
+  write(records: readonly Readonly<Record<string, unknown>>[], heartbeat: () => void): Promise<DirectResult> {
+    this.events.push('write');
+    this.written.push([...records]);
+    this.heartbeats.push(heartbeat);
+    const next = this.answers.length > 1 ? this.answers.shift() : this.answers[0];
+    if (next === undefined) throw new Error('FakeDirect: no answer');
+    return Promise.resolve(next);
+  }
+}
+
+function directSetup(direction?: WriteDirection) {
+  const events: string[] = [];
+  const reader = new FakeReader(events);
+  const direct = new FakeDirect(events);
+  const clock = new FakeClock(events);
+  const batch = new FakeBatch(events);
+  const writer = new ManifestBatchWriter({
+    operation,
+    readFieldsArg: 'fields',
+    readerFor: () => reader,
+    directFor: () => direct,
+    clock,
+    ...(direction === undefined ? {} : { direction }),
+  });
+  return { events, reader, direct, clock, batch, writer };
+}
+
+const directStates = (...s: DirectRecordState[]): DirectResult => ({ ok: true, states: s });
+
+describe('OPS-6 OPS-5 direct write mode', () => {
+  it('OPS-6 writes only items still at before and verifies ok items with one read', async () => {
+    const { events, reader, direct, batch, writer } = directSetup();
+    reader.pages = [
+      page(product('A', 'old', { status: 2 }), product('B', 'new'), product('C', 'other'), product('E', 'old')),
+      page(product('A', 'new'), product('E', 'new')),
+    ];
+    direct.answers = [directStates('ok', 'ok')];
+    const ids = ['A', 'B', 'C', 'D', 'E'];
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(ids), items: ids.map(item), batch });
+    expect(direct.written).toEqual([
+      [
+        { sku: 'A', status: 2, description: 'new' },
+        { sku: 'E', description: 'new' },
+      ],
+    ]);
+    expect(events).toEqual(['read', 'write', 'read']);
+    expect(batch.recorded).toEqual([]);
+    expect(reader.calls[1]?.args).toMatchObject({ skus: ['A', 'E'], fields: ['sku', 'description'] });
+    expect(outcomes).toEqual([
+      { targetId: 'A', status: 'written' },
+      { targetId: 'B', status: 'written', error: 'already_applied' },
+      { targetId: 'C', status: 'skipped', error: 'drift' },
+      { targetId: 'D', status: 'skipped', error: 'gone' },
+      { targetId: 'E', status: 'written' },
+    ]);
+  });
+
+  it('OPS-6 NFR-2 a retriable state throws write_retriable; the retry classifies the ok items as already_applied and sends only the rest', async () => {
+    const { reader, direct, batch, writer } = directSetup();
+    const ids = ['A', 'B', 'C'];
+    // Attempt 1 wrote A, B answered retriable, and the writer started nothing for C (F10): the
+    // answer is shorter than the records, and the thrown retry covers that tail.
+    reader.pages = [
+      page(product('A', 'old'), product('B', 'old'), product('C', 'old')),
+      page(product('A', 'new'), product('B', 'old'), product('C', 'old')),
+      page(product('B', 'new'), product('C', 'new')),
+    ];
+    direct.answers = [directStates('ok', 'retriable'), directStates('ok', 'ok')];
+    const input = { changeset: changesetFor(ids), items: ids.map(item), batch };
+    await expect(writer.writeBatch(input)).rejects.toMatchObject({ name: 'RetryableWriteError', code: 'write_retriable' });
+    expect(reader.calls).toHaveLength(1);
+    const outcomes = await writer.writeBatch(input);
+    expect(direct.written).toEqual([
+      [
+        { sku: 'A', description: 'new' },
+        { sku: 'B', description: 'new' },
+        { sku: 'C', description: 'new' },
+      ],
+      [
+        { sku: 'B', description: 'new' },
+        { sku: 'C', description: 'new' },
+      ],
+    ]);
+    expect(batch.recorded).toEqual([]);
+    expect(outcomes).toEqual([
+      { targetId: 'A', status: 'written', error: 'already_applied' },
+      { targetId: 'B', status: 'written' },
+      { targetId: 'C', status: 'written' },
+    ]);
+  });
+
+  it('OPS-6 a failed state is upstream_failed; a missing state is no_outcome', async () => {
+    const { reader, direct, batch, writer } = directSetup();
+    const ids = ['A', 'B', 'C'];
+    reader.pages = [page(product('A', 'old'), product('B', 'old'), product('C', 'old')), page(product('A', 'new'))];
+    direct.answers = [directStates('ok', 'failed')];
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(ids), items: ids.map(item), batch });
+    expect(reader.calls[1]?.args).toMatchObject({ skus: ['A'] });
+    expect(outcomes).toEqual([
+      { targetId: 'A', status: 'written' },
+      { targetId: 'B', status: 'failed', error: 'upstream_failed' },
+      { targetId: 'C', status: 'failed', error: 'no_outcome' },
+    ]);
+  });
+
+  it('OPS-6 a non-retriable invalid_response answer is no_outcome for every to-write item, any other is upstream_rejected; a retriable answer throws write_failed', async () => {
+    const run = async (answer: DirectResult) => {
+      const s = directSetup();
+      s.reader.pages = [page(product('A', 'old'), product('B', 'new'))];
+      s.direct.answers = [answer];
+      const outcomes = await s.writer.writeBatch({ changeset: changesetFor(['A', 'B']), items: [item('A'), item('B')], batch: s.batch });
+      expect(s.reader.calls).toHaveLength(1);
+      return outcomes;
+    };
+    expect(await run({ ok: false, code: 'invalid_response', retriable: false })).toEqual([
+      { targetId: 'A', status: 'failed', error: 'no_outcome' },
+      { targetId: 'B', status: 'written', error: 'already_applied' },
+    ]);
+    expect(await run({ ok: false, code: 'mapping', retriable: false })).toEqual([
+      { targetId: 'A', status: 'failed', error: 'upstream_rejected' },
+      { targetId: 'B', status: 'written', error: 'already_applied' },
+    ]);
+    await expect(run({ ok: false, code: 'timeout', retriable: true })).rejects.toMatchObject({
+      name: 'RetryableWriteError',
+      code: 'write_failed',
+    });
+  });
+
+  it('EXE-4 a recorded submission in direct mode ends every to-write item as no_outcome without writing', async () => {
+    const { events, direct, batch, writer } = directSetup();
+    batch.submission = {
+      upstreamBatchId: 'u-7',
+      plan: [
+        { targetId: 'B', action: 'outcome', status: 'skipped', error: 'drift' },
+        { targetId: 'A', action: 'write' },
+      ],
+    };
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(['A', 'B']), items: [item('A'), item('B')], batch });
+    expect(direct.written).toEqual([]);
+    expect(events).toEqual([]);
+    expect(outcomes).toEqual([
+      { targetId: 'B', status: 'skipped', error: 'drift' },
+      { targetId: 'A', status: 'failed', error: 'no_outcome' },
+    ]);
+  });
+
+  it('EXE-8 reverse direction writes before over after and reports already_restored', async () => {
+    const { reader, direct, batch, writer } = directSetup('reverse');
+    reader.pages = [page(product('A', 'new'), product('B', 'old')), page(product('A', 'old'))];
+    const outcomes = await writer.writeBatch({ changeset: changesetFor(['A', 'B']), items: [item('A'), item('B')], batch });
+    expect(direct.written).toEqual([[{ sku: 'A', description: 'old' }]]);
+    expect(outcomes).toEqual([
+      { targetId: 'A', status: 'written' },
+      { targetId: 'B', status: 'written', error: 'already_restored' },
+    ]);
+  });
+
+  it('NFR-2 the heartbeat passed to the direct writer is the batch heartbeat', async () => {
+    const { reader, direct, batch, writer } = directSetup();
+    reader.pages = [page(product('A', 'old')), page(product('A', 'new'))];
+    await writer.writeBatch({ changeset: changesetFor(['A']), items: [item('A')], batch });
+    const before = batch.heartbeats;
+    direct.heartbeats[0]?.();
+    expect(batch.heartbeats).toBe(before + 1);
+  });
+
+  it('OPS-6 bulk status is asked with the to-write target IDs in plan order', async () => {
+    const { bulk, reader, batch, writer } = setup();
+    reader.pages = [page(product('C', 'old'), product('B', 'new'), product('A', 'old')), page(product('C', 'new'), product('A', 'new'))];
+    bulk.statuses = [states('ok', 'ok')];
+    await writer.writeBatch({ changeset: changesetFor(['C', 'B', 'A']), items: ['C', 'B', 'A'].map(item), batch });
+    expect(bulk.statusKeys).toEqual([['C', 'A']]);
+
+    // Resume from a recorded plan: the keys come from the plan, not from a read.
+    const resumed = setup();
+    resumed.batch.submission = {
+      upstreamBatchId: 'u-9',
+      plan: [
+        { targetId: 'Z', action: 'write' },
+        { targetId: 'Y', action: 'outcome', status: 'skipped', error: 'gone' },
+        { targetId: 'X', action: 'write' },
+      ],
+    };
+    resumed.bulk.statuses = [{ ok: true, items: [] }, states('ok', 'failed')];
+    resumed.reader.pages = [page(product('Z', 'new'))];
+    await resumed.writer.writeBatch({ changeset: changesetFor(['Z', 'Y', 'X']), items: ['Z', 'Y', 'X'].map(item), batch: resumed.batch });
+    expect(resumed.bulk.statusKeys).toEqual([
+      ['Z', 'X'],
+      ['Z', 'X'],
     ]);
   });
 });

@@ -135,7 +135,7 @@ describe('OPS-6 EXE-4 bulk writer port over the connection write adapter', () =>
   it('OPS-6 passes connection settings, the bulk mapping, the records and the stored credential to the adapter', async () => {
     const { adapter, writer } = await setup();
     await writer.submit(RECORDS);
-    await writer.status('b-1');
+    await writer.status('b-1', ['A']);
     const binding = CONFIG.bindings.get('catalog.update_content');
     if (binding?.kind !== 'http') throw new Error('fixture has no HTTP binding');
     const connection = CONFIG.connectionSettings.get('magento');
@@ -153,22 +153,28 @@ describe('OPS-6 EXE-4 bulk writer port over the connection write adapter', () =>
     expect(adapter.statuses[0]?.credential).toMatchObject({ ref: 'magento-integration', scheme: 'bearer' });
   });
 
+  it('OPS-6 passes the status keys (to-write target IDs in plan order) to the adapter', async () => {
+    const { adapter, writer } = await setup();
+    await writer.status('b-1', ['C', 'A', 'B']);
+    expect(adapter.statuses[0]?.keys).toEqual(['C', 'A', 'B']);
+  });
+
   it('EXE-4 keeps code and retriable, drops status and duration from the port result', async () => {
     const ok = await setup();
     expect(await ok.writer.submit(RECORDS)).toEqual({ ok: true, batchId: 'b-1' });
-    expect(await ok.writer.status('b-1')).toEqual({ ok: true, items: [{ index: 0, state: 'ok' }] });
+    expect(await ok.writer.status('b-1', ['A'])).toEqual({ ok: true, items: [{ index: 0, state: 'ok' }] });
 
     const failed = await setup(
       { ok: false, code: 'http_status', status: 503, durationMs: 9, retriable: true },
       { ok: false, code: 'rejected', status: 404, durationMs: 3, retriable: false },
     );
     expect(await failed.writer.submit(RECORDS)).toEqual({ ok: false, code: 'http_status', retriable: true });
-    expect(await failed.writer.status('b-1')).toEqual({ ok: false, code: 'rejected', retriable: false });
+    expect(await failed.writer.status('b-1', ['A'])).toEqual({ ok: false, code: 'rejected', retriable: false });
   });
 
   it('EXE-4 a status http_status failure keeps its HTTP status, so the writer can retry a 401 or 403', async () => {
     const unauthorized = await setup(SUBMIT_OK, { ok: false, code: 'http_status', status: 401, durationMs: 3, retriable: false });
-    expect(await unauthorized.writer.status('b-1')).toEqual({ ok: false, code: 'http_status', status: 401, retriable: false });
+    expect(await unauthorized.writer.status('b-1', ['A'])).toEqual({ ok: false, code: 'http_status', status: 401, retriable: false });
   });
 
   it('OPS-6 is undefined for an operation without bulk and for an unknown operation', () => {
@@ -181,7 +187,7 @@ describe('OPS-6 EXE-4 bulk writer port over the connection write adapter', () =>
   it('SEC-3 a credential of an unknown scheme answers credential_unusable without calling the adapter', async () => {
     const { adapter, writer, lines } = await setup(SUBMIT_OK, STATUS_OK, 'carrier-pigeon');
     expect(await writer.submit(RECORDS)).toEqual({ ok: false, code: 'credential_unusable', retriable: false });
-    expect(await writer.status('b-1')).toEqual({ ok: false, code: 'credential_unusable', retriable: false });
+    expect(await writer.status('b-1', ['A'])).toEqual({ ok: false, code: 'credential_unusable', retriable: false });
     expect(adapter.submits).toEqual([]);
     expect(adapter.statuses).toEqual([]);
     expect(lines).toEqual([]);
@@ -190,7 +196,7 @@ describe('OPS-6 EXE-4 bulk writer port over the connection write adapter', () =>
   it('SEC-3 logs one record per call with identifiers, method, status and duration only', async () => {
     const { writer, lines } = await setup(SUBMIT_OK, { ok: false, code: 'http_status', status: 503, durationMs: 4, retriable: true });
     await writer.submit(RECORDS);
-    await writer.status('b-1');
+    await writer.status('b-1', ['A']);
     expect(lines).toEqual([
       { correlationId: 'corr-w', operation: 'catalog.update_content', connection: 'magento', method: 'POST', status: 202, durationMs: 11 },
       { correlationId: 'corr-w', operation: 'catalog.update_content', connection: 'magento', method: 'GET', status: 503, durationMs: 4, errorCode: 'http_status' },

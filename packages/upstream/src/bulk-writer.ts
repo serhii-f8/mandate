@@ -64,10 +64,16 @@ export function createBulkWriter(deps: BulkWriterDeps): BulkWriter | undefined {
       log(mapping.method, outcome);
       return outcome.ok ? { ok: true, batchId: outcome.batchId } : failure(outcome);
     },
-    async status(batchId) {
+    async status(batchId, keys) {
       const credential = await connectionCredential(deps.vault, connection.credentialRef);
       if (credential === 'unusable') return UNUSABLE;
-      const outcome = await adapter.bulkStatus({ connection, mapping, batchId, ...(credential === undefined ? {} : { credential }) });
+      const outcome = await adapter.bulkStatus({
+        connection,
+        mapping,
+        batchId,
+        keys,
+        ...(credential === undefined ? {} : { credential }),
+      });
       log(bulk.status.method, outcome);
       return outcome.ok ? { ok: true, items: outcome.items.map(({ index, state }) => ({ index, state })) } : statusFailure(outcome);
     },

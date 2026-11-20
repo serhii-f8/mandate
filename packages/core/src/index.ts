@@ -148,6 +148,8 @@ export {
   classifyForRollback,
   classifyForWrite,
   type Clock,
+  type DirectRecordState,
+  type DirectWriter,
   ManifestBatchWriter,
   type ManifestBatchWriterDeps,
   POLL_FACTOR,
