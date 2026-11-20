@@ -158,6 +158,18 @@ describe('CONN-7 connection test service', () => {
     expect(adapter.reads[0]?.credential).toBeUndefined();
   });
 
+  it('CONN-7 OPS-5 a code-bound test operation reports no upstream binding without calling the upstream', async () => {
+    const { adapter, service } = await setup();
+    const configuration: LoadedConfiguration = {
+      ...CONFIG,
+      bindings: new Map([...CONFIG.bindings, ['catalog.search_products', { kind: 'code', connection: 'magento', preset: 'magento', name: 'search', response: { maxItems: 100 } }]]),
+    };
+    const report = await service.run('magento', 'cli', 'cli', 'corr-code', configuration);
+    expect(report).toMatchObject({ ok: false, operation: 'catalog.search_products', code: 'mapping', message: 'the test operation has no upstream binding' });
+    expect(adapter.reads).toEqual([]);
+    expect(adapter.detections).toEqual([]);
+  });
+
   it('CONN-7 uses the configuration snapshot it is given', async () => {
     const { adapter, service } = await setup();
     const report = await service.run('magento', 'cli', 'cli', 'corr-6', { ...CONFIG, connectionTests: new Map() });

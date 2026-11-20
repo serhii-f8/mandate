@@ -15,7 +15,7 @@ operations:
       type: object
       properties:
         state: &state { type: string, enum: [open, closed], description: Item state. }
-        page: { type: integer, minimum: 1, description: Page number, starting at 1. }
+        page: { type: integer, minimum: 1, description: 'Page number, starting at 1.' }
         per_page: { type: integer, minimum: 1, maximum: 100, description: Items per page (1-100). }
         fields: &fields
           type: array

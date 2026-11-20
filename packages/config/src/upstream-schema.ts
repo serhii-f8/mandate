@@ -194,20 +194,55 @@ export const httpUpstreamSchema = z
 export const upstreamSchema = httpUpstreamSchema;
 export type UpstreamConfig = z.output<typeof httpUpstreamSchema>;
 
+/** OPS-5: a code operation name, as `parsePresetModule` of `@aiops/connector-sdk` accepts it. */
+export const CODE_OPERATION_NAME = /^[a-z][a-z0-9_]{0,62}$/;
+
+/** OPS-5: the upstream of a preset operation served by an operation of the preset's code module. */
+export const codeUpstreamSchema = z.strictObject({
+  code: z.string().regex(CODE_OPERATION_NAME),
+  response: z
+    .strictObject({
+      fields_from_arg: z.string().min(1).max(128).optional(),
+      max_items: z.number().int().min(1).max(500).default(100),
+    })
+    .optional(),
+});
+export type CodeUpstreamConfig = z.output<typeof codeUpstreamSchema>;
+
+/** True for the `{ code }` variant (OPS-5). */
+export function isCodeUpstream(u: UpstreamConfig | McpUpstreamConfig | CodeUpstreamConfig): u is CodeUpstreamConfig {
+  return Object.hasOwn(u, 'code');
+}
+
+/** The response mapping of a code binding: the projection argument and the item cap. */
+export function toCodeResponse(r: CodeUpstreamConfig['response']): ResponseMapping {
+  if (r === undefined) return { maxItems: 100 };
+  return { ...(r.fields_from_arg === undefined ? {} : { fieldsFromArg: r.fields_from_arg }), maxItems: r.max_items };
+}
+
 /** True when the input is an object with an own `tool` or `pin` key: the MCP variant. */
 function isMcpShaped(input: unknown): boolean {
   return typeof input === 'object' && input !== null && !Array.isArray(input) && (Object.hasOwn(input, 'tool') || Object.hasOwn(input, 'pin'));
 }
 
+/** True when the input is an object with an own `code` key: the code variant (OPS-5). */
+function isCodeShaped(input: unknown): boolean {
+  return typeof input === 'object' && input !== null && !Array.isArray(input) && Object.hasOwn(input, 'code');
+}
+
 /**
  * An operation's `upstream`: `{ tool, pin }` (CONN-1) when the object has a `tool` or `pin`
- * key, the HTTP mapping otherwise. Choosing by key, not `z.union`, keeps each variant's
+ * key, `{ code }` (OPS-5) when it has a `code` key, the HTTP mapping otherwise. Choosing by key, not `z.union`, keeps each variant's
  * issues at their own paths (`upstream.pin`, `upstream: unknown key: method`) instead of
  * one "does not match any allowed form". `reportInput` as `PARSE_PARAMS` of `schema.ts`
  * (not imported: `schema.ts` imports this module), so a missing key still reads "is required".
  */
-export const operationUpstreamSchema = z.unknown().transform((input, ctx): UpstreamConfig | McpUpstreamConfig => {
-  const result = isMcpShaped(input) ? mcpUpstreamSchema.safeParse(input, { reportInput: true }) : httpUpstreamSchema.safeParse(input, { reportInput: true });
+export const operationUpstreamSchema = z.unknown().transform((input, ctx): UpstreamConfig | McpUpstreamConfig | CodeUpstreamConfig => {
+  const result = isMcpShaped(input)
+    ? mcpUpstreamSchema.safeParse(input, { reportInput: true })
+    : isCodeShaped(input)
+      ? codeUpstreamSchema.safeParse(input, { reportInput: true })
+      : httpUpstreamSchema.safeParse(input, { reportInput: true });
   if (result.success) return result.data;
   // Re-raised as they are: Zod prefixes their paths with `upstream`, as it does for nested
   // schemas. The cast only widens `input` (reported because of `reportInput`) to the raw-issue

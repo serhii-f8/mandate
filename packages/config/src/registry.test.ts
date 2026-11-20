@@ -8,6 +8,7 @@ import { formatIssue, type ConfigIssue } from './issues.js';
 import type { CatalogEntry } from '@aiops/connector-sdk';
 import type { HttpOperationBinding } from './registry.js';
 import { loadConfigurationDirectory, loadConfigurationSources, type LoadedConfiguration, type LoadOptions, type LoadResult } from './load.js';
+import { FIXTURE_CONFIG, FIXTURE_PRESET_FILE, loadCodeFixture, presetWithoutUpdate } from '../test/code-fixture.js';
 
 const FIXTURES = fileURLToPath(new URL('../test/fixtures', import.meta.url));
 const PRESET_DIRS = [join(FIXTURES, 'preset-dir')];
@@ -767,6 +768,187 @@ notifications:
     const found = issues(await sources({ 'roles.yaml': 'version: 1\nroles:\n  - { id: admin, grants: [], manage_credentials: [chat-hook] }\n' }));
     expect(found).toEqual([
       expect.objectContaining({ file: 'roles.yaml', path: 'roles[0].manage_credentials[0]', message: 'names a credential that no connection or notification uses' }),
+    ]);
+  });
+});
+
+describe('OPS-5 code-bound operations', () => {
+  /** Issues at `path` of the fixture preset file. */
+  const presetIssuesAt = (result: LoadResult, path: string): string[] =>
+    issues(result)
+      .filter((i) => i.file === FIXTURE_PRESET_FILE && i.path === path)
+      .map((i) => i.message);
+
+  it('OPS-5 a preset operation with upstream.code binds to the module operation and is listed in codeOperations', async () => {
+    const config = ok(await loadCodeFixture(dirs, { preset: await presetWithoutUpdate() }));
+    const binding = config.bindings.get('fixture.get_many');
+    expect(binding).toEqual({ kind: 'code', connection: 'items', preset: 'fixture', name: 'get_many', response: { fieldsFromArg: 'fields', maxItems: 100 } });
+    // The binding carries no function, so `config diff` and `canonicalJson` stay valid.
+    expect(JSON.parse(JSON.stringify(binding))).toEqual(binding);
+    expect(config.bindings.get('fixture.ping')).toEqual({ kind: 'code', connection: 'items', preset: 'fixture', name: 'ping', response: { maxItems: 100 } });
+    expect([...config.codeOperations.keys()].sort()).toEqual(['fixture.boom', 'fixture.get_many', 'fixture.ping', 'fixture.set_tags']);
+    expect(Object.fromEntries([...config.codeOperations].map(([id, op]) => [id, op.kind]))).toEqual({
+      'fixture.get_many': 'read',
+      'fixture.set_tags': 'write',
+      'fixture.ping': 'call',
+      'fixture.boom': 'read',
+    });
+    const ping = config.codeOperations.get('fixture.ping');
+    expect(ping?.kind === 'call' && typeof ping.call).toBe('function');
+    // The HTTP read keeps its HTTP binding and is not a code operation.
+    expect(config.bindings.get('fixture.search')?.kind).toBe('http');
+  });
+
+  it('OPS-5 a disabled code operation has no binding and is not in codeOperations', async () => {
+    const config = ok(
+      await loadCodeFixture(dirs, {
+        preset: await presetWithoutUpdate(),
+        config: { 'overrides.yaml': 'version: 1\noverrides:\n  - { operation: fixture.ping, enabled: false }\n' },
+      }),
+    );
+    expect(config.bindings.has('fixture.ping')).toBe(false);
+    expect(config.codeOperations.has('fixture.ping')).toBe(false);
+    expect(config.disabled).toContainEqual({ key: 'fixture.ping', connection: 'items', method: 'CODE', path: 'ping' });
+  });
+
+  it('OPS-5 upstream.code in a configuration operation is refused', async () => {
+    const result = await loadCodeFixture(dirs, {
+      preset: await presetWithoutUpdate(),
+      config: {
+        'ops.yaml': `version: 1
+operations:
+  - id: own.ping
+    connection: items
+    risk: write_opaque
+    description: Ping.
+    input_schema: { type: object, properties: { message: { type: string } } }
+    upstream: { code: ping }
+`,
+      },
+    });
+    expect(issues(result)).toEqual([expect.objectContaining({ file: 'ops.yaml', path: 'operations[0].upstream.code', message: 'code operations are allowed in preset operations only' })]);
+  });
+
+  it('OPS-5 upstream.code without a code module, or naming an unknown operation, is refused', async () => {
+    const noModule = await loadCodeFixture(dirs, {
+      preset: await presetWithoutUpdate(),
+      packageJson: (json) => ({ ...json, aiops: { preset: 'preset.yaml', sdk: '^0.6.0' } }),
+    });
+    for (const index of [1, 2, 3, 4]) {
+      expect(presetIssuesAt(noModule, `operations[${index}].upstream.code`)).toEqual(['the preset has no code module (package.json aiops.code)']);
+    }
+
+    const base = await presetWithoutUpdate();
+    for (const name of ['nope', 'constructor', 'to_string']) {
+      const unknown = await loadCodeFixture(dirs, { preset: base.replace('code: boom', `code: ${name}`) });
+      expect(issues(unknown)).toEqual([
+        expect.objectContaining({ file: FIXTURE_PRESET_FILE, path: 'operations[4].upstream.code', message: 'is not an operation of the preset code module' }),
+      ]);
+    }
+
+    // The schema refuses a name outside ^[a-z][a-z0-9_]{0,62}$, and keys other than code and response.
+    const badName = await loadCodeFixture(dirs, { preset: base.replace('code: boom', 'code: Boom') });
+    expect(presetIssuesAt(badName, 'operations[4].upstream.code')).toHaveLength(1);
+    const extra = await loadCodeFixture(dirs, { preset: base.replace('upstream: { code: boom }', 'upstream: { code: boom, method: GET }') });
+    expect(issues(extra).some((i) => i.path.startsWith('operations[4].upstream'))).toBe(true);
+  });
+
+  it('OPS-5 the code kind must match the risk', async () => {
+    const base = await presetWithoutUpdate();
+    const cases: { name: string; edit: (text: string) => string; index: number; message?: string }[] = [
+      // read needs read
+      { name: 'read with a call', edit: (t) => t.replace('code: boom', 'code: ping'), index: 4, message: 'is a call code operation; risk read needs a read code operation' },
+      // write needs write
+      { name: 'write with a read', edit: (t) => t.replace('code: set_tags', 'code: get_many'), index: 2, message: 'is a read code operation; risk write needs a write code operation' },
+      // destructive with a manifest needs write
+      {
+        name: 'destructive with a manifest and a call',
+        edit: (t) => t.replace('upstream: { code: set_tags }', 'upstream: { code: ping }').replace(/(id: fixture\.set_tags\n {4})risk: write/, '$1risk: destructive'),
+        index: 2,
+        message: 'is a call code operation; risk destructive needs a write code operation',
+      },
+      { name: 'destructive with a manifest and a write', edit: (t) => t.replace(/(id: fixture\.set_tags\n {4})risk: write/, '$1risk: destructive'), index: 2 },
+      // write_opaque needs call
+      {
+        name: 'write_opaque with a write',
+        edit: (t) => t.replace('upstream: { code: ping }', 'upstream: { code: set_tags }'),
+        index: 3,
+        message: 'is a write code operation; risk write_opaque needs a call code operation',
+      },
+      // destructive without a manifest needs call
+      {
+        name: 'destructive without a manifest and a write',
+        edit: (t) => t.replace('risk: write_opaque', 'risk: destructive').replace('upstream: { code: ping }', 'upstream: { code: set_tags }'),
+        index: 3,
+        message: 'is a write code operation; risk destructive needs a call code operation',
+      },
+      { name: 'destructive without a manifest and a call', edit: (t) => t.replace('risk: write_opaque', 'risk: destructive'), index: 3 },
+    ];
+    for (const c of cases) {
+      const text = c.edit(base);
+      expect(text, c.name).not.toBe(base);
+      const result = await loadCodeFixture(dirs, { preset: text });
+      if (c.message === undefined) {
+        expect(result.ok, `${c.name}: ${result.ok ? '' : result.issues.map(formatIssue).join('\n')}`).toBe(true);
+      } else {
+        expect(issues(result), c.name).toEqual([expect.objectContaining({ file: FIXTURE_PRESET_FILE, path: `operations[${c.index}].risk`, message: c.message })]);
+      }
+    }
+  });
+
+  it('OPS-5 a code operation requires input_schema; fields_arg must equal response.fields_from_arg', async () => {
+    const base = await presetWithoutUpdate();
+    const ping = base.indexOf('  - id: fixture.ping\n');
+    const pingSchemaStart = base.indexOf('    input_schema:\n', ping);
+    const pingSchemaEnd = base.indexOf('    upstream: { code: ping }', ping);
+    const noSchema = await loadCodeFixture(dirs, { preset: base.slice(0, pingSchemaStart) + base.slice(pingSchemaEnd) });
+    expect(issues(noSchema)).toEqual([expect.objectContaining({ file: FIXTURE_PRESET_FILE, path: 'operations[3].input_schema', message: 'is required for a code operation' })]);
+
+    const notProjected = await loadCodeFixture(dirs, { preset: base.replace('      code: get_many\n      response: { fields_from_arg: fields }\n', '      code: get_many\n') });
+    expect(presetIssuesAt(notProjected, 'operations[1].fields_arg')).toEqual(['must equal upstream.response.fields_from_arg, so the response is projected by the same argument']);
+
+    const otherArg = await loadCodeFixture(dirs, { preset: base.replace('response: { fields_from_arg: fields }\n', 'response: { fields_from_arg: ids }\n') });
+    expect(presetIssuesAt(otherArg, 'operations[1].fields_arg')).toEqual(['must equal upstream.response.fields_from_arg, so the response is projected by the same argument']);
+
+    const unknownArg = await loadCodeFixture(dirs, { preset: base.replace('response: { fields_from_arg: fields }\n', 'response: { fields_from_arg: nope }\n') });
+    expect(presetIssuesAt(unknownArg, 'operations[1].upstream.response.fields_from_arg')).toEqual(['names an argument that is not in input_schema']);
+
+    const noFieldsArg = await loadCodeFixture(dirs, { preset: base.replace('fields_arg: fields\n    upstream:\n      code: get_many', 'upstream:\n      code: get_many') });
+    expect(presetIssuesAt(noFieldsArg, 'operations[1].upstream.response.fields_from_arg')).toEqual(['requires fields_arg naming the same argument']);
+  });
+
+  it('POL-2 sentArguments of a code operation is every argument', async () => {
+    // A scope on an argument that no template sends would be refused for an HTTP operation.
+    const config = ok(
+      await loadCodeFixture(dirs, {
+        preset: await presetWithoutUpdate(),
+        config: {
+          'config.yaml': FIXTURE_CONFIG.replace(
+            '      - { operation: fixture.search }\n',
+            '      - { operation: fixture.search }\n      - { operation: fixture.ping, scope: { message: [hello] } }\n    approval: { steps: [{ role: integration_admin }] }\n',
+          ),
+        },
+      }),
+    );
+    expect(config.codeOperations.has('fixture.ping')).toBe(true);
+  });
+
+  it('OPS-5 CONN-1 upstream.code on an mcp connection is refused with the mcp-connection message', async () => {
+    const result = await sources({
+      'mcp.yaml': `version: 1
+connections:
+  - { id: tools, adapter: mcp, mcp_url: https://tools.example.test/mcp }
+operations:
+  - id: tools.ping
+    connection: tools
+    risk: write_opaque
+    description: Ping.
+    input_schema: { type: object, properties: { message: { type: string } } }
+    upstream: { code: ping }
+`,
+    });
+    expect(issues(result).filter((i) => i.file === 'mcp.yaml')).toEqual([
+      expect.objectContaining({ path: 'operations[0].upstream', message: 'an operation of an mcp connection needs upstream: { tool, pin }' }),
     ]);
   });
 });

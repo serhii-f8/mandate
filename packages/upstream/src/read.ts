@@ -104,6 +104,9 @@ export async function performRead(
     return { ok: true, outcome, connection: binding.connection };
   }
 
+  // OPS-5: code reads run once the code runner is wired (plan task 10); until then, fail closed.
+  if (binding.kind === 'code') return { ok: false, code: 'not_bound' };
+
   // Configuration refuses a read that is not GET; checked again so nothing writes without a change-set (CS-1, MCP-4).
   if (binding.mapping.method !== 'GET') return { ok: false, code: 'not_get', connection: binding.connection };
   const credential = await connectionCredential(deps.vault, connection.credentialRef);

@@ -7,7 +7,7 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import type { ConnectionSettings, CredentialScheme, SpecIssue, ToolListOutcome, UpstreamResolver } from '@aiops/connector-sdk';
+import type { CodeOperation, ConnectionSettings, CredentialScheme, SpecIssue, ToolListOutcome, UpstreamResolver } from '@aiops/connector-sdk';
 import type { DisabledOperation, GrantDefinition, PolicyConfiguration, RoleApprovalRule, RoleDefinition, RoleNotifyTargets } from '@aiops/core';
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
 import { pathToString, type ConfigIssue } from './issues.js';
@@ -30,7 +30,7 @@ import {
   type RoleLimits,
 } from './schema.js';
 import { findSecretKeys, SECRET_MESSAGE } from './secrets.js';
-import { isSpecUrl, toAuthSettings, type AuthConfig, type ConnectionTestConfig } from './upstream-schema.js';
+import { isCodeUpstream, isSpecUrl, toAuthSettings, type AuthConfig, type ConnectionTestConfig } from './upstream-schema.js';
 import { parseYamlSource, type SourceDocument } from './yaml-source.js';
 
 /** Names of the platform's own tools (MCP-8 and `ping`); operations may not take them. */
@@ -77,6 +77,11 @@ export interface LoadedConfiguration {
   readonly bindings: ReadonlyMap<string, OperationBinding>;
   /** Catalog entries nothing enables, and operations disabled by an override (CONN-2, OPS-1). */
   readonly disabled: readonly DisabledOperation[];
+  /**
+   * OPS-5: the preset code-module operation of each enabled code-bound operation (binding
+   * `kind: 'code'`). Not part of `hash`: the code tree's digest is (CFG-4).
+   */
+  readonly codeOperations: ReadonlyMap<string, CodeOperation>;
   /** Every connection's settings; `kind` is set for each (CONN-1). */
   readonly connectionSettings: ReadonlyMap<string, ConnectionSettings>;
   /** CONN-4: seconds between pin checks, per `mcp` connection only. */
@@ -390,6 +395,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     mcpCatalogs,
     connectionIds: new Set(connectionById.keys()),
     connectionKinds: new Map([...connectionById].map(([id, c]) => [id, c.value.adapter] as const)),
+    codeModules: new Map([...resolvedPresets].flatMap(([id, preset]) => (preset.code === undefined ? [] : [[id, preset.code.module] as const]))),
     operationsIncomplete,
     reserved: new Set(options.reservedToolNames ?? BUILTIN_TOOL_NAMES),
     compile,
@@ -400,7 +406,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   // credential overwrites last, so the key would be lost without an error.
   for (const { located } of registry.all.values()) {
     const u = located.value.upstream;
-    if (isMcpUpstream(u) || u.idempotency === undefined) continue;
+    if (isMcpUpstream(u) || isCodeUpstream(u) || u.idempotency === undefined) continue;
     const auth = states.get(located.connection)?.auth;
     if (auth?.scheme === 'api_key' && auth.header.toLowerCase() === u.idempotency.header.toLowerCase()) {
       at(located.source, [...located.path, 'upstream', 'idempotency', 'header'], 'is set by the platform');
@@ -596,6 +602,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       ),
       bindings: registry.bindings,
       disabled: registry.disabled,
+      codeOperations: registry.codeOperations,
       connectionSettings: new Map([...states].map(([id, s]) => [id, s.settings] as const)),
       pinCheckSeconds: new Map(
         [...connectionById].flatMap(([id, { value: c }]) => (c.adapter === 'mcp' ? [[id, c.pin_check_seconds] as const] : [])),

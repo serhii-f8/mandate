@@ -1,7 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { rm } from 'node:fs/promises';
+import { afterEach, describe, expect, it } from 'vitest';
+import { loadCodeFixture, presetWithoutUpdate } from '../test/code-fixture.js';
 import type { ConfigIssue } from './issues.js';
 import { loadConfigurationSources, type LoadedConfiguration, type LoadResult } from './load.js';
 import type { HttpOperationBinding } from './registry.js';
+
+const dirs: string[] = [];
+afterEach(async () => {
+  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+});
 
 const CONNECTIONS = `version: 1
 connections:
@@ -253,6 +260,24 @@ describe('OPS-2 manifest configuration', () => {
     await expectIssue((t) => t.replace(SKUS, 'skus: { type: array }\n        name_like'), `${M}.ids_arg`, 'skus');
     await expectIssue((t) => t.replace(SKUS, 'skus: { type: array, items: { type: object } }\n        name_like'), `${M}.ids_arg`, 'skus');
     ok(await load({ 'write.yaml': WRITE.replace(SKUS, 'skus: { type: array, items: { type: integer } }\n        name_like') }));
+  });
+
+  it('OPS-2 read_before.ids_arg must be an array of strings', async () => {
+    const READ_SKUS = 'skus: { type: array, items: { type: string }, maxItems: 100 }';
+    const issue = await expectIssue((t) => t.replace(READ_SKUS, 'skus: { type: array, items: { type: integer }, maxItems: 100 }'), `${M}.read_before.ids_arg`, 'skus', 'reads.yaml');
+    expect(issue).toMatchObject({ file: 'write.yaml', message: 'must be an array of strings: target IDs are passed as strings' });
+    await expectIssue((t) => t.replace(READ_SKUS, "skus: { type: array, items: { type: [string, 'null'] }, maxItems: 100 }"), `${M}.read_before.ids_arg`, 'skus', 'reads.yaml');
+    // Items without a type stay accepted, as do absent items.
+    ok(await load({ 'reads.yaml': READS.replace(READ_SKUS, 'skus: { type: array, items: { enum: [sku-1, sku-2] }, maxItems: 100 }') }));
+    ok(await load({ 'reads.yaml': READS.replace(READ_SKUS, 'skus: { type: array, maxItems: 100 }') }));
+  });
+
+  it('OPS-2 OPS-5 a code read with fields_arg and an ids array serves as read_before', async () => {
+    const config = ok(await loadCodeFixture(dirs, { preset: await presetWithoutUpdate() }));
+    const setTags = config.policy.operations.find((o) => o.id === 'fixture.set_tags');
+    expect(setTags?.manifest?.readBefore).toMatchObject({ operation: 'fixture.get_many', idsArg: 'ids' });
+    expect(config.bindings.get('fixture.get_many')?.kind).toBe('code');
+    expect(config.bindings.get('fixture.set_tags')?.kind).toBe('code');
   });
 
   it('OPS-2 check 4: scope_args keys are write arguments referenced by the reads, and cover every grant scope argument', async () => {

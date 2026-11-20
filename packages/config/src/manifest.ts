@@ -234,7 +234,11 @@ export function checkManifests(input: ManifestCheckInput): void {
     checkArgs('read_before', rb.args, read);
     if (read?.schemaKnown === true) {
       const ids = propertySchema(read.definition.inputSchema, rb.ids_arg);
+      const items = ids?.items;
+      const itemType = typeof items === 'object' && items !== null ? (items as Record<string, unknown>).type : undefined;
       if (ids?.type !== 'array') mAt(['read_before', 'ids_arg'], `must name an array property of operation ${read.definition.id}`);
+      // Core passes target IDs to the read as strings; items without a type stay accepted.
+      else if (itemType !== undefined && itemType !== 'string') mAt(['read_before', 'ids_arg'], 'must be an array of strings: target IDs are passed as strings');
       else if (typeof ids.maxItems === 'number' && ids.maxItems < manifest.batch_size) {
         mAt(['batch_size'], `exceeds the maxItems of read_before.ids_arg in operation ${read.definition.id}`);
       }

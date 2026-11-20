@@ -155,3 +155,17 @@ describe('CONN-1 MCP reads through performRead', () => {
     expect(lines).toEqual([{ correlationId: 'corr-m', operation: 'shop.get_product', connection: 'shop', method: 'GET', status: 200, durationMs: 4 }]);
   });
 });
+
+describe('OPS-5 code bindings before the code runner is wired', () => {
+  it('OPS-5 answers not_bound for a code binding without reading or logging', async () => {
+    const configuration: LoadedConfiguration = {
+      ...CONFIG,
+      bindings: new Map([...CONFIG.bindings, ['shop.get_product', { kind: 'code', connection: 'shop', preset: 'shop', name: 'get_product', response: { maxItems: 100 } }]]),
+    };
+    const { adapter, lines, deps } = setup(new StubMcpAdapter(OK));
+    expect(await performRead({ ...deps, configuration }, 'shop.get_product', { sku: 'a' })).toEqual({ ok: false, code: 'not_bound' });
+    expect(adapter.reads).toEqual([]);
+    expect(adapter.calls).toEqual([]);
+    expect(lines).toEqual([]);
+  });
+});

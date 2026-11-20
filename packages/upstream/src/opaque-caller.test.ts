@@ -371,4 +371,12 @@ describe('EXE-4 CONN-4 createOpaqueCaller', () => {
     expect(createOpaqueCaller({ ...base, operationId: 'shop.bulk' })).toBeUndefined();
     expect(createOpaqueCaller({ ...base, operationId: 'unknown.op' })).toBeUndefined();
   });
+
+  it('OPS-5 undefined for a code binding until the code runner is wired', () => {
+    const configuration: LoadedConfiguration = {
+      ...CONFIG,
+      bindings: new Map([...CONFIG.bindings, ['shop.plain', { kind: 'code', connection: 'shop', preset: 'shop', name: 'plain', response: { maxItems: 100 } }]]),
+    };
+    expect(createOpaqueCaller({ configuration, vault: new MemoryVault(), adapter: new FakeWriteAdapter(), operationId: 'shop.plain', correlationId: 'c' })).toBeUndefined();
+  });
 });

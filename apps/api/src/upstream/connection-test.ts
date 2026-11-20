@@ -83,7 +83,8 @@ export class ConnectionTestService {
     if (declared === undefined) return failed('', 'mapping', NO_TEST_DECLARED);
     const binding = configuration.bindings.get(declared.operation);
     // Not reachable with a fully checked configuration (the loader checks the test operation).
-    if (binding?.connection !== connectionId) return failed(declared.operation, 'mapping', 'the test operation has no upstream binding');
+    // OPS-5: a code read cannot run here until the code runner is wired (plan task 10); fail closed.
+    if (binding?.connection !== connectionId || binding.kind === 'code') return failed(declared.operation, 'mapping', 'the test operation has no upstream binding');
 
     let credential: Awaited<ReturnType<typeof connectionCredential>>;
     try {

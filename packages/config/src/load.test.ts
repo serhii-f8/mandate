@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { formatIssue, type ConfigIssue } from './issues.js';
 import { loadConfigurationDirectory, loadConfigurationSources, type LoadResult } from './load.js';
 import { resolvePreset } from './presets.js';
+import { loadCodeFixture, presetWithoutUpdate } from '../test/code-fixture.js';
 
 const VALID_DIR = fileURLToPath(new URL('../test/fixtures/valid', import.meta.url));
 const FIXTURES = fileURLToPath(new URL('../test/fixtures', import.meta.url));
@@ -375,6 +376,29 @@ connections:
     } finally {
       await rm(presets, { recursive: true });
       await rm(openapiDir, { recursive: true });
+    }
+  });
+
+  it.todo('OPS-5 CONN-8 the fixture preset loads with all six operations and four code bindings plus one per-record binding');
+
+  it('OPS-5 CONN-8 the fixture preset without fixture.update loads with five operations and four code bindings', async () => {
+    const dirs: string[] = [];
+    try {
+      const result = await loadCodeFixture(dirs, { preset: await presetWithoutUpdate() });
+      if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+      const { configuration } = result;
+      expect(configuration.policy.operations.map((o) => o.id)).toEqual(['fixture.search', 'fixture.get_many', 'fixture.set_tags', 'fixture.ping', 'fixture.boom']);
+      expect(Object.fromEntries([...configuration.bindings].map(([id, b]) => [id, b.kind]))).toEqual({
+        'fixture.search': 'http',
+        'fixture.get_many': 'code',
+        'fixture.set_tags': 'code',
+        'fixture.ping': 'code',
+        'fixture.boom': 'code',
+      });
+      expect(configuration.codeOperations.size).toBe(4);
+      expect(configuration.loadedPresets.get('fixture')).toMatchObject({ package: '@aiops/code-fixture-preset', version: '1.1.0' });
+    } finally {
+      await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
     }
   });
 

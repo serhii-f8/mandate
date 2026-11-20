@@ -91,7 +91,6 @@ export function createOpaqueCaller(deps: OpaqueCallerDeps): OpaqueCaller | undef
   let target: CallTarget;
   let method: string;
   let idempotent: boolean;
-  // Plan 3 adds the `code` case here.
   switch (binding.kind) {
     case 'http':
       // An opaque call is one request; a bulk mapping is never one (OPS-6).
@@ -105,6 +104,9 @@ export function createOpaqueCaller(deps: OpaqueCallerDeps): OpaqueCaller | undef
       method = 'tools/call';
       idempotent = false;
       break;
+    case 'code':
+      // OPS-5: code calls run once the code runner is wired (plan task 10); until then, fail closed.
+      return undefined;
   }
 
   const log = (record: { readonly status?: number; readonly durationMs: number; readonly errorCode?: string }): void =>

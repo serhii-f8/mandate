@@ -9,7 +9,7 @@ import { mcpToolHash, type ReadErrorCode, type ToolListOutcome } from '@aiops/co
 import { z } from 'zod';
 import type { ArgumentValidator } from './argument-validators.js';
 import type { McpOperationBinding } from './registry.js';
-import type { UpstreamConfig } from './upstream-schema.js';
+import type { CodeUpstreamConfig, UpstreamConfig } from './upstream-schema.js';
 
 /** Upstream tool names the platform binds or lists; other listed names are dropped. Same set as the design's `[A-Za-z0-9_.\/-]`. */
 export const MCP_TOOL_NAME = /^[A-Za-z0-9_./-]{1,128}$/;
@@ -32,7 +32,7 @@ export const mcpUpstreamSchema = z.strictObject({
 });
 export type McpUpstreamConfig = z.output<typeof mcpUpstreamSchema>;
 
-export function isMcpUpstream(u: UpstreamConfig | McpUpstreamConfig): u is McpUpstreamConfig {
+export function isMcpUpstream(u: UpstreamConfig | McpUpstreamConfig | CodeUpstreamConfig): u is McpUpstreamConfig {
   return Object.hasOwn(u, 'tool');
 }
 
