@@ -183,6 +183,15 @@ describe('APR-8 review_changeset approver tool', () => {
     expect(tool.visibleTo?.({ subject: 'nobody', groups: [] }, CONFIG)).toBe(false);
   });
 
+  it('AUTH-4 APR-8 review_changeset is neither listed nor callable for a service caller holding a step role', async () => {
+    const { tool } = await setup();
+    const config: LoadedConfiguration = { ...CONFIG, policy: { ...CONFIG.policy, serviceAccounts: [{ clientId: 'sa', role: 'lead' }] } };
+    const sa: Caller = { subject: 'service:sa', clientId: 'sa', groups: [] };
+    // `lead` is a step role; a user holding it by group sees the tool, the service account does not.
+    expect(tool.visibleTo?.(dave, config)).toBe(true);
+    expect(tool.visibleTo?.(sa, config)).toBe(false);
+  });
+
   it('APR-5 the answer is the stored detail, one item page and a seeded sample', async () => {
     const s = await setup({ items: 60 });
     const answer = await s.call(dave, { sample_seed: 'seed-0001' });

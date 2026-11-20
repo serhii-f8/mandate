@@ -17,6 +17,7 @@ import { ApprovalService } from '../approvals/approval-service.js';
 import { callerFromAuthInfo } from '../auth/caller-from-auth.js';
 import { pingTool, type BuiltinToolDeps } from './builtin-tools.js';
 import { DECIDE_TOOL, decideChangesetTool } from './decide-tool.js';
+import { REVIEW_TOOL, reviewChangesetTool } from './review-tool.js';
 import { WidgetBundles, type WidgetCatalog, type WidgetKind } from './widget-bundles.js';
 import type { BuiltinTool } from './tool-catalog.js';
 import { callTool, linksChangeset, listTools, minuteWindow, snapshotOf, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
@@ -586,7 +587,7 @@ function widgetSetup() {
     approvals,
     publicUrl: new URL('https://aiops.example.test'),
   };
-  return { audit, repository, deps: { ...deps, builtins: [pingTool, decideChangesetTool(toolDeps)] }, req };
+  return { audit, repository, toolDeps, deps: { ...deps, builtins: [pingTool, decideChangesetTool(toolDeps)] }, req };
 }
 
 const dave: Caller = { subject: 'dave-id', clientId: 'aiops-mcp', groups: ['leads'] };
@@ -981,5 +982,58 @@ describe('CONN-4 MCP-backed operations in the pipeline', () => {
     await callTool({ ...deps, upstreamTools: view }, req(bob), 'tools.echo', { message: 5 });
     expect(actions(audit.events)[0]).toBe('policy.decision:allow');
     expect(invoker.calls.map((c) => c.operation.id)).toEqual(['tools.echo']);
+  });
+});
+
+/** A configuration with the service account `sa` holding `role` (AUTH-4). */
+async function withServiceAccount(sources: Readonly<Record<string, string>>, role: string): Promise<LoadedConfiguration> {
+  const result = await loadConfigurationSources(
+    [...Object.entries(sources), ['service-accounts.yaml', `version: 1\nservice_accounts:\n  - { client_id: sa, role: ${role} }\n`] as const].map(([file, text]) => ({ file, text })),
+  );
+  if (!result.ok) throw new Error(JSON.stringify(result.issues));
+  return result.configuration;
+}
+
+const sa: Caller = { subject: 'service:sa', clientId: 'sa', groups: [] };
+
+describe('AUTH-4 service-account callers', () => {
+  it('AUTH-4 a service caller lists its role tools and is denied outside its grant, audited with its subject', async () => {
+    const invoker = new FakeInvoker();
+    const { deps, req, audit } = setupWith(await withServiceAccount(SOURCES, 'content_manager'), invoker);
+    expect((await listTools(deps, req(sa))).map((t) => t.name)).toEqual(['ping', 'catalog.search_products']);
+    const error = await callTool(deps, req(sa), 'support.lookup_order', { order_number: '1' }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProtocolError);
+    expect((error as ProtocolError).message).toBe('Tool support.lookup_order not found');
+    const decisions = audit.events.filter((e) => e.action === 'policy.decision');
+    expect(decisions).toEqual([
+      expect.objectContaining({
+        actor: 'service:sa',
+        clientId: 'sa',
+        decision: 'deny',
+        subject: 'support.lookup_order',
+        details: { rule: 'default-deny', reason: 'no_grant', roles: ['content_manager'] },
+      }),
+    ]);
+    expect(invoker.calls).toEqual([]);
+  });
+
+  it('AUTH-4 APR-8 a service caller holding a step role neither lists nor calls review_changeset and decide_changeset', async () => {
+    const config = await withServiceAccount(WIDGET_SOURCES, 'lead');
+    const base = widgetSetup();
+    const { deps, req, audit } = setupWith(config, new FakeInvoker());
+    const builtins = [pingTool, reviewChangesetTool(base.toolDeps), decideChangesetTool(base.toolDeps)];
+    const pipeline = { ...deps, builtins };
+    // The same holder by group sees both tools.
+    expect((await listTools(pipeline, req(dave))).map((t) => t.name)).toEqual(['ping', REVIEW_TOOL, DECIDE_TOOL]);
+    expect((await listTools(pipeline, req(sa))).map((t) => t.name)).toEqual(['ping']);
+    for (const tool of [REVIEW_TOOL, DECIDE_TOOL]) {
+      const args = tool === REVIEW_TOOL ? { changeset_id: DECIDE_ARGS.changeset_id } : DECIDE_ARGS;
+      await expect(callTool(pipeline, req(sa), tool, args)).rejects.toThrow(`Tool ${tool} not found`);
+    }
+    expect(audit.events.filter((e) => e.action === 'policy.decision')).toEqual([
+      expect.objectContaining({ actor: 'service:sa', subject: REVIEW_TOOL, details: { rule: 'default-deny', reason: 'unknown_tool', roles: ['lead'] } }),
+      expect.objectContaining({ actor: 'service:sa', subject: DECIDE_TOOL, details: { rule: 'default-deny', reason: 'unknown_tool', roles: ['lead'] } }),
+    ]);
+    expect(await base.repository.approvals(DECIDE_ARGS.changeset_id)).toEqual([]);
   });
 });

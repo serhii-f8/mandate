@@ -84,7 +84,7 @@ function guard(row: SessionRow | null = session()): PageAccessGuard {
   return new PageAccessGuard(
     new Reflector(),
     { find: (cookieValue) => Promise.resolve(row !== null && hashToken(cookieValue) === row.idHash ? row : undefined) },
-    (groups) => (groups.includes('admins') ? ['integration_admin'] : []),
+    (s) => (s.groups.includes('admins') ? ['integration_admin'] : []),
     { publicOrigin: ORIGIN, freshAuthSeconds: 300, now: () => NOW },
   );
 }

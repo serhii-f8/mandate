@@ -13,7 +13,7 @@ import type { McpToolAdapter, ReadAdapter } from '@aiops/connector-sdk';
 import { ConfigurationUnavailableError, createSchemaCompiler, type ApiEnv, type ConfigurationHolder } from '@aiops/config';
 import {
   changesetKind,
-  resolveRoles,
+  rolesOf,
   type AuditLog,
   type ChangeSetExecutor,
   type ChangeSetRepository,
@@ -427,7 +427,7 @@ class AppModule {
           provide: APP_GUARD,
           inject: [PAGE_SESSIONS],
           useFactory: (sessions: SessionService) =>
-            new PageAccessGuard(new Reflector(), sessions, (groups) => resolveRoles(groups, configuration.current.policy.roleMapping), pageChecks),
+            new PageAccessGuard(new Reflector(), sessions, (session) => rolesOf(session, configuration.current.policy), pageChecks),
         },
         Resources,
       ],

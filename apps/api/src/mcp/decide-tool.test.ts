@@ -201,6 +201,15 @@ describe('APR-8 decide_changeset widget tool', () => {
     expect(tool).toMatchObject({ name: DECIDE_TOOL, readOnlyHint: false, meta: { ui: { visibility: ['app'] } } });
   });
 
+  it('AUTH-4 APR-8 decide_changeset is neither listed nor callable for a service caller holding a widget role', async () => {
+    const { tool } = await setup();
+    const config: LoadedConfiguration = { ...CONFIG, policy: { ...CONFIG.policy, serviceAccounts: [{ clientId: 'sa', role: 'lead' }] } };
+    const sa: Caller = { subject: 'service:sa', clientId: 'sa', groups: [] };
+    // `lead` is a widget step role; a user holding it by group sees the tool, the service account does not.
+    expect(tool.visibleTo?.(bob, config)).toBe(true);
+    expect(tool.visibleTo?.(sa, config)).toBe(false);
+  });
+
   it('APR-8 widget approver roles are the step roles of rules with allow_widget', () => {
     expect([...widgetApproverRoles(CONFIG)].sort()).toEqual(['brand', 'lead']);
   });

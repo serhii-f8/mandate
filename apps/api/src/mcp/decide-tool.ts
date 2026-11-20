@@ -7,7 +7,7 @@
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { createSchemaCompiler, type LoadedConfiguration } from '@aiops/config';
-import { resolveRoles, type Approver, type Caller, type DecisionRequest } from '@aiops/core';
+import { callerKind, rolesOf, type Approver, type Caller, type DecisionRequest } from '@aiops/core';
 import type { DecideResult } from '../approvals/approval-service.js';
 import { DECISION_REFUSAL_TEXT } from '../approvals/texts.js';
 import type { BuiltinToolDeps } from './builtin-tools.js';
@@ -38,9 +38,11 @@ export function widgetApproverRoles(configuration: LoadedConfiguration): Readonl
   return roles;
 }
 
+/** A service account never decides an approval step (AUTH-4, APR-8), so it never sees the widget tool. */
 function holdsWidgetRole(caller: Caller, configuration: LoadedConfiguration): boolean {
+  if (callerKind(caller) === 'service') return false;
   const widget = widgetApproverRoles(configuration);
-  return resolveRoles(caller.groups, configuration.policy.roleMapping).some((role) => widget.has(role));
+  return rolesOf(caller, configuration.policy).some((role) => widget.has(role));
 }
 
 function startText(start: NonNullable<Extract<DecideResult, { ok: true }>['start']>): string {
@@ -64,7 +66,7 @@ export function decideChangesetTool(deps: BuiltinToolDeps): BuiltinTool {
       const configuration = snapshot.configuration;
       const approver: Approver = {
         subject: caller.subject,
-        roles: resolveRoles(caller.groups, configuration.policy.roleMapping),
+        roles: rolesOf(caller, configuration.policy),
         ...(caller.clientId === undefined ? {} : { clientId: caller.clientId }),
         ...(caller.authTime === undefined ? {} : { authTime: caller.authTime }),
       };

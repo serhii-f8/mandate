@@ -10,7 +10,7 @@ import type { UpstreamToolView } from '@aiops/upstream';
 import {
   allowingRole,
   createPolicyEngine,
-  resolveRoles,
+  rolesOf,
   toolCallAuditEvent,
   type AuditLog,
   type Caller,
@@ -256,7 +256,7 @@ async function runCall(deps: PipelineDeps, req: PipelineRequest, name: string, r
       effect: 'deny',
       rule: 'default-deny',
       reason,
-      roles: resolveRoles(req.caller.groups, configuration.policy.roleMapping),
+      roles: rolesOf(req.caller, configuration.policy),
     });
     return { thrown: new ProtocolError(ProtocolErrorCode.InvalidParams, `Tool ${name} not found`), denial: reason };
   }
@@ -306,7 +306,7 @@ async function runCall(deps: PipelineDeps, req: PipelineRequest, name: string, r
   // 3. Decision (POL-1..3), audited before anything runs (POL-8).
   let decision: PolicyDecision =
     builtin !== undefined
-      ? { effect: 'allow', rule: 'builtin', roles: resolveRoles(req.caller.groups, configuration.policy.roleMapping) }
+      ? { effect: 'allow', rule: 'builtin', roles: rolesOf(req.caller, configuration.policy) }
       : // Step 1 returned unless a built-in or a granted operation was found.
         engine.evaluate({ caller: req.caller, operationId: operation?.id ?? name, args: validArgs });
   // POL-4: calls_per_minute per (user, role). Over the limit the deny replaces the allow, so the

@@ -100,7 +100,7 @@ export class PageAccessGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly sessions: SessionLookup,
-    private readonly rolesFor: (groups: readonly string[]) => readonly string[],
+    private readonly rolesFor: (session: { subject: string; groups: readonly string[] }) => readonly string[],
     private readonly options: PageAccessGuardOptions,
   ) {}
 
@@ -120,7 +120,7 @@ export class PageAccessGuard implements CanActivate {
 
     const denial = pageDenial(req.headers, session, access, this.options);
     if (denial !== undefined) throw deny(403, denial);
-    req.page = { session, roles: this.rolesFor(session.groups) };
+    req.page = { session, roles: this.rolesFor(session) };
     return true;
   }
 }

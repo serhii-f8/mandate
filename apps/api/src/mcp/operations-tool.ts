@@ -1,5 +1,5 @@
 import { createSchemaCompiler, type PinState } from '@aiops/config';
-import { resolveRoles, type GrantDefinition } from '@aiops/core';
+import { rolesOf, type GrantDefinition } from '@aiops/core';
 import type { UpstreamToolView } from '@aiops/upstream';
 import type { BuiltinTool } from './tool-catalog.js';
 
@@ -19,7 +19,7 @@ export function createListMyOperationsTool(upstreamTools?: UpstreamToolView): Bu
     validate,
     handler(_args, { caller, snapshot }) {
       const { configuration, engine } = snapshot;
-      const roleIds = new Set(resolveRoles(caller.groups, configuration.policy.roleMapping));
+      const roleIds = new Set(rolesOf(caller, configuration.policy));
       const grantsOf = (operationId: string): GrantDefinition[] =>
         configuration.policy.roles.filter((r) => roleIds.has(r.id)).flatMap((r) => r.grants.filter((g) => g.operation === operationId));
       const pinOf = (operationId: string): PinState | undefined =>
