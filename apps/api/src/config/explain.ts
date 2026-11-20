@@ -4,11 +4,13 @@
  * (MCP-3); an allowed write states the approval it would need (POL-5). Pure: no I/O.
  */
 import { createSchemaCompiler, pinStateOf, type LoadedConfiguration, type PinState } from '@aiops/config';
-import { allowingRole, approvalRequirement, createPolicyEngine, isOpaque, type ApprovalRequirement, type PolicyDecision } from '@aiops/core';
+import { allowingRole, approvalRequirement, createPolicyEngine, isOpaque, serviceSubject, type ApprovalRequirement, type PolicyDecision } from '@aiops/core';
 
 export interface ExplainInput {
   readonly operationId: string;
   readonly groups: readonly string[];
+  /** A configured service account's client ID (AUTH-4); the caller is its service subject with no groups. */
+  readonly service?: string;
   readonly subject?: string;
   readonly args: Readonly<Record<string, unknown>>;
   /** Records the change-set would include, for `above_threshold` approval rules. */
@@ -38,7 +40,7 @@ export function explainCall(configuration: LoadedConfiguration, input: ExplainIn
   const check = configuration.validators.get(operationId)?.(args);
   if (check?.ok === false) return { kind: 'invalid_arguments', message: check.message };
 
-  const evaluated = createPolicyEngine(configuration.policy).evaluate({ caller: { subject: input.subject ?? 'explain', groups }, operationId, args });
+  const evaluated = createPolicyEngine(configuration.policy).evaluate({ caller: input.service === undefined ? { subject: input.subject ?? 'explain', groups } : { subject: serviceSubject(input.service), groups: [] }, operationId, args });
   const operation = configuration.policy.operations.find((op) => op.id === operationId);
   // The engine denies an unknown ID as no_grant; the tool pipeline records it as unknown_tool, and so does explain.
   const decision: PolicyDecision = operation === undefined && evaluated.effect === 'deny' ? { ...evaluated, reason: 'unknown_tool' } : evaluated;

@@ -9,7 +9,7 @@
  *   aiops audit retention --now                    runs the audit retention job once with the active revision (AUD-7, CFG-3)
  *   aiops config diff <dir> [--preset-dir <dir>]...                 compares <dir> with the active revision (CFG-3)
  *   aiops config apply <dir> [--preset-dir <dir>]... [--actor <n>]  stores <dir> as the new active revision (CFG-3, CFG-4)
- *   aiops config explain --operation <id> --groups <g,...> [--subject <s>] [--args <json>] [--records <n>]
+ *   aiops config explain --operation <id> (--groups <g,...> | --service <client_id>) [--subject <s>] [--args <json>] [--records <n>]
  *                                                  dry policy evaluation against the active revision (POL-7)
  *   aiops mcp tools <connection> [--show <tool>]   lists an mcp connection's tools live with hashes and pin states;
  *                                                  --show prints one definition for review and a pinned skeleton (CONN-4, SEC-6)
@@ -64,7 +64,7 @@ const USAGE = [
   '       aiops audit retention --now',
   '       aiops config diff <dir> [--preset-dir <dir>]...',
   '       aiops config apply <dir> [--preset-dir <dir>]... [--actor <name>]',
-  '       aiops config explain --operation <id> --groups <g1,g2,...> [--subject <s>] [--args <json>] [--records <n>]',
+  '       aiops config explain --operation <id> (--groups <g1,g2,...> | --service <client_id>) [--subject <s>] [--args <json>] [--records <n>]',
   MCP_TOOLS_USAGE,
 ].join('\n');
 
@@ -516,11 +516,11 @@ async function configChange(kind: 'diff' | 'apply', args: readonly string[], out
   });
 }
 
-const EXPLAIN_FLAGS = ['--operation', '--groups', '--subject', '--args', '--records'] as const;
+const EXPLAIN_FLAGS = ['--operation', '--groups', '--service', '--subject', '--args', '--records'] as const;
 const MAX_RECORDS = 1_000_000;
 const NO_ACTIVE_CONFIGURATION = 'no active configuration: start the api once or run aiops config apply';
 
-/** `--operation <id> --groups <g1,...> [--subject <s>] [--args <json>] [--records <n>]`; undefined is a usage error. */
+/** `--operation <id> (--groups <g1,...> | --service <client_id>) [--subject <s>] [--args <json>] [--records <n>]`; undefined is a usage error. */
 function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
   const values = new Map<string, string>();
   for (let i = 0; i < args.length; i += 2) {
@@ -531,7 +531,9 @@ function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
   }
   const operationId = values.get('--operation');
   const groups = (values.get('--groups') ?? '').split(',').map((g) => g.trim()).filter((g) => g.length > 0);
-  if (operationId === undefined || groups.length === 0) return undefined;
+  const service = values.get('--service');
+  // Exactly one of --groups and --service; a service account has no IdP subject to override.
+  if (operationId === undefined || (groups.length === 0) === (service === undefined) || (service !== undefined && values.has('--subject'))) return undefined;
 
   // Neither message quotes the value: it is operator input of unknown content (SEC-3).
   let parsedArgs: unknown = {};
@@ -549,7 +551,7 @@ function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
   if (!(records >= 1 && records <= MAX_RECORDS)) throw new CliError(`--records: must be an integer from 1 to ${String(MAX_RECORDS)}`, 2);
 
   const subject = values.get('--subject');
-  return { operationId, groups, args: parsedArgs as Record<string, unknown>, records, ...(subject === undefined ? {} : { subject }) };
+  return { operationId, groups, args: parsedArgs as Record<string, unknown>, records, ...(subject === undefined ? {} : { subject }), ...(service === undefined ? {} : { service }) };
 }
 
 /** The adapter's resolver and the preset directories of `AIOPS_PRESET_DIRS` or the default, for loading the active revision. */
