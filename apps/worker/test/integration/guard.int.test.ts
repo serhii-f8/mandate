@@ -53,6 +53,25 @@ describe('production execution guard', () => {
     });
   });
 
+  it('AUTH-4 EXE re-authorisation uses the service account role of the stored requester', async () => {
+    // The service account holds `editor` (no approval, grants the operation on brand acme); its groups are empty.
+    const withServiceAccount: LoadedConfiguration = {
+      ...configuration,
+      serviceAccounts: new Map([['aiops-sa-ci', { role: 'editor' }]]),
+      policy: { ...configuration.policy, serviceAccounts: [{ clientId: 'aiops-sa-ci', role: 'editor' }] },
+    };
+    const cs = await createPrepared(repository, 3, {
+      requester: 'service:aiops-sa-ci',
+      execute: { actor: 'service:aiops-sa-ci', groups: [], clientId: 'aiops-sa-ci', correlationId: 'corr-exec-service' },
+    });
+    await expect(guardFor(withServiceAccount).check(cs)).resolves.toEqual({ ok: true });
+    // A reload without the service_accounts entry leaves the subject without a role.
+    expect(configuration.policy.serviceAccounts ?? []).toEqual([]);
+    await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: false, outcome: 'policy_denied' });
+    const decisions = (await auditEventsOf(postgres.database, cs.id)).filter((e) => e.action === 'policy.decision');
+    expect(decisions).toMatchObject([{ actor: 'service:aiops-sa-ci', clientId: 'aiops-sa-ci', decision: 'deny', details: { rule: 'default-deny' } }]);
+  });
+
   it('POL-6 the production guard denies a change-set without an execution request', async () => {
     const cs = await createPrepared(repository, 1);
     await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: false, outcome: 'policy_denied' });
