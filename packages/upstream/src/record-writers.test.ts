@@ -48,14 +48,22 @@ class FakeRecordAdapter implements RecordWriteAdapter, CodeAdapter {
   inFlight = 0;
   maxInFlight = 0;
   readonly script = new Map<unknown, RecordSendOutcome>();
+  /** Record IDs whose send rejects (an adapter bug or an aborted runtime), and extra macrotask waits per ID. */
+  readonly rejectFor = new Map<unknown, Error>();
+  readonly extraTicks = new Map<unknown, number>();
+  readonly settled: unknown[] = [];
   codeOutcome: CodeWriteOutcome = { ok: true, outcomes: [], durationMs: 9 };
 
   async writeRecord(input: RecordInput): Promise<RecordSendOutcome> {
     this.records.push(input);
     this.inFlight += 1;
     this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
-    await new Promise((resolve) => setImmediate(resolve));
+    const ticks = 1 + (this.extraTicks.get(input.record.id) ?? 0);
+    for (let i = 0; i < ticks; i += 1) await new Promise((resolve) => setImmediate(resolve));
     this.inFlight -= 1;
+    this.settled.push(input.record.id);
+    const error = this.rejectFor.get(input.record.id);
+    if (error !== undefined) throw error;
     return this.script.get(input.record.id) ?? OK_SEND;
   }
   codeRead(): Promise<ReadOutcome> {
@@ -158,6 +166,28 @@ describe('OPS-5 OPS-6 direct writers', () => {
     s.adapter.script.set('1', { ok: false, code: 'http_status', status: 503, durationMs: 1, retriable: true });
     const res = await writer.write(records(6), s.heartbeat);
     expect(res).toEqual({ ok: true, states: ['retriable', 'ok', 'retriable', 'retriable', 'retriable', 'retriable'] });
+    expect(s.adapter.records.map((r) => r.record.id)).toEqual(['1', '2']);
+  });
+
+  it('OPS-6 NFR-2 a rejected send stops new requests and propagates only after in-flight requests settle', async () => {
+    const s = await setup('fixture.update', 2);
+    const writer = createPerRecordWriter(s.deps);
+    if (writer === undefined) throw new Error('expected a per-record writer');
+    const broken = new Error('adapter failed');
+    s.adapter.rejectFor.set('1', broken);
+    // Record 2 is still in flight when record 1 rejects.
+    s.adapter.extraTicks.set('2', 3);
+    let settledAtRejection: unknown[] = [];
+    await expect(
+      writer.write(records(6), s.heartbeat).catch((error: unknown) => {
+        settledAtRejection = [...s.adapter.settled];
+        throw error;
+      }),
+    ).rejects.toBe(broken);
+    // The error surfaces only once the lane with record 2 has settled.
+    expect(settledAtRejection).toEqual(['1', '2']);
+    // Nothing starts after the rejection, then or later.
+    for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setImmediate(resolve));
     expect(s.adapter.records.map((r) => r.record.id)).toEqual(['1', '2']);
   });
 

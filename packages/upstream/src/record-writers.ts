@@ -62,7 +62,8 @@ function logger(deps: DirectWriterDeps, connection: string, method: string): (ou
  * undefined unless the binding is HTTP, non-GET, without bulk, for a manifest write. Requests run
  * with at most `connection.maxConcurrency` in flight; once a record answers `retriable` no new
  * request starts (ruling F10): those in flight finish and the unsent records answer `retriable`,
- * so the retry re-reads and sends only what is not yet written (NFR-2). One heartbeat per response.
+ * so the retry re-reads and sends only what is not yet written (NFR-2). A rejected send stops the
+ * lanes the same way and is rethrown once every lane has settled. One heartbeat per response.
  */
 export function createPerRecordWriter(deps: DirectWriterDeps): DirectWriter | undefined {
   const { configuration, adapter, operationId } = deps;
@@ -88,7 +89,14 @@ export function createPerRecordWriter(deps: DirectWriterDeps): DirectWriter | un
           const record = records[index];
           // In range by the loop condition; kept for noUncheckedIndexedAccess.
           if (record === undefined) continue;
-          const outcome = await adapter.writeRecord({ connection, mapping, record, args: deps.args, ...(credential === undefined ? {} : { credential }) });
+          let outcome: RecordSendOutcome;
+          try {
+            outcome = await adapter.writeRecord({ connection, mapping, record, args: deps.args, ...(credential === undefined ? {} : { credential }) });
+          } catch (error) {
+            // A rejected send stops every lane: no request may start that could race the retry's read-before-write.
+            stopped = true;
+            throw error;
+          }
           log(outcome);
           heartbeat();
           const state = stateOf(outcome);
@@ -97,7 +105,10 @@ export function createPerRecordWriter(deps: DirectWriterDeps): DirectWriter | un
         }
       };
       const lanes = Math.max(1, Math.min(connection.maxConcurrency, records.length));
-      await Promise.all(Array.from({ length: lanes }, worker));
+      // Wait for every lane, so a rejection surfaces only once nothing is in flight; then rethrow the first.
+      const settled = await Promise.allSettled(Array.from({ length: lanes }, worker));
+      const rejected = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (rejected !== undefined) throw rejected.reason;
       return { ok: true, states };
     },
   };
