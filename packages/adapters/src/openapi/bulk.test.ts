@@ -39,4 +39,8 @@ describe('OPS-6 bulk body and status mapping', () => {
   it('OPS-6 answers undefined when the items path is not an array', () => {
     expect(mapBulkStatus(STATUS, { operations_list: null })).toBeUndefined();
   });
+  it('OPS-6 answers undefined for a key-mode status (no index field) until key mapping is read', () => {
+    const keyed = { method: STATUS.method, path: STATUS.path, items: STATUS.items, key: 'id', state: STATUS.state, states: STATUS.states };
+    expect(mapBulkStatus(keyed, { operations_list: [{ id: 0, status: 1 }] })).toBeUndefined();
+  });
 });

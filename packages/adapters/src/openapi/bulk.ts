@@ -56,13 +56,16 @@ export function mapBulkStatus(
   status: BulkMapping['status'],
   json: unknown,
 ): { index: number; state: BulkItemState }[] | undefined {
+  // Key mode (`status.key`) is not read here: without `index` there is no position to map.
+  const indexField = status.index;
+  if (indexField === undefined) return undefined;
   const list = dotted(json, status.items);
   if (!Array.isArray(list)) return undefined;
   const out: { index: number; state: BulkItemState }[] = [];
   const has = (set_: readonly unknown[], v: unknown): boolean => set_.some((x) => x === v);
   for (const e of list) {
     if (!isObj(e)) continue;
-    const index = e[status.index];
+    const index = e[indexField];
     if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) continue;
     const raw = e[status.state];
     // A state in no list is failed, never open.

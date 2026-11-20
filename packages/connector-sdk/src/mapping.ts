@@ -4,7 +4,9 @@ export type TemplateValue =
   | string
   | number
   | boolean
-  | { readonly arg: string; readonly default?: string | number | boolean; readonly join?: string };
+  | { readonly arg: string; readonly default?: string | number | boolean; readonly join?: string }
+  /** since 0.6.0, additive. A field of the record being written (per-record writes, OPS-6). */
+  | { readonly record: string; readonly default?: string | number | boolean; readonly join?: string };
 
 export interface ResponseMapping {
   items?: string;
@@ -25,7 +27,13 @@ export interface BulkMapping {
     /** Contains `{batch_id}`. */
     path: string;
     items: string;
-    index: string;
+    /**
+     * Field of a status entry holding the record's position. Exactly one of `index` and `key`
+     * (since 0.6.0: `index` optional because `key` is the alternative).
+     */
+    index?: string;
+    /** since 0.6.0, additive. Field of a status entry holding the record's target ID. */
+    key?: string;
     state: string;
     states: {
       ok: readonly StateValue[];

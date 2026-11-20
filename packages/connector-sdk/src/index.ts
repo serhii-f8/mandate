@@ -8,3 +8,4 @@ export * from './read.js';
 export * from './write.js';
 export * from './mcp.js';
 export * from './instrumentation.js';
+export * from './code.js';

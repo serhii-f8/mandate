@@ -4,6 +4,27 @@ import {
   CREDENTIAL_SCHEMES,
   type BulkMapping,
   type CallOutcome,
+  type CodeAdapter,
+  type CodeArgs,
+  type CodeCallOperation,
+  type CodeCallOutcome,
+  type CodeCallResult,
+  type CodeContext,
+  type CodeHttpClient,
+  type CodeHttpRequest,
+  type CodeHttpResponse,
+  type CodeOperation,
+  type CodeReadOperation,
+  type CodeReadResult,
+  type CodeWriteOperation,
+  type CodeWriteOutcome,
+  type PresetModule,
+  type RecordOutcome,
+  type RecordSendOutcome,
+  type RecordWriteAdapter,
+  type TemplateValue,
+  type WriteRecord,
+  parsePresetModule,
   type CallTarget,
   type ConnectionSettings,
   type ReadErrorCode,
@@ -48,5 +69,41 @@ describe('NFR-18 connector SDK 0.6.0 is additive', () => {
     expectTypeOf<Parameters<WriteAdapter['callOnce']>[0]['beforeSend']>().toEqualTypeOf<() => Promise<void>>();
     expectTypeOf<CallOutcome['result']>().toEqualTypeOf<'accepted' | 'refused' | 'unknown' | 'not_sent'>();
     expectTypeOf<CallOutcome['code']>().toEqualTypeOf<WriteErrorCode | undefined>();
+  });
+});
+
+describe('NFR-18 connector SDK 0.6.0 code operations are additive', () => {
+  it('NFR-18 OPS-5 the code types are exported and CodeWriteOperation.write takes records and arguments', () => {
+    expectTypeOf<Parameters<CodeWriteOperation['write']>>().toEqualTypeOf<[CodeContext, readonly WriteRecord[], CodeArgs]>();
+    expectTypeOf<ReturnType<CodeWriteOperation['write']>>().toEqualTypeOf<Promise<readonly RecordOutcome[]>>();
+    expectTypeOf<Parameters<CodeReadOperation['read']>>().toEqualTypeOf<[CodeContext, CodeArgs]>();
+    expectTypeOf<ReturnType<CodeReadOperation['read']>>().toEqualTypeOf<Promise<CodeReadResult>>();
+    expectTypeOf<ReturnType<CodeCallOperation['call']>>().toEqualTypeOf<Promise<CodeCallOutcome>>();
+    expectTypeOf<CodeCallOutcome>().toEqualTypeOf<{ readonly ok: true } | { readonly ok: false; readonly definite: boolean }>();
+    expectTypeOf<RecordOutcome>().toEqualTypeOf<'ok' | 'failed' | 'retriable'>();
+    expectTypeOf<CodeOperation['kind']>().toEqualTypeOf<'read' | 'write' | 'call'>();
+    expectTypeOf<PresetModule['operations']>().toEqualTypeOf<Readonly<Record<string, CodeOperation>>>();
+    expectTypeOf<CodeContext['http']>().toEqualTypeOf<CodeHttpClient>();
+    expectTypeOf<Parameters<CodeHttpClient['send']>>().toEqualTypeOf<[CodeHttpRequest]>();
+    expectTypeOf<Extract<CodeHttpResponse, { ok: false }>['code']>().toEqualTypeOf<ReadErrorCode>();
+    expectTypeOf(parsePresetModule).returns.toEqualTypeOf<{ ok: true; module: PresetModule } | { ok: false; message: string }>();
+    // The existing opaque CallOutcome keeps its name and shape (F1).
+    expectTypeOf<CallOutcome['result']>().toEqualTypeOf<'accepted' | 'refused' | 'unknown' | 'not_sent'>();
+  });
+  it('NFR-18 OPS-6 TemplateValue gains the record form and BulkMapping.status takes index or key', () => {
+    expectTypeOf<{ readonly record: string; readonly default?: string | number | boolean; readonly join?: string }>().toExtend<TemplateValue>();
+    expectTypeOf<{ readonly arg: string }>().toExtend<TemplateValue>();
+    expectTypeOf<BulkMapping['status']['index']>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<BulkMapping['status']['key']>().toEqualTypeOf<string | undefined>();
+  });
+  it('NFR-18 RecordWriteAdapter and CodeAdapter are separate interfaces; WriteAdapter keeps its two methods', () => {
+    expectTypeOf<keyof WriteAdapter>().toEqualTypeOf<'submitBulk' | 'bulkStatus' | 'callOnce'>();
+    expectTypeOf<keyof RecordWriteAdapter>().toEqualTypeOf<'writeRecord'>();
+    expectTypeOf<keyof CodeAdapter>().toEqualTypeOf<'codeRead' | 'codeWrite' | 'codeCall'>();
+    expectTypeOf<Parameters<WriteAdapter['bulkStatus']>[0]['keys']>().toEqualTypeOf<readonly string[] | undefined>();
+    expectTypeOf<ReturnType<RecordWriteAdapter['writeRecord']>>().toEqualTypeOf<Promise<RecordSendOutcome>>();
+    expectTypeOf<ReturnType<CodeAdapter['codeWrite']>>().toEqualTypeOf<Promise<CodeWriteOutcome>>();
+    expectTypeOf<ReturnType<CodeAdapter['codeCall']>>().toEqualTypeOf<Promise<CodeCallResult>>();
+    expectTypeOf<Parameters<CodeAdapter['codeWrite']>[0]['records']>().toEqualTypeOf<readonly WriteRecord[]>();
   });
 });

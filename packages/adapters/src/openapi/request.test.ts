@@ -35,6 +35,10 @@ describe('MCP-4 request building', () => {
     expect(r.url.searchParams.getAll('b')).toEqual(['x', 'y']);
     expect(r.url.searchParams.get('c')).toBe('lit');
   });
+  it('OPS-6 omits a record template outside a per-record write, even with a default', () => {
+    const r = buildRequest('http://h', { ...base, query: { sku: { record: 'sku', default: 'x' } } }, { sku: 'A-1' });
+    expect(r.url.searchParams.has('sku')).toBe(false);
+  });
   it('encodes path parameters', () => {
     const r = buildRequest('http://h', { ...base, path: '/V1/products/{sku}', pathParams: { sku: { arg: 'sku' } } }, { sku: 'a/b' });
     expect(r.url.pathname).toBe('/V1/products/a%2Fb');

@@ -19,6 +19,8 @@ const isScalar = (v: unknown): v is Scalar => typeof v === 'string' || typeof v 
 /** Resolve a template to its raw value; undefined means "omit". */
 function resolve(t: TemplateValue, args: Readonly<Record<string, unknown>>): unknown {
   if (typeof t === 'object') {
+    // A `{ record }` template has no value outside a per-record write (OPS-6): omitted here.
+    if (!('arg' in t)) return undefined;
     const v = Object.hasOwn(args, t.arg) ? args[t.arg] : undefined;
     return v ?? t.default;
   }

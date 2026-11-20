@@ -1,7 +1,8 @@
 import type { ConnectionSettings } from './connection.js';
 import type { CredentialSource } from './credentials.js';
-import type { UpstreamMapping } from './mapping.js';
-import type { ReadErrorCode } from './read.js';
+import type { CodeArgs, CodeCallOperation, CodeReadOperation, CodeWriteOperation, RecordOutcome, WriteRecord } from './code.js';
+import type { ResponseMapping, UpstreamMapping } from './mapping.js';
+import type { ReadErrorCode, ReadOutcome } from './read.js';
 
 export type WriteErrorCode = ReadErrorCode | 'rejected';
 export type BulkItemState = 'ok' | 'failed' | 'retriable' | 'open';
@@ -52,6 +53,8 @@ export interface WriteAdapter {
     mapping: UpstreamMapping;
     batchId: string;
     credential?: CredentialSource;
+    /** since 0.6.0, additive. The target IDs in plan order, for `bulk.status.key`. */
+    keys?: readonly string[];
   }): Promise<BulkStatusOutcome>;
   /**
    * since 0.6.0, additive. Sends one call at most once, never retried (EXE-4, NFR-2). Every
@@ -69,4 +72,54 @@ export interface WriteAdapter {
     idempotencyKey?: string;
     beforeSend: () => Promise<void>;
   }): Promise<CallOutcome>;
+}
+
+/** since 0.6.0, additive. The outcome of one per-record request. */
+export type RecordSendOutcome = { ok: true; status: number; durationMs: number } | WriteFailure;
+
+/** since 0.6.0. Sends one record of a per-record write binding (OPS-6). */
+export interface RecordWriteAdapter {
+  writeRecord(input: {
+    connection: ConnectionSettings;
+    mapping: UpstreamMapping;
+    record: WriteRecord;
+    args: CodeArgs;
+    credential?: CredentialSource;
+  }): Promise<RecordSendOutcome>;
+}
+
+/** since 0.6.0, additive. One outcome per record, in record order. */
+export type CodeWriteOutcome = { ok: true; outcomes: readonly RecordOutcome[]; durationMs: number } | WriteFailure;
+/** since 0.6.0, additive. Codes only (SEC-3). */
+export type CodeCallResult =
+  | { ok: true; durationMs: number }
+  | { ok: false; definite: boolean; code: WriteErrorCode; durationMs: number };
+
+/** since 0.6.0. Runs a preset's code operations (OPS-5). */
+export interface CodeAdapter {
+  codeRead(input: {
+    connection: ConnectionSettings;
+    name: string;
+    operation: CodeReadOperation;
+    args: CodeArgs;
+    response: ResponseMapping;
+    credential?: CredentialSource;
+    exactValues?: boolean;
+  }): Promise<ReadOutcome>;
+  codeWrite(input: {
+    connection: ConnectionSettings;
+    name: string;
+    operation: CodeWriteOperation;
+    records: readonly WriteRecord[];
+    args: CodeArgs;
+    credential?: CredentialSource;
+    onProgress?: () => void;
+  }): Promise<CodeWriteOutcome>;
+  codeCall(input: {
+    connection: ConnectionSettings;
+    name: string;
+    operation: CodeCallOperation;
+    args: CodeArgs;
+    credential?: CredentialSource;
+  }): Promise<CodeCallResult>;
 }
