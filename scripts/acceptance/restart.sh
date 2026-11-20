@@ -7,7 +7,14 @@
 #   group `baseline`: alice prepares catalog.update_content over SKUs 1-100 with meta_keyword
 #   `v-baseline` (role restart_operator, approval never), submits, waits for `completed`, and checks
 #   exactly-once at the fake and the common checks (hash unchanged, every item written,
-#   `changeset.batch` audit rows = batches, `audit verify` exit 0): restart-baseline.
+#   `changeset.batch` audit rows = batches, `audit verify` exit 0): restart-baseline;
+#   groups `api`, `worker`, `postgres`, `temporal`: alice prepares 300 SKUs (3 batches of the
+#   preset's 100) with open-polls 3, and once the fake shows an applied bulk and an open one of the
+#   range while the change-set is `executing`, the component is killed with SIGKILL (every worker
+#   replica for `worker`) and started again with `up --no-deps --wait` (after PostgreSQL also
+#   Temporal, Keycloak, api and worker, and api /readyz 200); then `completed` within 300 s, the
+#   exactly-once and the common checks: restart-api (a call during the outage fails, get_changeset
+#   works after it), restart-worker, restart-postgres, restart-temporal.
 # Every group runs over its own SKU range so counts stay attributable (ledger ruling P1): baseline
 # 1-100, api 101-400, worker 401-700, postgres 701-1000, temporal 1001-1300, pending 1301-1400 and
 # 1401-1500. The fake is never reset between groups; the exactly-once check compares every SKU with
@@ -44,9 +51,10 @@ SEED_VALUE="seed"
 PRODUCTS=1600
 BRAND="restart"
 
-free_port() { node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})"; }
-AIOPS_API_PORT="$(free_port)" AIOPS_KEYCLOAK_PORT="$(free_port)" AIOPS_TEMPORAL_PORT="$(free_port)" AIOPS_POSTGRES_PORT="$(free_port)"
-AIOPS_MAILPIT_PORT="$(free_port)" AIOPS_FAKE_MAGENTO_PORT="$(free_port)"
+# Six distinct free ports in one call: every socket stays open until all are allocated, so two
+# separate calls cannot be handed the same port.
+free_ports() { node -e "const n=Number(process.argv[1]),net=require('net'),ss=[];(function next(){if(ss.length===n){console.log(ss.map(s=>s.address().port).join(' '));ss.forEach(s=>s.close());return}const s=net.createServer();ss.push(s);s.listen(0,'127.0.0.1',next)})()" "$1"; }
+read -r AIOPS_API_PORT AIOPS_KEYCLOAK_PORT AIOPS_TEMPORAL_PORT AIOPS_POSTGRES_PORT AIOPS_MAILPIT_PORT AIOPS_FAKE_MAGENTO_PORT <<<"$(free_ports 6)"
 export AIOPS_API_PORT AIOPS_KEYCLOAK_PORT AIOPS_TEMPORAL_PORT AIOPS_POSTGRES_PORT AIOPS_MAILPIT_PORT AIOPS_FAKE_MAGENTO_PORT
 export AIOPS_KEYCLOAK_PUBLIC_URL="http://localhost:${AIOPS_KEYCLOAK_PORT}"
 export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
@@ -260,6 +268,109 @@ group_baseline() {
   common="$(check_common "$id" "$hash")" || { fail restart-baseline "common: $common"; return 0; }
   pass restart-baseline "change-set $id: $once; $common"
 }
+
+# ---- Kill groups (Task 6): SIGKILL one component while a bulk is being polled ---------------------
+
+# api_ready: GET /readyz answers 200.
+api_ready() { [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$API/readyz" || true)" == 200 ]]; }
+
+# restart_service SVC: starts SVC again and waits until it is healthy (ruling P4: `up --no-deps
+# --wait`, which also brings back every worker replica). After PostgreSQL, the services that hold
+# connections to it (Temporal, Keycloak, api, worker) must be healthy too, and api /readyz 200 (P5).
+# Prints what it waited for; returns 1 with the Compose output when a service does not come back.
+restart_service() {
+  local svc="$1" out
+  out="$(compose up -d --no-deps --wait "$svc" 2>&1)" || { echo "up $svc: $(tail -5 <<<"$out" | tr '\n' '|')"; return 1; }
+  if [[ "$svc" == postgres ]]; then
+    out="$(compose up -d --no-deps --wait temporal keycloak api worker 2>&1)" ||
+      { echo "up temporal keycloak api worker: $(tail -5 <<<"$out" | tr '\n' '|')"; return 1; }
+  fi
+  local deadline=$((SECONDS + 120))
+  until api_ready; do
+    ((SECONDS >= deadline)) && { echo "api /readyz not 200 within 120 s"; return 1; }
+    sleep 1
+  done
+  if [[ "$svc" == postgres ]]; then
+    echo "postgres, temporal, keycloak, api, worker healthy (running workers $(running_workers)); api /readyz 200"
+  else
+    echo "$svc healthy (running workers $(running_workers)); api /readyz 200"
+  fi
+}
+
+# listeners: backends of the configuration LISTEN connection (CFG-3; one per api and worker process).
+listeners() { psql_q "select count(*) from pg_stat_activity where application_name = 'aiops-config-listener'" 2>/dev/null | tr -d ' ' || true; }
+
+# loops_recovered BEFORE: after a PostgreSQL restart, waits (60 s) until the LISTEN connections are
+# back to BEFORE and the sealer has sealed every audit row (`audit verify` reports unsealed=0), so the
+# api's listener and the worker's listener and sealer loops reconnected (Review Focus 1). Observed
+# state only. Prints the observation; returns 1 when the wait ends first.
+loops_recovered() {
+  local before="$1" deadline=$((SECONDS + 60)) now verify unsealed
+  while :; do
+    now="$(listeners)"
+    verify="$(compose exec -T api node dist/cli.js audit verify 2>&1 | tail -1 || true)"
+    unsealed="$(grep -oE 'unsealed=[0-9]+' <<<"$verify" | cut -d= -f2 || true)"
+    if [[ "$now" == "$before" && "$unsealed" == 0 ]]; then
+      echo "config listeners back to $now; sealer caught up (unsealed=0)"; return 0
+    fi
+    ((SECONDS >= deadline)) && { echo "after 60 s: config listeners '$now' want $before; audit verify: $verify"; return 1; }
+    sleep 1
+  done
+}
+
+# kill_group NAME SVC FIRST COUNT VALUE: sets open-polls 3, prepares and starts SKUs
+# FIRST..FIRST+COUNT-1 (ruling P1: 300 SKUs = 3 batches of the preset's 100), waits until a bulk is
+# being polled, SIGKILLs every container of SVC, starts it again, waits for `completed` and runs the
+# exactly-once and common checks. Check name restart-NAME. For the api, a call during the outage
+# must fail, and get_changeset must work again after the restart (Review Focus 3).
+kill_group() {
+  local name="$1" svc="$2" first="$3" count="$4" value="$5" id hash once common up started outage="" t0
+  t0=$SECONDS
+  set_open_polls 3 || { fail "restart-$name" "open-polls 3 not accepted"; return 0; }
+  id="$(prepare_and_start "$first" "$count" "$value" 2>"$WORK/$name.err")" || { fail "restart-$name" "$(tr '\n' '|' <"$WORK/$name.err")"; return 0; }
+  hash="$(prepared_hash "$id")"
+  if ! wait_bulk_polling "$id" "$first" "$count"; then
+    fail "restart-$name" "change-set $id: kill point not reached: $POLLING_SEEN"
+    compose logs --no-color worker | tail -40
+    return 0
+  fi
+  started="$POLLING_SEEN"
+  local before="" loops=""
+  if [[ "$svc" == postgres ]]; then
+    before="$(listeners)"
+    [[ "$before" =~ ^[1-9][0-9]*$ ]] || { fail "restart-$name" "config listeners before the kill: '$before'"; return 0; }
+  fi
+  compose kill -s KILL "$svc" >/dev/null 2>&1 || { fail "restart-$name" "docker compose kill -s KILL $svc failed"; return 0; }
+  local left
+  left="$(compose ps "$svc" --status running -q | wc -l | tr -d ' ')"
+  [[ "$left" == 0 ]] || { fail "restart-$name" "$left containers of $svc still running after the kill"; return 0; }
+  if [[ "$svc" == api ]]; then
+    local during
+    during="$(user_mcp alice get_changeset "{\"changeset_id\":\"$id\",\"page_size\":1}")"
+    if [[ -n "$(json "$during" '.structuredContent.changeset.status')" ]]; then
+      fail "restart-$name" "get_changeset answered while the api was killed: ${during:0:300}"; return 0
+    fi
+    outage="; during the outage get_changeset failed: $( (grep -m1 -oE 'ECONNREFUSED|ECONNRESET|fetch failed' <<<"$during" || grep -m1 -oE '[A-Za-z]*Error[^"]{0,120}' <<<"$during" || head -c 120 <<<"$during") | tr '\n' ' ')"
+  fi
+  up="$(restart_service "$svc")" || { fail "restart-$name" "$up"; compose ps -a; compose logs --no-color "$svc" | tail -40; return 0; }
+  if ! wait_status "$id" completed 300; then
+    fail "restart-$name" "change-set $id is '$WAIT_STATUS' 300 s after the restart: ${WAIT_ANSWER:0:1500}"
+    compose logs --no-color worker | tail -60
+    return 0
+  fi
+  once="$(check_exactly_once "$first" "$count" "$value")" || { fail "restart-$name" "exactly-once: $once"; return 0; }
+  common="$(check_common "$id" "$hash")" || { fail "restart-$name" "common: $common"; return 0; }
+  if [[ "$svc" == postgres ]]; then
+    loops="$(loops_recovered "$before")" || { fail "restart-$name" "loops: $loops"; compose logs --no-color api worker | tail -60; return 0; }
+    loops="; $loops"
+  fi
+  pass "restart-$name" "change-set $id: killed $svc (SIGKILL, 0 containers left running) at $started; $up$outage; $once; $common$loops; wall time $((SECONDS - t0)) s"
+}
+
+group_api() { kill_group api api 101 300 v-api; }
+group_worker() { kill_group worker worker 401 300 v-worker; }
+group_postgres() { kill_group postgres postgres 701 300 v-postgres; }
+group_temporal() { kill_group temporal temporal 1001 300 v-temporal; }
 
 # ---- Group selection: every selected group must be defined (ADR 0043), before any Docker work ----
 # Not GROUPS: bash ignores assignments to its own GROUPS array (the user's group IDs).
