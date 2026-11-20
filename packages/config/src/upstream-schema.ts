@@ -77,7 +77,13 @@ export const openApiSchema = z.strictObject({
 });
 
 const literal = z.union([z.string().max(4000), z.number(), z.boolean()]);
-const templateValue = z.union([literal, z.strictObject({ arg: z.string().min(1).max(128), default: literal.optional(), join: z.string().min(1).max(8).optional() })]);
+const templateJoin = z.string().min(1).max(8).optional();
+/** A literal, an argument of the call (`{ arg }`), or a field of the written record (`{ record }`, OPS-6). */
+const templateValue = z.union([
+  literal,
+  z.strictObject({ arg: z.string().min(1).max(128), default: literal.optional(), join: templateJoin }),
+  z.strictObject({ record: z.string().min(1).max(128), default: literal.optional(), join: templateJoin }),
+]);
 const templateMap = z.record(z.string().min(1).max(256), templateValue);
 const dottedPath = z.string().min(1).max(256);
 
@@ -114,7 +120,9 @@ const bulkSchema = z.strictObject({
       method: z.literal('GET').default('GET'),
       path: z.string().min(1).max(2048).regex(/^\//),
       items: bulkPath,
-      index: bulkPath,
+      /** OPS-6: the entry's position, or (`key`) its target ID; exactly one. */
+      index: bulkPath.optional(),
+      key: bulkPath.optional(),
       state: bulkPath,
       states: z.strictObject({
         ok: z.array(stateValue).min(1),
@@ -124,6 +132,11 @@ const bulkSchema = z.strictObject({
       }),
     })
     .superRefine((status, ctx) => {
+      if (status.index !== undefined && status.key !== undefined) {
+        ctx.addIssue({ code: 'custom', path: ['index'], message: 'give either index or key, not both' });
+      } else if (status.index === undefined && status.key === undefined) {
+        ctx.addIssue({ code: 'custom', path: ['index'], message: 'is required (or give key)' });
+      }
       const placeholders = pathPlaceholders(status.path);
       if (placeholders.length !== 1 || placeholders[0] !== 'batch_id') {
         ctx.addIssue({ code: 'custom', path: ['path'], message: 'must contain {batch_id} and no other placeholder' });
@@ -262,17 +275,30 @@ export function hasTemplates(u: UpstreamConfig): boolean {
   );
 }
 
-/** Every `{ arg }` reference of the block with its path inside `upstream`. */
-export function templateArgs(u: UpstreamConfig): { arg: string; path: readonly PropertyKey[] }[] {
-  const found: { arg: string; path: readonly PropertyKey[] }[] = [];
-  const visit = (value: TemplateConfig, path: readonly PropertyKey[]): void => {
-    if (typeof value === 'object') found.push({ arg: value.arg, path });
-  };
+/** Calls `visit` with every request template of the block and its path inside `upstream`. */
+function eachTemplate(u: UpstreamConfig, visit: (value: TemplateConfig, path: readonly PropertyKey[]) => void): void {
   for (const key of ['path_params', 'query', 'headers'] as const) {
     for (const [name, value] of Object.entries(u[key] ?? {})) visit(value, [key, name]);
   }
   if (u.body !== undefined) visit(u.body, ['body']);
+}
+
+/** Every `{ arg }` reference of the block with its path inside `upstream`; `{ record }` templates are not arguments. */
+export function templateArgs(u: UpstreamConfig): { arg: string; path: readonly PropertyKey[] }[] {
+  const found: { arg: string; path: readonly PropertyKey[] }[] = [];
+  eachTemplate(u, (value, path) => {
+    if (typeof value === 'object' && 'arg' in value) found.push({ arg: value.arg, path });
+  });
   if (u.response?.fields_from_arg !== undefined) found.push({ arg: u.response.fields_from_arg, path: ['response', 'fields_from_arg'] });
+  return found;
+}
+
+/** OPS-6: every `{ record }` reference of the block with its path inside `upstream`. */
+export function templateRecords(u: UpstreamConfig): { record: string; path: readonly PropertyKey[] }[] {
+  const found: { record: string; path: readonly PropertyKey[] }[] = [];
+  eachTemplate(u, (value, path) => {
+    if (typeof value === 'object' && 'record' in value) found.push({ record: value.record, path });
+  });
   return found;
 }
 
@@ -284,7 +310,7 @@ export function pathPlaceholders(path: string): string[] {
 function toTemplate(value: TemplateConfig): TemplateValue {
   if (typeof value !== 'object') return value;
   return {
-    arg: value.arg,
+    ...('arg' in value ? { arg: value.arg } : { record: value.record }),
     ...(value.default === undefined ? {} : { default: value.default }),
     ...(value.join === undefined ? {} : { join: value.join }),
   };
@@ -320,7 +346,8 @@ export function toBulkMapping(b: BulkConfig): BulkMapping {
       method: b.status.method,
       path: b.status.path,
       items: b.status.items,
-      index: b.status.index,
+      ...(b.status.index === undefined ? {} : { index: b.status.index }),
+      ...(b.status.key === undefined ? {} : { key: b.status.key }),
       state: b.status.state,
       states: {
         ok: [...b.status.states.ok],

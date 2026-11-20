@@ -379,7 +379,37 @@ connections:
     }
   });
 
-  it.todo('OPS-5 CONN-8 the fixture preset loads with all six operations and four code bindings plus one per-record binding');
+  it('OPS-5 OPS-6 CONN-8 the fixture preset loads with all six operations and four code bindings plus one per-record binding', async () => {
+    const dirs: string[] = [];
+    try {
+      const result = await loadCodeFixture(dirs);
+      if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+      const { configuration } = result;
+      expect(configuration.policy.operations.map((o) => o.id)).toEqual([
+        'fixture.search',
+        'fixture.get_many',
+        'fixture.update',
+        'fixture.set_tags',
+        'fixture.ping',
+        'fixture.boom',
+      ]);
+      expect(Object.fromEntries([...configuration.bindings].map(([id, b]) => [id, b.kind]))).toEqual({
+        'fixture.search': 'http',
+        'fixture.get_many': 'code',
+        'fixture.update': 'http',
+        'fixture.set_tags': 'code',
+        'fixture.ping': 'code',
+        'fixture.boom': 'code',
+      });
+      expect(configuration.codeOperations.size).toBe(4);
+      const update = configuration.bindings.get('fixture.update');
+      if (update?.kind !== 'http') throw new Error('fixture.update has no HTTP binding');
+      expect(update.mapping).toMatchObject({ method: 'PATCH', path: '/items/{id}', pathParams: { id: { record: 'id' } } });
+      expect(update.mapping.bulk).toBeUndefined();
+    } finally {
+      await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+    }
+  });
 
   it('OPS-5 CONN-8 the fixture preset without fixture.update loads with five operations and four code bindings', async () => {
     const dirs: string[] = [];

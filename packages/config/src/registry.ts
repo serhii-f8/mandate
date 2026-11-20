@@ -17,6 +17,7 @@ import {
   isCodeUpstream,
   pathPlaceholders,
   templateArgs,
+  templateRecords,
   toBulkMapping,
   toCodeResponse,
   toResponse,
@@ -385,6 +386,10 @@ export function buildRegistry(input: RegistryInput): Registry {
       }
       for (const ref of templateArgs(u)) upstreamAt(ref.path, 'cannot reference arguments in a bulk binding');
     }
+    // OPS-6: a manifest write bound to HTTP without bulk sends one request per record.
+    const perRecord = (op.risk === 'write' || op.risk === 'destructive') && op.manifest !== undefined && u.bulk === undefined;
+    if (perRecord && method === 'GET') upstreamAt(methodAt, 'must not be GET for a per-record write binding');
+    checkRecordTemplates(u, perRecord ? op.manifest : undefined, upstreamAt);
     all.set(op.id, { definition, located, enabled, schemaKnown, ...(validator === undefined ? {} : { validator }) });
 
     if (enabled) {
@@ -475,6 +480,29 @@ function bindingOf(connection: string, op: PresetOperationConfig, u: UpstreamCon
       ...(u.idempotency === undefined ? {} : { idempotency: { header: u.idempotency.header } }),
     },
   };
+}
+
+/**
+ * OPS-6: `{ record }` templates appear only in a per-record write binding (`manifest` given) and
+ * name a field the written record carries. Records carry `id_field`, the carry fields and only
+ * the touched fields, so a path parameter takes only `id_field` or a carry field (ledger F20):
+ * a path built from an untouched field would fail per record depending on the change.
+ */
+function checkRecordTemplates(u: UpstreamConfig, manifest: PresetOperationConfig['manifest'], upstreamAt: (sub: readonly PropertyKey[], message: string) => void): void {
+  const refs = templateRecords(u);
+  if (manifest === undefined) {
+    for (const ref of refs) upstreamAt(ref.path, 'is allowed only in a per-record write binding');
+    return;
+  }
+  const always = new Set([manifest.id_field, ...(manifest.write?.carry_fields ?? [])]);
+  const written = new Set([...always, ...manifest.fields]);
+  for (const ref of refs) {
+    if (ref.path[0] === 'path_params') {
+      if (!always.has(ref.record)) upstreamAt(ref.path, 'names a field that is not always in the written record (id_field or write.carry_fields)');
+    } else if (!written.has(ref.record)) {
+      upstreamAt(ref.path, 'names a field that is not in the written record (id_field, fields or write.carry_fields)');
+    }
+  }
 }
 
 function indexOverrides(input: RegistryInput): Map<string, Located<OverrideConfig>> {

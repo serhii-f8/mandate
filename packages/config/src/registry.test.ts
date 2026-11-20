@@ -952,3 +952,119 @@ operations:
     ]);
   });
 });
+
+describe('OPS-6 per-record write bindings', () => {
+  const READS = `version: 1
+operations:
+  - id: shop.search
+    connection: shop
+    risk: read
+    description: Search.
+    upstream: { method: GET, path: /items, query: { page: { arg: page }, size: { arg: size }, fields: { arg: fields, join: ',' } }, response: { items: items, fields_from_arg: fields } }
+    input_schema:
+      type: object
+      properties:
+        page: { type: integer }
+        size: { type: integer }
+        fields: { type: array, items: { type: string } }
+      required: [fields]
+    fields_arg: fields
+  - id: shop.get_items
+    connection: shop
+    risk: read
+    description: Items by SKU.
+    upstream: { method: GET, path: /items, query: { skus: { arg: skus, join: ',' }, fields: { arg: fields, join: ',' } }, response: { items: items, fields_from_arg: fields } }
+    input_schema:
+      type: object
+      properties:
+        skus: { type: array, items: { type: string } }
+        fields: { type: array, items: { type: string } }
+      required: [skus, fields]
+    fields_arg: fields
+`;
+  const UPSTREAM = `{ method: PUT, path: '/items/{sku}', path_params: { sku: { record: sku } }, query: { store: { arg: store }, v: { record: version } }, headers: { X-Name: { record: name } }, body: { record: name } }`;
+  const write = (options: { risk?: string; upstream?: string; manifest?: boolean } = {}): string => `version: 1
+operations:
+  - id: shop.update
+    connection: shop
+    risk: ${options.risk ?? 'write'}
+    description: Update.
+    upstream: ${options.upstream ?? UPSTREAM}
+    input_schema:
+      type: object
+      properties:
+        store: { type: string }
+        skus: { type: array, items: { type: string } }
+        changes: { type: object, properties: { name: { type: string }, price: { type: number } }, additionalProperties: false }
+      required: [changes]
+${
+  options.manifest === false
+    ? ''
+    : `    manifest:
+      id_field: sku
+      ids_arg: skus
+      values_arg: changes
+      fields: [name, price]
+      write: { carry_fields: [version] }
+      read_before: { operation: shop.get_items, ids_arg: skus, args: {} }
+      selector: { operation: shop.search, args: {}, page_arg: page, page_size_arg: size }
+      rollback: { strategy: replay_previous_state }
+`
+}`;
+  const load = (text: string): Promise<LoadResult> => sources({ 'search.yaml': READS, 'write.yaml': text });
+  const ONLY = 'is allowed only in a per-record write binding';
+  const BULK = `bulk: { batch_id: id, status: { path: '/b/{batch_id}', items: ops, key: sku, state: s, states: { ok: [1], open: [2] } } }`;
+
+  it('OPS-6 a write operation with a manifest and an HTTP binding without bulk is accepted with record templates in path_params, query, headers and body', async () => {
+    const config = ok(await load(write()));
+    expect(httpBinding(config, 'shop.update').mapping).toMatchObject({
+      method: 'PUT',
+      path: '/items/{sku}',
+      pathParams: { sku: { record: 'sku' } },
+      query: { store: { arg: 'store' }, v: { record: 'version' } },
+      headers: { 'X-Name': { record: 'name' } },
+      body: { record: 'name' },
+    });
+    // Destructive with a manifest is per-record too.
+    ok(await load(write({ risk: 'destructive' })));
+  });
+
+  it('OPS-6 a record template on a read, a bulk binding or a write without manifest is refused', async () => {
+    const onRead = issues(await sources({ 'search.yaml': READS.replace("page: { arg: page }", 'page: { record: page }') }));
+    expect(onRead).toEqual([expect.objectContaining({ file: 'search.yaml', path: 'operations[0].upstream.query.page', message: ONLY })]);
+
+    const bulk = issues(await load(write({ upstream: `{ method: POST, path: /bulk, query: { v: { record: version } }, ${BULK} }` })));
+    expect(bulk).toEqual([expect.objectContaining({ file: 'write.yaml', path: 'operations[0].upstream.query.v', message: ONLY })]);
+    // The key-mapped bulk binding alone loads.
+    ok(await load(write({ upstream: `{ method: POST, path: /bulk, ${BULK} }` })));
+
+    const opaque = issues(await load(write({ risk: 'write_opaque', manifest: false, upstream: "{ method: POST, path: /send, body: { record: name } }" })));
+    expect(opaque).toEqual([expect.objectContaining({ file: 'write.yaml', path: 'operations[0].upstream.body', message: ONLY })]);
+  });
+
+  it('OPS-6 a record template naming a field outside id_field, fields and carry_fields is refused', async () => {
+    const outside = issues(await load(write({ upstream: "{ method: PUT, path: '/items/{sku}', path_params: { sku: { record: sku } }, headers: { X-Other: { record: other } } }" })));
+    expect(outside).toEqual([
+      expect.objectContaining({ path: 'operations[0].upstream.headers.X-Other', message: 'names a field that is not in the written record (id_field, fields or write.carry_fields)' }),
+    ]);
+    // F20: a path parameter takes only fields every written record has.
+    const touched = issues(await load(write({ upstream: "{ method: PUT, path: '/items/{name}', path_params: { name: { record: name } } }" })));
+    expect(touched).toEqual([
+      expect.objectContaining({ path: 'operations[0].upstream.path_params.name', message: 'names a field that is not always in the written record (id_field or write.carry_fields)' }),
+    ]);
+    ok(await load(write({ upstream: "{ method: PUT, path: '/items/{sku}/{version}', path_params: { sku: { record: sku }, version: { record: version } } }" })));
+  });
+
+  it('OPS-6 a per-record write binding on GET is refused', async () => {
+    const found = issues(await load(write({ upstream: "{ method: GET, path: '/items/{sku}', path_params: { sku: { record: sku } } }" })));
+    expect(found).toEqual([expect.objectContaining({ path: 'operations[0].upstream.method', message: 'must not be GET for a per-record write binding' })]);
+  });
+
+  it('OPS-6 MCP-4 a record template is not an argument: it needs no input_schema property', async () => {
+    // `sku`, `version` and `name` are not properties of input_schema; only `store` is.
+    const config = ok(await load(write()));
+    expect(config.policy.operations.find((o) => o.id === 'shop.update')?.inputSchema).not.toHaveProperty('properties.sku');
+    const missingArg = issues(await load(write({ upstream: "{ method: PUT, path: '/items/{sku}', path_params: { sku: { record: sku } }, query: { s: { arg: shop } } }" })));
+    expect(missingArg).toEqual([expect.objectContaining({ path: 'operations[0].upstream.query.s', message: 'names an argument that is not in input_schema' })]);
+  });
+});
