@@ -78,6 +78,11 @@ Gitea's `PUT …/labels` silently drops unknown names and ids, so the writer res
 - A PUT that Gitea answers with 2xx is reported `ok`; core's verify read then decides, so a
   partial result ends `drift`. A 429, a 5xx or a transport error is `retriable` and stops sending
   for the rest of the batch.
+- The labels to set come from each record, never from `args.changes`: in a rollback
+  (`ctx.direction === 'rollback'`) the records carry the labels read before execution while the
+  arguments still describe the forward change. The PUT replaces the whole label set, so sending a
+  record again after a retried batch is harmless (the SDK requires each record write to be
+  idempotent).
 - **Give labels sorted.** Core compares the label list by order: `[triage, bug]` on an issue
   with `[bug, triage]` shows as a change, writes, and the item ends `drift` (the verify read
   answers the sorted list). Sorted labels avoid this.
