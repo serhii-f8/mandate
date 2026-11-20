@@ -5,7 +5,7 @@
  * argument validation (MCP-3) → policy decision, audited (POL-8) → run (SEC-1).
  */
 import { ProtocolError, ProtocolErrorCode, type CallToolResult, type Tool } from '@modelcontextprotocol/server';
-import { createSchemaCompiler, type ArgumentValidator, type LoadedConfiguration } from '@aiops/config';
+import { createSchemaCompiler, type ArgumentValidator, type LoadedConfiguration, type PinEvaluation } from '@aiops/config';
 import type { UpstreamToolView } from '@aiops/upstream';
 import {
   allowingRole,
@@ -23,7 +23,7 @@ import {
 } from '@aiops/core';
 import { preparesChangeSet } from '../changesets/changeset-invoker.js';
 import { withPageLink } from '../changesets/links.js';
-import { usablePin } from '../upstream/pin-refusal.js';
+import { pinRefusal, usablePin } from '../upstream/pin-refusal.js';
 import { toCallToolResult } from '../changesets/results.js';
 import { createTaskResult, isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { AUDIT_UNAVAILABLE, auditedRun } from './audited-tool.js';
@@ -164,21 +164,29 @@ function operationTools(deps: PipelineDeps, configuration: LoadedConfiguration, 
   return tools;
 }
 
-/** Only checks that the arguments are an object: what a not-`ok` MCP-backed call is validated with, so policy decides and the router refuses (R8). */
+/** Only checks that the arguments are an object: what a not-`ok` MCP-backed call is validated with, so policy decides and the call is refused after it (R8). */
 const validateObjectOnly: ArgumentValidator = createSchemaCompiler()({ type: 'object' });
+
+/** The validator of a call and, for a schema derived from a pinned tool, the pin evaluation it was chosen from. */
+interface ChosenValidator {
+  readonly validate: ArgumentValidator | undefined;
+  readonly derivedFrom?: PinEvaluation;
+}
 
 /**
  * The argument validator of an operation (MCP-3). For an MCP-backed one the pin is refreshed
  * first, so the router's check after policy is fresh (R8): a derived schema comes from the
- * pinned tool when it is `ok`; an explicit `input_schema` is the configured validator.
+ * pinned tool when it is `ok`; an explicit `input_schema` is the configured validator. A derived
+ * choice carries its evaluation, so a call checked only as an object is refused even when the
+ * pin is `ok` again by the time the router looks (fail closed on one evaluation).
  */
-async function operationValidator(deps: PipelineDeps, configuration: LoadedConfiguration, op: OperationDefinition): Promise<ArgumentValidator | undefined> {
+async function operationValidator(deps: PipelineDeps, configuration: LoadedConfiguration, op: OperationDefinition): Promise<ChosenValidator> {
   const binding = configuration.bindings.get(op.id);
-  if (binding?.kind !== 'mcp') return configuration.validators.get(op.id);
+  if (binding?.kind !== 'mcp') return { validate: configuration.validators.get(op.id) };
   const view = usablePin(binding, await deps.upstreamTools?.current(configuration, op.id));
-  if (!binding.schemaFromTool) return configuration.validators.get(op.id);
-  // usablePin makes an `ok` view without a validator `schema_invalid`, which the router refuses.
-  return view.state === 'ok' && view.validator !== undefined ? view.validator : validateObjectOnly;
+  if (!binding.schemaFromTool) return { validate: configuration.validators.get(op.id) };
+  // usablePin makes an `ok` view without a validator `schema_invalid`, which is refused.
+  return { validate: view.state === 'ok' && view.validator !== undefined ? view.validator : validateObjectOnly, derivedFrom: view };
 }
 
 export async function listTools(deps: PipelineDeps, req: PipelineRequest): Promise<Tool[]> {
@@ -272,8 +280,8 @@ async function runCall(deps: PipelineDeps, req: PipelineRequest, name: string, r
 
   // 2. Arguments (MCP-3), before any policy or upstream call.
   const args = rawArgs ?? {};
-  const check =
-    builtin !== undefined ? builtin.validate(args) : operation === undefined ? undefined : (await operationValidator(deps, configuration, operation))?.(args);
+  const chosen = builtin === undefined && operation !== undefined ? await operationValidator(deps, configuration, operation) : undefined;
+  const check = builtin !== undefined ? builtin.validate(args) : chosen?.validate?.(args);
   // MCP-9: operation rows record the operation ID behind the called tool name.
   const operationDetails = operation === undefined ? {} : { details: { operation: operation.id } };
   if (check?.ok !== true) {
@@ -354,7 +362,10 @@ async function runCall(deps: PipelineDeps, req: PipelineRequest, name: string, r
       // Step 1 returned unless a built-in or a granted operation was found.
       if (operation === undefined) throw new Error('no operation after lookup');
       report({ operation: operation.id });
-      const result = await deps.invokerFor(configuration, req.correlationId).invoke({ operation, args: validArgs, caller: req.caller, asTask: req.tasks, report });
+      // R8 on the evaluation the arguments were validated with: not `ok` there is refused here,
+      // whatever the router sees later; the router still checks its own (both must be `ok`).
+      const refusal = chosen?.derivedFrom === undefined ? undefined : pinRefusal(operation, chosen.derivedFrom);
+      const result = refusal ?? (await deps.invokerFor(configuration, req.correlationId).invoke({ operation, args: validArgs, caller: req.caller, asTask: req.tasks, report }));
       // The operation ID stays authoritative over whatever the invoker reports.
       if (result.auditDetails !== undefined) report({ ...result.auditDetails, operation: operation.id });
       if (result.task !== undefined) {

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ProtocolError, type CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import type { AuditEventInput, Caller, DenyReason, OperationDefinition, PolicyDecision, RateCounter, InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
+import { READ_RESULT_TEXT, type AuditEventInput, type Caller, type DenyReason, type OperationDefinition, type PolicyDecision, type RateCounter, type InvocationRequest, type InvocationResult, type OperationInvoker } from '@aiops/core';
 import { createSchemaCompiler, loadConfigurationSources, type LoadedConfiguration, type PinEvaluation } from '@aiops/config';
 import type { UpstreamToolView } from '@aiops/upstream';
 import {
@@ -14,6 +14,7 @@ import {
   ScriptedWriter,
 } from '@aiops/testing';
 import { ApprovalService } from '../approvals/approval-service.js';
+import { OperationRouter } from '../upstream/operation-router.js';
 import { callerFromAuthInfo } from '../auth/caller-from-auth.js';
 import { pingTool, type BuiltinToolDeps } from './builtin-tools.js';
 import { DECIDE_TOOL, decideChangesetTool } from './decide-tool.js';
@@ -975,13 +976,40 @@ describe('CONN-4 MCP-backed operations in the pipeline', () => {
     expect(audit.events.map((e) => e.details.errorCode)).toEqual(['invalid_arguments']);
   });
 
-  it('CONN-4 a not-ok call passes an object-only check and reaches policy, so the router refuses it (R8)', async () => {
+  it('CONN-4 a not-ok call passes an object-only check and reaches policy, then is refused before the invoker (R8)', async () => {
     const view = toolView({ state: 'changed', liveHash: `sha256:${'c'.repeat(64)}` });
     const invoker = new FakeInvoker();
     const { deps, req, audit } = setupWith(MCP_LOADED, invoker);
-    await callTool({ ...deps, upstreamTools: view }, req(bob), 'tools.echo', { message: 5 });
-    expect(actions(audit.events)[0]).toBe('policy.decision:allow');
-    expect(invoker.calls.map((c) => c.operation.id)).toEqual(['tools.echo']);
+    const result = plain(await callTool({ ...deps, upstreamTools: view }, req(bob), 'tools.echo', { message: 5 }));
+    expect(result.isError).toBe(true);
+    expect(actions(audit.events)).toEqual(['policy.decision:allow', 'tool.call:error']);
+    expect(audit.events[1]?.details).toMatchObject({ operation: 'tools.echo', connection: 'tools', errorCode: 'upstream_changed', pinState: 'changed' });
+    expect(invoker.calls).toEqual([]);
+  });
+
+  it('MCP-3 CONN-4 a derived-schema call validated while the pin was not ok is refused even if the pin is ok at the router', async () => {
+    // The pin flips between validation (`current`) and the router's check (`view`).
+    const view: UpstreamToolView = {
+      view: () => OK,
+      current: () => Promise.resolve({ state: 'changed', liveHash: `sha256:${'c'.repeat(64)}` }),
+      touch: () => undefined,
+    };
+    const read = new FakeInvoker();
+    const changeset = new FakeInvoker();
+    const { deps, req, audit } = setupWith(MCP_LOADED, read);
+    const routed: PipelineDeps = {
+      ...deps,
+      upstreamTools: view,
+      invokerFor: (configuration) => new OperationRouter({ read, changeset }, { configuration, upstreamTools: view }),
+    };
+    // Valid against the object-only check, invalid against the derived schema.
+    const result = plain(await callTool(routed, req(bob), 'tools.echo', { message: 5 }));
+    expect(result.isError).toBe(true);
+    expect(text(result)).toBe(READ_RESULT_TEXT.errors.upstream_changed('tools.echo'));
+    expect(read.calls).toEqual([]);
+    expect(changeset.calls).toEqual([]);
+    expect(actions(audit.events)).toEqual(['policy.decision:allow', 'tool.call:error']);
+    expect(audit.events[1]?.details).toMatchObject({ operation: 'tools.echo', errorCode: 'upstream_changed', pinState: 'changed' });
   });
 });
 
