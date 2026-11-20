@@ -36,6 +36,10 @@ async function main(): Promise<void> {
   // One composite adapter (CONN-1): its resolver checks the specs and lists the tools of every
   // revision loaded; it also runs the reads and tool calls, and its listTools drives the pin monitor.
   const adapter = createAdapters({
+    // A preset code module's thrown text, already scrubbed of the credential and cut (OPS-5, SEC-3).
+    onCodeError: ({ connection, operation, kind, message }) => {
+      logger.warn({ connection, operation, kind, message }, 'preset code failed');
+    },
     instrumentation: createUpstreamInstrumentation({ meter: telemetry.meter }),
     credentialFor: async (ref) => {
       const credential = await connectionCredential(vault, ref);

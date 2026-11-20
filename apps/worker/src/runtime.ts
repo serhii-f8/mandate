@@ -87,7 +87,8 @@ interface RuntimeStores {
  * Activities registered on the worker: `echo` and the change-set activities bound to the stores,
  * the current configuration (it changes on SIGHUP) and the tuning from the environment. Writes
  * go through `createWriterFor` (an opaque operation sends its one call, after a fresh pin check for
- * an MCP tool; a bulk binding writes; anything else fails every item with `write_mode_unsupported`),
+ * an MCP tool; a bulk, per-record or code binding writes (OPS-5, OPS-6); anything else fails every
+ * item with `write_mode_unsupported`),
  * rollbacks through `createRollbackWriterFor` (EXE-8, OPS-3); reads run the shared upstream read path.
  */
 function activitiesFor(stores: RuntimeStores): WorkerActivities {
@@ -205,6 +206,10 @@ export async function startWorkerRuntime(
     // One composite adapter (CONN-1): its resolver checks the specs and lists the tools of every
     // revision loaded; it also runs the calls. The pin monitor runs in api only (R13).
     const adapter = createAdapters({
+      // A preset code module's thrown text, already scrubbed of the credential and cut (OPS-5, SEC-3).
+      onCodeError: ({ connection, operation, kind, message }) => {
+        logger.warn({ connection, operation, kind, message }, 'preset code failed');
+      },
       instrumentation: createUpstreamInstrumentation({ meter }),
       credentialFor: async (ref) => {
         const credential = await connectionCredential(vault, ref);

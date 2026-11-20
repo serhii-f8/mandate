@@ -63,6 +63,17 @@ operations:
       rollback: { strategy: replay_previous_state }
 `;
 
+/** Only the read and bulk/opaque methods of `adapter`: no per-record writes, no code operations. */
+function bulkOnly(adapter: ReadAdapter & WriteAdapter): ReadAdapter & WriteAdapter {
+  return {
+    read: (input) => adapter.read(input),
+    detectScopes: (input) => adapter.detectScopes(input),
+    submitBulk: (input) => adapter.submitBulk(input),
+    bulkStatus: (input) => adapter.bulkStatus(input),
+    callOnce: (input) => adapter.callOnce(input),
+  };
+}
+
 /** Advances virtual time instead of sleeping. */
 class FakeClock implements Clock {
   private t = 0;
@@ -154,8 +165,11 @@ describe('EXE-4 OPS-6 worker writerFor', () => {
     createWriterFor({ vault, adapter: createOpenApiAdapter(), clock: new FakeClock(), log: (l) => lines.push(l) });
   const statusPolls = (): number => up.requests.filter((r) => r.method === 'GET' && r.path.endsWith('/detailed-status')).length;
 
-  it('OPS-6 writerFor returns UnsupportedWriter without a bulk binding: every item failed/write_mode_unsupported', async () => {
-    const writer = writerFor()(configuration, 'catalog.update_content_plain');
+  it('OPS-6 writerFor returns UnsupportedWriter without a usable write binding: every item failed/write_mode_unsupported', async () => {
+    // A non-bulk HTTP write binding is a per-record write (OPS-6); an adapter that cannot write per
+    // record has no writer for it and fails closed (ruling F14).
+    expect(writerFor()(configuration, 'catalog.update_content_plain')).toBeInstanceOf(ManifestBatchWriter);
+    const writer = createWriterFor({ vault, adapter: bulkOnly(createOpenApiAdapter()) })(configuration, 'catalog.update_content_plain');
     expect(writer).toBeInstanceOf(UnsupportedWriter);
     expect(writerFor()(configuration, 'catalog.get_products_by_sku')).toBeInstanceOf(UnsupportedWriter);
     expect(writerFor()(configuration, 'catalog.unknown')).toBeInstanceOf(UnsupportedWriter);
@@ -330,10 +344,11 @@ describe('EXE-8 OPS-3 rollbackWriterFor', () => {
   it('OPS-3 strategy none gives no rollback writer', () => {
     const rollbackWriterFor = createRollbackWriterFor(deps());
     expect(rollbackWriterFor(withStrategy(configuration, { strategy: 'none' }), 'catalog.update_content')).toBeUndefined();
-    // An unknown operation, one without a manifest and one without a bulk binding get none either.
+    // An unknown operation, one without a manifest and one without a usable write binding get none either.
     expect(rollbackWriterFor(configuration, 'catalog.unknown')).toBeUndefined();
     expect(rollbackWriterFor(configuration, 'catalog.get_products_by_sku')).toBeUndefined();
-    expect(rollbackWriterFor(configuration, 'catalog.update_content_plain')).toBeUndefined();
+    expect(rollbackWriterFor(configuration, 'catalog.update_content_plain')).toBeInstanceOf(ManifestBatchWriter);
+    expect(createRollbackWriterFor({ ...deps(), adapter: bulkOnly(createOpenApiAdapter()) })(configuration, 'catalog.update_content_plain')).toBeUndefined();
     // An inverse operation that is not in the configuration has no binding.
     const dangling = withStrategy(configuration, { strategy: 'inverse_operation', operation: 'catalog.gone' });
     expect(rollbackWriterFor(dangling, 'catalog.update_content')).toBeUndefined();
