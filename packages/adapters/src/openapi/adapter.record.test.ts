@@ -122,7 +122,7 @@ describe('OPS-6 writeRecord', () => {
     expect(up.requests).toHaveLength(0);
   });
 
-  it('OPS-6 SEC-5 a mapping problem sends nothing: no path value, a dot segment, a GET, a bulk mapping, an unsendable header', async () => {
+  it('OPS-6 SEC-5 a mapping problem sends nothing: no path value, a dot segment, a GET, a bulk mapping, an unsendable header, a body template that renders nothing', async () => {
     const adapter = createOpenApiAdapter();
     const send = (mapping: UpstreamMapping, record: Record<string, unknown>) =>
       adapter.writeRecord({ connection: settings(), mapping, record, args: {} });
@@ -136,6 +136,10 @@ describe('OPS-6 writeRecord', () => {
     const bulk = { body: {}, batchId: 'id', status: { method: 'GET' as const, path: '/b/{batch_id}', items: 'i', index: 'i', state: 's', states: { ok: [], failed: [], retriable: [], open: [] } } };
     expect(await send({ ...MAPPING, bulk }, { id: 7 })).toEqual(refused);
     expect(await send({ ...MAPPING, headers: { 'x-note': { record: 'note' } } }, { id: 7, note: 'a\r\nb' })).toEqual(refused);
+    // A body template that renders nothing would send an empty PUT/PATCH, which an upstream may read as "clear".
+    expect(await send({ ...MAPPING, body: { record: 'labels' } }, { id: 7 })).toEqual(refused);
+    expect(await send({ ...MAPPING, body: { record: 'labels' } }, { id: 7, labels: null })).toEqual(refused);
+    expect(await send({ ...MAPPING, body: { arg: 'payload' } }, { id: 7 })).toEqual(refused);
     expect(up.requests).toHaveLength(0);
   });
 });

@@ -345,6 +345,8 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
       if (err instanceof MappingError) return mappingFailure();
       throw err;
     }
+    // A body template that renders nothing would send an empty write, which an upstream may read as "clear".
+    if (mapping.body !== undefined && req.body === undefined) return mappingFailure();
     if (!headersSendable(req.headers)) return mappingFailure();
     const r = await clientOf(connection).send(req, { retryable: false, discardBody: true, ...(credential ? { credential } : {}) });
     if (r.ok) return { ok: true, status: r.status, durationMs: r.durationMs };
