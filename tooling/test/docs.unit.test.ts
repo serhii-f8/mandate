@@ -155,6 +155,17 @@ describe('NFR-9 public docs', () => {
     const empty = map.filter((e) => (blocks.get(e.section) ?? []).length === 0).map((e) => e.section);
     expect(empty).toEqual([]);
   });
+
+  // A reader of the rendered page never sees an HTML comment: a command the walkthrough needs must be a
+  // visible code block (newcomer walkthrough, 2026-11-21).
+  it('NFR-9 every doc-test command of the guide is visible: no hidden doc-test-alt block', () => {
+    const blocks = extract(
+      PAGES.map((p) => ({ path: `docs/guide/${p}`, text: read(`docs/guide/${p}`) })),
+      SECTIONS,
+    );
+    const hidden = [...blocks.values()].flat().filter((b) => b.alt).map((b) => `${b.path}#${String(b.index)}`);
+    expect(hidden).toEqual([]);
+  });
 });
 
 describe('NFR-18 release notes', () => {

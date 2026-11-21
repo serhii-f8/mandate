@@ -29,6 +29,12 @@ This starts `api`, `worker`, PostgreSQL, Temporal, Keycloak and Mailpit (a devel
 Migrations run on start, and the development configuration in `deploy/config/` seeds the first
 active revision. All ports are bound to `127.0.0.1`.
 
+The host ports are 8400 (api), 8480 (Keycloak), 17233 (Temporal), 15432 (PostgreSQL) and 8025
+(Mailpit). If one is taken by another program, `up` fails with `port is already allocated`: pick a
+free port as described in [Change the defaults](#change-the-defaults) and run `up` again. The
+Compose project is always called `aiops`, so a second clone on the same machine shares its
+containers and volumes; run one copy at a time.
+
 ## Check health
 
 <!-- doc-test: install -->
@@ -79,6 +85,11 @@ URLs on this page.
 docker compose down        # stop, keep the data
 docker compose down -v     # stop and delete all data
 ```
+
+These commands stop only this stack. The Magento sandbox of the next page is a separate Compose
+project and keeps running; stop it with `bash deploy/sandbox/magento/down.sh` (add `-v` to delete the shop's data; the next start
+reinstalls it). The walkthrough leaves its new keywords on the acme products until you roll the
+change back or reset the sandbox.
 
 ## Next
 

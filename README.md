@@ -31,7 +31,7 @@ You need Docker with Compose v2.
 ```bash
 git clone <repository-url> ai-operations-layer
 cd ai-operations-layer
-cp .env.example .env   # optional: the defaults work
+cp .env.example .env   # optional: the defaults work when ports 8400, 8480, 17233, 15432, 8025 are free
 docker compose up -d --build --wait
 ```
 
