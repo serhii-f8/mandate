@@ -110,6 +110,7 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
         <ActionBar>
           <button
             type="button"
+            className="danger"
             disabled={action.busy}
             onClick={() => {
               action.run('Not rolled back: ', rollback, (next) => {

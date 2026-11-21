@@ -51,7 +51,9 @@ const ItemRows = memo(function ItemRows({ row, box }: RowProps): ReactElement {
           ) : null}
         </td>
       ) : null}
-      <td rowSpan={span}>{row.targetId}</td>
+      <td rowSpan={span} className="target">
+        {row.targetId}
+      </td>
       <td rowSpan={span}>
         <StatusBadge status={row.status} />
       </td>
@@ -74,10 +76,10 @@ const ItemRows = memo(function ItemRows({ row, box }: RowProps): ReactElement {
         <tr key={String(i)}>
           {i === 0 ? head : null}
           <td>{f.field ?? ''}</td>
-          <td>
+          <td className="before">
             <Value value={f.before} />
           </td>
-          <td>
+          <td className="after">
             <Value value={f.after} />
           </td>
           <td rowSpan={1}>{i === 0 ? note(row) : ''}</td>

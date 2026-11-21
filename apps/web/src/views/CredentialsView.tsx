@@ -152,7 +152,7 @@ function CredentialCard({ row, props }: { row: CredentialRow; props: Credentials
             </div>
           );
         })}
-        <button type="submit" disabled={busy || !props.fresh}>
+        <button type="submit" className="primary" disabled={busy || !props.fresh}>
           Save
         </button>
       </form>

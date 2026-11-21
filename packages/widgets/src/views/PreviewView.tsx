@@ -193,6 +193,7 @@ export function PreviewView({ data, actions, onData }: ViewProps<ChangeSetViewMo
         {submit && data.permissions.canSubmit && hash !== undefined ? (
           <button
             type="button"
+            className="primary"
             disabled={action.busy}
             onClick={() => {
               sendSubmit(hash);

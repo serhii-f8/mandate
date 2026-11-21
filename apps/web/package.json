@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@aiops/widgets": "workspace:*",
+    "@fontsource-variable/public-sans": "5.2.6",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

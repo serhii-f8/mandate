@@ -82,6 +82,7 @@ function DecisionPanel(props: Props & { action: Action; origin: Origin | undefin
         </label>
         <button
           type="button"
+          className="primary"
           disabled={action.busy}
           onClick={() => {
             send('approve');
@@ -91,6 +92,7 @@ function DecisionPanel(props: Props & { action: Action; origin: Origin | undefin
         </button>
         <button
           type="button"
+          className="danger"
           disabled={action.busy}
           onClick={() => {
             send('reject');
@@ -135,6 +137,7 @@ function DecisionPanel(props: Props & { action: Action; origin: Origin | undefin
       {viewer.canStart && start ? (
         <button
           type="button"
+          className="primary"
           disabled={action.busy}
           onClick={() => {
             begin();
@@ -171,7 +174,7 @@ export function ApprovalView({ data, actions, onData }: Props): ReactElement {
           {'Status: '}
           <StatusBadge status={data.status} />
         </p>
-        {data.hash === undefined ? null : <p>{`Hash: ${data.hash}`}</p>}
+        {data.hash === undefined ? null : <p className="hash">{`Hash: ${data.hash}`}</p>}
         <p>
           {'Expires: '}
           <Time iso={data.expiresAt} />
@@ -290,7 +293,9 @@ export function ApprovalView({ data, actions, onData }: Props): ReactElement {
               <li key={s.step}>
                 <span>{`Step ${String(s.step)}: ${s.role}`}</span>{' '}
                 {s.decision === undefined ? (
-                  <span>{s.role === approval.awaitingRole ? 'awaiting' : 'pending'}</span>
+                  <span className={s.role === approval.awaitingRole ? 'awaiting' : undefined}>
+                    {s.role === approval.awaitingRole ? 'awaiting' : 'pending'}
+                  </span>
                 ) : (
                   <span>
                     {`${s.decision.decision} by ${s.decision.by} at ${formatDateTime(s.decision.ts)}`}
