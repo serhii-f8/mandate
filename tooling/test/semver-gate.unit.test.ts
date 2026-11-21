@@ -59,6 +59,70 @@ describe('NFR-18 semver gate', () => {
     expect(() => versionOf('nothing', 'sdk')).toThrow();
   });
 
+  describe('context-keyed classification', () => {
+    const sdk = (body: string) => `// @aiops/connector-sdk 1.0.0 public API report — generated, do not edit\n${body}`;
+    const iface = 'export interface Ctx {\n    readonly id: string;\n    run(): void;\n}\nexport declare class Impl {\n    x: number;\n}\n';
+    const cfg = (inner: string) =>
+      `{\n  "properties": {\n    "name": {\n      "type": "string"${inner}\n    },\n    "mode": {\n      "enum": [\n        "a"\n      ],\n      "type": "string"\n    }\n  },\n  "required": [\n    "name"\n  ],\n  "type": "object"\n}\n`;
+
+    it('NFR-18 a key added to an existing required array is breaking', () => {
+      const r = judge(cfg(''), cfg('').replace('"name"\n  ]', '"name",\n    "mode"\n  ]'), '1.0.0', '1.1.0');
+      expect(r).toMatchObject({ ok: false, kind: 'breaking' });
+    });
+    it('NFR-18 a required array added to an existing object schema is breaking', () => {
+      const old = '{\n  "properties": {\n    "a": {\n      "type": "string"\n    }\n  },\n  "type": "object"\n}\n';
+      const next = '{\n  "properties": {\n    "a": {\n      "type": "string"\n    }\n  },\n  "required": [\n    "a"\n  ],\n  "type": "object"\n}\n';
+      expect(judge(old, next, '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+    });
+    it('NFR-18 a non-optional member added to an interface body is breaking', () => {
+      for (const member of ['    mustImplement(): void;', '    foo: string;', '    readonly bar: number;']) {
+        const next = iface.replace('    run(): void;', `    run(): void;\n${member}`);
+        expect(judge(sdk(iface), sdk(next), '1.0.0', '1.1.0'), member).toMatchObject({ ok: false, kind: 'breaking' });
+      }
+    });
+    it('NFR-18 a non-optional member added to a type-literal body is breaking', () => {
+      const old = 'export type T = {\n    readonly a: string;\n    readonly nested: {\n        readonly b: string;\n    };\n};\n';
+      const top = old.replace('    readonly a: string;', '    readonly a: string;\n    readonly c: string;');
+      const nested = old.replace('        readonly b: string;', '        readonly b: string;\n        readonly d: string;');
+      expect(judge(sdk(old), sdk(top), '1.0.0', '1.1.0').kind).toBe('breaking');
+      expect(judge(sdk(old), sdk(nested), '1.0.0', '1.1.0').kind).toBe('breaking');
+    });
+    it('NFR-18 an optional member added to an interface is additive', () => {
+      const next = iface.replace('    run(): void;', '    run(): void;\n    foo?: string;\n    readonly opt?: {\n        readonly inner: string;\n    };\n    hook?(): void;');
+      expect(judge(sdk(iface), sdk(next), '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
+    });
+    it('NFR-18 a member added to a class body and a new top-level export are additive', () => {
+      const next = iface.replace('    x: number;', '    x: number;\n    y: string;') + 'export interface Fresh {\n    readonly must: string;\n}\nexport declare function f(): void;\n';
+      expect(judge(sdk(iface), sdk(next), '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
+    });
+    it('NFR-18 a member type changed in one interface while added in another is breaking', () => {
+      const old = 'export interface A {\n    durationMs: number;\n}\nexport declare class B {\n    other: string;\n}\n';
+      const next = 'export interface A {\n    durationMs: string;\n}\nexport declare class B {\n    other: string;\n    durationMs: number;\n}\n';
+      expect(judge(sdk(old), sdk(next), '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+    });
+    it('NFR-18 an added constraint keyword on an existing schema is breaking', () => {
+      for (const kw of ['"minLength": 1', '"maxLength": 5', '"pattern": "^a$"', '"format": "uri"', '"minimum": 0', '"const": "x"', '"additionalProperties": false', '"uniqueItems": true']) {
+        const r = judge(cfg(''), cfg(`,\n      ${kw}`), '1.0.0', '1.1.0');
+        expect(r, kw).toMatchObject({ ok: false, kind: 'breaking' });
+      }
+      const withEnum = cfg(',\n      "enum": [\n        "x"\n      ]');
+      expect(judge(cfg(''), withEnum, '1.0.0', '1.1.0').kind).toBe('breaking');
+    });
+    it('NFR-18 a value appended to an existing enum is additive', () => {
+      const next = cfg('').replace('"a"\n      ]', '"a",\n        "b"\n      ]');
+      expect(judge(cfg(''), next, '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
+    });
+    it('NFR-18 a new optional property carrying constraints is additive', () => {
+      const next = cfg('').replace('    "mode": {', '    "extra": {\n      "additionalProperties": false,\n      "minLength": 1,\n      "required": [\n        "z"\n      ],\n      "type": "string"\n    },\n    "mode": {');
+      expect(judge(cfg(''), next, '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
+    });
+    it('NFR-18 a version downgrade without a surface change fails', () => {
+      expect(judge(base, base, '1.2.0', '1.1.9')).toMatchObject({ ok: false, kind: 'none' });
+      expect(judge(base, base, '1.2.0', '1.2.0-rc.1').ok).toBe(false);
+      expect(judge(base, base, '1.2.0-rc.1', '1.2.0').ok).toBe(true);
+    });
+  });
+
   describe('CLI', () => {
     function repo(): string {
       const dir = mkdtempSync(join(tmpdir(), 'semver-gate-'));
@@ -71,7 +135,19 @@ describe('NFR-18 semver gate', () => {
       git('commit', '-qm', 'one');
       return dir;
     }
-    const run = (dir: string, ...args: string[]) => spawnSync('node', [cli, ...args], { cwd: dir, encoding: 'utf8' });
+    const env = (extra: Record<string, string> = {}): NodeJS.ProcessEnv => {
+      const e: NodeJS.ProcessEnv = { ...process.env, ...extra };
+      if (!('CI' in extra)) delete e.CI;
+      return e;
+    };
+    const run = (dir: string, ...args: string[]) => spawnSync('node', [cli, ...args], { cwd: dir, encoding: 'utf8', env: env() });
+    const sdkFile = 'packages/connector-sdk/api-report.d.ts';
+    const commitReport = (dir: string, body: string, msg: string) => {
+      mkdirSync(join(dir, 'packages/connector-sdk'), { recursive: true });
+      writeFileSync(join(dir, sdkFile), `// @aiops/connector-sdk 1.0.0 public API report - generated, do not edit\n${body}`);
+      spawnSync('git', ['add', '.'], { cwd: dir });
+      spawnSync('git', ['commit', '-qm', msg], { cwd: dir });
+    };
 
     it('without main it prints skipped: no base and exits 0', () => {
       const r = run(repo());
@@ -86,16 +162,32 @@ describe('NFR-18 semver gate', () => {
       spawnSync('git', ['add', '.'], { cwd: dir });
       spawnSync('git', ['commit', '-qm', 'report'], { cwd: dir });
       spawnSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: dir });
+      writeFileSync(join(dir, 'f'), 'y');
+      spawnSync('git', ['commit', '-qam', 'later'], { cwd: dir });
       rmSync(join(dir, path));
       const r = run(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain(`FAIL ${path}: report removed (breaking)`);
     });
-    it('an unresolvable --base is skipped', () => {
+    it('NFR-18 an unresolvable --base exits 2', () => {
       const dir = repo();
       const r = run(dir, '--base', 'not-a-ref');
-      expect(r.status).toBe(0);
-      expect(r.stdout).toContain('skipped: no base');
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain('cannot resolve --base not-a-ref');
+    });
+    it('NFR-18 without a base under CI it exits 2', () => {
+      const r = spawnSync('node', [cli], { cwd: repo(), encoding: 'utf8', env: env({ CI: 'true' }) });
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain('no base');
+    });
+    it('NFR-18 on main itself it compares with the first parent', () => {
+      const dir = repo();
+      commitReport(dir, 'export interface A {\n    a: string;\n}\n', 'report');
+      commitReport(dir, 'export interface A {\n    a: string;\n    b: string;\n}\n', 'breaking');
+      spawnSync('git', ['branch', 'main'], { cwd: dir });
+      const r = run(dir);
+      expect(r.status, r.stdout).toBe(1);
+      expect(r.stdout).toContain(`FAIL ${sdkFile}: breaking change needs a major bump`);
     });
     it('with only origin/main it uses it as the base', () => {
       const dir = repo();

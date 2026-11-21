@@ -9,18 +9,50 @@ import { judge, versionOf } from './semver-gate-lib.mjs';
 const REPORTS = [
   { path: 'packages/connector-sdk/api-report.d.ts', kind: 'sdk' },
   { path: 'packages/config/schema/aiops-config.v1.json', kind: 'config' },
+  { path: 'packages/config/schema/aiops-preset.v1.json', kind: 'preset' },
 ];
 
 const git = (...args) => spawnSync('git', args, { encoding: 'utf8' });
 
+/**
+ * The commit to compare with: the merge base of HEAD and `--base <ref>` (default `main`, else
+ * `origin/main`). When that is HEAD itself (running on main), the first parent, so a local merge
+ * into main is still gated. Exits 2 when an explicit base does not resolve, or when no default
+ * base resolves under CI; otherwise prints `skipped: no base`.
+ */
 function resolveBase(argv) {
   const i = argv.indexOf('--base');
-  const candidates = i >= 0 && argv[i + 1] ? [argv[i + 1]] : ['main', 'origin/main'];
+  const explicit = i >= 0;
+  if (explicit && !argv[i + 1]) {
+    console.error('--base needs a ref');
+    process.exit(2);
+  }
+  const candidates = explicit ? [argv[i + 1]] : ['main', 'origin/main'];
+  let found;
   for (const ref of candidates) {
     const r = git('merge-base', 'HEAD', ref);
-    if (r.status === 0 && r.stdout.trim()) return r.stdout.trim();
+    if (r.status === 0 && r.stdout.trim()) {
+      found = r.stdout.trim();
+      break;
+    }
   }
-  return undefined;
+  if (!found) {
+    if (explicit) {
+      console.error(`cannot resolve --base ${argv[i + 1]} (no merge base with HEAD)`);
+      process.exit(2);
+    }
+    if (process.env.CI) {
+      console.error('no base: neither main nor origin/main resolves (CI needs the base branch; fetch it)');
+      process.exit(2);
+    }
+    return undefined;
+  }
+  const head = git('rev-parse', 'HEAD').stdout.trim();
+  if (found === head) {
+    const parent = git('rev-parse', '--verify', '--quiet', 'HEAD^1');
+    if (parent.status === 0 && parent.stdout.trim()) return parent.stdout.trim();
+  }
+  return found;
 }
 
 const base = resolveBase(process.argv.slice(2));
