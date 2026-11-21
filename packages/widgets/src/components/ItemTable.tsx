@@ -15,6 +15,8 @@ export interface ItemTableProps {
     isDisabled?: (row: ItemRowModel) => boolean;
     toggle: (targetId: string) => void;
   };
+  /** Shown as the only row when there are no rows; absent: the table stays empty (the page may still load). */
+  empty?: string;
 }
 
 function note(row: ItemRowModel): string {
@@ -100,7 +102,7 @@ function sameRow(a: RowProps, b: RowProps): boolean {
   );
 }
 
-export function ItemTable({ rows, selection }: ItemTableProps): ReactElement {
+export function ItemTable({ rows, selection, empty }: ItemTableProps): ReactElement {
   return (
     <table className="items">
       <thead>
@@ -115,6 +117,13 @@ export function ItemTable({ rows, selection }: ItemTableProps): ReactElement {
         </tr>
       </thead>
       <tbody>
+        {rows.length === 0 && empty !== undefined ? (
+          <tr>
+            <td className="empty" colSpan={selection ? 7 : 6}>
+              {empty}
+            </td>
+          </tr>
+        ) : null}
         {rows.map((row) => (
           <ItemRows
             key={row.targetId}

@@ -328,6 +328,17 @@ describe('ApprovalView', () => {
     expect(decision().queryByText('This change-set is not awaiting a decision.')).toBeNull();
   });
 
+  it('UI-2 APR-7 with nothing to decide or start, the decision part says so and is not marked open', () => {
+    setup({ ...deciding({ canDecide: false, reason: 'not_pending' }), status: 'completed' });
+    const region = screen.getByRole('region', { name: 'Decision' });
+    expect(within(region).getByText('Nothing to decide: this change-set is completed.')).toBeTruthy();
+    expect(region.classList.contains('open')).toBe(false);
+    cleanup();
+    setup(deciding({ canDecide: true }));
+    expect(screen.getByRole('region', { name: 'Decision' }).classList.contains('open')).toBe(true);
+    expect(screen.queryByText(/Nothing to decide/)).toBeNull();
+  });
+
   it('APR-7 Start execution shows only when viewer.canStart and calls start', async () => {
     setup({ ...deciding({ canDecide: false, reason: 'not_pending' }), status: 'approved' });
     expect(decision().queryByRole('button', { name: 'Start execution' })).toBeNull();

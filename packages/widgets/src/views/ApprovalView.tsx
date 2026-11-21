@@ -130,11 +130,15 @@ function DecisionPanel(props: Props & { action: Action; origin: Origin | undefin
       </>
     );
   }
+  const canStart = viewer.canStart && start !== undefined;
+  // Nothing to act on: say so plainly, and leave the panel unmarked.
+  const open = body !== null || canStart;
+  if (!open) body = <p>{`Nothing to decide: this change-set is ${data.status}.`}</p>;
   return (
-    <section aria-label="Decision">
+    <section aria-label="Decision" className={open ? 'decision open' : 'decision'}>
       <h2>Decision</h2>
       {body}
-      {viewer.canStart && start ? (
+      {canStart ? (
         <button
           type="button"
           className="primary"

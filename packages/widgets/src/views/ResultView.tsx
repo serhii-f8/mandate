@@ -93,7 +93,12 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
         ))}
       </div>
       <div role="tabpanel" aria-label={tab === 'failed' ? 'Failed' : 'Skipped'}>
-        <ItemTable rows={pages.page.items} />
+        <ItemTable
+          rows={pages.page.items}
+          {...(loaded.current.has(key) && !pages.busy && pages.error === undefined
+            ? { empty: tab === 'failed' ? 'No failed items.' : 'No skipped items.' }
+            : {})}
+        />
         <Pager
           hasPrevious={pages.hasPrevious}
           hasNext={pages.page.next !== undefined}

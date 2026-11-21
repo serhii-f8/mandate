@@ -317,13 +317,16 @@ describe('EXE-8 changesetWorkflow rollback window and compensation', () => {
     try {
       const handle = await signalWithStart(worker.taskQueue, cs.id);
       await windowOpen(cs.id);
+      const timersStarted = async (): Promise<number> =>
+        ((await handle.fetchHistory()).events ?? []).filter((e) => (e.timerStartedEventAttributes ?? undefined) !== undefined).length;
+      // The row's window is written by an activity, before the workflow arms the window's timer; a wake
+      // in that gap satisfies the condition with no timer started. Wake only once the loop is waiting.
+      await expect.poll(timersStarted, { timeout: 10_000 }).toBe(1);
       const before = inspects;
       await worker.executor.wake(cs.id);
       await expect.poll(() => inspects, { timeout: 10_000 }).toBeGreaterThan(before);
       // The spy runs before the activity body: wait until the window's timer is re-armed after the
       // wake-handled inspect (a second timer), which proves the loop kept waiting.
-      const timersStarted = async (): Promise<number> =>
-        ((await handle.fetchHistory()).events ?? []).filter((e) => (e.timerStartedEventAttributes ?? undefined) !== undefined).length;
       await expect.poll(timersStarted, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
       expect((await handle.describe()).status.name).toBe('RUNNING');
       expect((await load(cs.id)).status).toBe('completed');
