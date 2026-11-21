@@ -10,7 +10,7 @@ Four things carry a version, and two of them are public interfaces with a writte
 | Artifact | Version | Where you see it | Public contract |
 | --- | --- | --- | --- |
 | Product (`api`, `worker`, images) | 1.0.0 | `version` field of `GET /healthz`; image label `org.opencontainers.image.version` | The behaviour this guide describes |
-| Connector SDK (`@aiops/connector-sdk`) | 1.0.0 | package version; `CONNECTOR_SDK_VERSION` | `packages/connector-sdk/api-report.d.ts` |
+| Connector SDK (`@aiops/connector-sdk`) | 1.0.0 | package version; `CONNECTOR_SDK_VERSION` | `packages/connector-sdk/api-report.d.ts`; the preset format in `packages/config/schema/aiops-preset.v1.json` |
 | Configuration schema | 1.0.0 | `CONFIG_SCHEMA_VERSION`; the `version: 1` line of every YAML file is its major | `packages/config/schema/aiops-config.v1.json` |
 | Presets (`@aiops/magento2-catalog`, `@aiops/gitea-issues`) | 1.0.0 | package version | Each preset's `aiops.sdk` range |
 
@@ -33,25 +33,50 @@ The product version moves with the highest of the other changes in a release.
 
 ## Reports and the gate
 
-The two contracts are committed as generated files, so a change to them shows up in review:
+The contracts are committed as generated files, so a change to them shows up in review:
 
 - `packages/connector-sdk/api-report.d.ts`: every declaration reachable from the SDK entry, with
   comments removed. Its first line names the SDK version.
 - `packages/config/schema/aiops-config.v1.json`: the JSON Schema of the root configuration object. It
   carries `x-aiops-schema-version`. Editors can use it for completion and validation: start a YAML file
   with `# yaml-language-server: $schema=...` pointing at it.
+- `packages/config/schema/aiops-preset.v1.json`: the preset format, which presets depend on as much as
+  on the SDK code. `$defs.presetDocument` is the JSON Schema of a preset file (`preset.yaml`) and
+  `$defs.packageJsonAiops` that of the `aiops` block of a preset's `package.json`. It is versioned with
+  the connector SDK, so it carries `x-aiops-sdk-version`, and a preset's `aiops.sdk` range covers it.
 
-CI regenerates both and fails when a file is stale (`--check`). A semver gate then compares each report
-with the one on the base branch:
+CI regenerates all three and fails when a file is stale (`--check`). A semver gate then compares each
+report with the one at the merge base of the branch and `main` (on `main` itself, with the first parent
+of `HEAD`). It compares lines within their context, the chain of enclosing `{` and `[` lines, so a line
+that moves from one interface or schema object to another counts as removed and added. It classifies
+the change as:
+
+- **breaking** when a line is removed or changed, or when an added line narrows what was accepted
+  before: a key added to an existing `required` list; a constraint keyword (`minLength`, `maxLength`,
+  `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `pattern`, `format`, `multipleOf`,
+  `minItems`, `maxItems`, `uniqueItems`, `minProperties`, `maxProperties`, `const`, `not`, `enum`,
+  `additionalProperties`, `type`, `allOf`, `anyOf`, `oneOf`, `$ref`, `items` and similar) added to a
+  schema object that already existed; a member without `?` added to an existing interface or type
+  literal of the SDK;
+- **additive** for any other added line: a new optional key or member, a new value in an existing
+  `enum`, a new property schema, a member added to a class, a new export;
+- **none** when the report did not move apart from its version.
 
 | Change to a report | Required version change |
 | --- | --- |
-| none | none |
-| only added lines | a higher minor (or major) |
-| any removed or changed line | a higher major |
+| none | none, and the version must not go down |
+| additive | a higher minor (or major) |
+| breaking | a higher major |
 
-The gate is a heuristic that backs up review: it sees names and shapes, not meaning. A change in what
-a field means is a breaking change even if the report does not move.
+The gate is deliberately conservative. A required member added to a context object that the platform
+passes to presets, which a preset only reads, is judged breaking too; so is a removal that in fact
+widens a schema (dropping `"additionalProperties": false`). When that is wrong, the change still needs
+the major bump or a different shape. The gate backs up review, it does not replace it: it sees names
+and shapes, not meaning, and a change in what a field means is a breaking change even if the report
+does not move.
+
+The gate exits 2 when an explicit `--base` does not resolve, or when neither `main` nor `origin/main`
+resolves under CI (`CI` set). Outside CI it prints `skipped: no base`.
 
 ## Deprecation
 

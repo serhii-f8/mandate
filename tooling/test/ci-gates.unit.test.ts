@@ -96,7 +96,7 @@ describe('NFR-18 CI checks the public API reports and runs the semver gate', () 
   it('NFR-18 ci.sh checks the public API reports and runs the semver gate after build', () => {
     const code = codeLines('scripts/ci.sh');
     expect(code).toMatch(
-      /node tooling\/versioning\/api-report\.mjs connector-sdk --check && node tooling\/versioning\/api-report\.mjs config --check && node tooling\/versioning\/semver-gate\.mjs/,
+      /node tooling\/versioning\/api-report\.mjs connector-sdk --check && node tooling\/versioning\/api-report\.mjs config --check && node tooling\/versioning\/api-report\.mjs preset --check && node tooling\/versioning\/semver-gate\.mjs/,
     );
     expect(code.indexOf('semver-gate.mjs')).toBeGreaterThan(code.indexOf('pnpm build'));
     expect(code.indexOf('semver-gate.mjs')).toBeLessThan(code.indexOf('pnpm test\n'));

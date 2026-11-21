@@ -38,9 +38,9 @@ Read these before you upgrade from a release before 1.0.
 
 - Versions 1.0.0 for the product, the connector SDK (`@aiops/connector-sdk`), the configuration schema
   and both shipped presets (`@aiops/magento2-catalog`, `@aiops/gitea-issues`).
-- Committed public surface reports, `packages/connector-sdk/api-report.d.ts` and
-  `packages/config/schema/aiops-config.v1.json`, and a semver gate in CI that compares them with the
-  base branch.
+- Committed public surface reports, `packages/connector-sdk/api-report.d.ts`,
+  `packages/config/schema/aiops-config.v1.json` and `packages/config/schema/aiops-preset.v1.json` (the
+  preset format), and a semver gate in CI that compares them with the base branch.
 - A `version` field in the `/healthz` answer of the `api` and the `worker`: `{"ok":true,"version":"1.0.0"}`.
 - The user guide in `docs/guide/`: installation, connecting Magento, roles and approvals, a first bulk
   update, backup and restore, configuration reference, presets, MCP upstreams, service accounts,

@@ -136,11 +136,14 @@ source of this section.
 
 ## Public interfaces and versioning
 
-Two interfaces are public and versioned (NFR-18): the `@aiops/connector-sdk` API and the configuration
-schema. Their committed reports are the contract:
+Two interfaces are public and versioned (NFR-18): the `@aiops/connector-sdk` API, with the preset
+format that is versioned with it, and the configuration schema. Their committed reports are the
+contract:
 
 - `packages/connector-sdk/api-report.d.ts` (SDK API report);
-- `packages/config/schema/aiops-config.v1.json` (configuration JSON Schema).
+- `packages/config/schema/aiops-config.v1.json` (configuration JSON Schema);
+- `packages/config/schema/aiops-preset.v1.json` (preset file and package.json `aiops` block, carries the
+  SDK version).
 
 Regenerate after a change (the config report needs `pnpm build` first), and verify without writing with
 `--check`:
@@ -148,15 +151,23 @@ Regenerate after a change (the config report needs `pnpm build` first), and veri
 ```sh
 node tooling/versioning/api-report.mjs connector-sdk
 node tooling/versioning/api-report.mjs config
+node tooling/versioning/api-report.mjs preset
 node tooling/versioning/api-report.mjs connector-sdk --check
 ```
 
 CI runs the checks and the semver gate (`node tooling/versioning/semver-gate.mjs [--base <ref>]`), which
 compares the reports with the base branch. Bump the version in the same change:
 
-- no report diff: no bump needed;
-- only additions: a higher minor (or major);
-- any removal or change: a higher major.
+- no report diff: no bump needed, and the version must not go down;
+- additive (new optional keys or members, new enum values, new exports): a higher minor (or major);
+- breaking: a higher major. Breaking is any removed or changed line, compared within its enclosing
+  interface or schema object, and any added line that narrows: a key added to an existing `required`
+  list, a constraint keyword (`minLength`, `pattern`, `enum`, `"additionalProperties": false`, ...) on
+  an existing schema, or a member without `?` in an existing SDK interface or type literal.
+
+The gate is conservative (it also flags a required member added to a context object presets only
+read) and backs up review; it does not judge meaning. See
+[docs/guide/versioning.md](docs/guide/versioning.md#reports-and-the-gate).
 
 The SDK version lives in `packages/connector-sdk/package.json` and equals `CONNECTOR_SDK_VERSION`; the
 configuration schema version is `CONFIG_SCHEMA_VERSION`. Presets declare the SDK range they need in

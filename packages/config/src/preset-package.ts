@@ -27,7 +27,8 @@ export interface PackageCandidate {
 
 const relativePath = z.string().min(1).max(1024);
 
-const aiopsSchema = z.strictObject({
+/** The `aiops` block of a preset's package.json; exported for the public preset report (NFR-18). */
+export const presetAiopsSchema = z.strictObject({
   preset: relativePath.default('preset.yaml'),
   sdk: z
     .string()
@@ -44,7 +45,7 @@ export function parseAiopsField(
   json: unknown,
 ): { ok: true; aiops?: AiopsField } | { ok: false; issues: readonly { path: readonly PropertyKey[]; message: string }[] } {
   if (typeof json !== 'object' || json === null || !('aiops' in json)) return { ok: true };
-  const result = aiopsSchema.safeParse(json.aiops, PARSE_PARAMS);
+  const result = presetAiopsSchema.safeParse(json.aiops, PARSE_PARAMS);
   if (!result.success) return { ok: false, issues: schemaIssues(result).map((issue) => ({ path: ['aiops', ...issue.path], message: issue.message })) };
   const { preset, sdk, code } = result.data;
   return { ok: true, aiops: { preset, sdk, ...(code === undefined ? {} : { code }) } };

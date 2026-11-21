@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { checkReport, configReport, diffReport, headerVersion, sdkReport } from '../versioning/api-report-lib.mjs';
+import { checkReport, configReport, diffReport, headerVersion, presetReport, sdkReport } from '../versioning/api-report-lib.mjs';
 
 const cli = fileURLToPath(new URL('../versioning/api-report.mjs', import.meta.url));
 
@@ -136,6 +136,33 @@ describe('NFR-18 config schema report', () => {
 
   it('CLI --check passes on the committed schema file', () => {
     const r = spawnSync('node', [cli, 'config', '--check'], { encoding: 'utf8' });
+    expect(r.status, r.stderr).toBe(0);
+  });
+});
+
+describe('NFR-18 preset format report', () => {
+  const doc = z.strictObject({ version: z.literal(1), spec: z.string().min(1).optional() });
+  const aiops = z.strictObject({ sdk: z.string(), preset: z.string().default('preset.yaml') });
+  interface Report {
+    $id: string;
+    'x-aiops-sdk-version': string;
+    $defs: Record<string, { required?: string[]; $schema?: string }>;
+  }
+
+  it('NFR-18 carries the SDK version and both schemas', () => {
+    const text = presetReport(doc, aiops, '1.2.3');
+    const j = JSON.parse(text) as Report;
+    expect(j.$id).toBe('https://aiops.invalid/schema/aiops-preset.v1.json');
+    expect(j['x-aiops-sdk-version']).toBe('1.2.3');
+    expect(headerVersion(text)).toBe('1.2.3');
+    expect(Object.keys(j.$defs)).toEqual(['packageJsonAiops', 'presetDocument']);
+    expect(j.$defs.presetDocument?.required).toEqual(['version']);
+    expect(j.$defs.packageJsonAiops?.required).toEqual(['sdk']);
+    expect(j.$defs.presetDocument?.$schema).toBeUndefined();
+  });
+
+  it('NFR-18 CLI --check passes on the committed preset report', () => {
+    const r = spawnSync('node', [cli, 'preset', '--check'], { encoding: 'utf8' });
     expect(r.status, r.stderr).toBe(0);
   });
 });

@@ -115,7 +115,8 @@ export function diffReport(a, b) {
 export function headerVersion(report) {
   const m =
     /^\/\/ @aiops\/connector-sdk (\S+) public API report/m.exec(report) ??
-    /^\s*"x-aiops-schema-version": "([^"]+)"/m.exec(report);
+    /^\s*"x-aiops-schema-version": "([^"]+)"/m.exec(report) ??
+    /^\s*"x-aiops-sdk-version": "([^"]+)"/m.exec(report);
   return m ? m[1] : undefined;
 }
 
@@ -143,6 +144,28 @@ export function configReport(schema, version) {
   return `${JSON.stringify(doc, null, 2)}\n`;
 }
 
+const PRESET_SCHEMA_ID = 'https://aiops.invalid/schema/aiops-preset.v1.json';
+
+function inputSchema(schema) {
+  const json = toJSONSchema(schema, { io: 'input', unrepresentable: 'any' });
+  delete json.$schema;
+  return json;
+}
+
+/**
+ * JSON Schema of the preset format, versioned with the connector SDK: the preset document
+ * (`$defs.presetDocument`) and the `aiops` block of a preset's package.json
+ * (`$defs.packageJsonAiops`). Same conventions as the configuration report.
+ */
+export function presetReport(presetDocumentSchema, aiopsSchema, sdkVersion) {
+  const doc = sortKeys({
+    $id: PRESET_SCHEMA_ID,
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $defs: { packageJsonAiops: inputSchema(aiopsSchema), presetDocument: inputSchema(presetDocumentSchema) },
+    'x-aiops-sdk-version': sdkVersion,
+  });
+  return `${JSON.stringify(doc, null, 2)}\n`;
+}
 
 /** Problems found when comparing a committed report with a fresh one; empty when current. */
 export function checkReport(committed, fresh, version) {
