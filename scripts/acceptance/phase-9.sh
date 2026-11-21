@@ -214,7 +214,7 @@ write_gitea_config() {
   cat >"$1" <<'YAML'
 version: 1
 presets:
-  - { id: gitea-issues, package: '@aiops/gitea-issues', version: '^0.1.0' }
+  - { id: gitea-issues, package: '@aiops/gitea-issues', version: '^1.0.0' }
 connections:
   - id: gitea
     adapter: openapi
@@ -731,7 +731,7 @@ group_3_gitea() {
   grep -qx '+ preset gitea-issues' <<<"$diff" && diff_preset=yes || diff_preset=no
   apply_code=0
   apply="$(apply_config)" || apply_code=$?
-  if [[ "$diff_code" == 0 && "$diff_preset" == yes && "$pkg_version" == 0.1.0 && "$apply_code" == 0 ]] &&
+  if [[ "$diff_code" == 0 && "$diff_preset" == yes && "$pkg_version" == 1.0.0 && "$apply_code" == 0 ]] &&
     await_listed alice issues.search yes && await_listed alice issues.set_labels yes &&
     [[ "$(started_at api)" == "$started_api" && "$(started_at worker)" == "$started_worker" ]]; then
     pass gitea-config-apply "config diff → exit 0: $(grep -E '^\+ (preset|connection|operation) ' <<<"$diff" | tr '\n' '|' | head -c 400); api loads @aiops/gitea-issues $pkg_version; config apply → exit 0; alice lists issues.search and issues.set_labels; api started $started_api and worker started $started_worker unchanged"
