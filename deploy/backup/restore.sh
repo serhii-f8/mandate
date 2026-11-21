@@ -66,22 +66,44 @@ docker compose up -d --wait postgres >&2
 # 3. Never overwrite an audit trail by mistake: neither audit rows nor archive files without --force.
 # A database without the aiops tables (fresh volume, init.sh only) counts as empty.
 psql_aiops() { docker compose exec -T postgres psql -U postgres -d aiops -v ON_ERROR_STOP=1 -tAc "$1"; }
-if [ "$(psql_aiops "SELECT to_regclass('public.audit_event') IS NOT NULL")" = t ] &&
-  [ "$(psql_aiops "SELECT EXISTS (SELECT 1 FROM public.audit_event)")" = t ]; then
+# Every probe fails closed: a probe that errors or answers anything but t/f (or empty/nonempty) stops
+# the restore; a failure is never read as "empty".
+yes_no() {
+  local answer
+  answer="$(psql_aiops "$1")" || fail "cannot inspect the aiops database ($2); nothing was restored"
+  answer="$(printf '%s' "$answer" | tr -d ' \r\n')"
+  case "$answer" in
+    t | f) printf '%s' "$answer" ;;
+    *) fail "cannot inspect the aiops database ($2): unexpected answer '$answer'; nothing was restored" ;;
+  esac
+}
+HAS_TABLE="$(yes_no "SELECT to_regclass('public.audit_event') IS NOT NULL" "audit table")"
+HAS_ROWS=f
+if [ "$HAS_TABLE" = t ]; then
+  HAS_ROWS="$(yes_no "SELECT EXISTS (SELECT 1 FROM public.audit_event)" "audit rows")"
+fi
+if [ "$HAS_ROWS" = t ]; then
   if [ "$FORCE" = 1 ]; then
     echo "restore: database not empty; --force given, its audit trail is discarded" >&2
   else
     fail "refusing: database not empty (aiops.audit_event has rows); pass --force to replace it"
   fi
 fi
-ARCHIVE_COUNT="$(docker compose run --rm --no-deps -T --entrypoint sh api -c "ls -A $ARCHIVE_DIR | wc -l")"
-if [ "$(printf '%s' "$ARCHIVE_COUNT" | tr -d ' \r\n')" != 0 ]; then
-  if [ "$FORCE" = 1 ]; then
-    echo "restore: audit archive not empty; --force given, its files are discarded" >&2
-  else
-    fail "refusing: audit archive not empty; pass --force to replace it"
-  fi
-fi
+ARCHIVE_STATE="$(docker compose run --rm --no-deps -T --entrypoint sh api -c \
+  "set -e; test -d $ARCHIVE_DIR; first=\$(find $ARCHIVE_DIR -mindepth 1 -print -quit); if [ -z \"\$first\" ]; then echo empty; else echo nonempty; fi")" ||
+  fail "cannot inspect the audit archive volume; nothing was restored"
+ARCHIVE_STATE="$(printf '%s' "$ARCHIVE_STATE" | tr -d ' \r\n')"
+case "$ARCHIVE_STATE" in
+  empty) ;;
+  nonempty)
+    if [ "$FORCE" = 1 ]; then
+      echo "restore: audit archive not empty; --force given, its files are discarded" >&2
+    else
+      fail "refusing: audit archive not empty; pass --force to replace it"
+    fi
+    ;;
+  *) fail "cannot inspect the audit archive volume: unexpected answer '$ARCHIVE_STATE'; nothing was restored" ;;
+esac
 
 # 4. Nothing may hold a connection or write while the databases are replaced.
 docker compose stop "${USERS_OF_DB[@]}" >&2
