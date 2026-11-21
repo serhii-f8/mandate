@@ -89,12 +89,10 @@ trap cleanup EXIT
 
 manual_steps() {
   cat <<'EOF'
-# Manual acceptance (design phase-10-release-docs §7; record in PROGRESS.md, "Blockers and manual checks"):
-#   1. Use a machine without the repository's history or prior setup.
-#   2. Read only the public documentation (README.md, docs/guide/, examples/).
-#   3. Follow docs/guide/installation.md -> connecting-magento.md -> roles-and-approvals.md ->
-#      first-bulk-update.md.
-#   4. Record pass or fail, the date, the time taken, and every place the docs were unclear.
+# Newcomer walkthrough (ADR 0059; SPEC section 7): a fresh agent or a person in a clean clone reads
+#   only README.md, docs/guide/ and examples/ as rendered, follows installation.md ->
+#   connecting-magento.md -> roles-and-approvals.md -> first-bulk-update.md, and reports pass or fail,
+#   the time and every unclear place. The prompt is in docs/reports/phase-10.md, section 3.
 EOF
 }
 

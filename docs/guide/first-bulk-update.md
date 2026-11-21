@@ -169,8 +169,9 @@ confirmed on the trusted page by the requester, who must have logged in within t
 (`AIOPS_FRESH_AUTH_SECONDS`, 300 by default); an older page session is asked to log in again:
 
 1. Open `http://localhost:8400/app/changesets/<change-set ID>` as alice.
-2. Choose **Roll back** and confirm. The page re-checks the hash; the products get their previous
-   keywords back, and the change-set ends `rolled_back`.
+2. Choose **Roll back 3 items**. The rollback starts at once, without a second confirmation: the
+   page sends the hash it shows, the products get their previous keywords back, and the change-set
+   ends `rolled_back`.
 
 From an MCP client, `rollback_changeset` checks that a rollback is possible and answers with the
 link to this page; it does not roll back by itself.
