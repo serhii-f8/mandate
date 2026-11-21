@@ -149,6 +149,12 @@ operations:
       rollback: { strategy: replay_previous_state }
 ```
 
+The `read_before` operation must be an enabled read operation that declares `fields_arg`; that
+argument must be a required property of its `input_schema` and equal `upstream.response.fields_from_arg`.
+A grant
+`scope` key must be an argument of the operation and, for a write with a manifest, a key of
+`manifest.scope_args`.
+
 ### `roles`
 
 | Key | Type | Default | Bounds / notes |
@@ -180,7 +186,6 @@ roles:
   - id: content_editor
     grants:
       - operation: catalog.update_products
-        scope: { brand: [acme] }
         deny_fields: [price]
     limits: { records_per_day: 500 }
     approval:
@@ -243,7 +248,7 @@ Applied after presets.
 | `tool_name` | operation ID shape | none | |
 | `title` | string | none | 1-200 characters |
 | `description` | string | none | 1-2000 characters |
-| `enabled` | boolean | none | `false` disables the operation |
+| `enabled` | boolean | none | `false` leaves the operation out of the enabled set: it is not offered or callable, and a connection test cannot name it. Default `true` |
 
 ### `changesets`
 
