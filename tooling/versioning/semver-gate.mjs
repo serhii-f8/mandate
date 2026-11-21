@@ -30,14 +30,32 @@ if (!base) {
 }
 let failed = false;
 for (const { path, kind } of REPORTS) {
-  if (!existsSync(path)) {
+  const listed = git('ls-tree', '--name-only', base, '--', path);
+  if (listed.status !== 0) {
+    console.log(`FAIL ${path}: cannot read the base (${listed.stderr.trim()})`);
+    failed = true;
+    continue;
+  }
+  const inBase = listed.stdout.trim() !== '';
+  const inTree = existsSync(path);
+  if (!inBase && !inTree) {
     console.log(`skipped ${path}: not present`);
     continue;
   }
-  const old = git('show', `${base}:${path}`);
+  if (inBase && !inTree) {
+    console.log(`FAIL ${path}: report removed (breaking)`);
+    failed = true;
+    continue;
+  }
   const current = readFileSync(path, 'utf8');
-  if (old.status !== 0) {
+  if (!inBase) {
     console.log(`ok ${path}: new report (${versionOf(current, kind)})`);
+    continue;
+  }
+  const old = git('show', `${base}:${path}`);
+  if (old.status !== 0) {
+    console.log(`FAIL ${path}: cannot read the base (${old.stderr.trim()})`);
+    failed = true;
     continue;
   }
   const r = judge(old.stdout, current, versionOf(old.stdout, kind), versionOf(current, kind));

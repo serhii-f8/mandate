@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The AI Operations Layer Authors
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -75,6 +75,25 @@ describe('NFR-18 semver gate', () => {
 
     it('without main it prints skipped: no base and exits 0', () => {
       const r = run(repo());
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain('skipped: no base');
+    });
+    it('a report present at the base but removed at HEAD fails', () => {
+      const dir = repo();
+      const path = 'packages/connector-sdk/api-report.d.ts';
+      mkdirSync(join(dir, 'packages/connector-sdk'), { recursive: true });
+      writeFileSync(join(dir, path), '// @aiops/connector-sdk 1.0.0 public API report - generated, do not edit\nexport type A = 1;\n');
+      spawnSync('git', ['add', '.'], { cwd: dir });
+      spawnSync('git', ['commit', '-qm', 'report'], { cwd: dir });
+      spawnSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: dir });
+      rmSync(join(dir, path));
+      const r = run(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain(`FAIL ${path}: report removed (breaking)`);
+    });
+    it('an unresolvable --base is skipped', () => {
+      const dir = repo();
+      const r = run(dir, '--base', 'not-a-ref');
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('skipped: no base');
     });
