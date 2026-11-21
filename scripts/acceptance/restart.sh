@@ -511,18 +511,20 @@ pending_group() {
   pass "restart-$name" "change-set $id: pending_approval with the approval request failed in the outbox ($(tr '\n' '|' <<<"$outbox_before")); killed $svc (SIGKILL, 0 containers left running); $up; still pending_approval; dave approved $v_hash $v_count → $(json "$dec" '.body.status'); $once; $common; outbox $(tr '\n' '|' <<<"$OUTBOX_SEEN"), approval-request e-mails $mails; wall time $((SECONDS - t0)) s"
 }
 
-# no_secret: runs once after all selected groups, whatever the selection. The api and worker logs
-# never contain the fake bearer value (SEC-3); the logs must not
-# be empty, so the check is not vacuous.
+# no_secret: runs once after all selected groups, whatever the selection. The logs of every process
+# that handles the credential or the workflow payloads (api, worker, Temporal, PostgreSQL and the fake
+# Magento upstream) never contain the fake bearer value (SEC-3); the logs must not be empty, so the
+# check is not vacuous.
+NO_SECRET_SERVICES=(api worker temporal postgres fake-magento)
 no_secret() {
   local logs lines hits
-  logs="$(compose logs --no-color api worker 2>&1)" || { fail restart-no-secret "docker compose logs api worker failed"; return 0; }
+  logs="$(compose logs --no-color "${NO_SECRET_SERVICES[@]}" 2>&1)" || { fail restart-no-secret "docker compose logs ${NO_SECRET_SERVICES[*]} failed"; return 0; }
   lines="$(grep -c . <<<"$logs" || true)"
   hits="$(grep -c -F "$FAKE_TOKEN" <<<"$logs" || true)"
   if [[ "$lines" -ge 1 && "$hits" == 0 ]]; then
-    pass restart-no-secret "docker compose logs api worker: $lines lines, 0 occurrences of the fake bearer value"
+    pass restart-no-secret "docker compose logs ${NO_SECRET_SERVICES[*]}: $lines lines, 0 occurrences of the fake bearer value"
   else
-    fail restart-no-secret "docker compose logs api worker: $lines lines, $hits occurrences of the fake bearer value"
+    fail restart-no-secret "docker compose logs ${NO_SECRET_SERVICES[*]}: $lines lines, $hits occurrences of the fake bearer value"
   fi
 }
 
