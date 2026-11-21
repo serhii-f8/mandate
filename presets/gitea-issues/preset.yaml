@@ -1,4 +1,4 @@
-# Gitea issues preset 0.1.0 (CONN-8, OPS-2, OPS-3, OPS-5, OPS-6; design phase-9-mcp-upstream-gitea,
+# Gitea issues preset 1.0.0 (CONN-8, OPS-2, OPS-3, OPS-5, OPS-6; design phase-9-mcp-upstream-gitea,
 # ADR 0051 items 25-27). Bind it to an openapi connection whose base_url ends in /api/v1, for example
 #   base_url: http://gitea-sandbox:3000/api/v1
 # The credential is a bearer token (the bare 40-hex access token, scope write:issue).

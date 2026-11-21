@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Curated operations and manifests for Gitea issues (preset `preset.yaml`, CONN-8 second preset).
  * The default export is the code module of `aiops.code` (OPS-5): the two code reads and the label

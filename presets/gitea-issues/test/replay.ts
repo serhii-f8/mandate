@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * A test-only `CodeContext` that answers `ctx.http.send` from recorded exchanges, in order.
  * A request that differs from the next exchange (method, path, query, body), an extra call or a

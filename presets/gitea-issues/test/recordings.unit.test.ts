@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The vendored spec and the sandbox recordings of the Gitea preset (NFR-17). `pnpm record`
  * writes them from the sandbox; these tests pin their shape without a sandbox: every case of

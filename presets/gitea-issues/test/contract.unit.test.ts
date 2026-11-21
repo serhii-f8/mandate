@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Contract tests of the Gitea issues preset (NFR-17, CONN-8; design phase-9-mcp-upstream-gitea).
  * The preset is loaded the way the api loads it: `@aiops/config` with the OpenAPI adapter's
