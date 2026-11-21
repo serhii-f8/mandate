@@ -1,13 +1,13 @@
 {
   "name": "@aiops/magento2-catalog",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Curated operations and manifests for Magento 2 catalog content.",
   "license": "Apache-2.0",
   "aiops": {
     "preset": "preset.yaml",
-    "sdk": "^0.6.0"
+    "sdk": "^1.0.0"
   },
   "exports": {
     ".": {
