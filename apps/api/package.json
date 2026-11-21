@@ -27,6 +27,8 @@
     "start": "node dist/main.js"
   },
   "devDependencies": {
+    "@aiops/gitea-issues": "workspace:*",
+    "@aiops/magento2-catalog": "workspace:*",
     "@aiops/testing": "workspace:*",
     "@modelcontextprotocol/client": "2.4.0",
     "@modelcontextprotocol/conformance": "0.2.0-alpha.12",

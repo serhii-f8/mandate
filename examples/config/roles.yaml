@@ -1,0 +1,62 @@
+# yaml-language-server: $schema=../../packages/config/schema/aiops-config.v1.json
+# Roles: what each group of people may do (POL-1..). Operations are granted per role;
+# everything not granted is denied.
+version: 1
+
+roles:
+  # Edits product content and issue labels, with limits, and needs approval above a threshold.
+  - id: content_manager
+    description: Edits product content and labels issues.
+    grants:
+      - operation: catalog.search_products
+        # Scope constraint: only these brands (POL-2).
+        scope: { brand: [acme, globex] }
+        # Fields the role never sees or sets.
+        deny_fields: [cost]
+      - operation: catalog.update_content
+        id: own-brands-content
+        scope: { brand: [acme, globex] }
+        deny_fields: [cost]
+      - operation: issues.search
+      - operation: issues.set_labels
+      - operation: docs.search
+    # Limits per role (POL-8).
+    limits:
+      records_per_operation: 500
+      records_per_day: 2000
+      calls_per_minute: 60
+      concurrent_executions: 2
+    # Changes touching more than record_threshold records need the listed approvers.
+    approval:
+      required: above_threshold
+      record_threshold: 25
+      steps:
+        - role: content_lead
+
+  # Approves content changes made by content managers.
+  - id: content_lead
+    description: Approves content changes.
+    grants: []
+    approval:
+      # The widget cannot approve; decisions are made on the trusted page.
+      allow_widget: false
+
+  # Enters credentials and reads the audit trail on the trusted pages.
+  - id: integration_admin
+    description: Manages upstream credentials and reads the audit trail.
+    grants: []
+    manage_credentials: [magento-integration, gitea-token, docs-mcp-token]
+    view_audit: true
+
+  # Read-only access to the audit trail.
+  - id: auditor
+    description: Reads the audit trail.
+    grants: []
+    view_audit: true
+
+# Identity provider groups (the token's groups claim) mapped to roles.
+role_mapping:
+  - { group: content, roles: [content_manager] }
+  - { group: content-leads, roles: [content_lead] }
+  - { group: admins, roles: [integration_admin] }
+  - { group: auditors, roles: [auditor] }

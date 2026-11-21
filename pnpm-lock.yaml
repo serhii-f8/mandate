@@ -123,6 +123,12 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@aiops/gitea-issues':
+        specifier: workspace:*
+        version: link:../../presets/gitea-issues
+      '@aiops/magento2-catalog':
+        specifier: workspace:*
+        version: link:../../presets/magento2-catalog
       '@aiops/testing':
         specifier: workspace:*
         version: link:../../packages/testing
