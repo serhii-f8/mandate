@@ -6,7 +6,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { readinessStatus, type ReadinessReport } from '@aiops/config';
+import { PRODUCT_VERSION, readinessStatus, type ReadinessReport } from '@aiops/config';
 
 export interface WorkerHttpDeps {
   readonly readiness: () => Promise<ReadinessReport>;
@@ -40,7 +40,7 @@ function handle(deps: WorkerHttpDeps, req: IncomingMessage, res: ServerResponse)
   // Exact match on the raw target: a query string or any other variant is a different path.
   switch (req.url) {
     case '/healthz':
-      json(res, 200, { ok: true });
+      json(res, 200, { ok: true, version: PRODUCT_VERSION });
       return;
     case '/readyz':
       void ready(deps, res);

@@ -1,5 +1,6 @@
 {
   "name": "aiops",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "AI Operations Layer: self-hosted MCP server with policy, change-sets, approvals and audit",

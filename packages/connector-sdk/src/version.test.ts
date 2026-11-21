@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   CONNECTOR_SDK_VERSION,
@@ -38,10 +39,18 @@ import {
   type WriteErrorCode,
 } from './index.js';
 
-describe('NFR-18 connector SDK 0.6.0 is additive', () => {
-  it('NFR-18 reports version 0.6.0', () => {
-    expect(CONNECTOR_SDK_VERSION).toBe('0.6.0');
+describe('NFR-18 connector SDK 1.0.0', () => {
+  it('NFR-18 reports version 1.0.0', () => {
+    expect(CONNECTOR_SDK_VERSION).toBe('1.0.0');
   });
+  it('NFR-18 the connector SDK package version equals CONNECTOR_SDK_VERSION', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
+    expect(manifest.version).toBe('1.0.0');
+    expect(manifest.version).toBe(CONNECTOR_SDK_VERSION);
+  });
+});
+
+describe('NFR-18 connector SDK 0.6.0 is additive', () => {
   it('NFR-18 SEC-2 webhook_url is appended to the credential schemes, old order kept', () => {
     expect(CREDENTIAL_SCHEMES).toEqual(['bearer', 'api_key', 'basic', 'oauth_client_credentials', 'webhook_url']);
   });

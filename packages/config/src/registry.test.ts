@@ -832,7 +832,7 @@ operations:
   it('OPS-5 upstream.code without a code module, or naming an unknown operation, is refused', async () => {
     const noModule = await loadCodeFixture(dirs, {
       preset: await presetWithoutUpdate(),
-      packageJson: (json) => ({ ...json, aiops: { preset: 'preset.yaml', sdk: '^0.6.0' } }),
+      packageJson: (json) => ({ ...json, aiops: { preset: 'preset.yaml', sdk: '^1.0.0' } }),
     });
     for (const index of [1, 2, 3, 4]) {
       expect(presetIssuesAt(noModule, `operations[${index}].upstream.code`)).toEqual(['the preset has no code module (package.json aiops.code)']);

@@ -70,3 +70,9 @@ describe('NFR-10 api readiness probes', () => {
     expect(r.body).toMatchObject({ database: 'unavailable' });
   });
 });
+
+describe('NFR-10 api liveness', () => {
+  it('NFR-10 /healthz reports the product version', () => {
+    expect(new HealthController(dbOk(), active, null).live()).toEqual({ ok: true, version: '1.0.0' });
+  });
+});

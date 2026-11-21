@@ -87,19 +87,19 @@ describe('CONN-8 preset lookup in preset directories', () => {
   });
 
   it('CONN-8 NFR-18 a preset whose sdk range the platform does not satisfy is refused with preset_sdk_incompatible', async () => {
-    const root = await installWithAiops({ sdk: '^1.0.0' });
+    const root = await installWithAiops({ sdk: '^2.0.0' });
     expect(await resolvePreset(ENTRY, [join(root, '..')])).toEqual({
       ok: false,
       issues: [
         {
           file: '@aiops/fake-preset/package.json',
           path: 'aiops.sdk',
-          message: 'preset_sdk_incompatible: the preset requires connector SDK ^1.0.0; this platform provides 0.6.0',
+          message: 'preset_sdk_incompatible: the preset requires connector SDK ^2.0.0; this platform provides 1.0.0',
         },
       ],
     });
-    const compatible = await resolvePreset(ENTRY, [join(await installWithAiops({ sdk: '^0.6.0' }), '..')]);
-    expect(compatible.ok && compatible.preset.sdk).toBe('^0.6.0');
+    const compatible = await resolvePreset(ENTRY, [join(await installWithAiops({ sdk: '^1.0.0' }), '..')]);
+    expect(compatible.ok && compatible.preset.sdk).toBe('^1.0.0');
   });
 
   it('CONN-8 an invalid sdk range and an invalid version range are issues', async () => {
@@ -119,7 +119,7 @@ describe('CONN-8 preset lookup in preset directories', () => {
   });
 
   it('CONN-8 aiops.preset names another preset file inside the package; a path outside is refused', async () => {
-    const dir = await installWithAiops({ preset: 'alt/main.yaml', sdk: '^0.6.0' });
+    const dir = await installWithAiops({ preset: 'alt/main.yaml', sdk: '^1.0.0' });
     await mkdir(join(dir, 'alt'));
     await writeFile(join(dir, 'alt', 'main.yaml'), await readFile(join(dir, 'preset.yaml'), 'utf8'));
     await rm(join(dir, 'preset.yaml'));
@@ -129,12 +129,12 @@ describe('CONN-8 preset lookup in preset directories', () => {
     expect(result.preset.files.map((f) => f.file)).toEqual(['@aiops/fake-preset/package.json', '@aiops/fake-preset/alt/main.yaml', '@aiops/fake-preset/spec.json']);
 
     const outsideIssue = { file: '@aiops/fake-preset/package.json', path: 'aiops.preset', message: 'must be a path inside the preset' };
-    const outside = await installWithAiops({ preset: '../preset.yaml', sdk: '^0.6.0' });
+    const outside = await installWithAiops({ preset: '../preset.yaml', sdk: '^1.0.0' });
     await writeFile(join(outside, '..', 'preset.yaml'), await readFile(join(outside, 'preset.yaml'), 'utf8'));
     expect(await resolvePreset(ENTRY, [join(outside, '..')])).toEqual({ ok: false, issues: [outsideIssue] });
-    const absolute = await installWithAiops({ preset: join(outside, 'preset.yaml'), sdk: '^0.6.0' });
+    const absolute = await installWithAiops({ preset: join(outside, 'preset.yaml'), sdk: '^1.0.0' });
     expect(await resolvePreset(ENTRY, [join(absolute, '..')])).toEqual({ ok: false, issues: [outsideIssue] });
-    const linked = await installWithAiops({ preset: 'linked.yaml', sdk: '^0.6.0' });
+    const linked = await installWithAiops({ preset: 'linked.yaml', sdk: '^1.0.0' });
     await symlink(join(outside, 'preset.yaml'), join(linked, 'linked.yaml'));
     expect(await resolvePreset(ENTRY, [join(linked, '..')])).toEqual({ ok: false, issues: [outsideIssue] });
   });

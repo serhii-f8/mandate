@@ -1,6 +1,6 @@
 {
   "name": "@aiops/connector-sdk",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Public types and helpers for presets and code operations (versioned, NFR-18).",

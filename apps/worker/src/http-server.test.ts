@@ -49,11 +49,11 @@ async function serve(deps: Partial<WorkerHttpDeps> = {}): Promise<number> {
 }
 
 describe('NFR-10 NFR-12 worker HTTP server', () => {
-  it('NFR-10 /healthz answers 200 while running', async () => {
+  it('NFR-10 /healthz answers 200 while running and reports the product version', async () => {
     const port = await serve();
     const reply = await send(port, 'GET', '/healthz');
     expect(reply.status).toBe(200);
-    expect(JSON.parse(reply.body)).toEqual({ ok: true });
+    expect(JSON.parse(reply.body)).toEqual({ ok: true, version: '1.0.0' });
   });
 
   it('NFR-10 /readyz is 200 only with database, configuration and a running worker', async () => {
