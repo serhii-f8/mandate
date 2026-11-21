@@ -143,3 +143,13 @@ describe('NFR-9 public docs', () => {
   // Task 10 makes this real (R9): parse the section map of phase-10.sh.
   it.todo('NFR-9 every doc-test section named by phase-10.sh exists');
 });
+
+describe('NFR-18 release notes', () => {
+  it('NFR-18 CHANGELOG 1.0.0 carries the upgrade notes', () => {
+    const changelog = read('CHANGELOG.md');
+    const missing = ['write_opaque', 'configuration_mismatch', 'input_schema', 'disabled ~', 'Mcp-Param', 'bare token', 'config apply', '^1.0.0'].filter(
+      (s) => !changelog.includes(s),
+    );
+    expect(missing).toEqual([]);
+  });
+});
