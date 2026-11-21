@@ -25,13 +25,15 @@ job's secret store. Never put it in the platform's configuration or a repository
 with the grant and the MCP resource, which makes `aud` exactly the MCP URL. `KEYCLOAK_URL` (the
 public Keycloak address, `http://localhost:8480` in development) and `CLIENT_SECRET` are
 placeholders: set them in your shell or job first, without echoing the secret. The command keeps
-the access token in a variable and prints nothing:
+the access token in a variable and prints nothing. The secret reaches curl on standard input
+(`printf` is a shell builtin), so it never appears on a command line that other users can see
+with `ps`:
 
 ```bash
-ACCESS_TOKEN="$(curl -s -X POST "$KEYCLOAK_URL/realms/aiops/protocol/openid-connect/token" \
+ACCESS_TOKEN="$(printf '%s' "$CLIENT_SECRET" | curl -s -X POST "$KEYCLOAK_URL/realms/aiops/protocol/openid-connect/token" \
   -d grant_type=client_credentials \
   -d client_id=nightly-sync \
-  --data-urlencode client_secret="$CLIENT_SECRET" \
+  --data-urlencode client_secret@- \
   -d resource="$AIOPS_MCP_RESOURCE" \
   | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>process.stdout.write(JSON.parse(d).access_token??""))')"
 test -n "$ACCESS_TOKEN"

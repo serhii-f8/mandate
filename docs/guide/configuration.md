@@ -248,7 +248,7 @@ Applied after presets.
 | `tool_name` | operation ID shape | none | |
 | `title` | string | none | 1-200 characters |
 | `description` | string | none | 1-2000 characters |
-| `enabled` | boolean | none | `false` leaves the operation out of the enabled set: it is not offered or callable, and a connection test cannot name it. Default `true` |
+| `enabled` | boolean | `true` | `false` leaves the operation out of the enabled set: it is not offered or callable, and a connection test cannot name it |
 
 ### `changesets`
 

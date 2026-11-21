@@ -62,7 +62,9 @@ the start, as after any worker restart.
 
 Temporal, Keycloak and PostgreSQL keep running. Each database is dumped as one consistent snapshot;
 with `api` and `worker` stopped, no new workflow starts and no running one makes progress, so the
-Temporal databases match the `aiops` database.
+workflows in the `temporal` database match the `aiops` database. The databases are dumped one after
+the other, and Temporal's own timers keep firing meanwhile, so `temporal_visibility` can lag
+`temporal` slightly; Temporal reconciles it, and only workflow search results are affected.
 
 Run the script from a scheduler (cron, a systemd timer) and copy the directory off the machine. Keep
 as many generations as your recovery policy needs; the script does not delete old backups.
