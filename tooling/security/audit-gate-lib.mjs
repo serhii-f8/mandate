@@ -3,7 +3,8 @@
 // Dependency audit gate (SEC-11). Pure logic: no file or process access, so tests can import it.
 import { parse } from 'yaml';
 
-const GATED = new Set(['high', 'critical']);
+// Fail closed: every severity other than these (any case) is gated, including unknown values.
+const UNGATED = new Set(['info', 'low', 'moderate']);
 const MAX_DAYS = 90;
 const DAY_MS = 86_400_000;
 
@@ -86,7 +87,7 @@ export function evaluateAudit(audit, allowlist, today) {
   const lines = [];
   let failed = false;
   const todayNum = dayNumber(today);
-  const byId = new Map(entries.map((e) => [e.id, e]));
+  const byId = new Map(entries.filter((e) => isoDay(e.expires) >= todayNum).map((e) => [e.id, e]));
   const seen = new Set(advisories.map((a) => a.id));
 
   for (const e of entries) {
@@ -109,7 +110,7 @@ export function evaluateAudit(audit, allowlist, today) {
     const where = `${a.id} ${a.pkg} ${a.severity} ${a.paths[0] ?? '(no path)'}`;
     if (entry !== undefined) {
       lines.push(`allowed ${a.id} until ${entry.expires} (${a.pkg}, ${a.severity})`);
-    } else if (GATED.has(a.severity)) {
+    } else if (!UNGATED.has(a.severity.toLowerCase())) {
       lines.push(`blocked ${where}`);
       failed = true;
     } else {

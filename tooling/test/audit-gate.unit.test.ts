@@ -40,6 +40,12 @@ describe('SEC-11 audit gate', () => {
     expect(run(report({ id: 'GHSA-bbbb-bbbb-bbbb', severity: 'critical' }), '[]', TODAY).exitCode).toBe(1);
   });
 
+  it('SEC-11 blocks an upper-case or unknown severity: only low, moderate and info pass ungated', () => {
+    expect(run(report({ id: 'GHSA-up', severity: 'HIGH' }), '[]', TODAY).exitCode).toBe(1);
+    expect(run(report({ id: 'GHSA-unk', severity: 'severe' }), '[]', TODAY).exitCode).toBe(1);
+    expect(run(report({ id: 'GHSA-info', severity: 'info' }, { id: 'GHSA-lo', severity: 'Low' }), '[]', TODAY).exitCode).toBe(0);
+  });
+
   it('SEC-11 passes moderate and low advisories and lists them as not gated', () => {
     const r = run(report({ id: 'GHSA-m', severity: 'moderate' }, { id: 'GHSA-l', severity: 'low' }), '', TODAY);
     expect(r.exitCode).toBe(0);
@@ -63,6 +69,12 @@ describe('SEC-11 audit gate', () => {
     const r = run(report({ id: 'GHSA-dddd', severity: 'high' }), entry('GHSA-dddd', '2026-11-19'), TODAY);
     expect(r.exitCode).toBe(1);
     expect(r.lines.join('\n')).toMatch(/expired allowlist entry GHSA-dddd/);
+  });
+
+  it('SEC-11 an expired entry does not print allowed for its advisory, and the advisory is judged by severity', () => {
+    const r = run(report({ id: 'GHSA-dddd', severity: 'high' }), entry('GHSA-dddd', '2026-11-19'), TODAY);
+    expect(r.lines.some((l) => l.startsWith('allowed GHSA-dddd'))).toBe(false);
+    expect(r.lines.join('\n')).toMatch(/blocked GHSA-dddd/);
   });
 
   it('SEC-11 accepts an entry that expires today and one exactly 90 days away', () => {
