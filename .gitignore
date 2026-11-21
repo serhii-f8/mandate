@@ -9,3 +9,4 @@ coverage/
 .serena/
 .idea/
 tooling/acceptance/widget-host/dist/
+/.doc-test.log
