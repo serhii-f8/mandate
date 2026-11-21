@@ -73,8 +73,10 @@ hash chain, and nothing updates or deletes them except the retention job.
   To check one retention archive file, add `--archive <file>`.
 - **Retention.** Set `audit.retention_days` in configuration (see the
   [Configuration reference](configuration.md)). The worker then archives older events to
-  `AIOPS_AUDIT_ARCHIVE_DIR` and removes them from the table. Without the directory it refuses with
-  `archive_unavailable`. To run the job once with the active configuration:
+  `AIOPS_AUDIT_ARCHIVE_DIR` and removes them from the table, but only after the archive is written and
+  its chain verified; exactly the archived rows are deleted. It refuses, and deletes nothing, with
+  `archive_unavailable` when events are due and the archive directory is not set or not writable, and with `chain_invalid`
+  when the archive fails verification. To run the job once with the active configuration:
 
   ```bash
   docker compose exec -T api node dist/cli.js audit retention --now

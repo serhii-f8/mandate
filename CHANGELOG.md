@@ -27,8 +27,8 @@ Read these before you upgrade from a release before 1.0.
   files.
 - **Servers that mirror parameters in headers.** An MCP server that requires mirrored `Mcp-Param`
   headers refuses opaque calls.
-- **Gitea credential.** The Gitea credential is the bare token, entered on the credential page,
-  without a scheme prefix.
+- **Gitea credential.** The Gitea credential is the bare token, entered on the credential page:
+  paste the bare access token, not `token <t>`. The adapter sends it as `Authorization: Bearer <t>`.
 - **Connector SDK range moves from 0.6 to 1.0.** The SDK is now 1.0.0, and the two shipped presets
   declare `aiops.sdk` as `^1.0.0`. A preset you wrote for the 0.6 SDK declares `^0.6.0`, which does not
   match 1.0.0: the loader refuses it with `preset_sdk_incompatible`. Rebuild and re-test it against the
