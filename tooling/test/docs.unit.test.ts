@@ -127,8 +127,18 @@ describe('NFR-9 public docs', () => {
     expect(pages.filter((p) => !listed.has(p))).toEqual([]);
   });
 
-  // Task 5 makes this real. R8: env names are unquoted object keys in runtime-env.ts.
-  it.todo('NFR-9 configuration.md mentions every top-level schema key and every runtime-env name');
+  // R8: env names are unquoted object keys in runtime-env.ts.
+  it('NFR-9 configuration.md mentions every top-level schema key and every runtime-env name', () => {
+    const page = read('docs/guide/configuration.md');
+    const schema = JSON.parse(read('packages/config/schema/aiops-config.v1.json')) as { properties: Record<string, unknown> };
+    const keys = Object.keys(schema.properties);
+    expect(keys.length).toBeGreaterThanOrEqual(12);
+    const envSource = read('packages/config/src/runtime-env.ts');
+    const names = [...new Set([...envSource.matchAll(/^\s+((?:AIOPS|API|OIDC|TEMPORAL|DATABASE|LOG|OTEL)_[A-Z0-9_]+):/gm)].map((m) => m[1] ?? ''))];
+    expect(names.length).toBeGreaterThanOrEqual(30);
+    const missing = [...keys.map((k) => `\`${k}\``), ...names.map((n) => `\`${n}\``)].filter((t) => !page.includes(t));
+    expect(missing).toEqual([]);
+  });
 
   // Task 10 makes this real (R9): parse the section map of phase-10.sh.
   it.todo('NFR-9 every doc-test section named by phase-10.sh exists');
