@@ -28,6 +28,8 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUT="${1:-$ROOT/backups/$(date -u +%Y%m%dT%H%M%SZ)}"
 umask 077
+CREATED=0
+[ -e "$OUT" ] || CREATED=1
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 [ -z "$(ls -A "$OUT")" ] || fail "refusing: $OUT is not empty"
@@ -39,16 +41,28 @@ else
   sha256() { shasum -a 256 "$1" | cut -d' ' -f1; }
 fi
 
+# api and worker as found: only the ones that were running are started again.
+RESTART=()
 STOPPED=0
-restart() {
+COMPLETE=0
+DONE=0
+on_exit() {
   local rc=$?
-  if [ "$STOPPED" = 1 ]; then
-    echo "backup: failed (exit $rc); starting api and worker again" >&2
-    docker compose start api worker >&2 || echo "backup: could not start api and worker; run: docker compose up -d --wait" >&2
+  if [ "$COMPLETE" = 0 ]; then
+    # A partial backup must never be mistaken for one: remove what this run wrote.
+    rm -f -- "$OUT"/*.dump "$OUT/audit-archive.tar" "$OUT/manifest.json"
+    if [ "$CREATED" = 1 ]; then rmdir -- "$OUT" 2>/dev/null || true; fi
+    echo "backup: failed (exit $rc); the partial output was removed" >&2
+  fi
+  if [ "$DONE" = 0 ]; then
+    if [ "$STOPPED" = 1 ] && [ "${#RESTART[@]}" -gt 0 ]; then
+      echo "backup: starting ${RESTART[*]} again" >&2
+      docker compose start "${RESTART[@]}" >&2 || echo "backup: could not start ${RESTART[*]}; run: docker compose up -d --wait" >&2
+    fi
   fi
   exit "$rc"
 }
-trap restart EXIT
+trap on_exit EXIT
 
 image_of() {
   local id
@@ -60,6 +74,10 @@ API_IMAGE="$(image_of api)"
 WORKER_IMAGE="$(image_of worker)"
 docker compose exec -T postgres pg_isready -q -U postgres || fail "postgres is not running; start the stack first"
 
+RUNNING="$(docker compose ps --status running --services)"
+for svc in api worker; do
+  if printf '%s\n' "$RUNNING" | grep -qx "$svc"; then RESTART+=("$svc"); fi
+done
 echo "backup: stopping api and worker" >&2
 STOPPED=1
 docker compose stop api worker >&2
@@ -86,11 +104,14 @@ docker compose run --rm --no-deps -T --entrypoint tar api -C "$ARCHIVE_DIR" -cf 
     printf '    "%s": { "bytes": %s, "sha256": "%s" }' "$f" "$(wc -c < "$OUT/$f" | tr -d ' ')" "$(sha256 "$OUT/$f")"
     sep=","
   done
-  printf '\n  },\n  "auditHead": "%s",\n  "images": {\n    "api": %s,\n    "worker": %s\n  }\n}\n' "$HEAD" "$API_IMAGE" "$WORKER_IMAGE"
+  printf '\n  },\n  "auditHead": "%s",\n  "auditVerify": "%s",\n  "images": {\n    "api": %s,\n    "worker": %s\n  }\n}\n' "$HEAD" "$VERIFY" "$API_IMAGE" "$WORKER_IMAGE"
 } > "$OUT/manifest.json"
+COMPLETE=1
 
-echo "backup: starting api and worker" >&2
-docker compose up -d --wait --no-deps api worker >&2
-STOPPED=0
+if [ "${#RESTART[@]}" -gt 0 ]; then
+  echo "backup: starting ${RESTART[*]}" >&2
+  docker compose up -d --wait --no-deps "${RESTART[@]}" >&2
+fi
+DONE=1
 echo "backup: done, audit head $HEAD" >&2
 echo "$OUT"

@@ -4,9 +4,9 @@
 # Restores a backup written by deploy/backup/backup.sh into this Compose installation (NFR-13).
 # Usage: bash deploy/backup/restore.sh <backup-dir> [--force]
 # Order: check the SHA-256 sums (before any docker call), start PostgreSQL, refuse a non-empty aiops
-# database unless --force, stop everything that uses the databases, pg_restore each database as its
-# owner, restore the audit archive volume, compare the audit chain head with the manifest while api
-# and worker are still stopped, then start the stack and verify the chain once more.
+# database or audit archive unless --force, stop everything that uses the databases, pg_restore each
+# database as its owner, restore the audit archive volume, compare the audit verify line with the
+# manifest while api and worker are still stopped, then start the stack and verify the chain again.
 # The .env of the backed-up installation (master keys, Temporal payload keys, passwords) must be in
 # place first: without the same keys the restored credentials and workflow payloads are unreadable.
 set -euo pipefail
@@ -56,19 +56,30 @@ for f in "${FILES[@]}"; do
 done
 HEAD="$(sed -n 's/^ *"auditHead": "\([0-9]*:sha256:[0-9a-f]*\)",\{0,1\}$/\1/p' "$DIR/manifest.json")"
 [ -n "$HEAD" ] || fail "manifest.json has no auditHead"
+WANT_VERIFY="$(sed -n 's/^ *"auditVerify": "\(ok sealed=[0-9]* unsealed=[0-9]* from=[0-9]* head=[0-9]*:sha256:[0-9a-f]*\)",\{0,1\}$/\1/p' "$DIR/manifest.json")"
+[ -n "$WANT_VERIFY" ] || fail "manifest.json has no auditVerify"
 echo "restore: checksums ok, backup audit head $HEAD" >&2
 
 # 2. PostgreSQL only.
 docker compose up -d --wait postgres >&2
 
-# 3. A database without the aiops tables (fresh volume, init.sh only) counts as empty.
+# 3. Never overwrite an audit trail by mistake: neither audit rows nor archive files without --force.
+# A database without the aiops tables (fresh volume, init.sh only) counts as empty.
 psql_aiops() { docker compose exec -T postgres psql -U postgres -d aiops -v ON_ERROR_STOP=1 -tAc "$1"; }
 if [ "$(psql_aiops "SELECT to_regclass('public.audit_event') IS NOT NULL")" = t ] &&
   [ "$(psql_aiops "SELECT EXISTS (SELECT 1 FROM public.audit_event)")" = t ]; then
   if [ "$FORCE" = 1 ]; then
-    echo "restore: database not empty; --force given, replacing it" >&2
+    echo "restore: database not empty; --force given, its audit trail is discarded" >&2
   else
     fail "refusing: database not empty (aiops.audit_event has rows); pass --force to replace it"
+  fi
+fi
+ARCHIVE_COUNT="$(docker compose run --rm --no-deps -T --entrypoint sh api -c "ls -A $ARCHIVE_DIR | wc -l")"
+if [ "$(printf '%s' "$ARCHIVE_COUNT" | tr -d ' \r\n')" != 0 ]; then
+  if [ "$FORCE" = 1 ]; then
+    echo "restore: audit archive not empty; --force given, its files are discarded" >&2
+  else
+    fail "refusing: audit archive not empty; pass --force to replace it"
   fi
 fi
 
@@ -82,21 +93,22 @@ for entry in "${DATABASES[@]}"; do
   echo "restore: restoring $db" >&2
   docker compose exec -T postgres pg_restore -U postgres --clean --if-exists --no-owner --role="$owner" \
     --single-transaction --exit-on-error -d "$db" < "$DIR/$db.dump" ||
-    fail "pg_restore of $db failed; the stack is left stopped"
+    fail "pg_restore of $db failed; the stack is left stopped; fix the cause and run the restore again with --force"
 done
 
 # 6. The audit archive volume, replaced as a whole.
 echo "restore: restoring the audit archive volume" >&2
 docker compose run --rm --no-deps -T --entrypoint sh api -c \
   "cd $ARCHIVE_DIR && find . -mindepth 1 -delete && tar -xf -" < "$DIR/audit-archive.tar" ||
-  fail "restoring the audit archive failed; the stack is left stopped"
+  fail "restoring the audit archive failed; the stack is left stopped; fix the cause and run the restore again with --force"
 
-# 7. The head must be exactly the one recorded at backup time, checked before api and worker
-# start (they write and seal audit rows as soon as they run).
+# 7. The audit state must be exactly the one recorded at backup time (sealed and unsealed counts,
+# chain start and head), checked before api and worker start: they write and seal audit rows as
+# soon as they run, and nothing else changes the restored database before that.
 VERIFY="$(docker compose run --rm --no-deps -T api node dist/cli.js audit verify)" ||
   fail "audit verify failed after the restore: $VERIFY; the stack is left stopped"
-GOT="$(printf '%s\n' "$VERIFY" | sed -n 's/^ok .* head=\([0-9]*:sha256:[0-9a-f]*\)$/\1/p')"
-[ "$GOT" = "$HEAD" ] || fail "audit head mismatch: backup $HEAD, restored ${GOT:-none}; the stack is left stopped"
+[ "$VERIFY" = "$WANT_VERIFY" ] ||
+  fail "audit head mismatch: backup '$WANT_VERIFY', restored '$VERIFY'; the stack is left stopped"
 echo "audit head matches: $HEAD"
 
 # 8. The whole stack, then the chain once more (the head may have advanced by now).

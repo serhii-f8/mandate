@@ -37,23 +37,26 @@ bash deploy/backup/backup.sh
 The script:
 
 1. stops `api` and `worker`;
-2. reads the audit chain head with `audit verify`;
+2. records the result of `audit verify`: the sealed and unsealed audit row counts and the chain head;
 3. dumps the four databases with `pg_dump -Fc` inside the `postgres` service;
 4. packs the audit archive volume into `audit-archive.tar`;
-5. writes `manifest.json` with the size and SHA-256 sum of every file, the audit head and the `api`
-   and `worker` images;
-6. starts `api` and `worker` again and waits until they are healthy.
+5. writes `manifest.json` with the size and SHA-256 sum of every file, the `audit verify` result and
+   the `api` and `worker` images;
+6. starts `api` and `worker` again, if they were running before, and waits until they are healthy.
 
-If a step fails, it starts `api` and `worker` again before it exits.
+If a step fails, it removes the partial backup files and starts again whichever of `api` and
+`worker` was running before it exits.
 
 Every Docker call goes through `docker compose` in the repository root, so `COMPOSE_PROJECT_NAME`,
-`COMPOSE_FILE` and `.env` apply as for your other commands.
+`COMPOSE_FILE` and `.env` apply as for your other commands. If your installation uses another
+project name, export `COMPOSE_PROJECT_NAME` (or set it in `.env`) rather than passing
+`docker compose -p`: the scripts cannot see a `-p` you type for other commands.
 
 ### Consistency
 
 While `api` and `worker` are stopped nothing writes to the `aiops` database: no MCP calls are
 served, no change-set moves and no audit row is written or sealed. That is what makes the audit head
-in the manifest exact. The stop lasts as long as the dumps, seconds for a small installation. MCP
+state in the manifest exact. The stop lasts as long as the dumps, seconds for a small installation. MCP
 clients get errors meanwhile; a batch the worker was writing is retried by Temporal after
 the start, as after any worker restart.
 
@@ -79,25 +82,37 @@ The script:
 1. checks the SHA-256 sum of every file against the manifest, before it touches anything;
 2. starts `postgres`;
 3. refuses with `refusing: database not empty` (exit 1) when the `aiops` database already has audit
-   rows, so it never overwrites a live installation by mistake;
+   rows, and with `refusing: audit archive not empty` when the audit archive volume has files, so it
+   never overwrites a live installation by mistake;
 4. stops `api`, `worker`, Temporal, Keycloak and their setup jobs;
 5. restores each database with `pg_restore --clean --if-exists` in one transaction, its objects owned
    by the database's own role;
 6. replaces the contents of the audit archive volume;
-7. compares the audit head with the manifest, before `api` and `worker` start, and prints
-   `audit head matches: <head>`;
+7. runs `audit verify` before `api` and `worker` start, requires the same sealed and unsealed counts
+   and chain head as the manifest, and prints `audit head matches: <head>`;
 8. starts the whole stack with `--wait` and runs `audit verify` once more.
 
 On a checksum mismatch it stops before step 2. On a head mismatch it exits 1 and leaves the stack
 stopped: the restored data is not the data that was backed up, and nothing should run on it.
 
+Start only `postgres` before a restore. Once the full stack has started, `api` has run its
+migrations and written audit rows, so the restore refuses without `--force`; that is expected on a
+fresh machine where you ran `docker compose up -d --wait` first, and `--force` is then safe.
+
+If `pg_restore` or the archive step fails, the stack stays stopped and the databases restored
+before the failure already hold the backup's data. Fix the cause (the message names the step) and run
+the restore again with `--force`.
+
 To replace an installation that has data on purpose, for example to roll a test system back to last
-night's state, add `--force`.
+night's state, add `--force`. It discards the installation's current audit trail and audit archive
+files and every change-set, approval and credential since the backup: run `backup.sh` first, so
+you can return to the state you replace.
 
 ## Verify
 
-The restore verifies the audit chain itself: `audit head matches` means every sealed audit row is
-back and the hash chain from the newest retention anchor up to the recorded head is intact. Check
+The restore verifies the audit trail itself: `audit head matches` means the restored database has
+exactly the sealed and unsealed audit rows counted at backup time, and the hash chain from the newest
+retention anchor up to the recorded head is intact. Check
 the rest as you would after any start:
 
 - `curl -fsS "http://localhost:${AIOPS_API_PORT:-8400}/readyz"` answers 200;
