@@ -158,12 +158,14 @@ test "$(node -p 'JSON.parse(process.argv[1]).items.filter((p) => p.custom_attrib
 ```
 
 All three products carry the new keyword. The audit page (`http://localhost:8400/app/audit`, as
-carol) shows the request, the approval and the batch.
+carol) shows the request, the approval and the batch; it is a browser check, and nothing later
+depends on it.
 
 ## Roll it back (optional)
 
 A completed change-set can be rolled back to the values recorded before the write. The rollback is
-confirmed on the trusted page, by a fresh login:
+confirmed on the trusted page by the requester, who must have logged in within the last five minutes
+(`AIOPS_FRESH_AUTH_SECONDS`, 300 by default); an older page session is asked to log in again:
 
 1. Open `http://localhost:8400/app/changesets/<change-set ID>` as alice.
 2. Choose **Roll back** and confirm. The page re-checks the hash; the products get their previous
@@ -171,6 +173,33 @@ confirmed on the trusted page, by a fresh login:
 
 From an MCP client, `rollback_changeset` checks that a rollback is possible and answers with the
 link to this page; it does not roll back by itself.
+
+Without a browser, in the same shell: ask `rollback_changeset` until the rollback is available (it
+opens when the change-set's workflow has finished), log in to the page as alice, confirm the
+rollback with the hash, and follow the change-set to `rolled_back`.
+
+<!-- doc-test: rollback -->
+```bash
+ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${AIOPS_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${AIOPS_API_PORT:-8400}/mcp")"
+for i in $(seq 1 30); do
+  OFFER="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool rollback_changeset --args "{\"changeset_id\":\"$CHANGESET_ID\",\"hash\":\"$CHANGESET_HASH\"}")"
+  test "$(node -p 'JSON.parse(process.argv[1]).structuredContent.rollback.available' "$OFFER")" = true && break
+  sleep 2
+done
+node -p 'JSON.stringify(JSON.parse(process.argv[1]).structuredContent.rollback)' "$OFFER"
+ALICE_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${AIOPS_API_PORT:-8400}" alice "$DEV_PASSWORD" "/app/changesets/$CHANGESET_ID")"
+ROLLBACK="$(AIOPS_PAGE_COOKIE="$ALICE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" rollback "$CHANGESET_ID" "$CHANGESET_HASH")"
+echo "$ROLLBACK"
+test "$(node -p 'JSON.parse(process.argv[1]).status' "$ROLLBACK")" = 200
+for i in $(seq 1 120); do
+  CHANGESET="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$CHANGESET_ID\"}")"
+  STATUS="$(node -p 'JSON.parse(process.argv[1]).structuredContent.changeset.status' "$CHANGESET")"
+  case "$STATUS" in rolled_back|failed) break ;; esac
+  sleep 2
+done
+echo "$STATUS"
+test "$STATUS" = rolled_back || { echo "change-set $CHANGESET_ID ended the wait with status $STATUS, not rolled_back" >&2; false; }
+```
 
 ## Connect Claude or ChatGPT (optional)
 
