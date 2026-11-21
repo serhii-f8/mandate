@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { defineConfig } from 'drizzle-kit';
 
 // Generates SQL migrations from src/schema.ts. Migrations are committed and

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Opaque operations end to end over the real MCP transport (CS-1, MCP-1, MCP-6, POL-5).
  *

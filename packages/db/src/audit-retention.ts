@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import path from 'node:path';

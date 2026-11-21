@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Restart acceptance (NFR-1, NFR-2, NFR-4, EXE-4, AUD-5; design phase-10-release-quality §3.2) against
 # the fake Magento catalog of packages/testing on the Compose network (`fake-magento`, 1600 products
 # RST-0001..RST-1600, brand `restart`, meta_keyword `seed`):

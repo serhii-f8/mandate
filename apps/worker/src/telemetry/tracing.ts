@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Temporal tracing for the worker (NFR-11). The SDK's OpenTelemetry plugin adds the client,
  * activity and workflow interceptors; workflow spans leave the sandbox through a sink into

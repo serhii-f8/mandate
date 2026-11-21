@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { proxyActivities } from '@temporalio/workflow';
 import type * as activities from '../activities/index.js';
 

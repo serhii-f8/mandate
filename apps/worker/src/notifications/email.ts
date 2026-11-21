@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { NotificationError } from '@aiops/core';
 import nodemailer from 'nodemailer';
 import type { EmailSender, SendOutcome } from './senders.js';

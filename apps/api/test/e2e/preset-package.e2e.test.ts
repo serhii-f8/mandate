@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * A code preset installed the way an operator installs one (CONN-8, OPS-5): `npm pack` of the
  * code fixture, extracted into a preset directory, served behind MCP tools by a revision-backed

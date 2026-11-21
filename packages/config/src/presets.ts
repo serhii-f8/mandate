@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Preset resolution (CONN-8; design part 1 §3.4, ADR 0017; Phase 9 packages): a preset is a
  * package directory in one of the preset directories, chosen by its `package.json` name and

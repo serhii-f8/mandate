@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * OpenTelemetry for the worker (NFR-11, NFR-12): a tracer provider for the activity and client
  * interceptors (they use the global tracer), the span processor the Temporal plugin's workflow

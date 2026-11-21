@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // @ts-check
 /**
  * Bundled-realm settings that a realm import cannot toggle (AUTH-8, ADR 0014),

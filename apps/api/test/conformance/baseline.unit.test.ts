@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Guards the reviewed conformance baselines (NFR-16): an entry needs a reason, and a scenario the
  * platform implements can never be excused as a whole, so a baseline cannot grow silently on a pin

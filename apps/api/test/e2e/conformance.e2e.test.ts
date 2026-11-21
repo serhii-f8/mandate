@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The official MCP conformance suite against the running api (NFR-16, MCP-1).
  *

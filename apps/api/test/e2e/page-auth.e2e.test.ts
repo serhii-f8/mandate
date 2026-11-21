@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createHash } from 'node:crypto';
 import { Writable } from 'node:stream';
 import { METHOD_METADATA } from '@nestjs/common/constants.js';

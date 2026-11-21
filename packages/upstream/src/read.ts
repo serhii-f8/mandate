@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * One upstream read under a configuration snapshot (design §4.2), shared by the api read
  * path and the worker: binding lookup, the GET check, the credential and the adapter call.

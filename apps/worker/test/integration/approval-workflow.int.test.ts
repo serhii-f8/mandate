@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `changesetWorkflow` across the approval statuses (design §7): the workflow's command sequence is
  * unchanged from Phase 5; it waits in `pending_approval` and `approved` as in `prepared`, ends on the

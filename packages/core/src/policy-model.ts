@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The policy model (SPEC section 4: Operation, Role, Grant), as `@aiops/config`
  * produces it from validated YAML. Plain immutable data, no behaviour.

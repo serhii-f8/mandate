@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `exclude_changeset_items` (CS-5, MCP-8): the requester removes items from a prepared change-set, or
  * puts back items they removed, before submitting it. The answer is a new change-set with its own ID

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Limits on the MCP endpoint (SEC-10, SEC-11, AUD-1), over the real HTTP transport.
  *

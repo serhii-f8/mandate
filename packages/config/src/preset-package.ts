@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Preset packages (CONN-8): finding every installed copy of a package in the preset
  * directories, choosing a version by semver range, and reading the `aiops` field of its

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `rollback_changeset` (MCP-8, EXE-8): tells the requester whether their executed change-set can be
  * rolled back now, and how many items it would restore until when. It never changes state: the

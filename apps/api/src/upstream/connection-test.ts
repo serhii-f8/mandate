@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * CONN-7 connection test (design part 1 §4.7): runs a connection's declared test read
  * through its adapter with the stored credential and reports status, item count and the

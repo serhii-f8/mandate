@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { SEAL_BATCH, type RetentionReport, type SealResult } from '@aiops/db';
 import type { Logger } from 'pino';
 

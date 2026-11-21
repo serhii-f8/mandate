@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Widget bundles as MCP Apps UI resources over the real MCP transport (MCP-5, UI-6, SEC-1, AUTH-2).
  *

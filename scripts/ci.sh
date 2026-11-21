@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # The whole CI run, identical locally and in .github/workflows/ci.yml (ADR 0001:
 # "CI is green" means this script passes). Needs Docker (Testcontainers) and
 # network access (images, Temporal test server download).

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { auditRowHash, GENESIS_HASH, type ChainHead, type ChainRow, type SealedChainRow } from '@aiops/core';
 import type pg from 'pg';
 import { guarded } from './errors.js';

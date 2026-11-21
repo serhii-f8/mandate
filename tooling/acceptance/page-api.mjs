@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // Calls the api's REST API for trusted pages like the credential page does (UI-5, SEC-8):
 // the session cookie, the CSRF token from GET /api/v1/session and the page's Origin.
 // Secrets never come from argv (argv shows in `ps`) and are never printed:

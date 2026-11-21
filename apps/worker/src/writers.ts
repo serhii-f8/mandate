@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The worker's writers per operation (design part 2 §4, design phase 9 §4; OPS-5, OPS-6, EXE-8,
  * OPS-3). Forward: an `OpaqueCallWriter` for an opaque operation (one call sent at most once,

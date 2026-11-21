@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import 'reflect-metadata';
 import type { Request, Response } from 'express';
 import pino from 'pino';

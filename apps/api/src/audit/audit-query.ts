@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Query-string parsing for the audit search and export routes (AUD-6, NFR-8). Every value is
  * checked here so a malformed query is a 400, never a database error: only strings are accepted

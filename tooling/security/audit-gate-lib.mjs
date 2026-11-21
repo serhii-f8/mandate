@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // Dependency audit gate (SEC-11). Pure logic: no file or process access, so tests can import it.
 import { parse } from 'yaml';
 

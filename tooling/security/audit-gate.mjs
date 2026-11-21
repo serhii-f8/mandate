@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // CLI: node tooling/security/audit-gate.mjs <audit.json> <allowlist.yaml>  (SEC-11)
 import { readFileSync } from 'node:fs';
 import { evaluateAudit } from './audit-gate-lib.mjs';

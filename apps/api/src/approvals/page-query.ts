@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Query-string and body parsing for the approval page routes (NFR-8, APR-5, SEC-8). Only a string
  * query value is accepted: an array means a repeated parameter and is refused. Cursors are opaque

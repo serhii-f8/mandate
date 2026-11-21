@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // Client-credentials token of a service-account client of the bundled realm (AUTH-4), for the
 // acceptance scripts.
 //

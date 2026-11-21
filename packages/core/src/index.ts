@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** Domain model, policy evaluation, manifest engine and diff. Free of frameworks, drivers and adapters. */
 export { AUDIT_ACTIONS, type AuditAction, type AuditDecision, type AuditEventInput, type AuditLog, type AuditOutcome } from './audit.js';
 export { AuditRedactionError, REDACTED, redactAuditDetails } from './audit/redact.js';

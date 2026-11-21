@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Contract tests of the Magento catalog preset (NFR-17 first cut, CONN-2; design part 1 §6).
  * The preset is loaded the way the api loads it: `@aiops/config` with the OpenAPI adapter's

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Which path an allowed call takes, by risk class (SPEC section 2, design §4.1): reads run
  * directly; opaque operations and writes or destructive operations with a manifest create a

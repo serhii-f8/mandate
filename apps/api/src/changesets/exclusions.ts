@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The requester's exclusions (CS-5): derive a new change-set and start its workflow (EXE-1), shared by
  * the MCP tool and the page route so one request yields one outcome.

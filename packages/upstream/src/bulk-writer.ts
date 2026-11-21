@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The worker implementation of the core `BulkWriter` port (design part 2 §4): one change-set's
  * bulk submit and status calls through the connection's `WriteAdapter` (OPS-6). The credential is

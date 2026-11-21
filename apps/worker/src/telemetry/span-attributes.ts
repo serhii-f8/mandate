@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Change-set attributes on the activity spans of the Temporal plugin (NFR-11): the change-set ID
  * and the correlation ID its audit rows carry for the activity's phase (EXE-4), so a trace is found

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { CanonicalJsonError, checkLink, GENESIS_HASH, type ChainBreak, type ChainHead } from '@aiops/core';
 import type pg from 'pg';
 import { CHAIN_COLUMNS, safeInteger, toSealedChainRow } from './audit-chain.js';

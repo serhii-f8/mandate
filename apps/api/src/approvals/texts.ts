@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** Fixed answers for refused approval decisions (SEC-5: IDs only, never change-set content). */
 import type { DecisionRefusal } from '@aiops/core';
 

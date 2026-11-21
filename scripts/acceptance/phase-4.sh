@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Phase 4 acceptance (SPEC section 7, design phase-4-changesets) against the Magento sandbox:
 #   prepared-explicit, before-matches-sandbox / after-matches-request, same-input-same-hash,
 #   selector-prepared, other-brand-denied, zero-writes, get-and-cancel,

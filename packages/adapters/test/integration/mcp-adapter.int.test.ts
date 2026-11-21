@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { mcpToolHash, type ConnectionSettings, type CredentialSource, type McpToolDefinition } from '@aiops/connector-sdk';
 import { startFakeMcpServer, type FakeMcpServer, type FakeMcpTool, type RecordedMcpRequest } from '@aiops/testing';
 import { afterEach, describe, expect, it } from 'vitest';

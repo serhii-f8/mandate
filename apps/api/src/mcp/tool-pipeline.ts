@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `tools/list` and `tools/call` as `api` owns them (ADR 0016): every request,
  * including the ones rejected before anything runs, passes through code that

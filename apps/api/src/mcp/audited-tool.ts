@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import { toolCallAuditEvent, type AuditLog, type AuditOutcome, type Caller } from '@aiops/core';

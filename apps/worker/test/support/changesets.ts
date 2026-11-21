@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** Change-sets in a chosen state, written through the repository port as the api would. */
 import { randomUUID } from 'node:crypto';
 import {

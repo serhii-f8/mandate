@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The `api` implementation of the core `UpstreamReader` port (design §4.2): the reads a
  * manifest asks for while preparing a change-set. It runs the Phase 3 read path without a

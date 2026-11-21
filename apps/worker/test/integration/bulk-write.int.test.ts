@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Bulk writes end to end (EXE-4, CS-7, NFR-2; design part 2): a real `changesetWorkflow` prepares
  * a change-set through the Magento preset 1.0.0 against the fake catalog, then executes it with

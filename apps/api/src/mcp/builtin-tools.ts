@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createSchemaCompiler } from '@aiops/config';
 import type { AuditLog, ChangeSetExecutor, ChangeSetRepository, TaskRepository, WorkflowStarter } from '@aiops/core';
 import type { UpstreamToolView } from '@aiops/upstream';

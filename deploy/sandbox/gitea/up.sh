@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Brings the Gitea sandbox up (idempotent). Prints "GITEA UP <seconds> <version>" when the API answers.
 # Creates the admin aiops-admin only when it is missing. Development only.
 set -euo pipefail

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * A stand-in OAuth authorization server for tests: an RS256 key pair whose JWKS
  * is served over HTTP on 127.0.0.1, a signer for access tokens with any claims, and

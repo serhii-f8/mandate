@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@aiops/testing';
 import type { ConfigurationHolder } from '@aiops/config';

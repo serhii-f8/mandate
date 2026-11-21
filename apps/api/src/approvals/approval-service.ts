@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Approval decisions (design part 1 §6): runs the pure checks of `checkDecision`, records the
  * decision in one repository transaction, wakes the workflow on reject and return, and starts an

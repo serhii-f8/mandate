@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { AuditEventInput } from '../audit.js';
 import type { ChangeSetRecord, ChangeSetStatus } from './model.js';
 

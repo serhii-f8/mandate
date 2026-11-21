@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Opaque change-sets for worker tests (design phase 9 §5): a scripted `OpaqueCaller` that honours
  * the port's contract (pre-flight, `beforeSend`, one send) and counts what it sends, and a prepared

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { App } from '@modelcontextprotocol/ext-apps';
 import { isCallToolResult, type CallToolResult } from '@modelcontextprotocol/client';
 import { describe, expect, it, vi } from 'vitest';

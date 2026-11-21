@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { InvocationResult } from '../operation-invoker.js';
 import { READ_RESULT_TEXT, readErrorResult } from '../read-result.js';
 import type { ChangeItemRecord, ChangeSetRecord, ExclusionReason } from './model.js';

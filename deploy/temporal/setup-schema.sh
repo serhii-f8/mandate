@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Creates or upgrades the Temporal schemas in PostgreSQL. Safe to run on every start:
 # setup-schema -v 0.0 skips an initialized database and update-schema applies only
 # missing versions (verified 2026-11-16, admin-tools 1.32.2, ADR 0012). The databases

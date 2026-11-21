@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { timingSafeEqual } from 'node:crypto';
 
 /** Constant-time comparison; unequal lengths are unequal without comparing content. */

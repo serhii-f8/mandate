@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // @vitest-environment node
 import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';

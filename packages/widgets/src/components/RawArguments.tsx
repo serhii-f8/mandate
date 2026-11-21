@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { ReactElement, ReactNode } from 'react';
 import { Notice } from './Notice.js';
 

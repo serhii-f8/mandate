@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // Logs a development user in to the api's trusted pages like a browser (AUTH-5):
 // GET /auth/login → Keycloak login form (posted) → /auth/callback → the return path.
 // Redirects are followed by hand with one cookie jar per host name (ports share cookies, as

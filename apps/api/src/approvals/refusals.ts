@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * One status per refusal reason, shared by the decision and start routes (SEC-11), and the helper
  * that audits a refusal before answering it (AUD-1).

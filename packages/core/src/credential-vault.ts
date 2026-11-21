@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { AuditEventInput } from './audit.js';
 
 /** Port for credentials held encrypted at rest (SEC-2). Implemented in `@aiops/db`. */

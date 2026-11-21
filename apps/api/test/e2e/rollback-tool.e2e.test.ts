@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `rollback_changeset` and the rollback block of `get_changeset` end to end over the real MCP
  * transport, against PostgreSQL with the in-memory executor (MCP-8, UI-4, SEC-1, MCP-6, AUD-1).

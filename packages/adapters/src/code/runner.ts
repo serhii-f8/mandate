@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Runs a preset's code operations (OPS-5): each invocation gets a fresh `ctx` with the guarded
  * HTTP client of its connection, an abort signal and a deadline. The code's result is copied as

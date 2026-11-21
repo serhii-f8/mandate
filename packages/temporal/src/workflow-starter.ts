@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { WorkflowStarter } from '@aiops/core';
 import type { Client } from '@temporalio/client';
 import { CHANGESET_WORKFLOW, type ChangesetWorkflowInput } from './contract.js';

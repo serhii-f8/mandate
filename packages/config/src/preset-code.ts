@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Preset code modules (OPS-5, CONN-8, CFG-4; Phase 9 presets design): the ES module named by
  * `aiops.code`, the directory tree it lives in, and the digest of that tree, which is part of

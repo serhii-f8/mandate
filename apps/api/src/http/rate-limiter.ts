@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Per-endpoint request limits (SEC-10): a fixed one-minute window per key, counted in the shared
  * `RateCounter` so every api instance sees one budget (NFR-3). A failing counter fails closed.

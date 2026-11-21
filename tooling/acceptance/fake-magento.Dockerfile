@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # The fake Magento catalog of the restart acceptance (scripts/acceptance/restart.sh): product reads,
 # the async bulk write and its detailed status, with per-SKU submission counts at GET /_control/state,
 # POST /_control/open-polls {n} and POST /_control/reset (packages/testing/src/fake-magento-main.ts).

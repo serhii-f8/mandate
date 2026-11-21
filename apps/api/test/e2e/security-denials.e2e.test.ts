@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Denial suite, part 1 (SEC-11): argument validation, grant, scope and field denials over the real
  * MCP transport. Every test asserts the answer, the audit rows the path really writes, and that

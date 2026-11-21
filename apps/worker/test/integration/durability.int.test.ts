@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Durability of `changesetWorkflow` on a real Temporal test server and PostgreSQL: a worker that
  * dies mid-batch, two workers sharing a queue, and continue-as-new over a large change-set.

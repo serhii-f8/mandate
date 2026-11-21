@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * OpenAPI schema objects (Swagger 2.0, OAS 3.0, OAS 3.1) to JSON Schema 2020-12 that Ajv
  * accepts in strict mode (CONN-2, ADR 0018 decision 3).

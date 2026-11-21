@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { startSmtpSink, type SmtpSink } from '@aiops/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createSmtpSender } from './email.js';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The change-set activities of `changesetWorkflow` (design §4, §5). Each one reads the truth from
  * PostgreSQL and is safe to retry (NFR-2). The failures they raise themselves carry fixed codes,

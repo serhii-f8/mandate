@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Images for the two processes, built from the repository root:
 #   docker build -f deploy/Dockerfile --target api .
 #   docker build -f deploy/Dockerfile --target worker .

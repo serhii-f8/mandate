@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { LoggerService } from '@nestjs/common';
 import { pino, type DestinationStream, type Logger } from 'pino';
 import { REDACT_PATHS, type LogLevel } from '@aiops/config';

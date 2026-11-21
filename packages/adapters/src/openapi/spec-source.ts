@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Spec loading (CONN-2, design §4.2): a file (JSON or YAML, up to 5 MB) or a URL fetched through
  * the connection client (egress guard, timeouts, retries). Messages are fixed strings: they never

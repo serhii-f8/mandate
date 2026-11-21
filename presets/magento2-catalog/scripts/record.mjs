@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // Records the vendored spec and the contract-test responses from a Magento sandbox
 // (NFR-17 first cut, design part 1 §6). Needs MAGENTO_SANDBOX_URL (e.g. http://127.0.0.1:4390)
 // and MAGENTO_SANDBOX_TOKEN (bash deploy/sandbox/magento/token.sh).

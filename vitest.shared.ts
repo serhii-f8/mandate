@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Shared Vitest configuration. Every workspace package has a `vitest.config.ts`
  * that calls `packageConfig()`; its scripts select a project:

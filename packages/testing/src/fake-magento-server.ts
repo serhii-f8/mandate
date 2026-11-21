@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { startFakeUpstream } from './fake-upstream.js';
 import { installFakeMagentoCatalog, type FakeMagentoProduct } from './fake-magento-catalog.js';
 

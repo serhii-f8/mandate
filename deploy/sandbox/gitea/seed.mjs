@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // Seeds the Gitea sandbox (Phase 9). Idempotent. Usage:
 //   GITEA_SANDBOX_TOKEN=<token with write:organization,write:repository,write:issue> \
 //     node deploy/sandbox/gitea/seed.mjs [base-url]     # default http://127.0.0.1:4391

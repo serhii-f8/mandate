@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * A Tasks-aware test client (MCP-7), as spike 1 proved it (ADR 0003, spikes/1-mcp-sdk/check.mjs):
  * `@modelcontextprotocol/client` 2.4.0 rejects `resultType: "task"`, so ext-tasks 0.2.3 sends

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createHash, type Hash } from 'node:crypto';
 import { canonicalJson, compareTargetIds } from './canonical.js';
 

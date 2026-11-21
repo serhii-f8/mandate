@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { randomUUID } from 'node:crypto';
 import { All, Controller, Inject, Post, Req, Res } from '@nestjs/common';
 import { SpanKind, type Tracer } from '@opentelemetry/api';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Real PostgreSQL for integration and e2e tests (NFR-15): one container per test
  * file, a fresh database per test that asks for one. No mocked database.

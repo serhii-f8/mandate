@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Schemas of the upstream side of the configuration (design part 1 §3, ADR 0017):
  * connection settings and auth, the operation's `upstream` mapping, and their

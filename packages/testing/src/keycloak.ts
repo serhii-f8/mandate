@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Real Keycloak for tests (AUTH-8): the shipped realm file, the shipped bootstrap
  * script, and an authorization-code + PKCE login that posts the login form like a

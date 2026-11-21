@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { extname, join, resolve, sep } from 'node:path';

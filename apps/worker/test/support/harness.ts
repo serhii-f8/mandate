@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Shared harness for worker integration tests (NFR-15): one Temporal test environment and one
  * migrated PostgreSQL database per test file, one worker and task queue per case. Payloads are

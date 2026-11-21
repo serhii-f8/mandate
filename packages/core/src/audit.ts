@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Audit actions (AUD-1), once each. Runtime list for the audit search query parser (AUD-6).
  * Later phases extend it.

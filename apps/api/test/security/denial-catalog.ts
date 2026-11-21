@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * SEC-11: every denial path of SPEC section 5.3 with the test that proves it. Codes are the names
  * as built (`pending_approval`, not `approval_required`). The completeness test next to

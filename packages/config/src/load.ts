@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Loads a configuration directory (CFG-1) as one unit: either every file is
  * valid and cross-checked, or the result is the full list of located issues

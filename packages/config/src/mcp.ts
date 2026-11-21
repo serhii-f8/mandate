@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * MCP-backed operations in configuration (CONN-1, CONN-4; design phase 9 §2, §3, §4): the
  * `upstream: { tool, pin }` variant, the tool catalog listed at load and the pin state of

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createServer, request, type IncomingHttpHeaders, type OutgoingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 

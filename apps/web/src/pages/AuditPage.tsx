@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { AuditSearchView, type AuditEventModel, type AuditFilters } from '@aiops/widgets';
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { BadQuery, createApi, toLogin, Unauthenticated } from '../api.js';

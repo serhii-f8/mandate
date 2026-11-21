@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // Reference MCP Apps host for the acceptance run (MCP-5, UI-6). Node holds the user's token,
 // so widget tool calls are forwarded from here; the browser needs no token and no CORS.
 //

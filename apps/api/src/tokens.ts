@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** Dependency-injection tokens shared by the api modules. */
 export const API_ENV = Symbol('ApiEnv');
 export const APPROVAL_SERVICE = Symbol('ApprovalService');

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Audit search and JSON Lines export on the trusted page (AUD-6, NFR-8). Denied by default
  * (`@PageAccess`, SEC-1); the `view_audit` role flag is checked before the query is parsed, and

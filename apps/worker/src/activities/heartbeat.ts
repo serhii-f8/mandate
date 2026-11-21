@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Keeps a long activity step alive (EXE-4, NFR-2): one heartbeat at once, then one every third
  * of the activity's heartbeat timeout (at least every second) until `step` settles. A slow

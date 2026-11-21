@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { Controller, Inject, Param, Post, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { ConfigurationHolder } from '@aiops/config';

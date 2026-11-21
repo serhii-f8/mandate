@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { configDocumentSchema } from './schema.js';

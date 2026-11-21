@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { request } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startFakeUpstream, type FakeUpstream } from './fake-upstream.js';

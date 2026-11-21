@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { FakeResponse, FakeUpstream, RecordedRequest } from './fake-upstream.js';
 
 /** A flat product: `sku` plus name, status, brand, description, ... */

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The rollback window and compensation of `changesetWorkflow` (EXE-8, ADR 0042) on a real Temporal
  * test server and PostgreSQL: after a finished status the workflow keeps a window open, a stored

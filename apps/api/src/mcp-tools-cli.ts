@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `aiops mcp tools <connection> [--show <tool>]`: lists an `mcp` connection's tools live, with
  * their hashes, the operation bound to each and its pin state, so an operator can review a

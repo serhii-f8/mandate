@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Phase 9 acceptance (SPEC section 7, designs phase-9-mcp-upstream*) against two MCP upstreams on
 # the Compose network: the reference server `everything` (@modelcontextprotocol/server-everything
 # 2.2.1) and the fake MCP server of packages/testing, whose tools change at run time:

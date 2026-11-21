@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Answers about a change-set, shared by the write call, `get_changeset` and the Tasks
  * handlers so one state yields one answer (MCP-7, MCP-4). Counts and IDs only (SEC-5).

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** Configuration schemas, loader, validation and CLI. */
 export { EnvError, parseApiEnv, parseWorkerEnv, type ApiEnv, type EnvIssue, type LogLevel, type WorkerEnv } from './runtime-env.js';
 export { CONFIG_SCHEMA_VERSION } from './schema-version.js';

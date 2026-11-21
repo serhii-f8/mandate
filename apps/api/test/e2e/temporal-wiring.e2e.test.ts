@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The api's production execution wiring, with Temporal unreachable: no executor or starter
  * override, the real `TemporalExecutor` / `TemporalWorkflowStarter` on a lazy connection

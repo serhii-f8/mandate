@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The Magento catalog preset 1.0.0 as the worker loads it (specs resolved, presets loaded), bound
  * to connection `magento` at a fake catalog's `/rest/all`, plus a memory credential vault holding a

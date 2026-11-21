@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { and, eq } from 'drizzle-orm';
 import { isTaskId, type TaskRecord, type TaskRepository } from '@aiops/core';
 import type { Db } from './client.js';

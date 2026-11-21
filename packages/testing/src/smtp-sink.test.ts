@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { connect, type Socket } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startSmtpSink, type SmtpSink } from './smtp-sink.js';

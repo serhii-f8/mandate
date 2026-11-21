@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The `rollback` block of the detail answers (UI-4, EXE-8): `get_changeset`, the page detail and
  * `review_changeset` all report it through `rollbackBlock`, which asks the one eligibility function

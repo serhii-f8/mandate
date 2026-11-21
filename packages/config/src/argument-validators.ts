@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Operation input schemas (MCP-3): JSON Schema 2020-12 compiled with Ajv in strict
  * mode at load time, so a broken schema is a configuration error, not a runtime one.

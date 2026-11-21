@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `aiops`: operator commands of the api image (CFG-3, CONN-7, SEC-2).
  *

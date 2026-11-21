@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Tracing through Temporal with the OpenTelemetry plugin and the encrypting codec on (NFR-11,
  * SEC-4, ADR 0047): one trace runs from the caller through the workflow start, the workflow's

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // MCP Apps entry of the approval widget (UI-1, APR-8). API per @modelcontextprotocol/ext-apps 2.1.0
 // dist/src/react/useApp.d.ts and useHostStyles.d.ts: the handlers are set in onAppCreated, before
 // the connection completes, so the first tool result is not missed.

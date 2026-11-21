@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { desc, sql } from 'drizzle-orm';
 import pg from 'pg';
 import type {

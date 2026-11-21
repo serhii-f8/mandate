@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describe, expect, it } from 'vitest';
 import type { ChangeItemRecord } from '@aiops/core';
 import { csvChunks, csvLine } from './csv.js';

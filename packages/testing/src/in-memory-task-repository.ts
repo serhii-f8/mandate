@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { isTaskId, type TaskRecord, type TaskRepository } from '@aiops/core';
 
 /** In-memory task store keyed by task ID. */

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Versioned symmetric keys from an environment variable: credential master keys (SEC-2) and
  * Temporal payload keys (SEC-4) share the format and the parser.

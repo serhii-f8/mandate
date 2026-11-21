@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describe, expect, it, vi } from 'vitest';
 import { ProtocolError } from '@modelcontextprotocol/server';
 import {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 export const REDACTED = '[REDACTED]';
 const DEPTH_LIMIT = '[depth limit]';
 const MAX_DEPTH = 64;

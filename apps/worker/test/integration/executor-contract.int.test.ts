@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The executor contract (EXE-11) against `TemporalExecutor`: the same cases as the in-memory
  * executor, run through `changesetWorkflow` on a real worker. The contract's change-sets carry a

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Phase 5 acceptance (SPEC section 7, design phase-5-execution-tasks §8) against the Magento sandbox:
 #   sandbox-ready, stack-healthy (two workers), credential-entered, prepared-3000, execution-started,
 #   workers-killed-mid-run, completed-3000, no-missing-writes, no-duplicate-writes-records,

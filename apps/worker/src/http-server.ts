@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The worker's HTTP server (NFR-10, NFR-12): `/healthz` (alive), `/readyz` (database, configuration
  * and a running Temporal worker) and `/metrics` (the Prometheus exporter). Only `GET` on exactly

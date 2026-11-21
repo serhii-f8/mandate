@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Every PostgreSQL advisory-lock key this system takes, in one place so no two subsystems collide.
  * The 64-bit keys are ASCII tags read as signed big-endian integers.

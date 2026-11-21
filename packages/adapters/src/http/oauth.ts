@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createHash } from 'node:crypto';
 import type { ReadErrorCode } from '@aiops/connector-sdk';
 import { z } from 'zod';

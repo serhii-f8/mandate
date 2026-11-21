@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * OpenTelemetry for the api (NFR-11, NFR-12): a tracer provider that exports over OTLP/HTTP only
  * when an endpoint is configured, and a meter provider whose Prometheus exporter is served by a

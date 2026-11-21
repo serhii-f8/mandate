@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { ChangeSetHasher } from './hash.js';
 import type { ChangeSetRecord } from './model.js';
 import type { ChangeSetRepository } from './ports.js';

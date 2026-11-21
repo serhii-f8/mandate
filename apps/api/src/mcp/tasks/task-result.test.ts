@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describe, expect, it } from 'vitest';
 import { TASK_TTL_MS } from '@aiops/core';
 import { createTaskResult, isTaskAnswer, TASK_POLL_INTERVAL_MS } from './task-result.js';
