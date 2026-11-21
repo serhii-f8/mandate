@@ -216,10 +216,12 @@ mkdir -p /srv/aiops-presets/notes
 tar -xzf aiops-examples-preset-template-1.0.0.tgz --strip-components=1 -C /srv/aiops-presets/notes
 ```
 
-Reference it by its package name, apply the configuration, and restart nothing: the running api and
-worker pick up an applied revision within seconds. Because the preset code is part of the
-configuration hash, a changed preset needs `config apply` again. A process that has already loaded
-a code module refuses a changed one until it restarts.
+Reference it by its package name and apply the configuration. The running api and worker pick up an
+applied revision within seconds, and a new preset or a changed declarative preset needs no restart.
+Preset code is different: it is part of the configuration hash, and a process that has already
+loaded a code module refuses a changed one until it restarts. After you install a new version of a
+preset with code, run `config apply`, then restart `api` and `worker`
+(`docker compose restart api worker`).
 
 ### SDK compatibility
 

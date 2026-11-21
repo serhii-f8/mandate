@@ -22,17 +22,22 @@ idempotent and keeps the existing secrets. In production leave it empty unless y
 
 Read the secret in the Keycloak admin console (Clients, the client, Credentials). Store it in your
 job's secret store. Never put it in the platform's configuration or a repository. Request a token
-with the grant and the MCP resource, which makes `aud` exactly the MCP URL:
+with the grant and the MCP resource, which makes `aud` exactly the MCP URL. `KEYCLOAK_URL` (the
+public Keycloak address, `http://localhost:8480` in development) and `CLIENT_SECRET` are
+placeholders: set them in your shell or job first, without echoing the secret. The command keeps
+the access token in a variable and prints nothing:
 
 ```bash
-curl -s -X POST "$KEYCLOAK_URL/realms/aiops/protocol/openid-connect/token" \
+ACCESS_TOKEN="$(curl -s -X POST "$KEYCLOAK_URL/realms/aiops/protocol/openid-connect/token" \
   -d grant_type=client_credentials \
   -d client_id=nightly-sync \
-  -d client_secret="$CLIENT_SECRET" \
-  -d resource="$AIOPS_MCP_RESOURCE"
+  --data-urlencode client_secret="$CLIENT_SECRET" \
+  -d resource="$AIOPS_MCP_RESOURCE" \
+  | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>process.stdout.write(JSON.parse(d).access_token??""))')"
+test -n "$ACCESS_TOKEN"
 ```
 
-The token answer holds `access_token`. Send it as a bearer token to the MCP URL. Tokens are short
+Send `$ACCESS_TOKEN` as a bearer token to the MCP URL. Tokens are short
 lived and there is no refresh token: request a new one when it expires.
 
 ## Map the client to a role
