@@ -10,21 +10,13 @@ import { join, resolve } from 'node:path';
 import { extract } from './extract.mjs';
 
 export const SECTIONS = ['install', 'attach', 'role', 'bulk', 'backup'];
+// Only the pages that carry doc-test sections are read, in reading order; markers on other pages are not scanned.
 export const PAGES = [
-  'README.md',
   'installation.md',
   'connecting-magento.md',
   'roles-and-approvals.md',
   'first-bulk-update.md',
-  'configuration.md',
-  'presets.md',
-  'mcp-upstreams.md',
-  'service-accounts.md',
   'backup-and-restore.md',
-  'upgrading.md',
-  'production.md',
-  'operations.md',
-  'versioning.md',
 ];
 const SECRET_NAME = '(TOKEN|SECRET|PASSWORD|COOKIE)';
 const FAIL = '@@doc-test-fail';
@@ -43,7 +35,7 @@ export() {
 }
 __dt_secrets() {
   local v
-  for v in $(compgen -v | grep -E '${SECRET_NAME}' || true); do printf '%s\\0' "\${!v-}"; done > "$DOC_TEST_SECRETS"
+  for v in $(compgen -v | grep -Ei '${SECRET_NAME}' || true); do printf '%s\\0' "\${!v-}"; done > "$DOC_TEST_SECRETS"
 }
 trap '__dt_secrets' EXIT
 trap 'rc=$?; echo "${FAIL} $__B $rc" >&2; exit $rc' ERR
@@ -91,7 +83,7 @@ export function main(argv) {
       let script = PRELUDE;
       for (const b of list) script += `\n# block ${String(b.index)} (${b.path})\n__B=${String(b.index)}\n${b.code}`;
       writeFileSync(secretsFile, '');
-      const r = spawnSync('bash', ['-euo', 'pipefail', '-c', script], {
+      const r = spawnSync('bash', ['-eEuo', 'pipefail', '-c', script], {
         cwd: repo,
         encoding: 'utf8',
         env: { ...process.env, DOC_TEST_ENV: envFile, DOC_TEST_SECRETS: secretsFile },

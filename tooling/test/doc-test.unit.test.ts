@@ -113,9 +113,31 @@ describe('NFR-9 doc-test run', () => {
 
   it('refuses a missing guide page', () => {
     const dir = repo({});
-    rmSync(join(dir, 'docs/guide/versioning.md'));
+    rmSync(join(dir, 'docs/guide/first-bulk-update.md'));
     const r = run(dir, 'install');
     expect(r.status).toBe(2);
-    expect(r.stderr).toMatch(/missing guide page docs\/guide\/versioning\.md/);
+    expect(r.stderr).toMatch(/missing guide page docs\/guide\/first-bulk-update\.md/);
+  });
+
+  it('does not scan pages outside the five reading-order pages', () => {
+    const dir = repo({ 'installation.md': `<!-- doc-test: install -->\n${fence('true')}\n` });
+    writeFileSync(join(dir, 'docs/guide/operations.md'), `<!-- doc-test: nope -->\n${fence('false')}\n`);
+    expect(run(dir, 'install').stdout).toBe('pass install\n');
+  });
+
+  it('runs blocks in reading order, with the ERR trap reporting the block that failed inside a function', () => {
+    const dir = repo({
+      'installation.md': `<!-- doc-test: install -->\n${fence('echo first >> order.txt')}\n`,
+      'backup-and-restore.md': `<!-- doc-test: install -->\n${fence('echo last >> order.txt')}\n`,
+      'connecting-magento.md': `<!-- doc-test: attach -->\n${fence('f() { false; }\nf')}\n`,
+    });
+    expect(run(dir, 'install', 'attach').stdout).toBe('pass install\nfail attach block 1 exit 1: f() { false; }\n');
+    expect(readFileSync(join(dir, 'order.txt'), 'utf8')).toBe('first\nlast\n');
+  });
+
+  it('masks secret-named variables case-insensitively', () => {
+    const dir = repo({ 'installation.md': `<!-- doc-test: install -->\n${fence('export api_Token=lower-secret-1\necho "v=$api_Token"')}\n` });
+    run(dir, 'install');
+    expect(readFileSync(join(dir, '.doc-test.log'), 'utf8')).not.toContain('lower-secret-1');
   });
 });
