@@ -1,0 +1,27 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Notes API (template)", "version": "1.0.0" },
+  "paths": {
+    "/notes": {
+      "get": {
+        "operationId": "notesList",
+        "summary": "List notes",
+        "parameters": [
+          { "name": "ids", "in": "query", "schema": { "type": "string" }, "description": "Comma-separated note ids." },
+          { "name": "q", "in": "query", "schema": { "type": "string" }, "description": "Title contains." },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Notes", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/notes/{id}": {
+      "patch": {
+        "operationId": "notesUpdate",
+        "summary": "Change fields of one note",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "title": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "The note" } }
+      }
+    }
+  }
+}

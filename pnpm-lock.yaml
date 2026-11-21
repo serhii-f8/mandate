@@ -282,6 +282,21 @@ importers:
         specifier: 4.23.15
         version: 4.23.15
 
+  examples/preset-template:
+    devDependencies:
+      '@aiops/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
+      '@aiops/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@aiops/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connector-sdk
+      '@aiops/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+
   packages/adapters:
     dependencies:
       '@aiops/connector-sdk':

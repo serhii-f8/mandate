@@ -1,0 +1,28 @@
+{
+  "name": "@aiops-examples/preset-template",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Template for a preset: one read, one per-record write, a vendored spec and a contract test.",
+  "license": "Apache-2.0",
+  "aiops": {
+    "preset": "preset.yaml",
+    "sdk": "^1.0.0"
+  },
+  "files": [
+    "preset.yaml",
+    "spec",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --project unit --passWithNoTests"
+  },
+  "devDependencies": {
+    "@aiops/adapters": "workspace:*",
+    "@aiops/config": "workspace:*",
+    "@aiops/connector-sdk": "workspace:*",
+    "@aiops/testing": "workspace:*"
+  }
+}

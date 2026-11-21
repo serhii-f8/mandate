@@ -1,0 +1,87 @@
+# Preset template 1.0.0 (CONN-8, OPS-2, OPS-3, OPS-6). Copy this directory, rename the package,
+# replace the spec and the two operations, and keep the contract test green (NFR-17).
+# Bind it to an openapi connection:   base_url: https://notes.example.com/api
+version: 1
+spec: spec/notes.openapi.json
+auth: { scheme: bearer }
+test: { operation: notes.search, args: { fields: [id], page_size: 1 } }
+operations:
+  # A read: also serves as the manifest's read_before, so it takes an optional `ids` array.
+  - id: notes.search
+    risk: read
+    title: Search notes
+    description: Search notes by title, or fetch some by id. Returns only the requested fields.
+    input_schema:
+      type: object
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          description: Note ids (exact match, no commas).
+          items: { type: string, minLength: 1, maxLength: 64, pattern: '^[^,]+$' }
+        q:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Title contains this text.
+        fields:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Note fields to return.
+          items: { type: string, enum: [id, title, body, updated_at] }
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      required: [fields]
+      additionalProperties: false
+    fields_arg: fields
+    upstream:
+      method: GET
+      path: /notes
+      query:
+        ids: { arg: ids, join: ',' }
+        q: { arg: q }
+        page_size: { arg: page_size, default: 20 }
+      response: { items: items, total: total, fields_from_arg: fields, max_items: 100 }
+  # A write with a manifest: one PATCH per record; the change-set holds before and after (OPS-2).
+  - id: notes.update_title
+    risk: write
+    title: Update note titles
+    description: Change the title of notes. Prepared as a change-set for approval; nothing is written until approved.
+    input_schema:
+      type: object
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          uniqueItems: true
+          description: Note ids to change (no commas).
+          items: { type: string, minLength: 1, maxLength: 64, pattern: '^[^,]+$' }
+        changes:
+          type: object
+          minProperties: 1
+          additionalProperties: false
+          description: Field to new value.
+          properties:
+            title: { type: string, minLength: 1, maxLength: 255 }
+      required: [ids, changes]
+      additionalProperties: false
+    upstream:
+      method: PATCH
+      path: /notes/{id}
+      path_params: { id: { record: id } }
+    manifest:
+      id_field: id
+      ids_arg: ids
+      values_arg: changes
+      fields: [title]
+      read_before: { operation: notes.search, ids_arg: ids }
+      batch_size: 100
+      max_targets: 1000
+      rollback: { strategy: replay_previous_state }

@@ -61,19 +61,23 @@ describe('NFR-17 every preset package ships contract tests that run in pnpm test
     expect(presets.length).toBeGreaterThan(0);
     expect((parse(read('pnpm-workspace.yaml')) as { packages: string[] }).packages).toContain('presets/*');
   });
-  for (const name of presets) {
-    it(`NFR-17 preset ${name} has a unit contract test, recordings and a vitest test script`, () => {
-      const tests = walk(`presets/${name}/test`).filter((f) => f.endsWith('.unit.test.ts'));
+  it('NFR-17 CONN-8 the preset template is a workspace package', () => {
+    expect((parse(read('pnpm-workspace.yaml')) as { packages: string[] }).packages).toContain('examples/*');
+  });
+  const dirs = [...presets.map((n) => `presets/${n}`), 'examples/preset-template'];
+  for (const dir of dirs) {
+    it(`NFR-17 preset ${dir} has a unit contract test, recordings and a vitest test script`, () => {
+      const tests = walk(`${dir}/test`).filter((f) => f.endsWith('.unit.test.ts'));
       const valueImport = /import\s*\{([^}]*)\}\s*from\s*'@aiops\/testing'/;
       const ok = tests.filter((f) => {
         const names = (valueImport.exec(read(f))?.[1] ?? '').split(',').map((s) => s.trim());
         return names.some((n) => n === 'replayRecordings' || n === 'contractRead');
       });
       expect(ok.length).toBeGreaterThan(0);
-      const rec = `presets/${name}/test/recordings`;
+      const rec = `${dir}/test/recordings`;
       expect(existsSync(join(root, rec))).toBe(true);
       expect(readdirSync(join(root, rec)).length).toBeGreaterThan(0);
-      const pkg = JSON.parse(read(`presets/${name}/package.json`)) as { scripts: Record<string, string> };
+      const pkg = JSON.parse(read(`${dir}/package.json`)) as { scripts: Record<string, string> };
       expect(pkg.scripts.test).toContain('vitest run');
     });
   }
