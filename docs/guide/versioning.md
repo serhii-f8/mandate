@@ -55,10 +55,11 @@ a field means is a breaking change even if the report does not move.
 
 ## Deprecation
 
-A public name is never removed without notice:
+No name is deprecated in 1.0.0. This is the policy for future deprecations. A public name is never
+removed without notice:
 
-1. A minor release marks it deprecated. The loader or the SDK warns when it is used, and this guide and
-   the CHANGELOG name its replacement.
+1. A minor release marks it deprecated. It keeps working, the CHANGELOG and this guide name its
+   replacement, and the loader or the SDK warns when it is used.
 2. The next major release may remove it.
 
 So code and configuration that run without warnings on the last minor of a major keep working on the
