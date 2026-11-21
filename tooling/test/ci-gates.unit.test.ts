@@ -85,3 +85,19 @@ describe('NFR-1 CI runs ci.sh and the restart script', () => {
     expect(has('bash scripts/acceptance/restart.sh')).toBe(true);
   });
 });
+
+describe('NFR-18 CI checks the public API reports and runs the semver gate', () => {
+  it('NFR-18 ci.sh checks the public API reports and runs the semver gate after build', () => {
+    const code = codeLines('scripts/ci.sh');
+    expect(code).toMatch(
+      /node tooling\/versioning\/api-report\.mjs connector-sdk --check && node tooling\/versioning\/api-report\.mjs config --check && node tooling\/versioning\/semver-gate\.mjs/,
+    );
+    expect(code.indexOf('semver-gate.mjs')).toBeGreaterThan(code.indexOf('pnpm build'));
+    expect(code.indexOf('semver-gate.mjs')).toBeLessThan(code.indexOf('pnpm test\n'));
+  });
+  it('NFR-18 job ci checks out the full history so the merge base resolves', () => {
+    const wf = parse(read('.github/workflows/ci.yml')) as { jobs: Record<string, { steps: { uses?: string; with?: Record<string, unknown> }[] }> };
+    const checkout = wf.jobs.ci?.steps.find((s) => s.uses?.startsWith('actions/checkout'));
+    expect(checkout?.with?.['fetch-depth']).toBe(0);
+  });
+});

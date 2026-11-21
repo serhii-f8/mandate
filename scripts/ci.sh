@@ -12,6 +12,7 @@ step "dependency scan"; bash scripts/dependency-scan.sh
 step lint;              pnpm lint
 step typecheck;         pnpm typecheck
 step build;             pnpm build
+step "public API reports"; node tooling/versioning/api-report.mjs connector-sdk --check && node tooling/versioning/api-report.mjs config --check && node tooling/versioning/semver-gate.mjs
 step "unit tests";      pnpm test
 step "integration tests (PostgreSQL, Temporal test server, replay gate)"; pnpm test:int
 step "end-to-end tests"; pnpm test:e2e
