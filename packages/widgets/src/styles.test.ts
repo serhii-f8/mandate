@@ -31,6 +31,14 @@ describe('UI-6 stylesheet', () => {
     for (const n of names) expect(ALLOWED).toContain(n);
   });
 
+  it('UI-6 the colour scheme is declared on :root only, so the host theme set on <html> reaches every view', () => {
+    // ext-apps 2.1.0 applyDocumentTheme sets document.documentElement.style.colorScheme to the host theme;
+    // a color-scheme on an inner element would override what it inherits.
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ selector: (m[1] ?? '').trim(), body: m[2] ?? '' }));
+    const declaring = rules.filter((r) => /color-scheme\s*:/.test(r.body)).map((r) => r.selector.replace(/\/\*[\s\S]*?\*\//g, '').trim());
+    expect(declaring).toEqual([':root']);
+  });
+
   it('UI-6 the stylesheet follows the host colour scheme and loads nothing', () => {
     expect(css).toContain('color-scheme: light dark');
     expect(css).not.toMatch(/url\(|@import|@font-face/);

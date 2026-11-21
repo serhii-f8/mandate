@@ -135,6 +135,27 @@ describe('ChangeSetView', () => {
     expect(loadItems).toHaveBeenCalledTimes(2);
   });
 
+  it('UI-4 an empty result tab says it has no items, and not before its first page loaded', async () => {
+    let resolve: (v: Awaited<ReturnType<ChangeSetActions['loadItems']>>) => void = () => undefined;
+    const loadItems = vi.fn<ChangeSetActions['loadItems']>(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        }),
+    );
+    setup(changeSetModel({ status: 'completed', stats: finished }), actionsWith({ loadItems }));
+    await flush();
+    expect(document.body.textContent).not.toContain('No failed items.');
+    resolve({ ok: true, value: { items: [] } });
+    await flush();
+    expect(document.body.textContent).toContain('No failed items.');
+
+    loadItems.mockResolvedValue({ ok: true, value: { items: [] } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Skipped' }));
+    await flush();
+    expect(document.body.textContent).toContain('No skipped items.');
+  });
+
   it('UI-4 the result omits drift and the error line when they are absent', async () => {
     setup(changeSetModel({ status: 'completed', stats: finished }));
     await flush();
