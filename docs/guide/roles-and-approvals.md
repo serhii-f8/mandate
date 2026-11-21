@@ -171,7 +171,8 @@ test "$code" -eq 1
 ## Users and groups in Keycloak
 
 The walkthrough uses the users of the development realm: alice is in `content` and
-`content-leads`, dave is in `content-leads`. With the new mapping alice is a `content_editor` (and
+`content-leads`, dave is in `content-leads`. Keycloak shows group paths with a leading slash
+(`/content`); `role_mapping` names the group without it. With the new mapping alice is a `content_editor` (and
 a content lead, who cannot approve her own changes), and dave approves.
 
 On a real installation you manage people in the Keycloak admin console:

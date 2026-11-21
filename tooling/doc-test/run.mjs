@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { extract } from './extract.mjs';
 
-export const SECTIONS = ['install', 'attach', 'role', 'bulk', 'backup'];
+export const SECTIONS = ['install', 'attach', 'role', 'bulk', 'backup', 'rollback'];
 // Only the pages that carry doc-test sections are read, in reading order; markers on other pages are not scanned.
 export const PAGES = [
   'installation.md',

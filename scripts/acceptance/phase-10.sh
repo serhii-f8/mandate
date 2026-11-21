@@ -18,6 +18,9 @@
 #                              restore (audit head checked against the manifest), the completed
 #                              change-set is visible, the pending one is approved and completes, the
 #                              connection test passes (NFR-13);
+#   docs-rollback              section rollback: the last change-set (the backup page's) is rolled
+#                              back on the page with a fresh login, ends rolled_back, and every acme
+#                              product carries the bulk page's value again (EXE-8);
 #   docs-lint                  the doc lint unit tests pass in the clone.
 # The runner runs twice: `install attach role bulk`, then the bulk evidence (before the backup
 # section overwrites the acme values), then `backup` with CHANGESET_ID (the only change-set of the
@@ -47,6 +50,7 @@ SECTION_CHECKS=(
   role:docs-configure-role
   bulk:docs-approved-bulk-update
   backup:docs-backup-restore
+  rollback:docs-rollback
 )
 
 pass() { echo "PASS $1${2:+ — $2}"; }
@@ -85,12 +89,10 @@ trap cleanup EXIT
 
 manual_steps() {
   cat <<'EOF'
-# Manual acceptance (design phase-10-release-docs §7; record in PROGRESS.md, "Blockers and manual checks"):
-#   1. Use a machine without the repository's history or prior setup.
-#   2. Read only the public documentation (README.md, docs/guide/, examples/).
-#   3. Follow docs/guide/installation.md -> connecting-magento.md -> roles-and-approvals.md ->
-#      first-bulk-update.md.
-#   4. Record pass or fail, the date, the time taken, and every place the docs were unclear.
+# Newcomer walkthrough (ADR 0059; SPEC section 7): a fresh agent or a person in a clean clone reads
+#   only README.md, docs/guide/ and examples/ as rendered, follows installation.md ->
+#   connecting-magento.md -> roles-and-approvals.md -> first-bulk-update.md, and reports pass or fail,
+#   the time and every unclear place. The prompt is in docs/reports/phase-10.md, section 3.
 EOF
 }
 
@@ -169,6 +171,29 @@ if [[ -n "$CS" ]]; then
   run_sections backup || true
 else
   fail docs-backup-restore "not run: section bulk or its evidence failed (no guide change-set)"
+fi
+
+# ---- Section rollback: the reader rolls back the last change-set they made (the backup page's) -------
+LAST="$(psql_q "select id || ' ' || hash from change_set where operation = 'catalog.update_content' order by created_at desc limit 1" 2>&1 || true)"
+if [[ -n "$CS" && "$LAST" =~ ^[0-9a-f-]{36}\ sha256:[0-9a-f]{64}$ && "${LAST%% *}" != "$CS" ]]; then
+  if CHANGESET_ID="${LAST%% *}" CHANGESET_HASH="${LAST#* }" DEV_PASSWORD=dev-only-password run_sections rollback; then
+    MAGENTO_TOKEN="$(bash "$REPO/deploy/sandbox/magento/token.sh" "$SANDBOX" 2>/dev/null || true)"
+    COUNTS="$(MAGENTO_TOKEN="$MAGENTO_TOKEN" node -e "
+      const q = new URLSearchParams({ 'searchCriteria[filter_groups][0][filters][0][field]': 'brand', 'searchCriteria[filter_groups][0][filters][0][value]': 'acme', 'searchCriteria[filter_groups][0][filters][0][condition_type]': 'eq', 'searchCriteria[pageSize]': '1000' });
+      fetch(process.argv[1] + '/rest/all/V1/products?' + q, { headers: { authorization: 'Bearer ' + process.env.MAGENTO_TOKEN } })
+        .then((r) => r.json())
+        .then((b) => console.log((b?.total_count ?? '') + '|' + (b?.items ?? []).filter((p) => (p?.custom_attributes ?? []).some((a) => a.attribute_code === 'meta_keyword' && a.value === process.argv[2])).length))
+        .catch(() => console.log('|'));" "$SANDBOX" "$KEYWORD" || echo '|')"
+    unset MAGENTO_TOKEN
+    TOTAL="${COUNTS%%|*}" CARRY="${COUNTS#*|}"
+    if [[ "$TOTAL" =~ ^[0-9]+$ ]] && ((TOTAL >= 1)) && [[ "$CARRY" == "$TOTAL" ]]; then
+      pass docs-rollback "evidence: change-set ${LAST%% *} rolled back; $CARRY of $TOTAL acme products carry '$KEYWORD' again"
+    else
+      fail docs-rollback "evidence: after the rollback, acme products carrying '$KEYWORD': '$CARRY' of '$TOTAL'"
+    fi
+  fi
+else
+  fail docs-rollback "not run: no change-set of the backup page to roll back (got '$LAST')"
 fi
 
 # ---- Doc lint in the clone --------------------------------------------------------------------------
