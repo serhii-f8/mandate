@@ -148,7 +148,8 @@ if ((BULK_OK)); then
       const q = new URLSearchParams({ 'searchCriteria[filter_groups][0][filters][0][field]': 'brand', 'searchCriteria[filter_groups][0][filters][0][value]': 'acme', 'searchCriteria[filter_groups][0][filters][0][condition_type]': 'eq', 'searchCriteria[pageSize]': '1000' });
       fetch(process.argv[1] + '/rest/all/V1/products?' + q, { headers: { authorization: 'Bearer ' + process.env.MAGENTO_TOKEN } })
         .then((r) => r.json())
-        .then((b) => console.log(b.total_count + '|' + b.items.filter((p) => p.custom_attributes.some((a) => a.attribute_code === 'meta_keyword' && a.value === process.argv[2])).length), () => console.log('|'));" "$SANDBOX" "$KEYWORD")"
+        .then((b) => console.log((b?.total_count ?? '') + '|' + (b?.items ?? []).filter((p) => (p?.custom_attributes ?? []).some((a) => a.attribute_code === 'meta_keyword' && a.value === process.argv[2])).length))
+        .catch(() => console.log('|'));" "$SANDBOX" "$KEYWORD" || echo '|')"
     unset MAGENTO_TOKEN
     TOTAL="${COUNTS%%|*}" CARRY="${COUNTS#*|}"
     if [[ "$BULKS" =~ ^[0-9]+$ ]] && ((BULKS >= 1)) && [[ "$AUDITS" =~ ^[0-9]+$ ]] && ((AUDITS >= 1)) &&
@@ -172,7 +173,7 @@ fi
 
 # ---- Doc lint in the clone --------------------------------------------------------------------------
 if LINT="$(cd "$CLONE" && corepack pnpm --filter @aiops/tooling exec vitest run --project unit test/docs.unit.test.ts 2>&1)"; then
-  pass docs-lint "$(grep -E 'Tests +[0-9]+' <<<"$LINT" | tr -s ' ' | head -1)"
+  pass docs-lint "$(grep -E 'Tests +[0-9]+' <<<"$LINT" | tr -s ' ' | sed 's/^ //' | head -1)"
 else
   fail docs-lint "$(grep -E 'FAIL|Tests +[0-9]+' <<<"$LINT" | tr -s ' ' | head -5 | tr '\n' ' ')"
 fi
