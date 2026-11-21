@@ -1,7 +1,412 @@
-:root { font-family: system-ui, sans-serif; color: #1a1a1a; background: #fafafa; }
-body { max-width: 44rem; margin: 2rem auto; padding: 0 1rem; }
-.card { background: #fff; border: 1px solid #d8d8d8; border-radius: 6px; padding: 0.5rem 1rem 1rem; margin-bottom: 1rem; }
-.field { display: flex; flex-direction: column; margin-bottom: 0.5rem; }
-input { padding: 0.4rem; font: inherit; }
-button { padding: 0.4rem 0.9rem; font: inherit; cursor: pointer; }
-[role='alert'] { color: #a40000; }
+/*
+ * The trusted pages. The palette is set once here, as the MCP Apps variables the shared views read
+ * (UI-6), plus a few page-only tokens. Cool paper, ink, and one seal colour for the act of approving.
+ */
+:root {
+  color-scheme: light dark;
+  --paper: #eceff2;
+  --seal: #1d5e57;
+  --seal-strong: #164a44;
+  --on-seal: #ffffff;
+  --waiting: #8a5a00;
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f4f6f8;
+  --color-text-primary: #18222e;
+  --color-text-secondary: #56616e;
+  --color-text-danger: #9e2b25;
+  --color-text-success: #1d5e57;
+  --color-border-primary: #ccd3db;
+  --font-sans: 'Public Sans Variable', 'Public Sans', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'DejaVu Sans Mono', Menlo, monospace;
+  --border-radius-md: 4px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #12181f;
+    --seal: #5fb3a6;
+    --seal-strong: #7cc5b9;
+    --on-seal: #0c1a18;
+    --waiting: #e3b45a;
+    --color-background-primary: #1a222b;
+    --color-background-secondary: #212b35;
+    --color-text-primary: #e4e9ee;
+    --color-text-secondary: #9aa6b2;
+    --color-text-danger: #f08a80;
+    --color-text-success: #5fb3a6;
+    --color-border-primary: #2e3944;
+  }
+}
+
+html {
+  background: var(--paper);
+}
+body {
+  margin: 0;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+/* The root carries the shared `.aiops` scope; on a page it is the canvas, not a panel. */
+#root.aiops {
+  min-height: 100vh;
+  padding: 0;
+  background: var(--paper);
+}
+.aiops a {
+  color: var(--seal);
+  text-underline-offset: 2px;
+}
+.aiops :focus-visible {
+  outline-color: var(--seal);
+}
+
+/* Masthead: quiet, the product name and the two pages everyone may open. */
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 32px;
+  box-sizing: border-box;
+  width: min(calc(72rem - 32px), calc(100% - 32px));
+  margin: 0 auto;
+  padding: 20px 0 14px;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+.aiops .masthead .brand {
+  color: var(--color-text-primary);
+  font-weight: 750;
+  font-size: 1.0625rem;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+.masthead nav {
+  display: flex;
+  gap: 20px;
+}
+.aiops .masthead nav a {
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  padding-bottom: 2px;
+  border-bottom: 2px solid transparent;
+}
+.aiops .masthead nav a:hover {
+  color: var(--color-text-primary);
+}
+.aiops .masthead nav a[aria-current='page'] {
+  color: var(--color-text-primary);
+  border-bottom-color: var(--seal);
+}
+
+.page {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 32px 16px 80px;
+}
+/* Reading pages keep a narrow column, left-aligned with the masthead. */
+.page-credentials > *,
+.page-index > * {
+  max-width: 44rem;
+}
+
+.page h1 {
+  margin: 0 0 20px;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+}
+.page h2 {
+  font-size: 1.25rem;
+}
+.page [role='alert'] {
+  color: var(--color-text-danger);
+}
+
+/* A sheet: the paper a change-set or a credential is written on. */
+.page-changeset .view,
+.card {
+  padding: 28px 32px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 6px;
+  background: var(--color-background-primary);
+}
+.card {
+  margin-bottom: 16px;
+  padding: 20px 24px;
+}
+
+/* Primary actions carry the seal colour on the pages. */
+.aiops button.primary {
+  color: var(--on-seal);
+  border-color: var(--seal);
+  background: var(--seal);
+}
+.aiops button.primary:hover:not(:disabled) {
+  opacity: 1;
+  border-color: var(--seal-strong);
+  background: var(--seal-strong);
+}
+
+/* The decision: the one place the page raises its voice. */
+.page section[aria-label='Decision'] {
+  margin: 32px -32px -28px;
+  padding: 24px 32px 28px;
+  border: 0;
+  border-top: 4px solid var(--seal);
+  border-radius: 0 0 6px 6px;
+  background: var(--color-background-secondary);
+}
+.page section[aria-label='Decision'] h2 {
+  font-size: 1.375rem;
+}
+.page section[aria-label='Decision'] button {
+  padding: 9px 18px;
+}
+.page section[aria-label='Decision'] textarea {
+  max-width: 40rem;
+}
+.page-changeset .approval section[aria-label='Summary'] h1 {
+  margin-bottom: 4px;
+}
+.page-changeset .approval section[aria-label='Summary'] {
+  padding-bottom: 4px;
+}
+
+/* Index: the pages, each with what it is for. */
+.destinations {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--color-border-primary);
+}
+.destinations li {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+.destinations a {
+  font-size: 1.25rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+.destinations a:hover {
+  text-decoration: underline;
+}
+.destinations p {
+  margin: 2px 0 0;
+  color: var(--color-text-secondary);
+}
+
+/* Tables on the pages (approval queue, audit log). */
+.page table:not(.items) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 6px;
+  background: var(--color-background-primary);
+}
+.page table:not(.items) th,
+.page table:not(.items) td {
+  padding: 10px 14px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+.page table:not(.items) th {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: var(--color-background-secondary);
+}
+.page table:not(.items) tbody tr:last-child td {
+  border-bottom: 0;
+}
+.page table:not(.items) td:first-child a {
+  font-weight: 600;
+}
+.page table:not(.items) details summary {
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--seal);
+}
+.page table:not(.items) details pre {
+  max-width: 32rem;
+}
+.page > main > button,
+.page > main > p > a {
+  margin-top: 12px;
+}
+
+/* Audit search: the filters as a compact grid above the results. */
+.page-audit form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  align-items: end;
+  gap: 12px 16px;
+  margin-bottom: 16px;
+  padding: 16px 20px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 6px;
+  background: var(--color-background-primary);
+}
+.page-audit form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.page-audit form input,
+.page-audit form select {
+  font-weight: 400;
+  color: var(--color-text-primary);
+}
+.page-audit form button[type='submit'] {
+  justify-self: start;
+  font-weight: 600;
+  color: var(--on-seal);
+  border-color: var(--seal);
+  background: var(--seal);
+}
+
+/* Credentials */
+.card h2 {
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+.card > p {
+  color: var(--color-text-secondary);
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+}
+.card [data-status] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.card [data-status]::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.card [data-status='set'] {
+  color: var(--seal);
+}
+.card [data-status='unset'] {
+  color: var(--waiting);
+}
+.card form {
+  margin: 16px 0 8px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.field label {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.card h3 {
+  margin-top: 20px;
+  font-size: 0.9375rem;
+  color: var(--color-text-secondary);
+}
+.card ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.card li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border-primary);
+}
+.card li > span {
+  font-family: var(--font-mono);
+  font-size: 0.9375rem;
+  min-width: 8rem;
+}
+.card [data-test-result] {
+  flex-basis: 100%;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+.card [data-test-result] p {
+  margin: 0;
+}
+.reauthenticate {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border-primary);
+  border-left: 3px solid var(--waiting);
+  border-radius: 4px;
+  background: var(--color-background-primary);
+}
+
+@media (max-width: 40rem) {
+  .page {
+    padding-top: 24px;
+  }
+  .page h1 {
+    font-size: 1.625rem;
+  }
+  .page-changeset .view,
+  .card {
+    padding: 20px 16px;
+  }
+  .page section[aria-label='Decision'] {
+    margin: 24px -16px -20px;
+    padding: 20px 16px;
+  }
+  .page table:not(.items) {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
+/* Audit rows: time and actor are machine values; keep each on one line. */
+.page-audit table td:nth-child(1),
+.page-audit table td:nth-child(2) {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+.page-audit table th,
+.page-audit table td {
+  padding: 7px 12px;
+}
+.page-audit form input,
+.page-audit form select {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+/* The requester's view: the operation title is the page title. */
+.page-changeset .view > header h2 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+/* Approval queue: requester and expiry are machine values. */
+.page-approvals table td:nth-child(3),
+.page-approvals table td:nth-child(6) {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+.page-approvals table td:nth-child(5) {
+  white-space: nowrap;
+}

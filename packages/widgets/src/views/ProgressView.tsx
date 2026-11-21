@@ -37,6 +37,7 @@ export function ProgressView({ data, actions, onData }: ViewProps<ChangeSetViewM
         <ActionBar>
           <button
             type="button"
+            className="danger"
             disabled={action.busy}
             onClick={() => {
               action.run('Not cancelled: ', cancel, onData);

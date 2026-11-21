@@ -22,16 +22,19 @@ export function IndexPage(): ReactElement {
   return (
     <main>
       <h1>AI Operations</h1>
-      <ul>
+      <ul className="destinations">
         <li>
           <a href="/app/approvals">Approvals</a>
+          <p>Change-sets waiting for your decision.</p>
         </li>
         <li>
           <a href="/app/credentials">Credentials</a>
+          <p>The secrets the server uses to reach your systems.</p>
         </li>
         {viewAudit ? (
           <li>
             <a href="/app/audit">Audit</a>
+          <p>Every request, decision and write, searchable.</p>
           </li>
         ) : null}
       </ul>
