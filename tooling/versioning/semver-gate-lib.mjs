@@ -42,7 +42,8 @@ const SEP = '\u0000';
 /**
  * Lines of a report keyed by their context: the path of enclosing opener lines. A line ending
  * with `{` or `[` opens a frame, a line starting with `}` or `]` closes one (`} | {` closes and
- * reopens: the next variant of the same declaration). Closing lines belong to the frame they
+ * reopens: the next variant of the same declaration, as does a root line `| {` or `& {` right
+ * after a declaration closed). Closing lines belong to the frame they
  * close. Repeated identical openers under one parent (array elements, overloads) are numbered.
  * Each entry records its frame path and the frame kind (`interface`, `literal`, `class`, `other`).
  */
@@ -61,6 +62,16 @@ function surface(text) {
     frames.add(path);
     return frame;
   };
+  const variantOf = (closed) => {
+    const parent = stack[stack.length - 1];
+    const variant = closed.variant + 1;
+    const label = `${closed.base} |${variant}`;
+    const path = `${parent.path}${SEP}${label}`;
+    stack.push({ label, path, kind: closed.kind, children: new Map(), base: closed.base, variant });
+    frames.add(path);
+  };
+  // The last declaration closed at the root: a following root line `| {` or `& {` continues it.
+  let lastClosed;
   for (const raw of text.split('\n')) {
     if (VERSION_LINES.some((re) => re.test(raw))) continue;
     const line = raw.trim().replace(/,$/, '');
@@ -68,17 +79,18 @@ function surface(text) {
     const closes = (line.startsWith('}') || line.startsWith(']')) && stack.length > 1;
     const opens = line.endsWith('{') || line.endsWith('[');
     const top = stack[stack.length - 1];
+    if (stack.length === 1 && lastClosed && /^[|&]/.test(line) && opens) {
+      entries.push({ key: `${lastClosed.path}${SEP}${line}`, line, frame: lastClosed, parent: top });
+      variantOf(lastClosed);
+      lastClosed = undefined;
+      continue;
+    }
     entries.push({ key: `${top.path}${SEP}${line}`, line, frame: top, parent: stack[stack.length - 2] });
+    if (stack.length === 1) lastClosed = undefined;
     if (closes) {
       const closed = stack.pop();
-      if (opens) {
-        const parent = stack[stack.length - 1];
-        const variant = closed.variant + 1;
-        const label = `${closed.base} |${variant}`;
-        const path = `${parent.path}${SEP}${label}`;
-        stack.push({ label, path, kind: closed.kind, children: new Map(), base: closed.base, variant });
-        frames.add(path);
-      }
+      if (opens) variantOf(closed);
+      else if (stack.length === 1) lastClosed = closed;
     } else if (opens) {
       const parentKind = top.kind;
       let kind = 'other';
@@ -106,11 +118,14 @@ function narrowing(entry, oldFrames) {
   const existed = (f) => f !== undefined && oldFrames.has(f.path);
   // A JSON key listed in an existing schema's `required` array.
   if (frame.label.startsWith('"required": [') && existed(parent)) return `newly required ${line}`;
+  // Every element of an existing `allOf` must hold, so a new element narrows.
+  if (frame.label.startsWith('"allOf": [') && existed(frame)) return `allOf element added ${line}`;
   const key = JSON_KEY.exec(line);
   if (key && CONSTRAINT_KEYWORDS.has(key[1]) && existed(frame)) return `constraint added ${line}`;
   // A member consumers must now provide, inside an existing interface or type-literal body.
   if ((frame.kind === 'interface' || frame.kind === 'literal') && existed(frame) && !OPTIONAL_MEMBER.test(line)) {
-    if (line.startsWith('}') || line.startsWith(']')) return undefined;
+    // Closers, and the opener of a further union or intersection variant (judged like `} | {`).
+    if (line.startsWith('}') || line.startsWith(']') || (/^[|&]/.test(line) && line.endsWith('{'))) return undefined;
     return `required member added ${line}`;
   }
   return undefined;

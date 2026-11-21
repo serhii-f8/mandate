@@ -116,6 +116,18 @@ describe('NFR-18 semver gate', () => {
       const next = cfg('').replace('    "mode": {', '    "extra": {\n      "additionalProperties": false,\n      "minLength": 1,\n      "required": [\n        "z"\n      ],\n      "type": "string"\n    },\n    "mode": {');
       expect(judge(cfg(''), next, '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
     });
+    it('NFR-18 a required member added to a union variant continued on a root line is breaking', () => {
+      const old = "export type TemplateValue = string | number | boolean | {\n    readonly arg: string;\n    readonly join?: string;\n}\n | {\n    readonly record: string;\n    readonly join?: string;\n};\nexport interface Next {\n    a: string;\n}\n";
+      const next = old.replace('    readonly record: string;', '    readonly record: string;\n    readonly mustHave: string;');
+      expect(judge(sdk(old), sdk(next), '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+      const optional = old.replace('    readonly record: string;', '    readonly record: string;\n    readonly mayHave?: string;');
+      expect(judge(sdk(old), sdk(optional), '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
+    });
+    it('NFR-18 an element appended to an existing allOf is breaking', () => {
+      const old = '{\n  "allOf": [\n    {\n      "type": "object"\n    }\n  ]\n}\n';
+      const next = '{\n  "allOf": [\n    {\n      "type": "object"\n    },\n    {\n      "required": [\n        "a"\n      ]\n    }\n  ]\n}\n';
+      expect(judge(old, next, '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+    });
     it('NFR-18 a version downgrade without a surface change fails', () => {
       expect(judge(base, base, '1.2.0', '1.1.9')).toMatchObject({ ok: false, kind: 'none' });
       expect(judge(base, base, '1.2.0', '1.2.0-rc.1').ok).toBe(false);

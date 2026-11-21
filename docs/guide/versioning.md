@@ -73,7 +73,10 @@ passes to presets, which a preset only reads, is judged breaking too; so is a re
 widens a schema (dropping `"additionalProperties": false`). When that is wrong, the change still needs
 the major bump or a different shape. The gate backs up review, it does not replace it: it sees names
 and shapes, not meaning, and a change in what a field means is a breaking change even if the report
-does not move.
+does not move. The reverse case is left to review: a new variant of a union type in the SDK, or a new
+element of an `anyOf` or `oneOf` list in a schema, is judged additive because it widens what is
+accepted, yet for an output type that a preset or a client handles exhaustively (a `switch` over every
+variant) it is breaking. Reviewers judge that case and ask for the major bump.
 
 The gate exits 2 when an explicit `--base` does not resolve, or when neither `main` nor `origin/main`
 resolves under CI (`CI` set). Outside CI it prints `skipped: no base`.
