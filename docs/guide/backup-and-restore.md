@@ -197,16 +197,18 @@ test "$(node -p 'JSON.parse(process.argv[1]).structuredContent.changeset.status'
 
 Approve the waiting change-set as dave, as on the previous page: open
 `http://localhost:8400/app/approvals`, log in as `dave`, open the change-set and choose **Approve**.
-Its workflow was restored with the Temporal databases and continues from where it waited.
+Its workflow was restored with the Temporal databases and continues from where it waited. Without a
+browser:
 
-<!-- doc-test-alt: backup
+<!-- doc-test: backup -->
+```bash
 DAVE_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${AIOPS_API_PORT:-8400}" dave "$DEV_PASSWORD" "/app/changesets/$PENDING_ID")"
 VIEW="$(AIOPS_PAGE_COOKIE="$DAVE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" changeset "$PENDING_ID")"
 test "$(node -p 'JSON.parse(process.argv[1]).body.hash' "$VIEW")" = "$PENDING_HASH"
 DECIDED="$(AIOPS_PAGE_COOKIE="$DAVE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" decide "$PENDING_ID" approve "$PENDING_HASH" "$(node -p 'JSON.parse(process.argv[1]).body.stats.included' "$VIEW")")"
 echo "$DECIDED"
 test "$(node -p 'JSON.parse(process.argv[1]).status' "$DECIDED")" = 200
--->
+```
 
 Follow it to the end:
 
@@ -224,14 +226,15 @@ test "$STATUS" = completed || { echo "change-set $PENDING_ID ended the wait with
 ```
 
 Finally, run the connection test on the credential page as carol (`http://localhost:8400/app/credentials`,
-connection `magento`). It reports `ok`: the restored credential decrypts.
+connection `magento`). It reports `ok`: the restored credential decrypts. Without a browser:
 
-<!-- doc-test-alt: backup
+<!-- doc-test: backup -->
+```bash
 CAROL_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${AIOPS_API_PORT:-8400}" carol "$DEV_PASSWORD" /app/credentials)"
 REPORT="$(AIOPS_PAGE_COOKIE="$CAROL_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" test magento)"
 echo "$REPORT"
 test "$(node -p 'JSON.parse(process.argv[1]).body.ok' "$REPORT")" = true
--->
+```
 
 ### Background
 

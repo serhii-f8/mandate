@@ -135,7 +135,13 @@ page, never in configuration files or in a chat. In the development realm that p
 To print the token for pasting, run `bash deploy/sandbox/magento/token.sh` in a terminal nobody else
 can see.
 
-<!-- doc-test-alt: attach
+Without a browser, do the same from the terminal with the reference scripts in `tooling/acceptance/`
+(they need only Node 22). Run this in the shell where you set `MAGENTO_TOKEN` above: the commands on
+these pages use shell variables set by earlier commands, so keep one terminal open from here to the
+end of [Your first bulk update](first-bulk-update.md).
+
+<!-- doc-test: attach -->
+```bash
 export DEV_PASSWORD=dev-only-password
 CAROL_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${AIOPS_API_PORT:-8400}" carol "$DEV_PASSWORD" /app/credentials)"
 SAVED="$(printf '%s\n' "$MAGENTO_TOKEN" | AIOPS_PAGE_COOKIE="$CAROL_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" put-credential magento-integration)"
@@ -144,7 +150,7 @@ test "$SAVED" = '{"status":204}'
 REPORT="$(AIOPS_PAGE_COOKIE="$CAROL_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" test magento)"
 echo "$REPORT"
 test "$(node -p 'JSON.parse(process.argv[1]).body.ok' "$REPORT")" = true
--->
+```
 
 The token is stored encrypted in PostgreSQL. It never appears in logs, the audit trail, tool results
 or notifications.

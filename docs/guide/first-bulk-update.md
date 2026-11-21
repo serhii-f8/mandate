@@ -109,14 +109,18 @@ what a model wrote.
 3. Choose **Approve**. The page sends the hash and the item count you saw, so an approval can only
    apply to exactly that change-set.
 
-<!-- doc-test-alt: bulk
+Without a browser, the reference scripts do the same as dave: log in to the page, read the
+change-set the page shows, check its hash, and approve with that hash and item count.
+
+<!-- doc-test: bulk -->
+```bash
 DAVE_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${AIOPS_API_PORT:-8400}" dave "$DEV_PASSWORD" "/app/changesets/$CHANGESET_ID")"
 VIEW="$(AIOPS_PAGE_COOKIE="$DAVE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" changeset "$CHANGESET_ID")"
 test "$(node -p 'JSON.parse(process.argv[1]).body.hash' "$VIEW")" = "$CHANGESET_HASH"
 DECIDED="$(AIOPS_PAGE_COOKIE="$DAVE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" decide "$CHANGESET_ID" approve "$CHANGESET_HASH" "$(node -p 'JSON.parse(process.argv[1]).body.stats.included' "$VIEW")")"
 echo "$DECIDED"
 test "$(node -p 'JSON.parse(process.argv[1]).status' "$DECIDED")" = 200
--->
+```
 
 With the last approval step done, the worker starts writing.
 
