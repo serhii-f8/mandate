@@ -11,7 +11,8 @@ You need the stack, the Magento connection and the `content_editor` role from th
 
 Any MCP client can do what this page does; Claude and ChatGPT are covered at the end. For a local
 walkthrough the repository has small scripts in `tooling/acceptance/` that act as an MCP client and
-as a browser. They need the workspace dependencies once (Node 22 with corepack):
+as a browser. They need the workspace dependencies once (Node 22 with corepack; the first install
+downloads about 650 MB of packages and takes a few minutes):
 
 <!-- doc-test: bulk -->
 ```bash
@@ -200,6 +201,9 @@ done
 echo "$STATUS"
 test "$STATUS" = rolled_back || { echo "change-set $CHANGESET_ID ended the wait with status $STATUS, not rolled_back" >&2; false; }
 ```
+
+The products have their earlier keywords again: run the query of
+[Check the result in Magento](#check-the-result-in-magento) once more to see them.
 
 ## Connect Claude or ChatGPT (optional)
 

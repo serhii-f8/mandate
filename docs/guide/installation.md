@@ -9,7 +9,8 @@ For a real installation read [production.md](production.md) as well.
 - Docker Engine with Compose v2.
 - 4 CPU cores and 8 GB RAM for the stack plus the Magento sandbox used in later pages.
 - git.
-- Node 22 with corepack, only if you use the terminal client scripts from later pages.
+- Node 22 with corepack (22.22.2 or later; older 22 releases work but `pnpm install` prints engine
+  warnings), only if you use the terminal client scripts from later pages.
 
 ## Install
 
@@ -56,6 +57,8 @@ curl -fsS "http://localhost:${AIOPS_API_PORT:-8400}/readyz"
 | Audit page | `http://localhost:8400/app/audit` |
 | Keycloak | `http://localhost:8480` |
 | Mailpit (development mail) | `http://localhost:8025` |
+
+These are the default ports; if you change one in `.env`, use yours.
 
 ## Development users
 
