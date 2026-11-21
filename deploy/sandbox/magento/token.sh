@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Prints a fresh admin token of the Magento sandbox (valid 24 hours). Development only:
 # the password is the sandbox's visibly fake default (up.sh). Usage:
 #   bash deploy/sandbox/magento/token.sh [base-url]    # default http://127.0.0.1:4390

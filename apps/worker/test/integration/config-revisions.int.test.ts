@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -18,7 +20,7 @@ const PRESET_DIRS = fileURLToPath(new URL('../../../../presets', import.meta.url
 /** A read operation of the Magento preset that `support_agent` is not granted in `deploy/config`. */
 const GRANTED = 'catalog.get_product';
 /** AUD-1 CONN-8: `config.load` names the preset version each load chose. */
-const MAGENTO_PRESETS = [{ id: 'magento-catalog', package: '@aiops/magento2-catalog', version: '0.3.0' }];
+const MAGENTO_PRESETS = [{ id: 'magento-catalog', package: '@aiops/magento2-catalog', version: '1.0.0' }];
 const MASTER_KEYS = '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=';
 const TEMPORAL_KEYS = '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=';
 

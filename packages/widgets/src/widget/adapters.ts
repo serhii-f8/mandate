@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The widget entry's mapping from tool answers to the shared view models (UI-1). Answers are
  * parsed with `safeParse`: an answer the widget does not understand becomes its text and the page

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Phase 1 smoke check through the payload codec (SEC-4):
  *   node dist/smoke-cli.js <message>

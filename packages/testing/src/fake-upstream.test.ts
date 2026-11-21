@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { request } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startFakeUpstream, type FakeUpstream } from './fake-upstream.js';
@@ -23,6 +25,14 @@ describe('fake upstream', () => {
   afterEach(async () => {
     await up?.close();
     up = undefined;
+  });
+
+  it('NFR-1 listens on the given host and port when options are passed', async () => {
+    up = await startFakeUpstream({ host: '0.0.0.0', port: 0 });
+    expect(up.port).toBeGreaterThan(0);
+    expect(up.url).toBe(`http://127.0.0.1:${up.port}`);
+    up.route('GET', '/x', () => ({ status: 200, body: 'ok' }));
+    expect((await call(`${up.url}/x`)).body).toBe('ok');
   });
 
   it('listens on 127.0.0.1 with a random port', async () => {

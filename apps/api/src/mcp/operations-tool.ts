@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createSchemaCompiler, type PinState } from '@aiops/config';
 import { rolesOf, type GrantDefinition } from '@aiops/core';
 import type { UpstreamToolView } from '@aiops/upstream';

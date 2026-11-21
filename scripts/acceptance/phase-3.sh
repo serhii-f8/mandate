@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Phase 3 acceptance (SPEC section 7, design part 1 §7) against the Magento sandbox:
 #   1. stack-healthy, sandbox-ready
 #   2. credential-entered      carol (admins) logs in to the trusted page through the real

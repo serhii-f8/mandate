@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createHash } from 'node:crypto';
 import { open, readFile, rename, rm, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';

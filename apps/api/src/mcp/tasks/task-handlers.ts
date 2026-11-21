@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `tasks/get`, `tasks/update` and `tasks/cancel` of the Tasks extension (MCP-7). Every request
  * must declare the extension, and the task must belong to the caller (SEC-1): unknown, foreign and

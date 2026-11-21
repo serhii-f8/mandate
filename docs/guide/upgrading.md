@@ -1,0 +1,76 @@
+# Upgrading
+
+This page covers moving a running installation to a new release. Take a backup first (see
+[Backup and restore](backup-and-restore.md)): migrations only go forward, so a backup is the way back.
+
+## Upgrade steps
+
+From your working copy of the repository:
+
+```bash
+git pull
+docker compose build
+docker compose up -d --wait
+```
+
+- `docker compose build` rebuilds the `api` and `worker` images from the new source. If you pin images
+  by digest (see [Production hardening](production.md)), change the digests instead of building.
+- `docker compose up -d --wait` replaces the containers whose image changed and waits for their
+  health checks.
+- Database migrations run when the `api` and `worker` start, and they take a lock, so starting several
+  instances at once is safe. You run nothing by hand.
+
+Then check the version and readiness:
+
+```bash
+curl -fsS "http://localhost:${AIOPS_API_PORT:-8400}/healthz"
+curl -fsS "http://localhost:${AIOPS_API_PORT:-8400}/readyz"
+```
+
+`/healthz` answers with the product `version`. `/readyz` answers 200 when the database is reachable
+and a configuration is active.
+
+## Re-run `config apply`
+
+After every upgrade, re-run `config apply` on your configuration directory:
+
+```bash
+docker compose exec -T api node dist/cli.js config diff /etc/aiops/config
+docker compose exec -T api node dist/cli.js config apply /etc/aiops/config --actor upgrade
+```
+
+The active configuration revision is stored in PostgreSQL together with a hash that covers the files
+and the preset code. A release can change that hash without any change to your files, for example when
+a preset's code changes. Until you apply again, the stored revision no longer matches what the release
+computes, and the platform refuses it with `configuration_mismatch` rather than run something
+different from what an operator reviewed. `config diff` shows what changes; `config apply` stores a
+new revision. Running workflows and change-sets already prepared are not affected.
+
+A release may also tighten what the loader accepts. If `config diff` or `config apply` reports an
+error after an upgrade, fix the named key and run them again. The notes of each release list such
+changes (see the [CHANGELOG](../../CHANGELOG.md)).
+
+## Running change-sets survive an upgrade
+
+Change-sets execute as Temporal workflows, and one can wait days for an approval. Replacing the `worker`
+does not lose them: Temporal keeps the history and the new worker replays it. The release process
+guarantees this with workflow patching: every change to the steps of a deployed workflow type sits
+behind a patch marker, and CI replays committed histories of old executions against the new code. See
+[Versioning](versioning.md).
+
+Two rules for you:
+
+- Never send a signal or terminate a workflow from the Temporal CLI or UI. Payloads are encrypted, and
+  plaintext input makes the workflow impossible to replay.
+- Keep `AIOPS_TEMPORAL_KEYS` and `AIOPS_MASTER_KEYS` the same across the upgrade, and never remove a
+  key that open workflows or stored credentials still use.
+
+## Upgrading to 1.0.0
+
+The 1.0.0 notes (changes in what the loader accepts, the SDK range, and credential entry) are in the
+[CHANGELOG](../../CHANGELOG.md). Read them before you upgrade from a release before 1.0.
+
+## Roll back
+
+There is no downgrade of the database. To go back to an earlier release, restore the backup you took
+before the upgrade together with that release's images (see [Backup and restore](backup-and-restore.md)).

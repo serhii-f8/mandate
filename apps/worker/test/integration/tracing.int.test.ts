@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Tracing through Temporal with the OpenTelemetry plugin and the encrypting codec on (NFR-11,
  * SEC-4, ADR 0047): one trace runs from the caller through the workflow start, the workflow's
@@ -139,13 +141,13 @@ describe('NFR-11 tracing through Temporal', () => {
 
       const start = spanNamed('StartWorkflow:changesetWorkflow');
       expect(start.spanContext().traceId).toBe(traceId);
-      expect(start.parentSpanId).toBe(spanId);
+      expect(start.parentSpanContext?.spanId).toBe(spanId);
 
       const schedule = spanNamed('StartActivity:prepare');
       const run = spanNamed('RunActivity:prepare');
       expect(schedule.spanContext().traceId).toBe(traceId);
       expect(run.spanContext().traceId).toBe(traceId);
-      expect(run.parentSpanId).toBe(schedule.spanContext().spanId);
+      expect(run.parentSpanContext?.spanId).toBe(schedule.spanContext().spanId);
 
       for (const name of ['RunActivity:executeBatch', 'RunActivity:finishExecution']) {
         const spans = finished().filter((s) => s.name === name);
@@ -195,7 +197,33 @@ describe('NFR-11 tracing through Temporal', () => {
       const start = spanNamed('StartWorkflow:changesetWorkflow');
       const workflow = spanNamed('RunWorkflow:changesetWorkflow');
       expect(workflow.spanContext().traceId).toBe(traceId);
-      expect(workflow.parentSpanId).toBe(start.spanContext().spanId);
+      expect(workflow.parentSpanContext?.spanId).toBe(start.spanContext().spanId);
+    });
+  }, 60_000);
+
+  it('NFR-11 workflow spans reach the 2.x span processor in its span shape, with parent, scope and resource', async () => {
+    // The plugin's sink hands over spans built by its own 1.x SDK (`parentSpanId`,
+    // `instrumentationLibrary`); the OTLP exporter reads `parentSpanContext` and
+    // `instrumentationScope` (ADR 0054).
+    await withTracedWorker(async (worker) => {
+      const { result: prepared, traceId } = await underRoot(() => preparedByWorkflow(infra, worker, ['t-0001']));
+      await worker.executor.cancel({ changesetId: prepared.id, actor: 'alice', correlationId: 'corr-cancel' });
+      await expect(handleOf(prepared.id).result()).resolves.toEqual({ status: 'cancelled' });
+      await vi.waitFor(
+        () => {
+          expect(finished().map((s) => s.name)).toContain('RunWorkflow:changesetWorkflow');
+        },
+        { timeout: 30_000, interval: 100 },
+      );
+
+      const workflow = spanNamed('RunWorkflow:changesetWorkflow');
+      const schedule = spanNamed('StartActivity:prepare');
+      expect(schedule.parentSpanContext).toEqual(expect.objectContaining({ traceId, spanId: workflow.spanContext().spanId }));
+      for (const span of [workflow, schedule]) {
+        expect(span.instrumentationScope.name, span.name).toEqual(expect.any(String));
+        expect(span.resource.attributes['service.name'], span.name).toBe('aiops-worker');
+        expect(span, span.name).not.toHaveProperty('parentSpanId');
+      }
     });
   }, 60_000);
 

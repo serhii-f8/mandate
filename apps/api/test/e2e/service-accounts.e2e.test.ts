@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Service accounts end to end over the real MCP transport (AUTH-4, AUTH-1, APR-1, POL-8, AUD-2).
  *

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // Records the vendored spec and the contract-test responses from a Gitea sandbox (NFR-17).
 // Needs GITEA_SANDBOX_URL (e.g. http://127.0.0.1:4391) and GITEA_SANDBOX_TOKEN
 // (bash deploy/sandbox/gitea/token.sh).

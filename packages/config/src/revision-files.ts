@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Configuration revisions as file maps (CFG-4). `revisionFilesOf` collects the files a
  * revision stores; `loadConfigurationFiles` loads such a map through the unchanged

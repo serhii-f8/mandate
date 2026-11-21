@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** Normalized view models and action interfaces shared by the page and widget entries. */
 export type ActionResult<T = undefined> = { ok: true; value: T } | { ok: false; message: string };
 export type ItemFilter = 'pending' | 'excluded' | 'written' | 'failed' | 'skipped';

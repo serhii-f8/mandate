@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describe, expect, it } from 'vitest';
 import { MCP_APPS_DEFAULT_CSP, parseArgs, TERMINAL } from '../acceptance/widget-host-lib.mjs';
 

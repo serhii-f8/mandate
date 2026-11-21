@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Preset code and per-record writes end to end (design phase 9 §4, §6; OPS-5, OPS-6, EXE-4,
  * NFR-2): a real `changesetWorkflow` on Temporal and PostgreSQL prepares and executes change-sets

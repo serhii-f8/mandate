@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { canonicalJson } from '@aiops/core';
 import type { LoadedConfiguration } from './load.js';
 
@@ -81,7 +83,7 @@ function entitiesOf(configuration: LoadedConfiguration): ReadonlyMap<EntityKind,
       mapping: mapping.length > 0 ? mapping : undefined,
     });
   }
-  // AUTH-4: keyed by client ID; keys role and description.
+  // AUTH-4: keyed by client ID; keys role, description and rateLimitPerMinute.
   for (const [clientId, account] of configuration.serviceAccounts) put('service_account', clientId, account);
   for (const notification of configuration.notifications) put('notification', notification.id, notification);
   // CONN-8: `files` is the digest of the preset's hash inputs, computed by the loader.
@@ -89,6 +91,7 @@ function entitiesOf(configuration: LoadedConfiguration): ReadonlyMap<EntityKind,
   for (const disabled of configuration.disabled) put('disabled', disabled.key, disabled);
   put('setting', 'changesets', configuration.changesets);
   put('setting', 'audit', configuration.audit);
+  put('setting', 'rate_limits', configuration.rateLimits);
   return kinds;
 }
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // @ts-check
 import js from '@eslint/js';
 import globals from 'globals';
@@ -6,7 +8,7 @@ import { boundaryRules } from './eslint.boundaries.js';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', 'spikes/**', '**/.turbo/**', '**/coverage/**', '.claude/**', '.superpowers/**'],
+    ignores: ['**/dist/**', '**/node_modules/**', 'spikes/**', '**/.turbo/**', '**/coverage/**', 'packages/connector-sdk/api-report.d.ts', '.claude/**', '.superpowers/**'],
   },
   js.configs.recommended,
   {

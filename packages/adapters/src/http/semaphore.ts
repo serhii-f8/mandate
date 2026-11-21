@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** Releases a slot; calling it more than once has no further effect. */
 export type Release = () => void;
 

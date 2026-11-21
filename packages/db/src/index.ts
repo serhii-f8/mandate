@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** PostgreSQL persistence: Drizzle schema, SQL migrations, migrator and repository implementations. */
 export { DrizzleAuditLog, type AuditLogOptions } from './audit-log.js';
 export { CHAIN_COLUMNS, chainHead, SEAL_BATCH, sealAuditChain, toSealedChainRow, type SealResult } from './audit-chain.js';

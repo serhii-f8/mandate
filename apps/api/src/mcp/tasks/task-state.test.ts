@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describe, expect, it } from 'vitest';
 import { EMPTY_STATS, type ChangeSetRecord, type ChangeSetStatus, type TaskKind } from '@aiops/core';
 import { deriveTaskState } from './task-state.js';

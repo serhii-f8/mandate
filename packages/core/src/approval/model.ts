@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 export type ApprovalDecision = 'approved' | 'rejected' | 'returned';
 export type DecisionRequest = 'approve' | 'reject' | 'return';
 export type ApprovalChannel = 'page' | 'widget';

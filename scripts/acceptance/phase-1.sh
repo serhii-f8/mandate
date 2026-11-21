@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Phase 1 acceptance (SPEC section 7, PROGRESS.md):
 #   1. a fresh clone starts with one command
 #   2. an MCP client calls the tool

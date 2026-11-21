@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** Tasks extension detection (MCP-7, MCP-1): declared per request in `_meta`, never negotiated. */
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 

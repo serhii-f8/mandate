@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * A workflow started for a derived, already prepared change-set (CS-5, design §3): the unchanged
  * `changesetWorkflow` parks in `prepared`, executes on start and writes only the included items.

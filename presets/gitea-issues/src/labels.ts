@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Code writer `set_labels` (OPS-5, OPS-6). Gitea's `PUT …/issues/{n}/labels` drops unknown names
  * and ids with a 200, so a declarative mapping would report a partial write as success. This

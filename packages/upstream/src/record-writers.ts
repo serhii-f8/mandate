@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The worker implementations of the core `DirectWriter` port (design phase 9 §4): a per-record
  * write binding sends one request per record (OPS-6), a code write binding hands the records to

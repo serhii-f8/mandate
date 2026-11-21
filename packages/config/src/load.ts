@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Loads a configuration directory (CFG-1) as one unit: either every file is
  * valid and cross-checked, or the result is the full list of located issues
@@ -20,6 +22,7 @@ import {
   configDocumentSchema,
   PARSE_PARAMS,
   schemaIssues,
+  DEFAULT_RATE_LIMITS,
   type ConfigDocument,
   type ConnectionConfig,
   type NotificationConfig,
@@ -28,6 +31,7 @@ import {
   type PresetConfig,
   type RoleApproval,
   type RoleConfig,
+  type RateLimits,
   type RoleLimits,
   type ServiceAccountConfig,
 } from './schema.js';
@@ -67,7 +71,7 @@ export interface LoadedConfiguration {
   /** Compiled input-schema validator per enabled operation ID (MCP-3). */
   readonly validators: ReadonlyMap<string, ArgumentValidator>;
   /** AUTH-4: OAuth client ID (`azp`) → the one role it calls with; empty when none is configured. */
-  readonly serviceAccounts: ReadonlyMap<string, { readonly role: string; readonly description?: string }>;
+  readonly serviceAccounts: ReadonlyMap<string, { readonly role: string; readonly description?: string; /** SEC-10 */ readonly rateLimitPerMinute?: number }>;
   readonly connections: readonly ConnectionConfig[];
   readonly presets: readonly PresetConfig[];
   /** CONN-8: per loaded preset ID, the package and the version chosen; empty while presets are not loaded. */
@@ -111,6 +115,8 @@ export interface LoadedConfiguration {
   /** CS-6: hours after which a prepared change-set expires. */
   /** AUD-7: absent = keep forever. */
   readonly audit: { readonly retentionDays?: number };
+  /** SEC-10: effective endpoint rate limits; defaults filled key by key. */
+  readonly rateLimits: RateLimits;
   /** SEC-1, AUD-6: role IDs with view_audit: true. */
   readonly auditViewers: ReadonlySet<string>;
   /** AUD-4: union of every loaded manifest's sensitive_fields (presets included). */
@@ -253,6 +259,13 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     if (doc.audit === undefined) continue;
     if (audit === undefined) audit = { value: doc.audit, source, path: ['audit'] };
     else at(source, ['audit'], `may be set in one document only; first set in ${audit.source.file}`);
+  }
+  // SEC-10: rate limits come from at most one document.
+  let rateLimitsBlock: Located<NonNullable<ConfigDocument['rate_limits']>> | undefined;
+  for (const { source, doc } of documents) {
+    if (doc.rate_limits === undefined) continue;
+    if (rateLimitsBlock === undefined) rateLimitsBlock = { value: doc.rate_limits, source, path: ['rate_limits'] };
+    else at(source, ['rate_limits'], `may be set in one document only; first set in ${rateLimitsBlock.source.file}`);
   }
 
   const connectionById = indexById(connections);
@@ -627,7 +640,17 @@ export async function loadConfigurationSources(sources: readonly { file: string;
         serviceAccounts: serviceAccounts.map(({ value }) => ({ clientId: value.client_id, role: value.role })),
       },
       serviceAccounts: new Map(
-        serviceAccounts.map(({ value }) => [value.client_id, value.description === undefined ? { role: value.role } : { role: value.role, description: value.description }] as const),
+        serviceAccounts.map(
+          ({ value }) =>
+            [
+              value.client_id,
+              {
+                role: value.role,
+                ...(value.description === undefined ? {} : { description: value.description }),
+                ...(value.rate_limit_per_minute === undefined ? {} : { rateLimitPerMinute: value.rate_limit_per_minute }),
+              },
+            ] as const,
+        ),
       ),
       validators: registry.validators,
       connections: connections.map((c) => c.value),
@@ -655,6 +678,11 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       specChecksSkipped,
       presetChecksSkipped,
       audit: audit?.value.retention_days === undefined ? {} : { retentionDays: audit.value.retention_days },
+      rateLimits: {
+        mcpUserPerMinute: rateLimitsBlock?.value.mcp_user_per_minute ?? DEFAULT_RATE_LIMITS.mcpUserPerMinute,
+        mcpServiceAccountPerMinute: rateLimitsBlock?.value.mcp_service_account_per_minute ?? DEFAULT_RATE_LIMITS.mcpServiceAccountPerMinute,
+        unauthenticatedPerMinute: rateLimitsBlock?.value.unauthenticated_per_minute ?? DEFAULT_RATE_LIMITS.unauthenticatedPerMinute,
+      },
       auditViewers: new Set(roles.filter(({ value }) => value.view_audit).map(({ value }) => value.id)),
       sensitiveFields: new Set([...registry.all.values()].flatMap((op) => op.located.value.manifest?.sensitive_fields ?? [])),
       changesets: {

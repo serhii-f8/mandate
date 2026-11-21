@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { AuditAction, AuditOutcome } from '../audit.js';
 
 /** Filters of an audit search (AUD-6). Every field is optional; present fields are combined with AND. */

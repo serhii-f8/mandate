@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { HttpMethod, TemplateValue, UpstreamMapping, WriteRecord } from '@aiops/connector-sdk';
 import { FORBIDDEN_HEADERS } from '../http/headers.js';
 

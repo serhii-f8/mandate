@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Submission of a prepared or approved change-set (MCP-8; design part 1 §5), shared by
  * `submit_for_approval` and the change-set page. Re-checks policy with the caller's current identity

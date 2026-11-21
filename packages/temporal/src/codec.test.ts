@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { DefaultFailureConverter, defaultPayloadConverter, type Payload } from '@temporalio/common';
 import { isLoadedDataConverter, loadDataConverter } from '@temporalio/common/internal/internal-non-workflow';
 import { describe, expect, it } from 'vitest';

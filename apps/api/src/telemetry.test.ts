@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createServer, request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { trace } from '@opentelemetry/api';
@@ -51,7 +53,7 @@ describe('NFR-11 api tracing', () => {
     });
     try {
       telemetry.tracer.startSpan('probe').end();
-      expect(memory.getFinishedSpans()[0]?.resource.attributes['service.name']).toBe('aiops-api');
+      expect(memory.getFinishedSpans()[0]?.resource.attributes).toMatchObject({ 'service.name': 'aiops-api', 'telemetry.sdk.language': 'nodejs', 'telemetry.sdk.name': 'opentelemetry' });
     } finally {
       await telemetry.shutdown();
       sink.closeAllConnections();
@@ -105,6 +107,8 @@ describe('NFR-12 api metrics endpoint', () => {
       const ok = await call(server.port, 'GET', '/metrics');
       expect(ok.status).toBe(200);
       expect(ok.body).toContain('aiops_tool_calls_total{');
+      // As with 0.57: the resource is the SDK default merged with service.name (ADR 0054).
+      expect(ok.body).toMatch(/^target_info\{service_name="aiops-api",telemetry_sdk_language="nodejs",telemetry_sdk_name="opentelemetry",telemetry_sdk_version="[^"]+"\} 1$/m);
       const other = await call(server.port, 'GET', '/other');
       expect(other.status).toBe(404);
       expect(other.body).toBe('');

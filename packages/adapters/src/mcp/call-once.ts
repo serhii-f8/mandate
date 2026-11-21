@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The outcome of one MCP `tools/call` sent at most once (EXE-4, NFR-2, ruling F7), codes only
  * (SEC-3, SEC-5): the result's content, `structuredContent` and `_meta` are never read, and no

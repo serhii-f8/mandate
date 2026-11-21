@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Audit actions (AUD-1), once each. Runtime list for the audit search query parser (AUD-6).
  * Later phases extend it.
@@ -30,6 +32,8 @@ export const AUDIT_ACTIONS = [
   'config.apply',
   'config.load',
   'upstream.pin',
+  /** SEC-10: the first over-limit request of a (key, minute window). */
+  'rate.limited',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

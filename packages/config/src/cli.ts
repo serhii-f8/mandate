@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `aiops-config` (CFG-3). Phase 2 ships `validate`; `diff`, `apply`,
  * `test-connection` and `explain` follow in Phases 3 and 8.

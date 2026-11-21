@@ -1,13 +1,13 @@
 {
   "name": "@aiops/gitea-issues",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Curated operations and manifests for Gitea issues (second preset, code read and write).",
   "license": "Apache-2.0",
   "aiops": {
     "preset": "preset.yaml",
-    "sdk": "^0.6.0",
+    "sdk": "^1.0.0",
     "code": "dist/index.js"
   },
   "exports": {

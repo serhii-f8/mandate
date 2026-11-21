@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describe, expect, it } from 'vitest';
 import { EMPTY_STATS, encodeCursor, type ChangeSetRecord } from '@aiops/core';
 import { executionAnswer, preparedAnswer, executionSummaryText, expiredDuringPreparationAnswer, preparationErrorAnswer, preparingAnswer, toCallToolResult } from './results.js';

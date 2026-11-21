@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The direct read path (design part 1 §5, ADR 0017 decision 6): an allowed `read`
  * operation runs from `api` straight through its connection's adapter, as SPEC

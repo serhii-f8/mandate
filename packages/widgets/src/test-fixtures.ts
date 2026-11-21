@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** Model builders for the view tests; excluded from the library build. */
 import type { ApprovalViewModel, ChangeSetViewModel, ItemRowModel } from './model.js';
 

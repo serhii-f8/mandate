@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { canonicalJson as sdkCanonicalJson, mcpToolHash, type McpListedTool, type McpToolDefinition, type ToolListOutcome } from '@aiops/connector-sdk';
 import { canonicalJson as coreCanonicalJson } from '@aiops/core';
 import { FakeResolver } from '@aiops/testing';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { randomUUID } from 'node:crypto';
 import { Controller, Get, Inject, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
@@ -5,7 +7,10 @@ import type { Logger } from 'pino';
 import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
 import type { AuditLog } from '@aiops/core';
 import { mayViewAudit } from '../audit/access.js';
-import { API_ENV, AUDIT_LOG, CONFIGURATION, LOGGER, OIDC_CLIENT, PAGE_CHECKS, PAGE_SESSIONS } from '../tokens.js';
+import { clientAddress } from '../http/client-address.js';
+import { UNAVAILABLE_RETRY_AFTER_SECONDS } from '../http/rate-limit-answer.js';
+import type { EndpointRateLimiter } from '../http/rate-limiter.js';
+import { API_ENV, AUDIT_LOG, CONFIGURATION, LOGGER, OIDC_CLIENT, PAGE_CHECKS, PAGE_SESSIONS, RATE_LIMITER } from '../tokens.js';
 import { PageAccess, pageDenial, pageOf, Public, type PageChecks, type PageRequest } from './access.js';
 import { pageCorrelation } from './correlation.js';
 import type { OidcClient } from './oidc-client.js';
@@ -51,6 +56,8 @@ export class AuthController {
     @Inject(PAGE_SESSIONS) private readonly sessions: SessionService,
     @Inject(AUDIT_LOG) private readonly audit: AuditLog,
     @Inject(LOGGER) private readonly logger: Logger,
+    @Inject(RATE_LIMITER) private readonly limiter: EndpointRateLimiter,
+    @Inject(CONFIGURATION) private readonly configuration: ConfigurationHolder,
   ) {}
 
   private get secure(): boolean {
@@ -61,6 +68,7 @@ export class AuthController {
   @Public()
   async login(@Req() req: Request, @Res() res: Response): Promise<void> {
     const correlationId = pageCorrelation(req, res);
+    if (await this.refusedByLimit(req, res, correlationId)) return;
     // Housekeeping must never block a login.
     await this.sessions.purgeIfDue().catch((error: unknown) => {
       this.logger.warn({ correlationId, err: error instanceof Error ? error.message : 'unknown' }, 'purge of expired page sessions failed');
@@ -84,6 +92,8 @@ export class AuthController {
   async callback(@Req() req: Request, @Res() res: Response): Promise<void> {
     const correlationId = pageCorrelation(req, res);
     res.setHeader('cache-control', 'no-store');
+    // Before the login cookie is cleared or the login consumed: a refused callback can be retried.
+    if (await this.refusedByLimit(req, res, correlationId)) return;
     // The login cookie is single use too, whatever the outcome.
     res.append('set-cookie', clearedLoginCookie(this.secure));
     const state = single(req.query.state);
@@ -143,6 +153,27 @@ export class AuthController {
   @Public()
   loggedOut(@Res() res: Response): void {
     res.status(200).type('text/plain').send('You are logged out. Open /app/ to log in again.\n');
+  }
+
+  /**
+   * SEC-10: the login routes share the anonymous per-address budget of `/mcp` 401s and are checked
+   * before any `web_login` write, read or redirect. Answers 429, or 503 when the counter fails
+   * (fail closed), and returns true when refused.
+   */
+  private async refusedByLimit(req: Request, res: Response, correlationId: string): Promise<boolean> {
+    // Read per request: the configurationGate lets no request through while none is active (CFG-2).
+    const limit = this.configuration.current.rateLimits.unauthenticatedPerMinute;
+    const result = await this.limiter.check({ key: `anon:${clientAddress(req)}`, limit, scope: 'unauthenticated' }, { actor: 'unknown', correlationId });
+    if (result.allowed) return false;
+    res.setHeader('cache-control', 'no-store');
+    if ('unavailable' in result) {
+      res.setHeader('retry-after', String(UNAVAILABLE_RETRY_AFTER_SECONDS));
+      res.status(503).json({ error: 'rate_limit_unavailable' });
+    } else {
+      res.setHeader('retry-after', String(result.retryAfterSeconds));
+      res.status(429).json({ error: 'rate_limited', retryAfterSeconds: result.retryAfterSeconds });
+    }
+    return true;
   }
 
   private async failed(res: Response, correlationId: string, reason: LoginFailure): Promise<void> {

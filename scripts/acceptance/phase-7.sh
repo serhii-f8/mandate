@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Phase 7 acceptance (SPEC section 7, designs phase-7-widgets*) against the Magento sandbox:
 #   sandbox-ready, stack-healthy, credential-entered, widgets-in-image;
 #   group 1, the terminal client (text fallback, MCP-6): text-prepare, text-get, text-exclude,

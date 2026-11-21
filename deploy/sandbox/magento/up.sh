@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Brings the Mage-OS sandbox up (idempotent). First run: composer download + setup:install.
 # Prints "SANDBOX UP <seconds>" when the REST API answers. Development only.
 set -euo pipefail

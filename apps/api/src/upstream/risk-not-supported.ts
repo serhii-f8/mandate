@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { InvocationResult, OperationDefinition } from '@aiops/core';
 
 /** Fixed refusal for risk classes this phase does not run; no upstream call. */

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { parseVersionedKeys, type VersionedKeys } from '@aiops/core';
 import type { Payload, PayloadCodec } from '@temporalio/common';

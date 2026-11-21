@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // @ts-check
 /**
  * Package-boundary rules (CLAUDE.md "Package boundaries", ADR 0010).

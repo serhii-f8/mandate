@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # The fake MCP server of the Phase 9 acceptance (scripts/acceptance/phase-9.sh): tools `lookup` and
 # `create_note`, mutable through POST /_control/tools/<name>, and its request log at
 # GET /_control/requests (packages/testing/src/fake-mcp-main.ts). Built from the repository root:

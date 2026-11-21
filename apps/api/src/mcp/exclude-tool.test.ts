@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
 import { CHANGESET_TEXT, READ_RESULT_TEXT, type Caller, type ChangeSetStatus } from '@aiops/core';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `review_changeset` end to end over the real MCP transport (APR-5, APR-8, APR-2, NFR-8, MCP-6, UI-6, SEC-1).
  *

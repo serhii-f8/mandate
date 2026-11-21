@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
   ApprovalView,

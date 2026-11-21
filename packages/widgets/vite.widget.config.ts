@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The single-file MCP Apps bundles (UI-1, UI-6): `WIDGET=<name> vite build -c vite.widget.config.ts`
  * writes `dist/ui/<name>.html`, one document with every script and style inline.

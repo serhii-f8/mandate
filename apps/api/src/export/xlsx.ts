@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * XLSX export of a change-set (CS-8): a minimal SpreadsheetML workbook with one sheet `Items`,
  * streamed into a ZIP with fflate. Every cell is an inline string, so nothing is a formula (SEC-5).

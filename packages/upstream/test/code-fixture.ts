@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Loads the code fixture preset of `@aiops/testing` through the real loader, without a resolver
  * (HTTP `method`/`path` bindings bind). Each call copies the fixture into a new temporary preset

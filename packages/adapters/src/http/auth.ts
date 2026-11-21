@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { parseSecret, type ConnectionSettings, type CredentialSource, type ReadErrorCode } from '@aiops/connector-sdk';
 import type { Transport } from './client.js';
 import { clientCredentialsToken, clientSecretBasicValue, HEADER_SAFE, type ClientCredentialsParams } from './oauth.js';

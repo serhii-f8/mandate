@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Code reads `search_issues` and `get_issues` (OPS-5, OPS-6). Code, not a declarative read,
  * because labels arrive as objects but are compared as names. Errors name the response code and

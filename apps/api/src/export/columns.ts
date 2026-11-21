@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Columns and cell text of a change-set export (CS-8). The writers in `csv.ts` and `xlsx.ts`
  * apply the per-format cell safety (SEC-5); this module holds the pieces they share.

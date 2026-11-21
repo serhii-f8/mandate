@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describe, expect, it } from 'vitest';
 import { EnvError, parseApiEnv, parseWorkerEnv } from './runtime-env.js';
 
@@ -40,6 +42,7 @@ describe('api runtime environment', () => {
       temporalKeys: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
       prepareWaitMs: 20_000,
       metricsPort: 9464,
+      trustProxy: 0,
     });
   });
 
@@ -479,6 +482,23 @@ describe('telemetry port environment edge cases', () => {
       for (const bad of ['abc', '1.5']) {
         expect(() => read({ [variable]: bad })).toThrow(EnvError);
         expect(() => read({ [variable]: bad })).toThrow(new RegExp(variable));
+      }
+    }
+  });
+});
+
+describe('SEC-10 proxy trust environment', () => {
+  it('SEC-10 AIOPS_TRUST_PROXY defaults to 0, accepts 0..10, refuses 11, -1, 1.5, abc', () => {
+    expect(parseApiEnv(API).trustProxy).toBe(0);
+    for (const ok of [0, 1, 5, 10]) expect(parseApiEnv({ ...API, AIOPS_TRUST_PROXY: String(ok) }).trustProxy).toBe(ok);
+    for (const bad of ['11', '-1', '1.5', 'abc']) {
+      try {
+        parseApiEnv({ ...API, AIOPS_TRUST_PROXY: bad });
+        expect.unreachable(`AIOPS_TRUST_PROXY=${bad} was accepted`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(EnvError);
+        expect((error as EnvError).issues.map((i) => i.variable)).toEqual(['AIOPS_TRUST_PROXY']);
+        expect((error as EnvError).message).not.toContain(bad);
       }
     }
   });

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * How `api` and `worker` wire the upstream side: the configuration is always loaded with the
  * adapter's spec resolver and the installed presets, so neither process ever runs on a

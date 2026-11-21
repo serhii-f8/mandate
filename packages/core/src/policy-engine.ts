@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { Caller } from './caller.js';
 import type { GrantDefinition, OperationDefinition, PolicyConfiguration, ScopeValue } from './policy-model.js';
 import { rolesOf } from './roles.js';

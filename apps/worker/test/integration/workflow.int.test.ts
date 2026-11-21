@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { BatchFenced, type ChangeWriter, type ExecutionGuard, type ItemOutcome } from '@aiops/core';
 import { CHANGESET_WORKFLOW, PROGRESS_QUERY, WAKE_SIGNAL, type WorkflowProgress } from '@aiops/temporal';
 import { ScriptedWriter } from '@aiops/testing';

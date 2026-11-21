@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The guarded HTTP client a preset's code operation gets as `ctx.http` (OPS-5). Every request is
  * relative to the connection's base URL and goes through the connection's own client, so the

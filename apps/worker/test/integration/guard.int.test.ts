@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { randomUUID } from 'node:crypto';
 import type { LoadedConfiguration } from '@aiops/config';
 import { OPAQUE_TARGET_ID, type OperationDefinition, type RoleApprovalRule } from '@aiops/core';

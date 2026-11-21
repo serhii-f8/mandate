@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { AuthInfo } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
 import { callerFromAuthInfo } from './caller-from-auth.js';

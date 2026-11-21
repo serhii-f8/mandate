@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { KeyProvider } from './keyring.js';
 

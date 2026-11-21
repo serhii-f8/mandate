@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { InvocationResult } from './operation-invoker.js';
 
 /** Fixed result wording, kept in one place so tests compare the same strings. */

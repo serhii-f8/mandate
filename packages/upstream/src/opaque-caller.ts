@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The worker implementation of the core `OpaqueCaller` port (design phase 9 §5): one upstream
  * call of an opaque operation through the connection's `WriteAdapter.callOnce`, or for a code

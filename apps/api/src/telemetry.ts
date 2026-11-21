@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * OpenTelemetry for the api (NFR-11, NFR-12): a tracer provider that exports over OTLP/HTTP only
  * when an endpoint is configured, and a meter provider whose Prometheus exporter is served by a
@@ -9,7 +11,7 @@ import { context, diag, trace, type Meter, type Tracer } from '@opentelemetry/ap
 import { W3CTraceContextPropagator } from '@opentelemetry/core';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
-import { Resource } from '@opentelemetry/resources';
+import { defaultResource, resourceFromAttributes } from '@opentelemetry/resources';
 import { MeterProvider } from '@opentelemetry/sdk-metrics';
 import { BatchSpanProcessor, type SpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
@@ -45,17 +47,27 @@ export function traceMixin(): Record<string, string> {
   return { trace_id: ctx.traceId, span_id: ctx.spanId };
 }
 
+/** The 0.57 exposition: no `otel_scope_*` labels on each series, which 0.200+ add by default (ADR 0054). */
+const PROMETHEUS_FORMAT = { withoutScopeInfo: true } as const;
+
+/**
+ * One export, retries included, ends within 2 s, so the final flush on shutdown stays well inside
+ * a 10 s stop grace when the collector is down (the 2.x default is 10 s with retries; ADR 0054).
+ */
+const OTLP_EXPORT_TIMEOUT_MS = 2_000;
+
 export function startApiTelemetry(options: TelemetryOptions): ApiTelemetry {
-  const resource = new Resource({ 'service.name': options.serviceName });
+  // The SDK default (telemetry.sdk.*) merged with service.name, as 1.x providers did themselves (ADR 0054).
+  const resource = defaultResource().merge(resourceFromAttributes({ 'service.name': options.serviceName }));
   const spanProcessors: SpanProcessor[] = [];
   if (options.otlpEndpoint !== undefined) {
-    spanProcessors.push(new BatchSpanProcessor(new OTLPTraceExporter({ url: otlpTracesUrl(options.otlpEndpoint) })));
+    spanProcessors.push(new BatchSpanProcessor(new OTLPTraceExporter({ url: otlpTracesUrl(options.otlpEndpoint), timeoutMillis: OTLP_EXPORT_TIMEOUT_MS })));
   }
   if (options.spanProcessor !== undefined) spanProcessors.push(options.spanProcessor);
   const tracerProvider = new NodeTracerProvider({ resource, spanProcessors });
   if (options.register) tracerProvider.register({ propagator: new W3CTraceContextPropagator() });
 
-  const exporter = new PrometheusExporter({ preventServerStart: true });
+  const exporter = new PrometheusExporter({ preventServerStart: true, ...PROMETHEUS_FORMAT });
   const meterProvider = new MeterProvider({ resource, readers: [exporter] });
 
   const handle = (req: IncomingMessage, res: ServerResponse): void => {

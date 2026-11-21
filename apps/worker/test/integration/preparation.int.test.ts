@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Preparation and start through the Temporal adapters (EXE-1, EXE-11): `TemporalWorkflowStarter`
  * starts one workflow per change-set, which prepares it and waits; `TemporalExecutor.start`

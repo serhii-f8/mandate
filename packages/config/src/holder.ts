@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { AuditEventInput, AuditLog, ConfigRevision, ConfigRevisionStore } from '@aiops/core';
 import { formatIssue, type ConfigIssue } from './issues.js';
 import { loadConfigurationDirectory, type LoadedConfiguration, type LoadOptions } from './load.js';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describe, expect, it } from 'vitest';
 import type { ManifestDefinition, OperationDefinition } from '../policy-model.js';
 import type { ChangeItemRecord, ChangeSetRecord } from './model.js';

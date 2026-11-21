@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { lt, sql } from 'drizzle-orm';
 import type { RateCounter } from '@aiops/core';
 import { guarded } from './errors.js';

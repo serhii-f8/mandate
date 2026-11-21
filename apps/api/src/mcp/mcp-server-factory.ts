@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { CLIENT_INFO_META_KEY, Server, type AuthInfo, type CallToolResult, type McpServerFactory } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { Caller } from '@aiops/core';

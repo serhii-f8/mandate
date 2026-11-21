@@ -1,0 +1,4 @@
+{
+  "request": { "method": "PATCH", "path": "/notes/n1", "body": { "title": "Kickoff v2" } },
+  "response": { "status": 200, "body": { "id": "n1", "title": "Kickoff v2" } }
+}

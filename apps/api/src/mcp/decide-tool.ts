@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `decide_changeset` (APR-8; design part 1 §8): the widget's decision on the current approval step.
  * Listed only to holders of a step role of some role whose approval allows the widget, and published

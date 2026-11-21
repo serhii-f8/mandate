@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { Writable } from 'node:stream';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { describe, expect, it } from 'vitest';

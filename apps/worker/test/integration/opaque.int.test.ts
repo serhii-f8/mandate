@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Opaque change-sets end to end on Temporal and PostgreSQL (design phase 9 §3, §5; EXE-4, CS-1):
  * a real `changesetWorkflow` prepares the one `call` item without reading anything and executes it

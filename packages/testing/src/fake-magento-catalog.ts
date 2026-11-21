@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { FakeResponse, FakeUpstream, RecordedRequest } from './fake-upstream.js';
 
 /** A flat product: `sku` plus name, status, brand, description, ... */
@@ -20,6 +22,10 @@ export interface FakeMagentoCatalog {
   failStatusRequests(n: number): void;
   /** Status polls per bulk answered "4 open" before the bulk applies. */
   openPolls: number;
+  /** Every bulk submitted so far, in submission order, with whether it has been applied. */
+  bulks(): readonly { readonly batchId: string; readonly skus: readonly string[]; readonly applied: boolean }[];
+  /** Back to the seed: products, submissions, bulks, failing items, status failures and `openPolls`. Routes stay. */
+  reset(): void;
   /** Called after an item is applied (a verify-drift hook). */
   onApplied?: (sku: string) => void;
 }
@@ -129,7 +135,11 @@ export function installFakeMagentoCatalog(
 ): FakeMagentoCatalog {
   const basePath = opts.basePath ?? '/rest/all';
   const products = new Map<string, Record<string, unknown>>();
-  for (const p of opts.products) products.set(p.sku, { ...p });
+  const seed = (): void => {
+    products.clear();
+    for (const p of opts.products) products.set(p.sku, { ...p });
+  };
+  seed();
   const submissions: { batchId: string; skus: string[] }[] = [];
   const bulks = new Map<string, Bulk>();
   const failing = new Set<string>();
@@ -154,6 +164,15 @@ export function installFakeMagentoCatalog(
     },
     failStatusRequests: (n) => {
       failStatus = n;
+    },
+    bulks: () => [...bulks.values()].map((b) => ({ batchId: b.id, skus: b.items.map((i) => i.sku as string), applied: b.applied })), // parseBulkBody guarantees a string sku
+    reset: () => {
+      seed();
+      submissions.length = 0;
+      bulks.clear();
+      failing.clear();
+      failStatus = 0;
+      catalog.openPolls = opts.openPolls ?? 1;
     },
   };
 

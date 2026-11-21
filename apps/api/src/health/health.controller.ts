@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { Controller, Get, HttpCode, Inject, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { Connection } from '@temporalio/client';
-import { configurationProbe, probeWithin, readinessStatus, type ConfigurationStateSource, type ReadinessReport } from '@aiops/config';
+import { configurationProbe, PRODUCT_VERSION, probeWithin, readinessStatus, type ConfigurationStateSource, type ReadinessReport } from '@aiops/config';
 import type { Database } from '@aiops/db';
 import { CONFIGURATION, DATABASE, TEMPORAL } from '../tokens.js';
 import { Public } from '../web/access.js';
@@ -22,8 +24,8 @@ export class HealthController {
 
   @Get('healthz')
   @HttpCode(200)
-  live(): { ok: true } {
-    return { ok: true };
+  live(): { ok: true; version: string } {
+    return { ok: true, version: PRODUCT_VERSION };
   }
 
   @Get('readyz')

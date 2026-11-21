@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * A loaded configuration for worker tests: one connection, the read operation
  * `catalog.get_products`, the write operation `catalog.update_content` with a manifest

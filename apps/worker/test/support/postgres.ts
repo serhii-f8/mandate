@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** One migrated PostgreSQL database per test file (NFR-15): a real database, never a mock. */
 import { createDb, runMigrations, type Database } from '@aiops/db';
 import { startPostgres } from '@aiops/testing';

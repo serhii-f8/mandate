@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { RiskClass } from '../policy-model.js';
 import {
   DEFAULT_STEP_UP_SECONDS,

@@ -1,10 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import 'reflect-metadata';
 import type { Request, Response } from 'express';
 import pino from 'pino';
 import { describe, expect, it } from 'vitest';
-import type { ApiEnv } from '@aiops/config';
+import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
 import type { AuditEventInput, AuditLog } from '@aiops/core';
 import type { SessionRow } from '@aiops/db';
+import type { EndpointRateLimiter, LimitCheck, LimitResult } from '../http/rate-limiter.js';
 import type { PageRequest } from './access.js';
 import { AuthController } from './auth.controller.js';
 import type { OidcClient } from './oidc-client.js';
@@ -39,6 +42,9 @@ class FakeResponse {
     this.ended = true;
     return this;
   }
+  json(body: unknown): this {
+    return this.send(body);
+  }
   end(): this {
     this.ended = true;
     return this;
@@ -63,8 +69,22 @@ class FakeResponse {
 
 const failingAudit: AuditLog = { append: () => Promise.reject(new Error('database down')) };
 
-function controller(audit: AuditLog, sessions: Partial<SessionService> = {}): AuthController {
-  return new AuthController(env, {} as OidcClient, sessions as SessionService, audit, pino({ level: 'silent' }));
+const configuration = { current: { rateLimits: { unauthenticatedPerMinute: 60 } } } as unknown as ConfigurationHolder;
+
+/** A limiter that answers `result` and records the checks it was asked. */
+function limiterAnswering(result: LimitResult, checks: LimitCheck[] = []): EndpointRateLimiter {
+  return {
+    check: (c: LimitCheck) => {
+      checks.push(c);
+      return Promise.resolve(result);
+    },
+  } as unknown as EndpointRateLimiter;
+}
+
+const allowing = limiterAnswering({ allowed: true });
+
+function controller(audit: AuditLog, sessions: Partial<SessionService> = {}, limiter: EndpointRateLimiter = allowing, oidc = {} as OidcClient): AuthController {
+  return new AuthController(env, oidc, sessions as SessionService, audit, pino({ level: 'silent' }), limiter, configuration);
 }
 
 describe('AUD-1 AUTH-5 page logins and logouts are audited before acting', () => {
@@ -101,7 +121,7 @@ describe('AUD-1 AUTH-5 page logins and logouts are audited before acting', () =>
       endCookie: (value: string) => Promise.resolve(void ended.push(value)),
     } as unknown as SessionService;
     const audit: AuditLog = { append: () => Promise.resolve() };
-    const auth = new AuthController(env, oidc, sessions, audit, pino({ level: 'silent' }));
+    const auth = new AuthController(env, oidc, sessions, audit, pino({ level: 'silent' }), allowing, configuration);
     const res = new FakeResponse();
     // https public URL: the session cookie is `__Host-aiops_session`.
     const req = { query: { state: 's', code: 'c' }, headers: { cookie: 'aiops_login=s; __Host-aiops_session=old-cookie' } } as unknown as Request;
@@ -125,4 +145,37 @@ describe('AUD-1 AUTH-5 page logins and logouts are audited before acting', () =>
     expect(ended).toEqual([]);
     expect(res.headers.has('set-cookie')).toBe(false);
   });
+});
+
+describe('SEC-10 SEC-1 the page login routes are limited per address', () => {
+  const untouched = (): Partial<SessionService> => ({
+    purgeIfDue: () => Promise.reject(new Error('must not purge')),
+    beginLogin: () => Promise.reject(new Error('must not write a login')),
+    consumeLogin: () => Promise.reject(new Error('must not read a login')),
+  });
+  const oidc = { authorizationRequest: () => { throw new Error('must not build a request'); } } as unknown as OidcClient;
+  const req = { query: { state: 's', code: 'c', return_to: '/app/' }, headers: { cookie: 'aiops_login=s' }, ip: '192.0.2.5' } as unknown as Request;
+
+  for (const route of ['login', 'callback'] as const) {
+    it(`SEC-10 /auth/${route} over the limit answers 429 with Retry-After and touches no login`, async () => {
+      const checks: LimitCheck[] = [];
+      const res = new FakeResponse();
+      await controller(failingAudit, untouched(), limiterAnswering({ allowed: false, retryAfterSeconds: 17 }, checks), oidc)[route](req, res as unknown as Response);
+      expect(res.statusCode).toBe(429);
+      expect(res.getHeader('retry-after')).toBe('17');
+      expect(res.body).toEqual({ error: 'rate_limited', retryAfterSeconds: 17 });
+      expect(res.headers.has('set-cookie')).toBe(false);
+      expect(res.headers.has('location')).toBe(false);
+      expect(checks).toEqual([{ key: 'anon:192.0.2.5', limit: 60, scope: 'unauthenticated' }]);
+    });
+
+    it(`SEC-10 /auth/${route} fails closed with 503 and Retry-After 5 when the counter is unavailable`, async () => {
+      const res = new FakeResponse();
+      await controller(failingAudit, untouched(), limiterAnswering({ allowed: false, unavailable: true }), oidc)[route](req, res as unknown as Response);
+      expect(res.statusCode).toBe(503);
+      expect(res.getHeader('retry-after')).toBe('5');
+      expect(res.body).toEqual({ error: 'rate_limit_unavailable' });
+      expect(res.headers.has('set-cookie')).toBe(false);
+    });
+  }
 });

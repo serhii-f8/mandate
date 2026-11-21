@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { isCallToolResult, type CallToolResult } from '@modelcontextprotocol/client';
 import { describe, expect, it } from 'vitest';
 import { fromGetChangeset, fromReviewChangeset, parseApprovalTrigger, parseChangeSetTrigger } from './adapters.js';

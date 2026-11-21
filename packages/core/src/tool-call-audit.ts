@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { AuditEventInput, AuditOutcome } from './audit.js';
 import type { Caller } from './caller.js';
 

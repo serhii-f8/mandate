@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { OAuthError, OAuthErrorCode, type AuthInfo, type OAuthTokenVerifier } from '@modelcontextprotocol/server';
 import { errors, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { SERVICE_SUBJECT_PREFIX } from '@aiops/core';

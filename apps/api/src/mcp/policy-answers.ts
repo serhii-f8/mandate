@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** How a policy decision is recorded (POL-8) and how a denial is answered, for the pipeline and the built-ins. */
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { policyDecisionAuditEvent, type AuditLog, type Caller, type DenyReason, type PolicyDecision } from '@aiops/core';

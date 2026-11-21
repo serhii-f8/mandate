@@ -1,6 +1,6 @@
 # @aiops/gitea-issues
 
-Gitea issues preset 0.1.0 (CONN-8, OPS-5, OPS-6; design `docs/design/phase-9-mcp-upstream-gitea.md`).
+Gitea issues preset 1.0.0 (CONN-8, OPS-5, OPS-6; design `docs/design/phase-9-mcp-upstream-gitea.md`).
 The second preset, proving the same connector interfaces carry a different upstream: code reads, a
 code write that verifies label names, declarative writes and a vendored filtered spec.
 
@@ -8,7 +8,7 @@ code write that verifies label names, declarative writes and a vendored filtered
 
 ```yaml
 presets:
-  - { id: gitea-issues, package: '@aiops/gitea-issues', version: '^0.1.0' }
+  - { id: gitea-issues, package: '@aiops/gitea-issues', version: '^1.0.0' }
 connections:
   - id: gitea
     adapter: openapi

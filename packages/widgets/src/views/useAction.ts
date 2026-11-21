@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { useCallback, useRef, useState } from 'react';
 import type { ActionResult } from '../model.js';
 

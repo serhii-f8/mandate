@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { ConfigListener, ConfigRevisionStore } from '@aiops/core';
 import type { ConfigurationHolder, ConfigurationLogger, LoadTrigger, RefreshResult } from './holder.js';
 import { formatIssue } from './issues.js';

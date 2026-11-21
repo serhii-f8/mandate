@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,7 +12,7 @@ import type { INestApplication } from '@nestjs/common';
 import type { Logger } from 'pino';
 import { createAdapters, type OpenApiAdapter } from '@aiops/adapters';
 import { ConfigurationHolder, type ApiEnv } from '@aiops/config';
-import type { ChangeSetExecutor, CredentialVault, OperationInvoker, WorkflowStarter } from '@aiops/core';
+import type { ChangeSetExecutor, CredentialVault, OperationInvoker, RateCounter, WorkflowStarter } from '@aiops/core';
 import { createDb, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, runMigrations } from '@aiops/db';
 import { InMemoryExecutor, ScriptedWriter, startPostgres, TEST_WEB_CLIENT_SECRET, type StartedPostgres, type TestIssuer } from '@aiops/testing';
 import { createApp } from '../../src/app.js';
@@ -81,6 +83,12 @@ export interface StartApiOptions {
   readonly configuration?: ConfigurationHolder;
   /** `AIOPS_PRESET_DIRS`; none by default. */
   readonly presetDirs?: readonly string[];
+  /** `AIOPS_TRUST_PROXY`; 0 (trust no proxy) by default, as in production. */
+  readonly trustProxy?: number;
+  /** Wall-clock time of the rate limits (SEC-10, POL-4); the real clock by default. */
+  readonly wallClock?: () => Date;
+  /** Rate-limit counters; `PostgresRateCounter` on the api database by default. */
+  readonly rateCounter?: RateCounter;
 }
 
 /** Obviously fake Temporal payload key, same format as the master keys (never reaches Temporal here). */
@@ -90,7 +98,7 @@ const TEST_TEMPORAL_KEYS = '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=';
 export function testApiEnv(
   databaseUrl: string,
   port: number,
-  options: Pick<StartApiOptions, 'issuer' | 'configDir' | 'resource' | 'webDir' | 'widgetDir' | 'prepareWaitMs' | 'presetDirs'>,
+  options: Pick<StartApiOptions, 'issuer' | 'configDir' | 'resource' | 'webDir' | 'widgetDir' | 'prepareWaitMs' | 'presetDirs' | 'trustProxy'>,
 ): ApiEnv {
   const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
   return {
@@ -119,6 +127,7 @@ export function testApiEnv(
     temporalKeys: TEST_TEMPORAL_KEYS,
     prepareWaitMs: options.prepareWaitMs ?? 20_000,
     metricsPort: 0,
+    trustProxy: options.trustProxy ?? 0,
   };
 }
 
@@ -180,7 +189,14 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
   const app = await createApp({
     env,
     configuration,
-    overrides: { adapter, executor, starter, ...(options.invoker === undefined ? {} : { invoker: options.invoker }) },
+    overrides: {
+      adapter,
+      executor,
+      starter,
+      ...(options.invoker === undefined ? {} : { invoker: options.invoker }),
+      ...(options.wallClock === undefined ? {} : { wallClock: options.wallClock }),
+      ...(options.rateCounter === undefined ? {} : { rateCounter: options.rateCounter }),
+    },
     ...(options.logger === undefined ? {} : { logger: options.logger }),
   });
   await app.listen(port, '127.0.0.1');

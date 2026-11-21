@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const FAST_MS = 3000;

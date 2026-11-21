@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Phase 6 acceptance (SPEC section 7, designs phase-6-approvals*) against the Magento sandbox:
 #   sandbox-ready, stack-healthy (one worker, Mailpit), credential-entered, below-threshold-executes,
 #   above-threshold-pending, cannot-execute-without-approval, requester-cannot-approve,

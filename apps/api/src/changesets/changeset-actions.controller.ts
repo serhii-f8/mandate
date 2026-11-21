@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The requester's actions on the trusted page (UI-3, CS-5, EXE-8): submit a prepared change-set,
  * derive a new one with exclusions, and roll an executed one back. Submit and exclusions use the

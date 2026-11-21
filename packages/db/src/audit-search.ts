@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { AuditReader, AuditRecord, AuditSearchFilter } from '@aiops/core';
 import type pg from 'pg';
 import { CHAIN_COLUMNS, chainFields, safeInteger } from './audit-chain.js';

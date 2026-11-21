@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Schema of one configuration document (CFG-1, ADR 0015). Every object is strict:
  * an unknown key is an error, so typos and pasted secrets do not pass silently.
@@ -108,11 +110,25 @@ const role = z.strictObject({
 
 const roleMapping = z.strictObject({ group: z.string().min(1).max(255), roles: z.array(id).min(1) });
 
+/** SEC-10: requests per minute, a whole number from 1 to 100000. */
+const rateLimit = z.number().int().min(1).max(100000);
+
+/** SEC-10: effective endpoint rate limits (requests per minute). */
+export interface RateLimits {
+  readonly mcpUserPerMinute: number;
+  readonly mcpServiceAccountPerMinute: number;
+  readonly unauthenticatedPerMinute: number;
+}
+
+export const DEFAULT_RATE_LIMITS: RateLimits = { mcpUserPerMinute: 300, mcpServiceAccountPerMinute: 600, unauthenticatedPerMinute: 60 };
+
 /** AUTH-4: an OAuth client (`azp`) that calls as a service account, with exactly one role. */
 const serviceAccount = z.strictObject({
   client_id: z.string().min(1).max(255).regex(/^[^\p{Cc}]+$/u),
   role: id,
   description: z.string().max(500).optional(),
+  /** SEC-10: overrides `rate_limits.mcp_service_account_per_minute` for this client. */
+  rate_limit_per_minute: rateLimit.optional(),
 });
 
 const preset = z.strictObject({ id, package: z.string().min(1).max(214), version: z.string().min(1).max(64).optional() });
@@ -147,6 +163,14 @@ export const configDocumentSchema = z.strictObject({
   changesets: changesetsSchema.optional(),
   /** AUD-7: at most one document may set it; absent retention keeps the trail forever. */
   audit: z.strictObject({ retention_days: z.number().int().min(1).max(36500).optional() }).optional(),
+  /** SEC-10: at most one document may set it; absent keys take DEFAULT_RATE_LIMITS. */
+  rate_limits: z
+    .strictObject({
+      mcp_user_per_minute: rateLimit.optional(),
+      mcp_service_account_per_minute: rateLimit.optional(),
+      unauthenticated_per_minute: rateLimit.optional(),
+    })
+    .optional(),
 });
 
 export type ConfigDocument = z.output<typeof configDocumentSchema>;

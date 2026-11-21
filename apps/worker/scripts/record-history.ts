@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Records `changesetWorkflow` history fixtures for the replay gate (ADR 0006, EXE-10):
  *   pnpm --filter @aiops/worker record-history <scenario>

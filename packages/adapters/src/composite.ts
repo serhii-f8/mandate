@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Composite adapter (CONN-1, SEC-7): one object the api, worker and CLI use for every
  * connection. Each method dispatches on `ConnectionSettings.kind`: OpenAPI connections (the

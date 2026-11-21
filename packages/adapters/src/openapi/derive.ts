@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Derived catalog (CONN-2, design §4.3): one entry per imported operation, keyed
  * `<connection>:<operationId or "METHOD /path">`, with an input schema built from the

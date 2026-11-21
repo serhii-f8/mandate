@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
- * The Magento catalog preset 0.3.0 as the worker loads it (specs resolved, presets loaded), bound
+ * The Magento catalog preset 1.0.0 as the worker loads it (specs resolved, presets loaded), bound
  * to connection `magento` at a fake catalog's `/rest/all`, plus a memory credential vault holding a
  * fake bearer token. Shared by the writer unit test and the bulk-write integration test.
  */
@@ -23,7 +25,7 @@ export async function loadMagentoPreset(
   const connections = [
     'version: 1',
     'presets:',
-    "  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '0.3.0' }",
+    "  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '1.0.0' }",
     'connections:',
     '  - id: magento',
     '    adapter: openapi',

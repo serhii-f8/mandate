@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Spec loading (CONN-2, ADR 0018 decisions 1 and 2): structural validation with
  * `@seriousme/openapi-schema-validator`, then our own normaliser that reads Swagger 2.0

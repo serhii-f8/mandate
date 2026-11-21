@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { context, propagation, trace } from '@opentelemetry/api';
@@ -77,7 +79,7 @@ describe('NFR-11 worker tracing', () => {
         span.end();
       });
       const [span] = memory.getFinishedSpans();
-      expect(span?.resource.attributes['service.name']).toBe('aiops-worker');
+      expect(span?.resource.attributes).toMatchObject({ 'service.name': 'aiops-worker', 'telemetry.sdk.language': 'nodejs', 'telemetry.sdk.name': 'opentelemetry' });
     } finally {
       // Shutdown flushes the batch processor to the endpoint.
       await telemetry.shutdown();
@@ -98,6 +100,8 @@ describe('NFR-12 worker metrics', () => {
       const res = await get(port, '/metrics');
       expect(res.status).toBe(200);
       expect(res.body).toContain('aiops_probe_total{phase="execute"} 2');
+      // As with 0.57: the resource is the SDK default merged with service.name (ADR 0054).
+      expect(res.body).toMatch(/^target_info\{service_name="aiops-worker",telemetry_sdk_language="nodejs",telemetry_sdk_name="opentelemetry",telemetry_sdk_version="[^"]+"\} 1$/m);
     } finally {
       await close(server);
       await telemetry.shutdown();

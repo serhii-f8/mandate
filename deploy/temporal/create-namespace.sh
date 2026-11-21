@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Creates the Temporal namespace if it does not exist yet. Safe to run on every start.
 set -eu
 

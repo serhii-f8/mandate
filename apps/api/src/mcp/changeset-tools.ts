@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { createSchemaCompiler } from '@aiops/config';
 import {

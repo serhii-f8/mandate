@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describe, expect, it } from 'vitest';
 import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
 import { mcpToolHash, type CodeAdapter, type CodeOperation, type McpToolAdapter, type McpToolDefinition, type ReadAdapter, type ReadOutcome, type ScopeReport, type ToolListOutcome } from '@aiops/connector-sdk';

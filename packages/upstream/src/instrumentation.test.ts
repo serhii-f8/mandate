@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { context, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import {
@@ -121,7 +123,7 @@ describe('upstream instrumentation', () => {
     parent.end();
 
     const child = spans.getFinishedSpans().find((s) => s.name === 'http.request');
-    expect(child?.parentSpanId).toBe(parentContext.spanId);
+    expect(child?.parentSpanContext?.spanId).toBe(parentContext.spanId);
     expect(child?.spanContext().traceId).toBe(parentContext.traceId);
     const childSpanId = child?.spanContext().spanId ?? '';
     expect(childSpanId).not.toBe(parentContext.spanId);

@@ -1,0 +1,7 @@
+{
+  "request": { "method": "GET", "path": "/notes", "query": { "q": "Kick", "page_size": "20" } },
+  "response": {
+    "status": 200,
+    "body": { "items": [{ "id": "n1", "title": "Kickoff", "body": "Agenda", "updated_at": "2026-01-02T10:00:00Z" }], "total": 1 }
+  }
+}

@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=../../packages/config/schema/aiops-config.v1.json
+# Connections to the systems the AI clients work on, and the preset operations they bring.
+# Replace every host ending in .invalid with your own system; nothing here is a secret: a
+# credential_ref only names a credential that is entered later on the trusted credential
+# page, encrypted in PostgreSQL (CFG-5, SEC-2).
+
+# Schema version of this document (required, always 1).
+version: 1
+
+# Presets installed with the product. A preset brings operations, a spec and a connection
+# test; a connection applies it with `preset:`. `version` is a semver range the loaded
+# preset must satisfy (CONN-8).
+presets:
+  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '^1.0.0' }
+  - { id: gitea-issues, package: '@aiops/gitea-issues', version: '^1.0.0' }
+
+connections:
+  # An openapi connection with the Magento catalog preset (catalog.search_products,
+  # catalog.get_product, catalog.update_content, ...).
+  - id: magento
+    adapter: openapi
+    # Base URL of the upstream REST API.
+    base_url: https://shop.example.invalid/rest/all
+    # Name of the credential entered on the trusted page (never the value itself).
+    credential_ref: magento-integration
+    # How the credential is sent upstream.
+    auth: { scheme: bearer }
+    # The preset applied to this connection (an id from `presets`).
+    preset: magento-catalog
+
+  # An openapi connection with the Gitea issues preset (issues.search, issues.set_labels, ...).
+  # The base URL ends in /api/v1.
+  - id: gitea
+    adapter: openapi
+    base_url: https://git.example.invalid/api/v1
+    credential_ref: gitea-token
+    auth: { scheme: bearer }
+    preset: gitea-issues
+
+  # An MCP upstream connection. Its tools are bound one by one in `operations` below.
+  - id: docs-mcp
+    adapter: mcp
+    # Streamable HTTP endpoint of the upstream MCP server.
+    mcp_url: https://docs.example.invalid/mcp
+    credential_ref: docs-mcp-token
+    auth: { scheme: bearer }
+    # Seconds between checks that the pinned tool definitions did not change (CONN-4).
+    pin_check_seconds: 300
+
+# One operation bound to an upstream MCP tool (CONN-1). `pin` is the hash of the tool
+# definition as reviewed; the operation runs only while the live definition still hashes to it.
+# The value below is illustrative: copy the real one from `aiops config diff` against your
+# upstream. Loading never needs the live tool list.
+operations:
+  - id: docs.search
+    connection: docs-mcp
+    # read | write | write_opaque | destructive. A read needs no approval.
+    risk: read
+    title: Search documentation
+    description: Search the documentation site and return matching pages.
+    upstream:
+      tool: search
+      pin: 'sha256:0000000000000000000000000000000000000000000000000000000000000000'

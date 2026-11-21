@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../packages/config/schema/aiops-config.v1.json
+# Platform settings: change-sets, audit retention, rate limits and notifications. Each of
+# changesets, audit and rate_limits may appear in one document only.
+version: 1
+
+# Change-sets (CS-6, EXE-8).
+changesets:
+  # Hours after which an unapproved change-set expires.
+  expire_after_hours: 72
+  # Share of failed records (0..1) above which a run stops.
+  failure_threshold: 0.2
+  # Hours after execution during which a change-set can be rolled back; 0 disables rollback.
+  rollback_window_hours: 168
+
+# Audit trail (AUD-7). Omit retention_days to keep it forever.
+audit:
+  retention_days: 365
+
+# Requests per minute per endpoint class (SEC-10).
+rate_limits:
+  mcp_user_per_minute: 200
+  mcp_service_account_per_minute: 500
+  unauthenticated_per_minute: 30
+
+# Notifications (NTF-1). Roles reference them with `notify`.
+notifications:
+  - id: approvers-mail
+    kind: email
+    to: [approvers@example.invalid]
+  - id: ops-chat
+    kind: webhook
+    # The webhook URL is a credential: entered on the trusted page, never here (CFG-5).
+    url_credential_ref: ops-chat-webhook
+    # Hosts the webhook URL may point to (CONN-5).
+    allowed_hosts: [chat.example.invalid]

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describeApprovalRepositoryContract } from './approval-repository-contract.js';
 import { describeChangeSetRepositoryContract, type ChangeSetRepositoryHarness } from './changeset-repository-contract.js';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';

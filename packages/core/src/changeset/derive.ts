@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { Caller } from '../caller.js';
 import { changesetTransitionEvent } from './audit.js';
 import { isExpiryDue } from './lifecycle.js';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Change-sets prepared by their own workflow, shared by the integration tests and the history
  * recorder (`scripts/record-history.ts`).

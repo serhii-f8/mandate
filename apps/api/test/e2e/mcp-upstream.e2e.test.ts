@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * MCP-backed operations end to end (CONN-1, CONN-4, SEC-5, SEC-6, MCP-3, POL-1, POL-2): a real
  * api on real PostgreSQL in front of a fake MCP server whose tool list the test changes.

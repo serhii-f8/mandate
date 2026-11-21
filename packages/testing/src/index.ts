@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** Shared test fakes and fixtures. */
 export { InMemoryAuditLog } from './in-memory-audit-log.js';
 export { InMemoryConfigRevisionStore } from './in-memory-config-revision-store.js';
@@ -52,6 +54,7 @@ export { startFakeUpstream, type FakeUpstream, type FakeHandler, type FakeRespon
 export { FakeResolver, fakeCatalogEntry } from './fake-resolver.js';
 export { startSmtpSink, type SinkMessage, type SmtpSink } from './smtp-sink.js';
 export { installFakeMagentoCatalog, type FakeMagentoCatalog, type FakeMagentoProduct } from './fake-magento-catalog.js';
+export { startFakeMagentoServer, type FakeMagentoServerOptions } from './fake-magento-server.js';
 export { CODE_FIXTURE_PRESET_DIR, installFakeItems, type FakeItem, type FakeItems } from './fake-items.js';
 export { recordApproval, submitChangeSet } from './approval-fixtures.js';
 export { describeApprovalRepositoryContract } from './approval-repository-contract.js';

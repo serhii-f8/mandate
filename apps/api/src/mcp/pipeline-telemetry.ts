@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Spans and counters of the MCP tool path (NFR-11, NFR-12). Labels and attributes carry only a
  * bounded tool name, an outcome, a deny reason and the correlation ID: never an argument value,

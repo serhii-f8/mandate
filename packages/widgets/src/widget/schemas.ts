@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The structured content the widget reads (design part 3 §3.2 and §4). Answers are untrusted
  * input: every schema is used with `safeParse`, and unknown fields are ignored (UI-1).

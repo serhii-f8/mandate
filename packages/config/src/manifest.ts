@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The operation manifest (design phase 4 §3.1; OPS-2, OPS-3, OPS-4): its YAML schema,
  * conversion to the core `ManifestDefinition`, and the loader checks 1–7 that need

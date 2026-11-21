@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describe, expect, it } from 'vitest';
 import type { ConfigIssue } from './issues.js';
 import { loadConfigurationSources, type LoadedConfiguration, type LoadResult } from './load.js';

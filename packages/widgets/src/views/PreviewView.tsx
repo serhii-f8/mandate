@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { type ReactElement, useCallback, useRef, useState } from 'react';
 import { ActionBar } from '../components/ActionBar.js';
 import { ItemTable } from '../components/ItemTable.js';

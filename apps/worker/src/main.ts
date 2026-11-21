@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { parseWorkerEnv } from '@aiops/config';
 import { createWorkerLogger } from './logger.js';
 import { startWorkerRuntime } from './runtime.js';

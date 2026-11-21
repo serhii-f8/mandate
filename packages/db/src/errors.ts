@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { DrizzleQueryError } from 'drizzle-orm';
 
 /** Postgres error code of `error` or of its cause (drizzle wraps driver errors). */

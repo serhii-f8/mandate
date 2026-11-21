@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Request headers the platform sets itself or that carry credentials: never taken from
  * a mapping or exposed as an operation argument. The single list for the adapters

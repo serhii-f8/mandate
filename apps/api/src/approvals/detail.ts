@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The change-set detail answer of the trusted pages (design part 2 §4), its `viewer` block and the
  * page start check (part 1 §6 "Starting an approved change-set"). Everything comes from storage

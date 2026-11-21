@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import type { CallOutcome, ConnectionSettings, CredentialSource, UpstreamMapping, WriteAdapter } from '@aiops/connector-sdk';

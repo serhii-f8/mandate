@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Phase 8 acceptance (SPEC section 7, designs phase-8-rollback-audit*) against the Magento sandbox:
 #   sandbox-ready, stack-healthy, credential-entered;
 #   group 1, rollback on the trusted page (EXE-8, UI-4, SEC-8, MCP-8): rb-prepare,

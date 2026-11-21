@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
@@ -31,6 +33,7 @@ import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
 import { HealthController } from './health/health.controller.js';
 import { bodyErrorHandler } from './http/body-errors.js';
+import { EndpointRateLimiter } from './http/rate-limiter.js';
 import { configurationGate } from './config/configuration-gate.js';
 import { createLogger, PinoNestLogger } from './logger.js';
 import { ApprovalService } from './approvals/approval-service.js';
@@ -65,6 +68,8 @@ import {
   PAGE_CHECKS,
   PAGE_SESSIONS,
   PIN_MONITOR,
+  RATE_COUNTER,
+  RATE_LIMITER,
   SUBMIT_SERVICE,
   TELEMETRY,
   TEMPORAL,
@@ -110,6 +115,8 @@ export interface AppOverrides {
   readonly tasks?: TaskRepository;
   /** Rate-limit counters; defaults to `PostgresRateCounter` on the api database (POL-4, NFR-3). */
   readonly rateCounter?: RateCounter;
+  /** Wall-clock time of the rate-limit windows, endpoint (SEC-10) and pipeline (POL-4); the real clock by default. */
+  readonly wallClock?: () => Date;
   /** Runs after the api's own resources closed; `main.ts` stops the configuration sync and its database here. */
   readonly onShutdown?: () => Promise<void>;
 }
@@ -198,6 +205,8 @@ class AppModule {
     // Likewise the Temporal payload keys (SEC-4), whenever a Temporal client is built.
     const temporalKeys = overrides.executor === undefined || overrides.starter === undefined ? parseTemporalKeys(env.temporalKeys) : undefined;
     const adapter = overrides.adapter ?? createAdapters();
+    // One wall clock for the endpoint limits and the pipeline's calls_per_minute: the same windows.
+    const wallClock = overrides.wallClock ?? ((): Date => new Date());
     // Without telemetry the api's spans go to the global tracer (a no-op unless one is registered) and no metric is counted.
     const pipelineTelemetry: PipelineTelemetry = telemetry === undefined ? NO_TELEMETRY : createPipelineTelemetry({ tracer: telemetry.tracer, meter: telemetry.meter });
     // One key set for MCP access tokens and page ID tokens: same issuer.
@@ -260,6 +269,17 @@ class AppModule {
         },
         { provide: AUDIT_LOG, inject: [DATABASE], useFactory: (d: Database) => new DrizzleAuditLog(d.db, { sensitiveKeys: () => configuration.current.sensitiveFields }) },
         { provide: AUDIT_READER, inject: [DATABASE], useFactory: (d: Database) => new PostgresAuditReader(d.pool) },
+        {
+          // One counter for the pipeline's calls_per_minute (POL-4) and the endpoint limits (SEC-10), shared across instances (NFR-3).
+          provide: RATE_COUNTER,
+          inject: [DATABASE],
+          useFactory: (d: Database): RateCounter => overrides.rateCounter ?? new PostgresRateCounter(d.db),
+        },
+        {
+          provide: RATE_LIMITER,
+          inject: [RATE_COUNTER, AUDIT_LOG],
+          useFactory: (rateCounter: RateCounter, audit: AuditLog) => new EndpointRateLimiter({ rateCounter, audit, wallClock, logger }),
+        },
         {
           provide: CREDENTIAL_VAULT,
           inject: [DATABASE],
@@ -329,7 +349,7 @@ class AppModule {
         },
         {
           provide: MCP_HANDLER,
-          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE, WORKFLOW_STARTER, WIDGET_BUNDLES, PIN_MONITOR],
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE, WORKFLOW_STARTER, WIDGET_BUNDLES, PIN_MONITOR, RATE_COUNTER],
           useFactory: (
             audit: AuditLog,
             vault: CredentialVault,
@@ -340,6 +360,7 @@ class AppModule {
             starter: WorkflowStarter,
             widgets: WidgetBundles,
             pinMonitor: PinMonitorRun | null,
+            rateCounter: RateCounter,
           ) => {
             // One task store for the write path that creates tasks and the handlers that read them.
             const tasks = overrides.tasks ?? new PostgresTaskRepository(database.db);
@@ -382,8 +403,8 @@ class AppModule {
                   audit,
                   newId: randomUUID,
                   now: () => performance.now(),
-                  rateCounter: overrides.rateCounter ?? new PostgresRateCounter(database.db),
-                  wallClock: () => new Date(),
+                  rateCounter,
+                  wallClock,
                   widgets,
                   publicUrl: env.publicUrl,
                   telemetry: pipelineTelemetry,
@@ -463,6 +484,8 @@ export async function createApp(options: CreateAppOptions): Promise<INestApplica
     // eslint-disable-next-line @typescript-eslint/no-unsafe-class-instance-assignment
     { logger: new PinoNestLogger(logger), bodyParser: false },
   );
+  // SEC-10: `req.ip` honours X-Forwarded-For only across the configured number of proxy hops (0: none).
+  app.set('trust proxy', options.env.trustProxy);
   // MCP request bodies up to 4 MiB, the SDK's default bound (ADR 0013).
   app.useBodyParser('json', { limit: '4mb' });
   // Directly after the parser: its errors quote the body, so they get fixed bodies (SEC-3).

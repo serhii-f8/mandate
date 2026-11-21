@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Contract tests of the Gitea issues preset (NFR-17, CONN-8; design phase-9-mcp-upstream-gitea).
  * The preset is loaded the way the api loads it: `@aiops/config` with the OpenAPI adapter's
@@ -40,7 +42,7 @@ async function loadPreset(baseUrl: string, extra?: string): Promise<LoadedConfig
   const yaml = presetConnectionYaml({
     presetId: 'gitea-issues',
     package: '@aiops/gitea-issues',
-    version: '^0.1.0',
+    version: '^1.0.0',
     connectionId: 'gitea',
     baseUrl,
     credentialRef: 'gitea-token',
@@ -112,10 +114,10 @@ describe('NFR-17 CONN-8 Gitea preset contract', () => {
     config = await loadPreset(`http://gitea-sandbox.invalid${BASE_PATH}`);
   });
 
-  it('CONN-8 loads from package.json aiops with SDK ^0.6.0 and registers five operations', async () => {
+  it('CONN-8 loads from package.json aiops with SDK ^1.0.0 and registers five operations', async () => {
     const pkg = JSON.parse(await readFile(join(PRESET_DIR, 'package.json'), 'utf8')) as { aiops: Record<string, string> };
-    expect(pkg.aiops).toEqual({ preset: 'preset.yaml', sdk: '^0.6.0', code: 'dist/index.js' });
-    expect(config.loadedPresets.get('gitea-issues')).toMatchObject({ package: '@aiops/gitea-issues', version: '0.1.0', adapter: 'openapi' });
+    expect(pkg.aiops).toEqual({ preset: 'preset.yaml', sdk: '^1.0.0', code: 'dist/index.js' });
+    expect(config.loadedPresets.get('gitea-issues')).toMatchObject({ package: '@aiops/gitea-issues', version: '1.0.0', adapter: 'openapi' });
     expect(config.loadedPresets.get('gitea-issues')?.codeDigest).toMatch(/^[0-9a-f]{64}$/);
     const risks = Object.fromEntries(config.policy.operations.map((o) => [o.id, o.risk]));
     expect(Object.keys(risks).sort()).toEqual(OPERATIONS);

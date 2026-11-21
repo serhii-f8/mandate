@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { openSealed, rewrap, seal, type SealedCredential } from './envelope.js';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Change-set export on the trusted page (CS-8): the items as CSV or XLSX, streamed page by page
  * (NFR-7, NFR-8). Visibility is the detail page's (`canView`, UI-7); every answer is audited

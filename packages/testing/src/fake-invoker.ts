@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
 
 /** Records every invocation and answers `ran <operation id>`; set `failWith` to reject instead. */

@@ -1,4 +1,4 @@
-# Magento 2 catalog preset 0.3.0 (CONN-8, OPS-2, OPS-4, OPS-6; ADR 0007: scope `all`; Phase 4 design §8,
+# Magento 2 catalog preset 1.0.0 (CONN-8, OPS-2, OPS-4, OPS-6; ADR 0007: scope `all`; Phase 4 design §8,
 # Phase 5 design §6). catalog.update_content executes through POST /async/bulk/V1/products, which
 # needs a running `async.operations.all` consumer on the Magento side.
 # Bind it to an openapi connection whose base_url ends in /rest/all, for example

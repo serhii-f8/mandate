@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { ConnectionSettings } from './connection.js';
 import type { CredentialSource } from './credentials.js';
 import type { CodeArgs, CodeCallOperation, CodeReadOperation, CodeWriteDirection, CodeWriteOperation, RecordOutcome, WriteRecord } from './code.js';

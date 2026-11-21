@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Worker metrics (NFR-12): the `aiops_changesets` gauge by status and the batch duration histogram.
  * Labels are the closed sets of the constraints: never a change-set, user or target ID.

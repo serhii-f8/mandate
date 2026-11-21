@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createHash, randomBytes } from 'node:crypto';
 import { SERVICE_SUBJECT_PREFIX } from '@aiops/core';
 import { jwtVerify, type JWTVerifyGetKey } from 'jose';

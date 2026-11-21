@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The refusal of an MCP-backed operation whose pinned tool is not `ok` (CONN-4; ADR 0051 R8):
  * after the policy decision, before any upstream call, whatever the risk class. Fixed text,

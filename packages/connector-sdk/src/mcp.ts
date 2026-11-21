@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createHash } from 'node:crypto';
 import type { ConnectionSettings } from './connection.js';
 import type { CredentialSource } from './credentials.js';

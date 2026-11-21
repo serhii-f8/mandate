@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `POST /api/v1/changesets/:id/rollback` end to end (EXE-8, SEC-8, SEC-1, POL-6, AUD-1, SEC-11,
  * UI-4): the trusted page is the only place a rollback starts. PostgreSQL repository, the in-memory

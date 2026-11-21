@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * Tests of the preset contract helpers of @aiops/testing (NFR-17). They live here, not in
  * packages/testing: the helpers need the real adapter and loader, and @aiops/adapters and

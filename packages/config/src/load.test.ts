@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -5,6 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { formatIssue, type ConfigIssue } from './issues.js';
+import { DEFAULT_RATE_LIMITS } from './schema.js';
 import { loadConfigurationDirectory, loadConfigurationSources, type LoadResult } from './load.js';
 import { resolvePreset } from './presets.js';
 import { loadCodeFixture, presetWithoutUpdate } from '../test/code-fixture.js';
@@ -368,7 +371,7 @@ connections:
 `);
     try {
       await mkdir(join(presets, 'mcp-preset'));
-      await writeFile(join(presets, 'mcp-preset', 'package.json'), JSON.stringify({ name: '@acme/mcp-preset', version: '1.0.0', aiops: { sdk: '^0.6.0' } }));
+      await writeFile(join(presets, 'mcp-preset', 'package.json'), JSON.stringify({ name: '@acme/mcp-preset', version: '1.0.0', aiops: { sdk: '^1.0.0' } }));
       await writeFile(join(presets, 'mcp-preset', 'preset.yaml'), 'version: 1\nadapter: mcp\n');
       expect(issues(await loadConfigurationDirectory(openapiDir, { presetDirs: [presets] }))).toEqual([
         expect.objectContaining({ file: 'config.yaml', path: 'connections[0].preset', message: 'the preset is for mcp connections' }),
@@ -590,5 +593,36 @@ describe('AUTH-4 service_accounts', () => {
     // An empty client_id fails both the length and the format check: every issue is on that path.
     expect(found.length).toBeGreaterThan(0);
     expect(found.map((i) => [i.file, i.path])).toEqual(found.map(() => ['sa.yaml', path]));
+  });
+});
+
+describe('SEC-10 rate_limits in the loaded configuration', () => {
+  it('SEC-10 rate_limits defaults when absent', async () => {
+    const dir = await loadConfigurationDirectory(VALID_DIR);
+    if (!dir.ok) throw new Error('fixture invalid');
+    expect(dir.configuration.rateLimits).toEqual(DEFAULT_RATE_LIMITS);
+    expect(DEFAULT_RATE_LIMITS).toEqual({ mcpUserPerMinute: 300, mcpServiceAccountPerMinute: 600, unauthenticatedPerMinute: 60 });
+  });
+
+  it('SEC-10 rate_limits fills missing keys key by key and may be set in one document only', async () => {
+    const set = await load({ 'a.yaml': 'version: 1\nrate_limits: { mcp_user_per_minute: 5 }\n' });
+    if (!set.ok) throw new Error(JSON.stringify(set.issues));
+    expect(set.configuration.rateLimits).toEqual({ ...DEFAULT_RATE_LIMITS, mcpUserPerMinute: 5 });
+    const twice = issues(await load({ 'a.yaml': 'version: 1\nrate_limits: { mcp_user_per_minute: 5 }\n', 'b.yaml': 'version: 1\nrate_limits: { mcp_user_per_minute: 6 }\n' }));
+    expect(twice).toEqual([expect.objectContaining({ path: 'rate_limits', message: 'may be set in one document only; first set in a.yaml' })]);
+  });
+
+  it('SEC-10 rate_limits refusal names file, path and reason', async () => {
+    const found = issues(await load({ 'a.yaml': 'version: 1\nrate_limits: { mcp_user_per_minute: 0 }\n' }));
+    expect(found).toEqual([expect.objectContaining({ file: 'a.yaml', path: 'rate_limits.mcp_user_per_minute' })]);
+    expect(found.map((issue) => formatIssue(issue)).join('\n')).toContain('a.yaml');
+  });
+
+  it('SEC-10 service account override is optional and carried into the loaded map', async () => {
+    const result = await load({ 'sa.yaml': 'version: 1\nservice_accounts:\n  - { client_id: sa-a, role: content_manager, rate_limit_per_minute: 7 }\n  - { client_id: sa-b, role: content_manager }\n' });
+    if (!result.ok) throw new Error(JSON.stringify(result.issues));
+    expect(result.configuration.serviceAccounts.get('sa-a')?.rateLimitPerMinute).toBe(7);
+    expect(result.configuration.serviceAccounts.get('sa-b')?.rateLimitPerMinute).toBeUndefined();
+    expect(result.configuration.serviceAccounts.get('sa-b')).not.toHaveProperty('rateLimitPerMinute');
   });
 });

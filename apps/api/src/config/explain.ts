@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * `aiops config explain`: a dry policy evaluation against a loaded configuration (POL-7).
  * Arguments are checked against the operation's input schema first, as on a real call

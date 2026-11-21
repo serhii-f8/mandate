@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { NextFunction, Request, Response } from 'express';
 import type { ConfigurationStateSource } from '@aiops/config';
 

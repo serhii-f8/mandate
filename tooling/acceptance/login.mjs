@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // Logs a development user in through the real authorization-code + PKCE (S256) flow
 // of the bundled realm and prints the access token. The login form is posted like a
 // browser would; the final redirect to the loopback callback is read, never followed.

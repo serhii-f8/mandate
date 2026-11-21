@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // MCP client for the acceptance scripts: the v2 client pinned to protocol 2026-07-28.
 // Prints one JSON line and records the correlation ID of the last response.
 //

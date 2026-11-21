@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -75,14 +77,14 @@ describe('CONN-8 preset package selection', () => {
 
   it('CONN-8 parses the aiops field: preset default, sdk required, unknown keys refused', async () => {
     expect(parseAiopsField({ name: 'x', version: '1.0.0' })).toEqual({ ok: true });
-    expect(parseAiopsField({ aiops: { sdk: '^0.6.0' } })).toEqual({ ok: true, aiops: { preset: 'preset.yaml', sdk: '^0.6.0' } });
+    expect(parseAiopsField({ aiops: { sdk: '^1.0.0' } })).toEqual({ ok: true, aiops: { preset: 'preset.yaml', sdk: '^1.0.0' } });
     expect(parseAiopsField({ aiops: { preset: 'presets/main.yaml', sdk: '0.6.x', code: 'dist/index.js' } })).toEqual({
       ok: true,
       aiops: { preset: 'presets/main.yaml', sdk: '0.6.x', code: 'dist/index.js' },
     });
     expect(parseAiopsField({ aiops: {} })).toEqual({ ok: false, issues: [{ path: ['aiops', 'sdk'], message: 'is required' }] });
     expect(parseAiopsField({ aiops: { sdk: 'not a range' } })).toEqual({ ok: false, issues: [{ path: ['aiops', 'sdk'], message: 'must be a semver range' }] });
-    const unknown = parseAiopsField({ aiops: { sdk: '^0.6.0', hooks: 'x' } });
+    const unknown = parseAiopsField({ aiops: { sdk: '^1.0.0', hooks: 'x' } });
     expect(unknown.ok).toBe(false);
     expect(!unknown.ok && unknown.issues.map((i) => i.path)).toEqual([['aiops']]);
     expect(parseAiopsField({ aiops: 'preset.yaml' }).ok).toBe(false);
@@ -91,7 +93,7 @@ describe('CONN-8 preset package selection', () => {
     const root = await tempDir();
     const dir = join(root, 'x');
     await mkdir(dir);
-    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: NAME, version: '1.0.0', aiops: { sdk: '^0.6.0' } }));
-    expect((await selectPackage(NAME, undefined, [root]))?.aiops).toEqual({ preset: 'preset.yaml', sdk: '^0.6.0' });
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: NAME, version: '1.0.0', aiops: { sdk: '^1.0.0' } }));
+    expect((await selectPackage(NAME, undefined, [root]))?.aiops).toEqual({ preset: 'preset.yaml', sdk: '^1.0.0' });
   });
 });

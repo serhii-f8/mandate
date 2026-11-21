@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The AI Operations Layer Authors
 # Prints a new access token of aiops-admin (40 hex characters; keep it out of logs and files).
 # The name is unique per call. Usage: bash deploy/sandbox/gitea/token.sh [scopes]   # default write:issue
 set -euo pipefail

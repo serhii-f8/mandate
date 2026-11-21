@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { CodeHttpRequest, ConnectionSettings, CredentialSource } from '@aiops/connector-sdk';
 import { startFakeUpstream, type FakeUpstream } from '@aiops/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

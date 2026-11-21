@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /** Who may search and export the audit log on the trusted page (SEC-1, AUD-6). */
 import type { LoadedConfiguration } from '@aiops/config';
 

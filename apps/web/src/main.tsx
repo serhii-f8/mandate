@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { StrictMode, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ApprovalsPage } from './pages/ApprovalsPage.js';

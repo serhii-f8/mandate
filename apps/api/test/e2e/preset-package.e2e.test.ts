@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * A code preset installed the way an operator installs one (CONN-8, OPS-5): `npm pack` of the
  * code fixture, extracted into a preset directory, served behind MCP tools by a revision-backed
@@ -223,6 +225,6 @@ describe('CONN-8 OPS-5 a tarball-installed code preset behind MCP tools', () => 
     const lines: string[] = [];
     const code = await runApiCli(['validate', configDir, '--preset-dir', incompatibleDir], (line) => lines.push(line), { env: {}, defaultPresetDir: null });
     expect(code).toBe(1);
-    expect(lines.join('\n')).toContain('preset_sdk_incompatible: the preset requires connector SDK ^9.0.0; this platform provides 0.6.0');
+    expect(lines.join('\n')).toContain('preset_sdk_incompatible: the preset requires connector SDK ^9.0.0; this platform provides 1.0.0');
   });
 });

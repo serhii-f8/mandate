@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { redactAuditDetails, type AuditEventInput, type AuditLog } from '@aiops/core';
 import type { Db, DbExecutor } from './client.js';
 import { guarded } from './errors.js';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * A call of an allowed opaque operation, or of a `write` or `destructive` operation with a manifest,
  * creates a change-set in `preparing` and starts its workflow (EXE-1); the workflow prepares it

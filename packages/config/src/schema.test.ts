@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { configDocumentSchema, schemaIssues } from './schema.js';
@@ -193,5 +195,24 @@ describe('NFR-18 AUTH-4 service_accounts schema', () => {
     ]) {
       expect(parseDoc([bad]).success, JSON.stringify(bad)).toBe(false);
     }
+  });
+});
+
+describe('SEC-10 rate_limits and service account override schema', () => {
+  const parseLimits = (rate_limits: unknown) => configDocumentSchema.safeParse({ version: 1, rate_limits });
+  it('SEC-10 rate_limits accepts 1..100000 and refuses 0, 100001, 1.5, unknown keys', () => {
+    expect(parseLimits({ mcp_user_per_minute: 1, mcp_service_account_per_minute: 100000, unauthenticated_per_minute: 60 }).success).toBe(true);
+    expect(parseLimits({}).success).toBe(true);
+    for (const bad of [{ mcp_user_per_minute: 0 }, { mcp_user_per_minute: 100001 }, { unauthenticated_per_minute: 1.5 }, { mcp_service_account_per_minute: -1 }, { other: 1 }]) {
+      expect(parseLimits(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+  it('SEC-10 service account override is optional and bounded', () => {
+    const parse = (rate_limit_per_minute?: number) =>
+      configDocumentSchema.safeParse({ version: 1, service_accounts: [{ client_id: 'sa', role: 'r', ...(rate_limit_per_minute === undefined ? {} : { rate_limit_per_minute }) }] });
+    expect(parse().success).toBe(true);
+    expect(parse(1).success).toBe(true);
+    expect(parse(100000).success).toBe(true);
+    for (const bad of [0, 100001, 1.5]) expect(parse(bad).success, String(bad)).toBe(false);
   });
 });

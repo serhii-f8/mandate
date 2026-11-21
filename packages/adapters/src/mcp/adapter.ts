@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * MCP tool adapter (CONN-1, CONN-3, CONN-5, CONN-6, SEC-3, SEC-5): lists and calls the tools of an
  * upstream MCP server through the official client over the guarded fetch. The era (stateless

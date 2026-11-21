@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { describe, expect, it } from 'vitest';
 import type { Connection } from '@temporalio/client';
 import type { ConfigurationStateSource } from '@aiops/config';
@@ -68,5 +70,11 @@ describe('NFR-10 api readiness probes', () => {
     );
     expect(r.status).toBe(503);
     expect(r.body).toMatchObject({ database: 'unavailable' });
+  });
+});
+
+describe('NFR-10 api liveness', () => {
+  it('NFR-10 /healthz reports the product version', () => {
+    expect(new HealthController(dbOk(), active, null).live()).toEqual({ ok: true, version: '1.0.0' });
   });
 });

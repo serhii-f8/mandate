@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * What `changesetWorkflow` leaves in Temporal history (SEC-3, SEC-4): every payload the platform
  * puts there is encrypted, and failure messages are encoded fixed codes.

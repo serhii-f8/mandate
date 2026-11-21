@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { RateCounter } from '@aiops/core';
 
 /** In-memory fixed-window counter (POL-4 calls_per_minute). The increment is synchronous, so parallel hits get distinct counts. */

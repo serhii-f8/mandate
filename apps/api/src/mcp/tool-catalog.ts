@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { ArgumentCheck, LoadedConfiguration } from '@aiops/config';
 import type { Caller } from '@aiops/core';
 import type { AuditDetails } from './audited-tool.js';

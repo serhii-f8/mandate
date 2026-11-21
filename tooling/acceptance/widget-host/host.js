@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // Browser side of the reference host: an AppBridge around one sandboxed iframe. Calls leave
 // through functions that widget-host.mjs exposes (Node holds the token, so no CORS here).
 import { AppBridge, PostMessageTransport } from '@modelcontextprotocol/ext-apps/app-bridge';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DataConverter, Duration } from '@temporalio/common';

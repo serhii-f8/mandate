@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { createApi, loginUrl, toLogin as login, Unauthenticated, type CredentialListEntry, type Session } from '../api.js';
 import { CredentialsView } from '../views/CredentialsView.js';

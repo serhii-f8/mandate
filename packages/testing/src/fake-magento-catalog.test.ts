@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import { request } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startFakeUpstream, type FakeUpstream } from './fake-upstream.js';
@@ -187,6 +189,35 @@ describe('fake Magento catalog', () => {
     expect((await status(base, 'fake-bulk-1')).status).toBe(503);
     expect((await status(base, 'fake-bulk-1')).status).toBe(200);
     expect((await status(base, 'unknown')).status).toBe(404);
+  });
+
+  it('NFR-1 bulks() lists each bulk with its applied flag and reset() restores the seed without reinstalling routes', async () => {
+    const { base, cat } = await setup(0);
+    await call(`${base}/async/bulk/V1/products`, 'POST', bulk([{ sku: 'A-1', name: 'New', status: 1 }]));
+    await call(`${base}/async/bulk/V1/products`, 'POST', bulk([{ sku: 'C-3', name: 'New3', status: 1 }]));
+    expect(cat.bulks()).toEqual([
+      { batchId: 'fake-bulk-1', skus: ['A-1'], applied: false },
+      { batchId: 'fake-bulk-2', skus: ['C-3'], applied: false },
+    ]);
+    await status(base, 'fake-bulk-1');
+    expect(cat.bulks().map((b) => b.applied)).toEqual([true, false]);
+    cat.set('B-2', { name: 'Edited' });
+    cat.failItems(['A-1']);
+    cat.openPolls = 5;
+
+    cat.reset();
+    expect(cat.bulks()).toEqual([]);
+    expect(cat.submissions).toEqual([]);
+    expect(cat.product('A-1')?.name).toBe('One');
+    expect(cat.product('B-2')?.name).toBe('Two');
+    expect(cat.openPolls).toBe(0);
+    expect((await status(base, 'fake-bulk-2')).status).toBe(404);
+
+    // the same routes keep answering, and the batch counter starts over
+    const r = await call(`${base}/async/bulk/V1/products`, 'POST', bulk([{ sku: 'A-1', name: 'Again', status: 1 }]));
+    expect((JSON.parse(r.body) as { bulk_uuid: string }).bulk_uuid).toBe('fake-bulk-1');
+    expect((await status(base, 'fake-bulk-1')).ops.map((o) => o.status)).toEqual([1]);
+    expect(cat.product('A-1')?.name).toBe('Again');
   });
 
   it('routeMatch handles paths an exact route does not', async () => {

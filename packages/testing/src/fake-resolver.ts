@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { CatalogEntry, HttpMethod, SpecIssue, TemplateValue, ToolListOutcome, UpstreamResolver } from '@aiops/connector-sdk';
 
 type ResolveInput = Parameters<UpstreamResolver['resolveSpec']>[0];

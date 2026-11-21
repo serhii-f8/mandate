@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 // Code module of the code fixture preset (OPS-5, OPS-6). Plain ESM with no imports: a preset's
 // code runs from a directory outside the app's node_modules, so it uses only its own files.
 // The JSDoc types name the connector SDK as types only.

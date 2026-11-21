@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 import type { ChangeSetRecord } from './model.js';
 import { OPAQUE_TARGET_ID } from './opaque.js';
 import type { BatchContext, BatchSubmission, ChangeWriter, ItemOutcome, OpaqueCaller, OpaqueCallOutcome } from './ports.js';

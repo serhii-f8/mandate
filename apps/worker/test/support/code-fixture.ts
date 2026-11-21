@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The AI Operations Layer Authors
 /**
  * The code fixture preset of `@aiops/testing` as the worker loads it (OPS-5, OPS-6): connection
  * `items` at a fake upstream served by `installFakeItems`, a fake bearer token, and the role
