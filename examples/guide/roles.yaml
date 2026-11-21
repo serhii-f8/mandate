@@ -1,0 +1,51 @@
+# Roles of the guide (docs/guide/roles-and-approvals.md): the development roles plus
+# content_editor. The group `content` now maps to content_editor only. content_manager stays
+# defined but no group maps to it, so `config explain` for the group `content` has one answer.
+version: 1
+roles:
+  # Edits the content of the acme products. Changes to more than two products need one approval
+  # by a content lead.
+  - id: content_editor
+    description: Edits the content of acme products.
+    grants:
+      - operation: catalog.search_products
+        id: acme-search
+        scope: { brand: [acme] }
+        deny_fields: [cost]
+      - operation: catalog.update_content
+        id: acme-content
+        scope: { brand: [acme] }
+        deny_fields: [cost]
+    approval: { required: above_threshold, record_threshold: 2, steps: [{ role: content_lead }] }
+  - id: content_manager
+    description: Edits product content.
+    grants:
+      - operation: catalog.search_products
+        id: own-brands
+        scope: { brand: [acme, globex, umbrella] }
+        deny_fields: [cost]
+      - operation: catalog.update_content
+        id: own-brands-content
+        scope: { brand: [acme, globex, umbrella] }
+        deny_fields: [cost]
+    approval: { required: above_threshold, record_threshold: 25, steps: [{ role: content_lead }] }
+  - id: support_agent
+    grants:
+      - operation: support.lookup_order
+  - id: integration_admin
+    description: Enters and rotates upstream credentials on the trusted credential page (SEC-1, UI-5).
+    grants: []
+    manage_credentials: [magento-integration]
+    view_audit: true
+  - id: content_lead
+    description: Approves content changes (APR-1).
+    grants: []
+role_mapping:
+  - group: content
+    roles: [content_editor]
+  - group: support
+    roles: [support_agent]
+  - group: admins
+    roles: [integration_admin]
+  - group: content-leads
+    roles: [content_lead]

@@ -1,0 +1,20 @@
+# Compose override of the guide (docs/guide/connecting-magento.md): the api and the worker join the
+# Magento sandbox's external network (alias `magento-sandbox`) and read the reader's working copy of
+# the configuration, `my-config/` at the repository root, instead of deploy/config. Enabled through
+# `COMPOSE_FILE=compose.yaml:deploy/sandbox/magento/attach.compose.yaml` in `.env`. Relative paths
+# resolve against the project directory, the repository root. Development only.
+services:
+  api:
+    networks: [default, sandbox]
+    volumes:
+      - ./my-config:/etc/aiops/config:ro
+  # Preparation and execution run in the worker (ADR 0027): it reads and writes the sandbox.
+  worker:
+    networks: [default, sandbox]
+    volumes:
+      - ./my-config:/etc/aiops/config:ro
+
+networks:
+  sandbox:
+    external: true
+    name: aiops-sandbox
