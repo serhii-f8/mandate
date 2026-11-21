@@ -166,3 +166,36 @@ describe('NFR-18 release notes', () => {
     expect(missing).toEqual([]);
   });
 });
+
+describe('NFR-13 backup and restore of PostgreSQL, including the Temporal databases', () => {
+  const created = [...read('deploy/postgres/init.sh').matchAll(/^CREATE DATABASE (\w+) OWNER/gm)].map((m) => m[1] ?? '');
+  const listed = (script: string): string[] => {
+    const body = /^DATABASES=\(([^)]*)\)$/m.exec(read(script))?.[1] ?? '';
+    return body.trim().split(/\s+/).map((e) => e.split(':')[0] ?? '');
+  };
+
+  it('NFR-13 init.sh creates the Temporal databases the scripts must cover', () => {
+    expect(created).toEqual(expect.arrayContaining(['aiops', 'temporal', 'temporal_visibility', 'keycloak']));
+  });
+
+  it('NFR-13 backup.sh dumps every database init.sh creates', () => {
+    expect(listed('deploy/backup/backup.sh').sort()).toEqual([...created].sort());
+  });
+
+  it('NFR-13 restore.sh restores every database init.sh creates', () => {
+    expect(listed('deploy/backup/restore.sh').sort()).toEqual([...created].sort());
+  });
+
+  it('NFR-13 the backup guide documents both scripts, every database and the keys kept outside the backup', () => {
+    const page = read('docs/guide/backup-and-restore.md');
+    const missing = ['deploy/backup/backup.sh', 'deploy/backup/restore.sh', ...created.map((d) => `\`${d}\``), 'AIOPS_TEMPORAL_KEYS', 'AIOPS_MASTER_KEYS'].filter(
+      (t) => !page.includes(t),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('NFR-13 the backup guide carries the doc-test backup section the acceptance run executes', () => {
+    const blocks = extract([{ path: 'docs/guide/backup-and-restore.md', text: read('docs/guide/backup-and-restore.md') }], ['backup']);
+    expect((blocks.get('backup') ?? []).length).toBeGreaterThan(0);
+  });
+});
