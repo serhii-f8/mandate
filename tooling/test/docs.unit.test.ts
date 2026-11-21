@@ -4,6 +4,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { extract } from '../doc-test/extract.mjs';
+import { PAGES, SECTIONS } from '../doc-test/run.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (p: string): string => readFileSync(join(root, p), 'utf8');
@@ -140,8 +142,19 @@ describe('NFR-9 public docs', () => {
     expect(missing).toEqual([]);
   });
 
-  // Task 10 makes this real (R9): parse the section map of phase-10.sh.
-  it.todo('NFR-9 every doc-test section named by phase-10.sh exists');
+  // R9: the acceptance script maps runner sections to checks in SECTION_CHECKS=( section:check ... ).
+  it('NFR-9 every doc-test section named by phase-10.sh exists', () => {
+    const script = read('scripts/acceptance/phase-10.sh');
+    const body = /^SECTION_CHECKS=\(\n([\s\S]*?)^\)$/m.exec(script)?.[1] ?? '';
+    const map = [...body.matchAll(/^\s+([a-z]+):(docs-[a-z-]+)\s*$/gm)].map((m) => ({ section: m[1] ?? '', check: m[2] ?? '' }));
+    expect(map.map((e) => e.section)).toEqual([...SECTIONS]);
+    const blocks = extract(
+      PAGES.map((p) => ({ path: `docs/guide/${p}`, text: read(`docs/guide/${p}`) })),
+      SECTIONS,
+    );
+    const empty = map.filter((e) => (blocks.get(e.section) ?? []).length === 0).map((e) => e.section);
+    expect(empty).toEqual([]);
+  });
 });
 
 describe('NFR-18 release notes', () => {
