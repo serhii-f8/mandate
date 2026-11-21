@@ -3,16 +3,22 @@
 // Copyright 2026 The AI Operations Layer Authors
 // Public API report generator (NFR-18).
 // Usage: node tooling/versioning/api-report.mjs <subject> [--check]
-// Subjects: connector-sdk. Task 4 adds `config` by registering it in SUBJECTS.
+// Subjects: connector-sdk, config.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { checkReport, sdkReport } from './api-report-lib.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { checkReport, configReport, sdkReport } from './api-report-lib.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function readVersion(pkgDir) {
   return JSON.parse(readFileSync(join(root, pkgDir, 'package.json'), 'utf8')).version;
+}
+
+async function loadConfigDist() {
+  const dist = join(root, 'packages/config/dist/index.js');
+  if (!existsSync(dist)) throw new Error('packages/config/dist is missing: run `pnpm --filter @aiops/config build`');
+  return import(pathToFileURL(dist).href);
 }
 
 /** Each subject: where the report lives, the package version it must carry, and how to build it. */
@@ -28,17 +34,23 @@ const SUBJECTS = {
       return sdkReport(dist, version);
     },
   },
+  config: {
+    file: join(root, 'packages/config/schema/aiops-config.v1.json'),
+    // tooling has no @aiops/config dependency: the built package is imported by path.
+    version: async () => (await loadConfigDist()).CONFIG_SCHEMA_VERSION,
+    generate: async (version) => configReport((await loadConfigDist()).configDocumentSchema, version),
+  },
 };
 
-function main(argv) {
+async function main(argv) {
   const [subject, ...flags] = argv;
   const spec = SUBJECTS[subject];
   if (!spec) {
     console.error(`usage: api-report.mjs <${Object.keys(SUBJECTS).join('|')}> [--check]`);
     return 2;
   }
-  const version = spec.version();
-  const fresh = spec.generate(version);
+  const version = await spec.version();
+  const fresh = await spec.generate(version);
   if (!flags.includes('--check')) {
     writeFileSync(spec.file, fresh);
     console.log(`wrote ${spec.file}`);
@@ -54,4 +66,4 @@ function main(argv) {
   return 0;
 }
 
-process.exitCode = main(process.argv.slice(2));
+process.exitCode = await main(process.argv.slice(2));

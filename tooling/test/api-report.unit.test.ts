@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { checkReport, diffReport, headerVersion, sdkReport } from '../versioning/api-report-lib.mjs';
+import { z } from 'zod';
+import { checkReport, configReport, diffReport, headerVersion, sdkReport } from '../versioning/api-report-lib.mjs';
 
 const cli = fileURLToPath(new URL('../versioning/api-report.mjs', import.meta.url));
 
@@ -69,5 +70,72 @@ describe('NFR-18 api report', () => {
 
   it('CLI rejects an unknown subject', () => {
     expect(spawnSync('node', [cli, 'nope'], { encoding: 'utf8' }).status).toBe(2);
+  });
+});
+
+describe('NFR-18 config schema report', () => {
+  const schema = z.strictObject({
+    zeta: z.string(),
+    alpha: z.object({ y: z.number().default(1), b: z.string() }),
+    refined: z.string().refine((v) => v.length > 1),
+    shaped: z.unknown().transform((v) => v),
+  });
+  const report = () => configReport(schema, '1.2.3');
+  interface Doc {
+    $id: string;
+    'x-aiops-schema-version': string;
+    additionalProperties: boolean;
+    properties: Record<string, { type?: string; required?: string[] }>;
+  }
+  const parsed = () => JSON.parse(report()) as Doc;
+
+  it('keys are sorted recursively', () => {
+    const keys = (v: unknown): string[] =>
+      v && typeof v === 'object' ? Object.keys(v).flatMap((k) => [k, ...keys((v as Record<string, unknown>)[k])]) : [];
+    const walk = (v: unknown): void => {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const ks = Object.keys(v);
+        expect(ks).toEqual([...ks].sort());
+        Object.values(v).forEach(walk);
+      }
+    };
+    walk(JSON.parse(report()));
+    expect(keys(JSON.parse(report())).length).toBeGreaterThan(5);
+    expect(report().endsWith('}\n')).toBe(true);
+  });
+
+  it('sets $id and x-aiops-schema-version', () => {
+    const j = parsed();
+    expect(j.$id).toBe('https://aiops.invalid/schema/aiops-config.v1.json');
+    expect(j['x-aiops-schema-version']).toBe('1.2.3');
+    expect(headerVersion(report())).toBe('1.2.3');
+  });
+
+  it('a strict object yields additionalProperties false', () => {
+    expect(parsed().additionalProperties).toBe(false);
+  });
+
+  it('a refinement or transform does not throw and is exported as unconstrained', () => {
+    const j = parsed();
+    expect(j.properties.shaped).toEqual({});
+    expect(j.properties.refined?.type).toBe('string');
+  });
+
+  it('describes the file as written: defaulted keys are not required', () => {
+    expect(parsed().properties.alpha?.required).toEqual(['b']);
+  });
+
+  it('--check detects staleness and a version mismatch', () => {
+    const fresh = report();
+    expect(checkReport(fresh, fresh, '1.2.3')).toEqual([]);
+    const stale = checkReport(fresh.replace('"string"', '"number"'), fresh, '1.2.3');
+    expect(stale).toHaveLength(1);
+    expect(stale[0]).toMatch(/report is stale/);
+    expect(checkReport(fresh, fresh, '2.0.0')[0]).toMatch(/header version 1\.2\.3 differs from package\.json 2\.0\.0/);
+  });
+
+  it('CLI --check passes on the committed schema file', () => {
+    const r = spawnSync('node', [cli, 'config', '--check'], { encoding: 'utf8' });
+    expect(r.status, r.stderr).toBe(0);
   });
 });

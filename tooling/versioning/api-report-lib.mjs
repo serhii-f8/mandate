@@ -3,6 +3,7 @@
 // Public API reports (NFR-18). Reads built declaration files; no process access beyond the file system.
 import { existsSync, readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
+import { toJSONSchema } from 'zod';
 
 /** Header line of the connector SDK report; `versionOf` in the semver gate reads it back. */
 export function sdkHeader(version) {
@@ -110,10 +111,36 @@ export function diffReport(a, b) {
   return `${out.join('\n')}\n`;
 }
 
-/** Version carried by the header line of a report (`sdk` kind); undefined when absent. */
+/** Version carried by a report: the SDK header line or the config schema's version key; undefined when absent. */
 export function headerVersion(report) {
-  const m = /^\/\/ @aiops\/connector-sdk (\S+) public API report/m.exec(report);
+  const m =
+    /^\/\/ @aiops\/connector-sdk (\S+) public API report/m.exec(report) ??
+    /^\s*"x-aiops-schema-version": "([^"]+)"/m.exec(report);
   return m ? m[1] : undefined;
+}
+
+const CONFIG_SCHEMA_ID = 'https://aiops.invalid/schema/aiops-config.v1.json';
+
+function sortKeys(value) {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((k) => [k, sortKeys(value[k])]),
+    );
+  }
+  return value;
+}
+
+/**
+ * JSON Schema of the configuration file as written (`io: 'input'`: defaulted keys optional;
+ * refinements and transforms export as unconstrained), pretty-printed with sorted keys.
+ */
+export function configReport(schema, version) {
+  const json = toJSONSchema(schema, { io: 'input', unrepresentable: 'any' });
+  const doc = sortKeys({ ...json, $id: CONFIG_SCHEMA_ID, 'x-aiops-schema-version': version });
+  return `${JSON.stringify(doc, null, 2)}\n`;
 }
 
 
