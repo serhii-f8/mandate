@@ -5,7 +5,10 @@ walkthrough you use the Mage-OS sandbox that ships with the repository: a local 
 small brands of products. At the end the connection test passes and the `catalog.*` operations can
 reach the shop.
 
-Run every command from the repository root, with the stack from the previous page running.
+Run every command from the repository root, with the stack from the previous page running. The
+commands on these pages read the ports from your shell (`${AIOPS_API_PORT:-8400}` and so on), while
+Compose reads them from `.env`: if you changed a port in `.env`, export it in your shell as well, for
+example `export AIOPS_API_PORT=8401`.
 
 ## Start the Magento sandbox
 
@@ -55,11 +58,12 @@ The development configuration in `deploy/config/` describes a connection called 
 uses the Magento catalog preset, but its `base_url` is a placeholder
 (`https://shop.example.test/rest/all`), and the `api` and `worker` containers are not on the
 sandbox network. Make a working copy of the configuration; you edit this copy from now on, and the
-next page adds a role to it. `my-config/` is git-ignored.
+next page adds a role to it. `my-config/` is git-ignored; if it already exists from an earlier run,
+the command keeps it.
 
 <!-- doc-test: attach -->
 ```bash
-cp -R deploy/config my-config
+test -d my-config || cp -R deploy/config my-config
 ```
 
 Replace the connection file in the copy. Only `base_url` changes: inside the sandbox network the
@@ -91,11 +95,17 @@ Tell Compose to add the sandbox override
 [`deploy/sandbox/magento/attach.compose.yaml`](../../deploy/sandbox/magento/attach.compose.yaml).
 It puts `api` and `worker` on the sandbox network and mounts `my-config/` in place of
 `deploy/config/`. Compose reads `COMPOSE_FILE` from `.env`, so every later `docker compose` command
-uses the override too. The command adds the line only once.
+uses the override too. The commands add the line only once, on a line of its own, and then check
+that Compose really uses the override.
+
+If you already set `COMPOSE_FILE`, in `.env` or in your shell, the line is not added: extend your
+value by hand with `:deploy/sandbox/magento/attach.compose.yaml` (keeping `compose.yaml` first).
+The check below stops with a message until the override is in effect.
 
 <!-- doc-test: attach -->
 ```bash
-grep -qs '^COMPOSE_FILE=' .env || printf 'COMPOSE_FILE=compose.yaml:deploy/sandbox/magento/attach.compose.yaml\n' >> .env
+grep -qs '^COMPOSE_FILE=' .env || printf '\nCOMPOSE_FILE=compose.yaml:deploy/sandbox/magento/attach.compose.yaml\n' >> .env
+docker compose config | grep '/my-config$' >/dev/null || { echo "Compose does not use deploy/sandbox/magento/attach.compose.yaml: check COMPOSE_FILE in .env and in your shell" >&2; false; }
 docker compose up -d --wait
 ```
 

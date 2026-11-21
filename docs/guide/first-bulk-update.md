@@ -77,7 +77,7 @@ for i in $(seq 1 60); do
   sleep 2
 done
 node -p 'const c = JSON.parse(process.argv[1]).structuredContent.changeset; JSON.stringify({ status: c.status, stats: c.stats, hash: c.hash })' "$CHANGESET"
-test "$STATUS" = prepared
+test "$STATUS" = prepared || { echo "change-set $CHANGESET_ID is $STATUS, not prepared" >&2; false; }
 export CHANGESET_HASH="$(node -p 'JSON.parse(process.argv[1]).structuredContent.changeset.hash' "$CHANGESET")"
 ```
 
@@ -136,7 +136,7 @@ for i in $(seq 1 120); do
   sleep 2
 done
 echo "$STATUS"
-test "$STATUS" = completed
+test "$STATUS" = completed || { echo "change-set $CHANGESET_ID ended the wait with status $STATUS, not completed" >&2; false; }
 ```
 
 ## Check the result in Magento
