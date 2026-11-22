@@ -1,8 +1,6 @@
 # Spike 2 — Authorization with Keycloak
 
 Throwaway experiment for Phase 0 (de-risks AUTH-1, AUTH-2, AUTH-3; open item 3).
-Finding: [docs/reports/phase-0-spike-2-auth-keycloak.md](../../docs/reports/phase-0-spike-2-auth-keycloak.md).
-Decision: [docs/decisions/0004-authorization-and-client-registration.md](../../docs/decisions/0004-authorization-and-client-registration.md).
 
 ## What is here
 

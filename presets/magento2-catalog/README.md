@@ -1,7 +1,6 @@
 # @aiops/magento2-catalog
 
-Magento 2 catalog preset 1.0.0 (CONN-8, OPS-2, OPS-4; designs `docs/design/phase-3-connections-read-upstream.md` §6
-and `docs/design/phase-4-changesets.md` §8). Three read operations on `GET /V1/products`, one write
+Magento 2 catalog preset 1.0.0 (CONN-8, OPS-2, OPS-4). Three read operations on `GET /V1/products`, one write
 operation with a change-set manifest, a vendored filtered spec, a default connection test and bearer auth.
 
 ## Use

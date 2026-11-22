@@ -92,7 +92,7 @@ manual_steps() {
 # Newcomer walkthrough (ADR 0059; SPEC section 7): a fresh agent or a person in a clean clone reads
 #   only README.md, docs/guide/ and examples/ as rendered, follows installation.md ->
 #   connecting-magento.md -> roles-and-approvals.md -> first-bulk-update.md, and reports pass or fail,
-#   the time and every unclear place. The prompt is in docs/reports/phase-10.md, section 3.
+#   the time and every unclear place. 
 EOF
 }
 

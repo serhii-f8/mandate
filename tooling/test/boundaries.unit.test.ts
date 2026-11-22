@@ -40,7 +40,7 @@ async function restrictedImportErrors(filePath: string, specifier: string): Prom
   return ruleErrors(filePath, code, 'no-restricted-imports');
 }
 
-describe('package boundaries (CLAUDE.md engineering conventions)', () => {
+describe('package boundaries (CONTRIBUTING.md repository layout and boundaries)', () => {
   describe('packages/core is free of frameworks, drivers and adapters', () => {
     it.each([
       '@nestjs/common',

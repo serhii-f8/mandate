@@ -515,7 +515,7 @@ cat <<'MANUAL'
 #      `aiops-mcp` (as in manual check M1).
 #    - Run the same flow with UMBRELLA-0411..0414 and expect the same results.
 # 4. Record pass or fail per client, with the date, client version and what was observed, in
-#    docs/progress-history.md under "Phase 7 — optional client checks".
+#    the project notes under "Phase 7 — optional client checks".
 # 5. Stop the tunnels and `docker compose -f compose.yaml -f scripts/acceptance/phase-7.compose.yaml down`.
 MANUAL
 

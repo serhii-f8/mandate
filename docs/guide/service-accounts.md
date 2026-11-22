@@ -96,10 +96,3 @@ before anything is written. The account itself:
 An approval rule of `required: never` lets a service account's writes run without a human. That is
 an explicit choice you make on the role, so make it only for changes you would accept unreviewed.
 The loader refuses a `write_opaque` grant without approval steps unless you set `never`.
-
-## Background
-
-- [ADR 0050](../decisions/0050-mcp-upstream-opaque-presets-service-accounts.md): why service
-  accounts are identified by `azp` and mapped to one role.
-- [ADR 0051](../decisions/0051-phase-9-plan-rulings.md): the `service:<client_id>` subject and the
-  client credentials rule.

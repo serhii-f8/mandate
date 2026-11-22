@@ -1,8 +1,8 @@
 # Contributing
 
-Thank you for helping. This guide is the short version of how the repository works. The product is
-specified in [docs/SPEC.md](docs/SPEC.md); requirement IDs such as `POL-3` or `NFR-18` come from its
-sections 5 and 6. Be kind: see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Thank you for helping. This guide is the short version of how the repository works. Identifiers such as
+`POL-3` or `NFR-18` in test names, comments and commit messages are requirement IDs of the project's
+specification; the behaviour behind them is described in the [guide](docs/guide/README.md). Be kind: see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Development setup
 
@@ -89,10 +89,8 @@ in `.env.example` with obviously fake values.
 ## Temporal workflow versioning
 
 This is binding for every change under `apps/worker/src/workflows/`, `packages/temporal/src/contract.ts`,
-activity signatures and `apps/worker/test/workflow-histories/`. Background: ADR 0006
-([docs/decisions/0006-temporal-workflow-versioning.md](docs/decisions/0006-temporal-workflow-versioning.md))
-and [docs/conventions/temporal-workflows.md](docs/conventions/temporal-workflows.md), which is the
-source of this section.
+activity signatures and `apps/worker/test/workflow-histories/`. The source of this section is
+[docs/conventions/temporal-workflows.md](docs/conventions/temporal-workflows.md).
 
 - Workflow code is deterministic: no I/O, no wall-clock time, no randomness, no environment access, no
   Node built-ins, no imports from NestJS, Drizzle or adapters. Everything non-deterministic happens in

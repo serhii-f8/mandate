@@ -5,8 +5,6 @@ stateless Streamable HTTP endpoint at protocol `2026-07-28`, with a tool list
 per authenticated user and a long-running call exposed through the MCP Tasks
 extension, across two processes that share nothing but a task store?
 
-Finding: [docs/reports/phase-0-spike-1-mcp-sdk.md](../../docs/reports/phase-0-spike-1-mcp-sdk.md).
-Decision: [docs/decisions/0003-mcp-sdk-and-transport.md](../../docs/decisions/0003-mcp-sdk-and-transport.md).
 
 ## Prerequisites
 

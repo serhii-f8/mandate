@@ -15,7 +15,7 @@ function manifest(path: string): Manifest {
 /** Runtime dependencies `packages/core` may have. Adding one is a reviewed decision. */
 const CORE_ALLOWED_DEPENDENCIES: readonly string[] = [];
 
-describe('package manifests (CLAUDE.md package boundaries)', () => {
+describe('package manifests (CONTRIBUTING.md package boundaries)', () => {
   it('packages/core declares no runtime dependency outside the allow list', () => {
     const core = manifest('packages/core/package.json');
     const declared = [...Object.keys(core.dependencies ?? {}), ...Object.keys(core.peerDependencies ?? {})];

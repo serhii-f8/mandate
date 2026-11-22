@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The AI Operations Layer Authors
-# Phase 2 acceptance (SPEC section 7, PROGRESS.md):
+# Phase 2 acceptance (specification section 7):
 #   1. two users in different groups see different tool lists
 #   2. an out-of-scope call is denied
 #   3. the denial is audited with the matching rule

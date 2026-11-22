@@ -119,9 +119,3 @@ upgrade, see [Upgrading](upgrading.md).
 
 Database migrations are forward-only and run when the `api` and `worker` start. Never edit one. To go
 back, restore a backup (see [Backup and restore](backup-and-restore.md)).
-
-## Background
-
-- [ADR 0053](../decisions/0053-release-readiness.md): why the reports and the gate exist, and what
-  1.0.0 covers.
-- [ADR 0006](../decisions/0006-temporal-workflow-versioning.md): the workflow versioning convention.

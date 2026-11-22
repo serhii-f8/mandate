@@ -1,6 +1,6 @@
 # Spike 5 - Magento 2 REST (Mage-OS sandbox)
 
-Throwaway code. De-risks CONN-2, OPS-6, EXE-4, CS-7. Finding: `docs/reports/phase-0-spike-5-magento-rest.md`.
+Throwaway code. De-risks CONN-2, OPS-6, EXE-4, CS-7.
 
 ## Prerequisites
 

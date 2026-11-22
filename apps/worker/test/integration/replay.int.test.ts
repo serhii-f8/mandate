@@ -40,7 +40,7 @@ function converterFor(type: string): DataConverter | undefined {
 }
 
 /**
- * Required `changesetWorkflow` histories (CLAUDE.md fixture rule): parked at each wait after an
+ * Required `changesetWorkflow` histories (docs/conventions/temporal-workflows.md, fixture rule): parked at each wait after an
  * activity (the wake condition in `prepared` and in `pending_approval`, the prepare-retry pause, the
  * expire-retry pause), completed per code path (also after approval), failed, cancelled, rejected and
  * expired (also in `pending_approval`, and after a return and a resubmission), one per continue-as-new run.

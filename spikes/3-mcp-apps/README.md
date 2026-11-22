@@ -1,7 +1,6 @@
 # Spike 3 — MCP Apps
 
 Throwaway experiment for Phase 0 (open item 4; de-risks MCP-5, MCP-6, UI-1, UI-6).
-Finding: `docs/reports/phase-0-spike-3-mcp-apps.md`. Decision: `docs/decisions/0005-mcp-apps-widgets-and-fallback.md`.
 
 ## What is here
 

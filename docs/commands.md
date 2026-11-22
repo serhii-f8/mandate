@@ -1,7 +1,6 @@
 # Commands
 
-The full command reference, moved from CLAUDE.md (ADR 0033). CLAUDE.md keeps the everyday
-commands; keep this file current when a phase adds a command.
+The full command reference. Keep this file current when a change adds a command.
 
 Run from the repository root. pnpm comes from the `packageManager` field through
 corepack (`corepack enable` once); the user's global corepack cannot run pnpm 12
@@ -22,7 +21,7 @@ corepack (`corepack enable` once); the user's global corepack cannot run pnpm 12
 | End-to-end tests | `pnpm test:e2e` |
 | Single package / single test | `pnpm --filter @aiops/<pkg> test` (or `test:int`, `test:e2e`); one file: `cd <pkg> && pnpm exec vitest run --project <unit\|integration\|e2e> <path>` |
 | Full CI run locally | `bash scripts/ci.sh` |
-| Secret scan of the whole history (ADR 0061; needs Docker, run from a normal clone, not a worktree) | `bash scripts/secret-scan.sh` (gitleaks with `.gitleaks.toml`; exit 0: nothing found) |
+| Secret scan of the whole history (needs Docker, run from a normal clone, not a worktree) | `bash scripts/secret-scan.sh` (gitleaks with `.gitleaks.toml`; exit 0: nothing found) |
 | Phase 1 acceptance (fresh clone of HEAD, Compose) | `bash scripts/acceptance/phase-1.sh` |
 | Phase 2 acceptance (fresh clone of HEAD, Compose, real Keycloak logins) | `bash scripts/acceptance/phase-2.sh` |
 | Phase 3 acceptance (fresh clone of HEAD, Compose, Magento sandbox, page login, credential entry) | `bash scripts/acceptance/phase-3.sh` (brings the sandbox up and seeds it itself; not in CI: needs the sandbox) |

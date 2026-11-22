@@ -1,11 +1,7 @@
 # Temporal workflow conventions
 
 Binding for every change under `apps/worker/src/workflows/`, `packages/temporal/src/contract.ts`,
-activity signatures and `apps/worker/test/workflow-histories/`. Moved from CLAUDE.md unchanged
-(ADR 0033).
-
-Versioning convention from Phase 0 spike 4: [ADR 0006](../decisions/0006-temporal-workflow-versioning.md);
-full text with examples in [the finding](../reports/phase-0-spike-4-temporal.md).
+activity signatures and `apps/worker/test/workflow-histories/`.
 
 - Workflow code is deterministic: no I/O, no wall-clock time, no randomness, no
   environment access, no Node built-ins, no imports from NestJS, Drizzle or adapters.
@@ -46,7 +42,7 @@ full text with examples in [the finding](../reports/phase-0-spike-4-temporal.md)
   from the first merge on, the rules above apply (`changesetWorkflow` from Phase 5 on).
 - Worker Deployments with pinned workflows are not used (ADR 0006).
 - Never send signal or terminate input from the Temporal CLI or UI: the codec refuses
-  plaintext payloads and the workflow can no longer be replayed ([ADR 0027](../decisions/0027-execution-on-temporal.md) addendum).
+  plaintext payloads and the workflow can no longer be replayed (ADR 0027 addendum).
 - Payloads go through the encrypting data converter (SEC-4). Nothing sensitive in
   workflow history, search attributes or workflow IDs (SEC-3).
 - Large change-sets use child workflows or continue-as-new (EXE-9) and stream items in

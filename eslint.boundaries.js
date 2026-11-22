@@ -2,7 +2,7 @@
 // Copyright 2026 The AI Operations Layer Authors
 // @ts-check
 /**
- * Package-boundary rules (CLAUDE.md "Package boundaries", ADR 0010).
+ * Package-boundary rules (CONTRIBUTING.md "Repository layout and boundaries", ADR 0010).
  * Imported by eslint.config.js and exercised by tooling/test/boundaries.unit.test.ts,
  * which lints violating samples so a rule that stops matching fails the build.
  */
@@ -281,10 +281,10 @@ export const boundaryRules = [
         'error',
         {
           patterns: [
-            { regex: '^node:', message: 'Workflow code is deterministic: no Node built-ins (CLAUDE.md, ADR 0006).' },
+            { regex: '^node:', message: 'Workflow code is deterministic: no Node built-ins (docs/conventions/temporal-workflows.md, ADR 0006).' },
             {
               group: ['fs', 'fs/*', 'path', 'os', 'crypto', 'http', 'https', 'net', 'child_process', 'process', 'timers', 'worker_threads'],
-              message: 'Workflow code is deterministic: no Node built-ins (CLAUDE.md, ADR 0006).',
+              message: 'Workflow code is deterministic: no Node built-ins (docs/conventions/temporal-workflows.md, ADR 0006).',
             },
             { group: ['@nestjs/*', 'drizzle-orm', 'drizzle-orm/*', 'pg'], message: 'Workflow code does no I/O; use an activity.' },
             { regex: '^@temporalio/(?!workflow$|common$)', message: 'Workflow code may import only @temporalio/workflow and @temporalio/common.' },

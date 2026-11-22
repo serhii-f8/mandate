@@ -145,10 +145,9 @@ Contributions are welcome: new presets, adapters, documentation and fixes. Start
 
 Report vulnerabilities privately as described in the [security policy](SECURITY.md).
 
-## Background
+## Changelog
 
-- [Technical specification](docs/SPEC.md) and the [decision records](docs/decisions/README.md).
-- [Changelog](CHANGELOG.md).
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 

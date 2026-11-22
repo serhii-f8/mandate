@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The AI Operations Layer Authors
 /**
- * Process environment of `api` and `worker`, parsed at the boundary (CLAUDE.md:
+ * Process environment of `api` and `worker`, parsed at the boundary (CONTRIBUTING.md:
  * external input is parsed with a schema). Errors name the variable and the
  * reason, never the value, because values can be secrets (SEC-3).
  */
