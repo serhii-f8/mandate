@@ -121,6 +121,18 @@ function slowActivities(tuning: ActivityTuning): ChangesetActivities {
   });
 }
 
+/**
+ * PostgreSQL-only activities that must eventually happen but may take longer than the `db` proxy allows
+ * (`beginVerification` marks every written item): unlimited attempts, no heartbeat (EXE-12, NFR-2).
+ * Building a proxy emits no command.
+ */
+function stateActivities(tuning: ActivityTuning): ChangesetActivities {
+  return proxyActivities<ChangesetActivities>({
+    startToCloseTimeout: '5 minutes',
+    retry: { initialInterval: tuning.retryInitialMs, maximumInterval: tuning.retryMaxMs },
+  });
+}
+
 /** The batch activities of execution and rollback (EXE-3, NFR-2). Building a proxy emits no command. */
 function batchActivities(tuning: ActivityTuning): ChangesetActivities {
   return proxyActivities<ChangesetActivities>({
@@ -318,9 +330,11 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
     if (!begin.ok) return finish(begin.outcome);
     inPlan = begin.inPlan === true;
     progress = { status: 'executing', total: begin.total, done: begin.done, failed: begin.failed, skipped: begin.skipped };
-    // A run continued during verification (only new histories carry `verificationRound`) has
-    // written everything: a stored cancel stops its verification instead (EXE-7).
-    const verifying = input.resume?.verificationRound !== undefined;
+    // A run continued during verification (only new histories carry `verificationRound`), or any run
+    // of a change-set whose verification began (a reset, a fresh start: `verificationBegun`, absent in
+    // older histories), has written everything: a stored cancel stops its verification instead (EXE-7).
+    const continuedVerification = input.resume?.verificationRound !== undefined;
+    const verifying = continuedVerification || begin.verificationBegun === true;
     if (begin.cancelRequested && !verifying) return finish('cancelled');
 
     let batchNo = input.resume?.nextBatch ?? 0;
@@ -328,8 +342,9 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
 
     /**
      * EXE-12: the batch loop ended with nothing left. With `verify_after` (behind VERIFY_PATCH),
-     * look at the written items until none is pending, the stored deadline passed or a cancel stops
-     * it, waiting on workflow timers between rounds; then finish `done` (the items give the status).
+     * look at the written items until none is pending, the stored deadline passed (tested after every
+     * look) or a cancel stops it, waiting on workflow timers between rounds; then finish `done` (the
+     * items give the status).
      * Continues as new after MAX_LOOKS_PER_RUN looks; the next run comes back here through
      * `inspect`, `beginExecution` and one empty `executeBatch`, and `beginVerification` answers the
      * stored schedule.
@@ -339,13 +354,9 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
       // have the field). A continued verification run finishes even if the operation lost it since.
       if ((begin.verifyAfter !== true && !verifying) || !patched(VERIFY_PATCH)) return finish('done');
       // `woken` is not reset here: a wake during the batches (a cancel) ends the first wait at once.
-      let v: BeginVerificationResult;
-      try {
-        v = await slow.beginVerification(id);
-      } catch (e) {
-        if (e instanceof ActivityFailure) return finish('executor_error');
-        throw e;
-      }
+      // Unlimited attempts: a failure here must not end a fully written change-set failed, and a
+      // verification that never began would let it end completed unverified (NFR-2).
+      const v: BeginVerificationResult = await stateActivities(s.tuning).beginVerification(id);
       if (!v.ok) return finish('done');
       const schedule = v;
       let round = input.resume?.verificationRound ?? v.round + 1;
@@ -355,7 +366,8 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
         const left = untilMs - Date.now(); // workflow time
         if (left > 0) await condition(() => woken, left);
       };
-      if (v.pending > 0 && !verifying) await wait(v.firstAtMs);
+      // A continued run already waited; a fresh run with a stored cancel looks at once.
+      if (v.pending > 0 && !continuedVerification && !begin.cancelRequested) await wait(v.firstAtMs);
       for (;;) {
         // Reset before the look: a wake that arrives while it runs ends the next wait at once.
         woken = false;
@@ -377,12 +389,14 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
           await db.finishVerification(id, 'done');
           return finish('done');
         }
-        const roundOver = r.left === 0;
-        if (roundOver && Date.now() >= schedule.untilMs) {
+        // After every look (workflow time), not only at the end of a round: a round of many chunks
+        // must not hold the change-set `executing` long past its deadline. Items never looked at
+        // end `verify_timeout`.
+        if (Date.now() >= schedule.untilMs) {
           await db.finishVerification(id, 'timeout');
           return finish('done');
         }
-        if (roundOver) {
+        if (r.left === 0) {
           round += 1;
           await wait(Math.min(Date.now() + schedule.everyMs, schedule.untilMs));
           looks += 1;

@@ -557,6 +557,20 @@ describe('change-set activities', () => {
       expect(plain).not.toHaveProperty('verifyAfter');
     });
 
+    it('EXE-12 EXE-7 beginExecution answers verificationBegun only once verification began', async () => {
+      const cs = await written();
+      const a = activities({ configuration: verifying() });
+      // Written, verification not begun: the field is absent.
+      expect(await attempt(1, () => a.beginExecution(cs.id, { verified: true }))).not.toHaveProperty('verificationBegun');
+      await attempt(1, () => a.beginVerification(cs.id));
+      await expect(attempt(1, () => a.beginExecution(cs.id, { verified: true }))).resolves.toMatchObject({ ok: true, verificationBegun: true });
+      // Finished but still executing (finishExecution not yet run): every write happened, still verification's.
+      await attempt(1, () => a.finishVerification(cs.id, 'timeout'));
+      await expect(attempt(1, () => a.beginExecution(cs.id, { verified: true }))).resolves.toMatchObject({ ok: true, verificationBegun: true });
+      // Without verify_after on the operation, as long as the change-set's verification began.
+      await expect(attempt(1, () => activities().beginExecution(cs.id, { verified: true }))).resolves.toMatchObject({ verificationBegun: true });
+    });
+
     it('EXE-12 NFR-2 beginVerification stores the schedule once and answers it again later', async () => {
       const cs = await written();
       const first = await attempt(1, () => activities({ configuration: verifying(), now: () => new Date(T0) }).beginVerification(cs.id));

@@ -217,6 +217,58 @@ describe('EXE-12 verify-after in changesetWorkflow', () => {
     expect((await load(cs.id)).stats.verification).toEqual({ pending: 0, confirmed: 60, unconfirmed: 0 });
   }, 120_000);
 
+  it('EXE-12 the deadline ends a round of many chunks early; items never looked at read verify_timeout', async () => {
+    // Chunks of one item. The second look is held until the stored deadline has passed, so the
+    // deadline falls inside the first round: the look after it must be the last.
+    const inner = new LiveFromReader(Infinity);
+    let looks = 0;
+    const target: { id?: string } = {};
+    const reader = {
+      async read(operationId: string, args: Readonly<Record<string, unknown>>) {
+        looks += 1;
+        if (looks === 2 && target.id !== undefined) {
+          const until = (await load(target.id)).verificationUntil;
+          if (until === undefined) throw new Error('verification not begun');
+          await expect.poll(() => Date.now() > until.getTime() + 500, { timeout: 30_000, interval: 250 }).toBe(true);
+        }
+        return inner.read(operationId, args);
+      },
+    };
+    const { id } = await createPrepared(infra.repository, 6, { execute: {} });
+    target.id = id;
+    await withWorker({ reader, configuration: verifying({ afterSeconds: 0, everySeconds: 10, timeoutSeconds: 10 }, { batchSize: 1 }) }, async (worker) => {
+      const handle = await signalWithStart(worker, id);
+      await expect(handle.result()).resolves.toEqual({ status: 'completed_with_errors' });
+      expect(activities(await handle.fetchHistory()).filter((a) => a === 'verifyBatch')).toHaveLength(2);
+    });
+    expect(looks).toBe(2);
+    expect(await verificationOf(id)).toEqual([
+      ['t-0001', 'written', 'unconfirmed', VERIFY_CODE],
+      ['t-0002', 'written', 'unconfirmed', VERIFY_CODE],
+      ['t-0003', 'written', 'unconfirmed', 'verify_timeout'],
+      ['t-0004', 'written', 'unconfirmed', 'verify_timeout'],
+      ['t-0005', 'written', 'unconfirmed', 'verify_timeout'],
+      ['t-0006', 'written', 'unconfirmed', 'verify_timeout'],
+    ]);
+  }, 60_000);
+
+  it('EXE-12 NFR-2 beginVerification failing on infrastructure is retried, not an executor error', async () => {
+    let failures = 6; // more than PREPARE_MAX_ATTEMPTS: a bounded proxy would give up
+    const spy = (activity: string): void => {
+      if (activity === 'beginVerification' && failures > 0) {
+        failures -= 1;
+        throw new Error('database failover');
+      }
+    };
+    const cs = await createPrepared(infra.repository, 2, { execute: {} });
+    await withWorker({ reader: new LiveFromReader(1), configuration: verifying(TIMING), spy }, async (worker) => {
+      const handle = await signalWithStart(worker, cs.id);
+      await expect(handle.result()).resolves.toEqual({ status: 'completed' });
+    });
+    expect(failures).toBe(0);
+    expect((await load(cs.id)).stats.verification).toEqual({ pending: 0, confirmed: 2, unconfirmed: 0 });
+  }, 60_000);
+
   it('EXE-12 EXE-10 an operation without verify_after records no verify marker and no verification activity', async () => {
     const cs = await createPrepared(infra.repository, 3, { execute: {} });
     await withWorker({}, async (worker) => {
@@ -260,6 +312,22 @@ describe('EXE-12 verify-after in changesetWorkflow', () => {
         ['t-0001', 'written', 'unconfirmed', 'verify_cancelled'],
         ['t-0002', 'written', 'unconfirmed', 'verify_cancelled'],
       ]);
+    }, 60_000);
+
+    it('EXE-12 EXE-7 a fresh run (input { changesetId } only) after verification began: a stored cancel ends verification, not execution', async () => {
+      const id = await begunThenStopped({ afterSeconds: 600, everySeconds: 10, timeoutSeconds: 600 }, 0);
+      await infra.repository.requestCancel(id, { actor: 'bob', correlationId: 'corr-cancel', requestedAt: new Date() });
+      // As a workflow reset or a new start does: no resume state in the input.
+      await withWorker({ configuration: verifying(TIMING) }, async (worker) => {
+        const handle = await signalWithStart(worker, id);
+        await expect(handle.result()).resolves.toEqual({ status: 'completed_with_errors' });
+      });
+      expect(await verificationOf(id)).toEqual([
+        ['t-0001', 'written', 'unconfirmed', 'verify_cancelled'],
+        ['t-0002', 'written', 'unconfirmed', 'verify_cancelled'],
+      ]);
+      const events = (await auditEventsOf(infra.database, id)).filter((e) => e.action === 'changeset.verification');
+      expect(events.map((e) => [e.actor, e.correlationId, e.details.end])).toEqual([['bob', 'corr-cancel', 'cancelled']]);
     }, 60_000);
 
     it('EXE-12 a verification that began is finished at its stored deadline after the operation lost verify_after', async () => {

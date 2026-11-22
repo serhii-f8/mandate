@@ -85,6 +85,11 @@ export type BeginResult =
       readonly verifyAfter?: boolean;
       /** EXE-13: true when the change-set is a plan step; absent means outside a plan (no advance). */
       readonly inPlan?: boolean;
+      /**
+       * EXE-12, EXE-7: true when the change-set's verification began (a stored schedule), so every write
+       * happened and a stored cancel stops verification rather than execution; absent otherwise.
+       */
+      readonly verificationBegun?: boolean;
     } & ExecutionCounts)
   | { readonly ok: false; readonly outcome: 'hash_mismatch' | 'policy_denied' | 'approval_missing' };
 

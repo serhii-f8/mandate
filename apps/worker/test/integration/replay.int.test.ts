@@ -47,7 +47,7 @@ function converterFor(type: string): DataConverter | undefined {
  * The rollback patch: parked in the window, rolled back after completion and after a cancel, window
  * closed by the timer, a failed rollback, one per continue-as-new run of a rollback.
  * The verify-after patch (EXE-12): confirmed, timed out, parked in the wait between looks, cancelled
- * during the wait, one per continue-as-new run of a verification.
+ * during the wait, one per continue-as-new run of a verification, a look that fails every attempt.
  * The plan-advance patch (EXE-13): a completed step that starts the next one, and one whose
  * advancePlan fails every attempt and settles anyway.
  */
@@ -87,6 +87,7 @@ const REQUIRED_CHANGESET_FIXTURES = [
   'verify-cancelled',
   'verify-continued-run1',
   'verify-continued-run2',
+  'verify-batch-failed',
   'plan-advanced',
   'plan-not-advanced',
 ];

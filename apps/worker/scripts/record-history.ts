@@ -728,6 +728,21 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
     },
   },
 
+  /**
+   * EXE-12: every attempt of the first look fails on infrastructure (the reader throws): the
+   * failure is swallowed, the items close unconfirmed with verify_timeout: completed_with_errors.
+   */
+  'verify-batch-failed': {
+    files: ['verify-batch-failed'],
+    async run(infra) {
+      const reader: UpstreamReader = { read: () => Promise.reject(new Error('infrastructure unavailable')) };
+      const opts = { reader, configuration: withVerifyAfter(infra.configuration, VERIFY_TIMING) };
+      const history = await executeToEnd(infra, opts, 2, 'completed_with_errors');
+      if (!history.events?.some((e) => e.activityTaskFailedEventAttributes != null)) throw new Error('verifyBatch did not fail');
+      return { 'verify-batch-failed': history };
+    },
+  },
+
   /** EXE-13: a two-step plan, both approved; step 1 completes and its advancePlan starts step 2 (step 1's history). */
   'plan-advanced': {
     files: ['plan-advanced'],

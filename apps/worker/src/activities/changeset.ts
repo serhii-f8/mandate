@@ -279,6 +279,9 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
         cancelRequested: changeset.cancelRequest !== undefined,
         ...(verificationManifest(configuration, changeset.operation) === undefined ? {} : { verifyAfter: true }),
         ...(changeset.plan === undefined ? {} : { inPlan: true }),
+        // EXE-7: also after verification finished while still executing (a crash before finishExecution):
+        // every write happened, so a stored cancel must not end the change-set `cancelled`.
+        ...(changeset.verificationUntil === undefined ? {} : { verificationBegun: true }),
       };
     },
 

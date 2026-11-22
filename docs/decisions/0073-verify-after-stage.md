@@ -97,7 +97,15 @@ verification ends. Both are documented.
   repeat { `verifyBatch` until the round is through; stop when nothing is pending or the deadline
   passed; wait `every_seconds` or a wake }, then `finishVerification` and `finishExecution('done')`.
   The waits are workflow timers, so a worker restart loses nothing. Continue-as-new as today; a
-  continued run finds the stored deadline and round and goes on.
+  continued run finds the stored deadline and round and goes on. The deadline is tested after every
+  look, not only when a round is through, so a round of many chunks cannot hold the change-set
+  `executing` long past `timeout_seconds`; items never looked at end `verify_timeout`.
+  `beginVerification` touches PostgreSQL only and is retried without limit: a database failover
+  after the last batch must not end a fully written change-set `failed`, and a verification that
+  never began would let it end `completed` unverified. `beginExecution` answers
+  `verificationBegun: true` once a schedule is stored (absent in older histories), so a run that
+  carries no resume state (a reset, a fresh start) still treats a stored cancel as the end of
+  verification, not of execution.
 - **Read-only.** Verification activities only read upstream and retry safely: a confirmed item is
   never un-confirmed, and no verification path calls a writer.
 - **In-memory executor** (EXE-11) runs the same core functions with an injected sleep.
