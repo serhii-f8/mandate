@@ -94,6 +94,44 @@ were written, failed or skipped, and lists the ones that need attention:
 
 ![Result of a completed change-set with the rollback action](images/result.png)
 
+## Verify after
+
+Some systems accept a write at once but show it later: a search index that refreshes every few
+minutes, a cache, a queue that applies the change in the background. An operation can therefore
+declare a verify-after stage (`verify_after` in its manifest, see the
+[configuration reference](configuration.md)). The platform then does not call the change finished
+when the last batch was sent. It looks at the written records again, read-only, until the checks
+the administrator wrote hold for them or a time limit passes.
+
+What you see:
+
+- While it runs the change-set is still `executing`, and the result reads `Verifying: N of M
+  confirmed`. A written record is `confirmed` once all checks hold for it.
+- When every record is confirmed the change-set ends `completed`. A record that the checks did not
+  confirm before the time limit is `unconfirmed` and shows `Not confirmed: <check title or code>`.
+  It stays `written` (the write was sent and is not undone), it can be rolled back, and the
+  change-set ends `completed_with_errors`. The code is that of the first check that failed at the
+  last look, or one of three fixed codes: `verify_read_failed` (the system could not be read, or
+  answered incompletely; a record is never confirmed on an answer that was not read),
+  `verify_timeout` (the time ran out without a look that named a failing check) and
+  `verify_cancelled`.
+- Only a status and a code are stored and shown for each record, never a value that was read.
+
+Things to know when you run it:
+
+- A change-set that is verifying holds one of the `limits.concurrent_executions` slots until it
+  ends, as it does while it writes. Long verifications can delay other change-sets from starting.
+- A rollback waits until verification ends.
+- Cancelling a change-set during verification stops the verification. Records not yet confirmed
+  become `unconfirmed` with `verify_cancelled`, and the change-set ends with the status its records
+  give (`completed` or `completed_with_errors`), not `cancelled`.
+- Verification reads the upstream system: roughly looks x items / batch size reads, where looks is
+  at most `(timeout_seconds - after_seconds) / every_seconds`, and more when the checks use lookups
+  of their own. Choose `every_seconds` and `timeout_seconds` with the rate limits of that system in
+  mind.
+- The time limit is counted from the end of the last batch and stored when verification begins. A
+  restart of the worker does not move it.
+
 ## Roll back
 
 A finished change-set can be rolled back while its window is open

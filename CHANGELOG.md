@@ -11,8 +11,11 @@ Additive release: the configuration schema and the connector SDK are 1.3.0. A pr
 
 - `manifest.verify_after` declares a verify-after stage: checks, with their own lookups and reason
   codes, that confirm the written items after the last batch, with `after_seconds`, `every_seconds`
-  and `timeout_seconds`. The loader validates it; the stage itself is executed by later changes
-  (OPS-2, EXE-12, ADR 0073).
+  and `timeout_seconds`. The loader validates it (OPS-2, EXE-12, ADR 0073).
+- The preset template declares `verify_after` on `notes.update_title` and is version 1.3.0
+  (NFR-17).
+- The usage guide explains the stage: what it shows, the `concurrent_executions` slot it holds, that
+  a rollback waits for it and the read load (NFR-9, EXE-12).
 - `changesetWorkflow` runs the verify-after stage after the last batch, on workflow timers, and
   continues as new on long verifications. A cancel during verification stops it; the change-set then
   ends with the status its items give, not `cancelled` (EXE-12, EXE-6, EXE-7, EXE-10).

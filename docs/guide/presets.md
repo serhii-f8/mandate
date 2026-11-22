@@ -324,7 +324,7 @@ Extract it into a directory that is on `MANDATE_PRESET_DIRS`, one subdirectory p
 
 ```bash
 mkdir -p /srv/mandate-presets/notes
-tar -xzf mandate-examples-preset-template-1.2.0.tgz --strip-components=1 -C /srv/mandate-presets/notes
+tar -xzf mandate-examples-preset-template-1.3.0.tgz --strip-components=1 -C /srv/mandate-presets/notes
 ```
 
 Reference it by its package name and apply the configuration. The running api and worker pick up an

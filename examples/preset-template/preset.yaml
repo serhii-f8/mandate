@@ -1,4 +1,4 @@
-# Preset template 1.2.0 (CONN-8, OPS-2, OPS-3, OPS-6). Copy this directory, rename the package,
+# Preset template 1.3.0 (CONN-8, OPS-2, OPS-3, OPS-6). Copy this directory, rename the package,
 # replace the spec and the operations, and keep the contract test green (NFR-17).
 # Bind it to an openapi connection:   base_url: https://notes.example.com/api
 version: 1
@@ -97,6 +97,16 @@ operations:
         - code: empty_title
           title: The note has no title yet
           require: [{ present: { before: title } }]
+      # Verify after (EXE-12, since 1.3.0): once the last batch is written, read the notes again and
+      # confirm each one whose title shows the written value. Looks every 10 seconds (the minimum)
+      # for up to a minute; a note that still differs then is reported as not confirmed.
+      verify_after:
+        every_seconds: 10
+        timeout_seconds: 60
+        checks:
+          - code: title_not_updated
+            title: The note does not show the new title yet
+            require: [{ equals: [{ record: title }, { after: title }] }]
   # A create (OPS-2, since 1.2.0): each record carries its own values. A note that already exists is
   # left out (already_exists); the rollback deletes what was created, through notes.delete.
   - id: notes.create

@@ -67,10 +67,22 @@ Two rules for you:
 
 ## Upgrading to 1.3.0
 
-1.3.0 is additive and needs no step: the configuration schema and the connector SDK are 1.3.0, and a
-configuration that loaded before still loads. A preset of your own that uses `verify_after` in a
-manifest declares `"sdk": "^1.3.0"` in its `package.json` (`mandate.sdk`), which an older platform
-refuses with `preset_sdk_incompatible`.
+1.3.0 is additive: the configuration schema and the connector SDK are 1.3.0, and a configuration that
+loaded before still loads. A change-set whose operation declares no `verify_after` runs exactly as
+before.
+
+Upgrade every `worker` and `api` instance before you add `verify_after` to an operation. A 1.2
+process does not know the key or the verification stage, so a configuration that uses it must not
+reach one. With the single-host Compose setup, `docker compose up -d --wait` replaces both
+containers together and there is nothing more to do.
+
+A preset of your own that uses `verify_after` in a manifest declares `"sdk": "^1.3.0"` in its
+`package.json` (`mandate.sdk`), which an older platform refuses with `preset_sdk_incompatible`. The
+template preset does so, and shows the stage on `notes.update_title`.
+
+The migration `0016_verification` adds nullable (or defaulted) columns to `change_item` and
+`change_set` that record how far a verification got, and runs on start, as every migration does.
+Change-sets that are already running or finished are not affected.
 
 ## Upgrading to 1.2.0
 

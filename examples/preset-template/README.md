@@ -17,7 +17,11 @@ record: `notes.update_title` (`PATCH /notes/{id}`, `replay_previous_state` rollb
 
 - **`notes.update_title`** changes the same field on many notes (`values_arg`). Its `empty_title`
   check (since 1.2.0) leaves a note that has no title yet out of the change-set during preparation:
-  the item is excluded with that reason code and never written.
+  the item is excluded with that reason code and never written. Its `verify_after` (since 1.3.0)
+  then confirms the write: after the last batch the worker reads the notes again, every 10 seconds
+  for up to a minute, and an item is confirmed once the note's `title` equals the value written
+  (`{ equals: [{ record: title }, { after: title }] }`). A note that still shows another title at
+  the end is not confirmed, and the change-set ends `completed_with_errors`.
 - **`notes.create`** takes `notes: [{ id, title, body? }]` (`records_arg`): every record carries its
   own values. A note whose id already exists is excluded with `already_exists`; one that appears
   between approval and execution is skipped as drift and not sent. That holds because
@@ -47,7 +51,7 @@ pnpm mandate validate <config-dir> --preset-dir examples
 ```
 
 The configuration binds the preset to a connection, for example
-`presets: [{ id: notes, package: '@mandate-examples/preset-template', version: '1.2.0' }]` and a
+`presets: [{ id: notes, package: '@mandate-examples/preset-template', version: '1.3.0' }]` and a
 connection with `preset: notes`, `adapter: openapi` and a `base_url`. The parameter `search_fields` (the fields
 `notes.search` may return) can be narrowed with `preset_params: { search_fields: [id, title] }`; see
 [Parameters](../../docs/guide/presets.md#parameters).

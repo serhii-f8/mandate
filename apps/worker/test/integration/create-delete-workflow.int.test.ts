@@ -65,7 +65,7 @@ async function loadTemplate(baseUrl: string): Promise<LoadedConfiguration> {
   const config = presetConnectionYaml({
     presetId: 'notes',
     package: '@mandate-examples/preset-template',
-    version: '1.2.0',
+    version: '1.3.0',
     connectionId: 'notes',
     baseUrl,
     credentialRef: CREDENTIAL_REF,
