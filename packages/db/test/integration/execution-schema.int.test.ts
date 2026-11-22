@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startPostgres, type StartedPostgres } from '@mandate/testing';
 import { createDb, type Database } from '../../src/client.js';
@@ -108,5 +115,163 @@ describe('POL-4 rate_bucket', () => {
     };
     expect(await upsert()).toBe(1);
     expect(await upsert()).toBe(2);
+  });
+});
+
+describe('EXE-12 verification storage', () => {
+  const MIGRATIONS = fileURLToPath(new URL('../../migrations', import.meta.url));
+
+  /** An executing change-set with item `a` written and item `b` excluded. */
+  async function executing(): Promise<string> {
+    const id = randomUUID();
+    await database.db.execute(sql`
+      INSERT INTO change_set (id, operation, connection, requester, args, status, stats, config_hash, correlation_id, created_at, expires_at)
+      VALUES (${id}, 'op', 'conn', 'alice', '{}'::jsonb, 'preparing', '{}'::jsonb, 'cfg', 'corr', now(), now() + interval '1 day')`);
+    await database.db.execute(sql`
+      INSERT INTO change_item (changeset_id, target_id, status, reason, before, after) VALUES
+        (${id}, 'a', 'pending', NULL, '{"v":1}'::jsonb, '{"v":2}'::jsonb),
+        (${id}, 'b', 'excluded', 'no_change', '{"v":1}'::jsonb, '{"v":1}'::jsonb)`);
+    await database.db.execute(
+      sql`UPDATE change_set SET status = 'prepared', hash = 'h', prepared_at = now() WHERE id = ${id}`,
+    );
+    await database.db.execute(sql`UPDATE change_set SET status = 'executing' WHERE id = ${id}`);
+    await database.db.execute(sql`UPDATE change_item SET status = 'written' WHERE changeset_id = ${id} AND target_id = 'a'`);
+    return id;
+  }
+
+  /** The trigger message, or the name of the violated constraint. */
+  async function refusal(promise: Promise<unknown>): Promise<string> {
+    try {
+      await promise;
+    } catch (error) {
+      const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
+      return cause?.constraint ?? cause?.message ?? (error as Error).message;
+    }
+    throw new Error('expected the statement to be rejected');
+  }
+
+  /** The committed migrations up to and including 0015, as the previous release shipped them. */
+  function migrationsThrough0015(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'mandate-mig-'));
+    cpSync(MIGRATIONS, dir, { recursive: true });
+    const journalPath = join(dir, 'meta', '_journal.json');
+    const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as { entries: { idx: number; tag: string }[] };
+    for (const entry of journal.entries.filter((e) => e.idx > 15)) rmSync(join(dir, `${entry.tag}.sql`));
+    journal.entries = journal.entries.filter((entry) => entry.idx <= 15);
+    writeFileSync(journalPath, JSON.stringify(journal));
+    return dir;
+  }
+
+  it('NFR-5 EXE-12 migration 0016 applies on a database at 0015 that holds an executing change-set', async () => {
+    const url = await postgres.createDatabase();
+    const folder = migrationsThrough0015();
+    const id = randomUUID();
+    const client = new pg.Client({ connectionString: url });
+    await client.connect();
+    try {
+      await migrate(drizzle(client), { migrationsFolder: folder });
+      await client.query(
+        `INSERT INTO change_set (id, operation, connection, requester, args, status, stats, config_hash, correlation_id, created_at, expires_at)
+         VALUES ($1, 'op', 'conn', 'alice', '{}'::jsonb, 'preparing', '{"total":1}'::jsonb, 'cfg', 'corr', now(), now() + interval '1 day')`,
+        [id],
+      );
+      await client.query(
+        `INSERT INTO change_item (changeset_id, target_id, status, before, after) VALUES ($1, 'a', 'pending', '{}'::jsonb, '{}'::jsonb)`,
+        [id],
+      );
+      await client.query(`UPDATE change_set SET status = 'prepared', hash = 'h', prepared_at = now() WHERE id = $1`, [id]);
+      await client.query(`UPDATE change_set SET status = 'executing' WHERE id = $1`, [id]);
+    } finally {
+      await client.end();
+      rmSync(folder, { recursive: true, force: true });
+    }
+    const applied = await runMigrations(url);
+    expect(applied.applied).toBeGreaterThanOrEqual(1);
+    const after = new pg.Client({ connectionString: url });
+    await after.connect();
+    try {
+      const cs = await after.query(
+        'SELECT status, stats, verification_first_at, verification_until, verification_finished_at FROM change_set WHERE id = $1',
+        [id],
+      );
+      expect(cs.rows).toEqual([
+        {
+          status: 'executing',
+          stats: { total: 1 },
+          verification_first_at: null,
+          verification_until: null,
+          verification_finished_at: null,
+        },
+      ]);
+      const items = await after.query(
+        'SELECT verification_status, verification_code, verification_round FROM change_item WHERE changeset_id = $1',
+        [id],
+      );
+      expect(items.rows).toEqual([{ verification_status: null, verification_code: null, verification_round: 0 }]);
+      // An item of a change-set that was executing during the upgrade can be verified.
+      await after.query(
+        `UPDATE change_item SET verification_status = 'pending' WHERE changeset_id = $1 AND target_id = 'a'`,
+        [id],
+      );
+    } finally {
+      await after.end();
+    }
+  });
+
+  it('EXE-12 the verification columns are writable; item content and status rules still hold', async () => {
+    const id = await executing();
+    await database.db.execute(sql`
+      UPDATE change_item SET verification_status = 'pending', verification_code = 'x', verification_round = 1
+      WHERE changeset_id = ${id} AND target_id = 'a'`);
+    await database.db.execute(sql`
+      UPDATE change_item SET verification_status = 'unconfirmed', verification_code = 'verify_timeout'
+      WHERE changeset_id = ${id} AND target_id = 'a'`);
+    expect(
+      await refusal(
+        database.db.execute(
+          sql`UPDATE change_item SET verification_status = 'maybe' WHERE changeset_id = ${id} AND target_id = 'a'`,
+        ),
+      ),
+    ).toBe('change_item_verification_status_check');
+    expect(
+      await refusal(
+        database.db.execute(sql`UPDATE change_item SET after = '{"v":3}'::jsonb WHERE changeset_id = ${id} AND target_id = 'a'`),
+      ),
+    ).toBe('change_item update rejected: item content is immutable');
+    expect(
+      await refusal(
+        database.db.execute(sql`UPDATE change_item SET before = '{"v":0}'::jsonb WHERE changeset_id = ${id} AND target_id = 'a'`),
+      ),
+    ).toBe('change_item update rejected: item content is immutable');
+    await database.db.execute(sql`UPDATE change_set SET status = 'completed' WHERE id = ${id}`);
+    expect(
+      await refusal(
+        database.db.execute(sql`UPDATE change_item SET status = 'failed' WHERE changeset_id = ${id} AND target_id = 'a'`),
+      ),
+    ).toBe('change_item update rejected: change-set is not executing');
+  });
+
+  it('EXE-12 NFR-2 the verification schedule and its end are written once', async () => {
+    const id = await executing();
+    await database.db.execute(sql`
+      UPDATE change_set SET verification_first_at = now(), verification_until = now() + interval '10 minutes' WHERE id = ${id}`);
+    for (const column of ['verification_first_at', 'verification_until']) {
+      expect(
+        await refusal(
+          database.db.execute(sql`UPDATE change_set SET ${sql.identifier(column)} = now() + interval '1 day' WHERE id = ${id}`),
+        ),
+      ).toBe('change_set update rejected: verification schedule is fixed');
+      expect(
+        await refusal(database.db.execute(sql`UPDATE change_set SET ${sql.identifier(column)} = NULL WHERE id = ${id}`)),
+      ).toBe('change_set update rejected: verification schedule is fixed');
+    }
+    await database.db.execute(sql`UPDATE change_set SET verification_finished_at = now() WHERE id = ${id}`);
+    expect(
+      await refusal(
+        database.db.execute(sql`UPDATE change_set SET verification_finished_at = now() + interval '1 day' WHERE id = ${id}`),
+      ),
+    ).toBe('change_set update rejected: verification schedule is fixed');
+    // Unrelated updates still work, and an unchanged value is not a change.
+    await database.db.execute(sql`UPDATE change_set SET stats = '{"total":2}'::jsonb, status = 'completed' WHERE id = ${id}`);
   });
 });

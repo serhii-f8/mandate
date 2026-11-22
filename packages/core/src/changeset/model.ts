@@ -136,6 +136,8 @@ export interface ChangeSetRecord {
   /** EXE-8: end of the rollback window, set when execution finished with rollbackable items. */
   readonly rollbackUntil?: Date;
   readonly rollbackRequest?: RollbackRequest;
+  /** EXE-12: the verification deadline, written once when verification begins. */
+  readonly verificationUntil?: Date;
 }
 
 export interface ChangeItemRecord {

@@ -27,6 +27,9 @@ import type {
   RollbackItemOutcome,
   RollbackItemStatus,
   Submission,
+  VerificationCounts,
+  VerificationOutcome,
+  VerificationStatus,
 } from '@mandate/core';
 import {
   changesetTransitionEvent,
@@ -50,6 +53,8 @@ const DAY_MS = 24 * 3_600_000;
 const OUTCOMES_REFUSED = 'item outcomes rejected: change-set is not executing';
 const BATCH_REFUSED = 'batch outcomes rejected: change-set is not executing';
 const ROLLBACK_BATCH_REFUSED = 'rollback batch outcomes rejected: change-set is not rolling back';
+/** A verification round is stored in an `integer` column. */
+const MAX_ROUND = 2_147_483_647;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** CTEs `ex` and `inc` of distinct target IDs, passed as one jsonb parameter each (never a text array). */
@@ -64,6 +69,9 @@ const includes = sql`(ci.status = 'excluded' AND ci.reason = 'requester'
   AND ci.target_id IN (SELECT t FROM inc) AND ci.target_id NOT IN (SELECT t FROM ex))`;
 /** EXE-8: an item this run wrote itself (no `already_applied`) that has no rollback outcome yet. */
 const rollbackable = sql`${changeItem.status} = 'written' AND ${changeItem.error} IS NULL AND ${changeItem.rollbackStatus} IS NULL`;
+/** EXE-12: an item awaiting a look. */
+const verificationPending = sql`${changeItem.verificationStatus} = 'pending'`;
+const NO_VERIFICATION: VerificationCounts = Object.freeze({ pending: 0, confirmed: 0, unconfirmed: 0 });
 const derivedStatus = sql`(CASE WHEN ${excludes} THEN 'excluded' WHEN ${includes} THEN 'pending' ELSE ci.status END)`;
 
 export interface PostgresChangeSetRepositoryOptions {
@@ -89,6 +97,7 @@ type RollbackRequestOf = Parameters<ChangeSetRepository['requestRollback']>[0];
 type RollbackResult = Awaited<ReturnType<ChangeSetRepository['requestRollback']>>;
 type RollbackClaimResult = Awaited<ReturnType<ChangeSetRepository['claimRollbackBatch']>>;
 type RollbackCompleteResult = Awaited<ReturnType<ChangeSetRepository['completeRollbackBatch']>>;
+type BeginVerificationResult = Awaited<ReturnType<ChangeSetRepository['beginVerification']>>;
 
 function toRecord(row: ChangeSetRow): ChangeSetRecord {
   return {
@@ -152,6 +161,7 @@ function toRecord(row: ChangeSetRow): ChangeSetRecord {
             requestedAt: row.rollbackRequestedAt,
           },
         }),
+    ...(row.verificationUntil === null ? {} : { verificationUntil: row.verificationUntil }),
   };
 }
 
@@ -237,6 +247,8 @@ function toItem(row: ChangeItemRow): ChangeItemRecord {
     ...(row.error === null ? {} : { error: row.error }),
     ...(row.rollbackStatus === null ? {} : { rollbackStatus: row.rollbackStatus }),
     ...(row.rollbackError === null ? {} : { rollbackError: row.rollbackError }),
+    ...(row.verificationStatus === null ? {} : { verificationStatus: row.verificationStatus }),
+    ...(row.verificationCode === null ? {} : { verificationCode: row.verificationCode }),
   };
 }
 
@@ -1213,6 +1225,157 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     );
   }
 
+  async beginVerification(
+    changesetId: string,
+    schedule: { firstAt: Date; until: Date },
+  ): Promise<BeginVerificationResult> {
+    if (Number.isNaN(schedule.firstAt.getTime()) || Number.isNaN(schedule.until.getTime())) {
+      throw new Error('invalid verification schedule');
+    }
+    if (!UUID.test(changesetId)) return undefined;
+    return guarded('verification begin', () =>
+      this.db.transaction(async (tx): Promise<BeginVerificationResult> => {
+        // The lock recordItemOutcomes takes: the recomputed stats see every write of this change-set.
+        const [row] = await tx
+          .select({
+            status: changeSet.status,
+            firstAt: changeSet.verificationFirstAt,
+            until: changeSet.verificationUntil,
+          })
+          .from(changeSet)
+          .where(eq(changeSet.id, changesetId))
+          .for('update');
+        if (row?.status !== 'executing') return undefined;
+        // Write-once (the guard refuses a change too): a retry or a continued run keeps the first schedule.
+        const firstAt = row.firstAt ?? schedule.firstAt;
+        const until = row.until ?? schedule.until;
+        await tx
+          .update(changeItem)
+          .set({ verificationStatus: 'pending', updatedAt: sql`now()` })
+          .where(
+            and(eq(changeItem.changesetId, changesetId), eq(changeItem.status, 'written'), isNull(changeItem.verificationStatus)),
+          );
+        const stats = await computeStats(tx, changesetId);
+        await tx
+          .update(changeSet)
+          .set({
+            ...(row.firstAt === null ? { verificationFirstAt: firstAt } : {}),
+            ...(row.until === null ? { verificationUntil: until } : {}),
+            stats,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(changeSet.id, changesetId));
+        const [round] = await tx
+          .select({ n: sql<number>`coalesce(max(${changeItem.verificationRound}), 0)::int` })
+          .from(changeItem)
+          .where(eq(changeItem.changesetId, changesetId));
+        return { firstAt, until, round: round?.n ?? 0, pending: stats.verification?.pending ?? 0 };
+      }),
+    );
+  }
+
+  async verificationItems(changesetId: string, round: number, limit: number): Promise<readonly ChangeItemRecord[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE) {
+      throw new Error(`limit must be between 1 and ${MAX_PAGE}`);
+    }
+    assertRound(round);
+    if (!UUID.test(changesetId)) return [];
+    const rows = await guarded('verification items', () =>
+      this.db
+        .select()
+        .from(changeItem)
+        .where(and(eq(changeItem.changesetId, changesetId), verificationPending, lt(changeItem.verificationRound, round)))
+        .orderBy(asc(changeItem.targetId))
+        .limit(limit),
+    );
+    return rows.map(toItem);
+  }
+
+  async recordVerification(
+    changesetId: string,
+    round: number,
+    outcomes: readonly VerificationOutcome[],
+  ): Promise<{ left: number; pending: number }> {
+    assertRound(round);
+    if (!UUID.test(changesetId)) return { left: 0, pending: 0 };
+    // The first outcome per target wins, as recordItemOutcomes does.
+    const seen = new Set<string>();
+    const rows: Record<string, unknown>[] = [];
+    for (const o of outcomes) {
+      if (seen.has(o.targetId)) continue;
+      seen.add(o.targetId);
+      rows.push({ target_id: o.targetId, confirmed: o.confirmed, code: o.confirmed ? null : (o.code ?? null) });
+    }
+    return guarded('verification record', () =>
+      this.db.transaction(async (tx) => {
+        const [parent] = await tx
+          .select({ id: changeSet.id })
+          .from(changeSet)
+          .where(eq(changeSet.id, changesetId))
+          .for('update');
+        if (parent === undefined) return { left: 0, pending: 0 };
+        if (rows.length > 0) {
+          // Only pending items change: a confirmed or unconfirmed item is final.
+          await tx.execute(sql`
+            UPDATE change_item AS ci
+            SET verification_status = CASE WHEN o.confirmed THEN 'confirmed' ELSE 'pending' END,
+                verification_code = o.code,
+                verification_round = CASE WHEN o.confirmed THEN ci.verification_round ELSE ${round}::int END,
+                updated_at = now()
+            FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS o(target_id text, confirmed boolean, code text)
+            WHERE ci.changeset_id = ${changesetId}::uuid
+              AND ci.target_id = o.target_id
+              AND ci.verification_status = 'pending'`);
+        }
+        const stats = await computeStats(tx, changesetId);
+        await tx.update(changeSet).set({ stats, updatedAt: sql`now()` }).where(eq(changeSet.id, changesetId));
+        const [left] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(changeItem)
+          .where(and(eq(changeItem.changesetId, changesetId), verificationPending, lt(changeItem.verificationRound, round)));
+        return { left: left?.n ?? 0, pending: stats.verification?.pending ?? 0 };
+      }),
+    );
+  }
+
+  async finishVerification(
+    changesetId: string,
+    fallbackCode: 'verify_timeout' | 'verify_cancelled',
+    audit: (counts: VerificationCounts) => AuditEventInput,
+  ): Promise<VerificationCounts> {
+    if (!UUID.test(changesetId)) return { ...NO_VERIFICATION };
+    return guarded('verification finish', () =>
+      this.db.transaction(async (tx): Promise<VerificationCounts> => {
+        const [row] = await tx
+          .select({ until: changeSet.verificationUntil, finishedAt: changeSet.verificationFinishedAt })
+          .from(changeSet)
+          .where(eq(changeSet.id, changesetId))
+          .for('update');
+        if (row === undefined) return { ...NO_VERIFICATION };
+        // Never begun, or already finished: nothing changes and nothing is appended.
+        if (row.until === null || row.finishedAt !== null) {
+          return (await computeStats(tx, changesetId)).verification ?? { ...NO_VERIFICATION };
+        }
+        await tx
+          .update(changeItem)
+          .set({
+            verificationStatus: 'unconfirmed',
+            verificationCode: sql`coalesce(${changeItem.verificationCode}, ${fallbackCode})`,
+            updatedAt: sql`now()`,
+          })
+          .where(and(eq(changeItem.changesetId, changesetId), verificationPending));
+        const stats = await computeStats(tx, changesetId);
+        await tx
+          .update(changeSet)
+          .set({ stats, verificationFinishedAt: sql`now()`, updatedAt: sql`now()` })
+          .where(eq(changeSet.id, changesetId));
+        const counts = stats.verification ?? { ...NO_VERIFICATION };
+        await this.auditFor(tx).append(audit(counts));
+        return counts;
+      }),
+    );
+  }
+
   /** Compare-and-set on status; no matching row writes no audit event and returns undefined. */
   private async compareAndSet(
     changesetId: string,
@@ -1251,6 +1414,10 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
       }),
     );
   }
+}
+
+function assertRound(round: number): void {
+  if (!Number.isInteger(round) || round < 0 || round > MAX_ROUND) throw new Error('invalid verification round');
 }
 
 /** SEC-9: every plan step of the current round holds an `approved` row for this hash. */
@@ -1316,11 +1483,12 @@ async function computeStats(db: Db | DbExecutor, changesetId: string): Promise<C
       status: changeItem.status,
       reason: changeItem.reason,
       rollbackStatus: changeItem.rollbackStatus,
+      verificationStatus: changeItem.verificationStatus,
       n: sql<number>`count(*)::int`,
     })
     .from(changeItem)
     .where(eq(changeItem.changesetId, changesetId))
-    .groupBy(changeItem.status, changeItem.reason, changeItem.rollbackStatus);
+    .groupBy(changeItem.status, changeItem.reason, changeItem.rollbackStatus, changeItem.verificationStatus);
   const reasons: [string, number][] = [];
   let total = 0;
   let included = 0;
@@ -1328,11 +1496,17 @@ async function computeStats(db: Db | DbExecutor, changesetId: string): Promise<C
   let failed = 0;
   let skipped = 0;
   let rollback: { -readonly [K in keyof RollbackCounts]: number } | undefined;
-  for (const { status, reason, rollbackStatus, n } of rows) {
+  let verification: Record<VerificationStatus, number> | undefined;
+  for (const { status, reason, rollbackStatus, verificationStatus, n } of rows) {
     total += n;
     if (rollbackStatus !== null) {
       rollback ??= { restored: 0, skipped: 0, failed: 0 };
       rollback[rollbackStatus] += n;
+    }
+    // EXE-12: present once an item has a verification status, so stats of an unverified run stay as they were.
+    if (verificationStatus !== null) {
+      verification ??= { pending: 0, confirmed: 0, unconfirmed: 0 };
+      verification[verificationStatus] += n;
     }
     if (status === 'excluded') {
       if (reason !== null) reasons.push([reason, n]);
@@ -1345,5 +1519,14 @@ async function computeStats(db: Db | DbExecutor, changesetId: string): Promise<C
   }
   // CS-3: any reason string is counted as its own key, never read from Object.prototype.
   const excluded = countExclusions(reasons);
-  return { total, included, excluded, written, failed, skipped, ...(rollback === undefined ? {} : { rollback }) };
+  return {
+    total,
+    included,
+    excluded,
+    written,
+    failed,
+    skipped,
+    ...(rollback === undefined ? {} : { rollback }),
+    ...(verification === undefined ? {} : { verification }),
+  };
 }

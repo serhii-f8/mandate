@@ -35,6 +35,7 @@ import type {
   PlanEntry,
   RollbackItemStatus,
   TaskKind,
+  VerificationStatus,
 } from '@mandate/core';
 
 /** `Submission` as stored: `at` is an ISO 8601 string in JSON, revived to a `Date` on read. */
@@ -203,6 +204,11 @@ export const changeSet = pgTable(
     rollbackActor: text('rollback_actor'),
     rollbackCorrelationId: text('rollback_correlation_id'),
     rollbackClientId: text('rollback_client_id'),
+    // EXE-12 verify-after (migration `0016_verification`): the first look and the deadline, written once
+    // when verification begins, and the end, written once when it finishes (each fixed by the guard).
+    verificationFirstAt: timestamp('verification_first_at', { withTimezone: true }),
+    verificationUntil: timestamp('verification_until', { withTimezone: true }),
+    verificationFinishedAt: timestamp('verification_finished_at', { withTimezone: true }),
   },
   (t) => [
     index('change_set_requester_created_at_idx').on(t.requester, t.createdAt),
@@ -238,6 +244,11 @@ export const changeItem = pgTable(
     // EXE-8: the rollback outcome of an item this run wrote, written once (migration `0012_rollback`).
     rollbackStatus: text('rollback_status').$type<RollbackItemStatus>(),
     rollbackError: text('rollback_error'),
+    // EXE-12: the verification state of a written item, NULL when never verified; the code of the first
+    // failing check or a fixed verification code (never a value, SEC-3); the round of its last miss.
+    verificationStatus: text('verification_status').$type<VerificationStatus>(),
+    verificationCode: text('verification_code'),
+    verificationRound: integer('verification_round').notNull().default(0),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -246,6 +257,10 @@ export const changeItem = pgTable(
     check(
       'change_item_rollback_status_check',
       sql`${t.rollbackStatus} IS NULL OR ${t.rollbackStatus} IN ('restored', 'skipped', 'failed')`,
+    ),
+    check(
+      'change_item_verification_status_check',
+      sql`${t.verificationStatus} IS NULL OR ${t.verificationStatus} IN ('pending', 'confirmed', 'unconfirmed')`,
     ),
   ],
 );

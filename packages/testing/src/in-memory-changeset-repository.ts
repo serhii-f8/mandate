@@ -22,6 +22,9 @@ import type {
   RollbackCounts,
   RollbackItemOutcome,
   Submission,
+  VerificationCounts,
+  VerificationOutcome,
+  VerificationStatus,
 } from '@mandate/core';
 import {
   changesetTransitionEvent,
@@ -43,11 +46,18 @@ const DAY_MS = 24 * 3_600_000;
 const NO_COUNTS: BatchCounts = Object.freeze({ written: 0, failed: 0, skipped: 0 });
 const NO_ROLLBACK_COUNTS: RollbackCounts = Object.freeze({ restored: 0, skipped: 0, failed: 0 });
 const ROLLBACK_BATCH_REFUSED = 'rollback batch outcomes rejected: change-set is not rolling back';
+const MAX_ROUND = 2_147_483_647;
+const NO_VERIFICATION: VerificationCounts = Object.freeze({ pending: 0, confirmed: 0, unconfirmed: 0 });
 
 interface Entry {
   record: ChangeSetRecord;
   readonly items: Map<string, ChangeItemRecord>;
   approvals: ApprovalRecord[];
+  /** EXE-12: the round of each item's last miss (the `verification_round` column; absent means 0). */
+  readonly verificationRounds: Map<string, number>;
+  /** EXE-12: the stored first look and end of verification (columns the record does not carry). */
+  verificationFirstAt?: Date;
+  verificationFinished: boolean;
 }
 
 /** A write batch row (EXE-3): fenced by `attempt`, frozen once `done`. */
@@ -146,7 +156,13 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       ...(cs.derivedFrom === undefined ? {} : { derivedFrom: cs.derivedFrom }),
     };
     // Apply before awaiting the audit append so concurrent callers see the change; undo if the append fails.
-    this.entries.set(cs.id, { record, items: new Map(), approvals: [] });
+    this.entries.set(cs.id, {
+      record,
+      items: new Map(),
+      approvals: [],
+      verificationRounds: new Map(),
+      verificationFinished: false,
+    });
     try {
       await this.audit.append(audit);
     } catch (error) {
@@ -746,6 +762,115 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     return { ok: true, counts: { ...counts } };
   }
 
+  beginVerification(
+    changesetId: string,
+    schedule: { firstAt: Date; until: Date },
+  ): ReturnType<ChangeSetRepository['beginVerification']> {
+    if (Number.isNaN(schedule.firstAt.getTime()) || Number.isNaN(schedule.until.getTime())) {
+      return Promise.reject(new Error('invalid verification schedule'));
+    }
+    const entry = this.entries.get(changesetId);
+    if (entry?.record.status !== 'executing') return Promise.resolve(undefined);
+    // Write-once: a retry or a continued run keeps the first schedule.
+    entry.verificationFirstAt ??= copyDate(schedule.firstAt);
+    const until = entry.record.verificationUntil ?? copyDate(schedule.until);
+    for (const it of entry.items.values()) {
+      if (it.status === 'written' && it.verificationStatus === undefined) {
+        entry.items.set(it.targetId, { ...it, verificationStatus: 'pending' });
+      }
+    }
+    const stats = computeStats(entry.items);
+    entry.record = { ...entry.record, verificationUntil: until, stats, updatedAt: new Date() };
+    let round = 0;
+    for (const r of entry.verificationRounds.values()) round = Math.max(round, r);
+    return Promise.resolve({
+      firstAt: copyDate(entry.verificationFirstAt),
+      until: copyDate(until),
+      round,
+      pending: stats.verification?.pending ?? 0,
+    });
+  }
+
+  verificationItems(changesetId: string, round: number, limit: number): Promise<readonly ChangeItemRecord[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE) {
+      return Promise.reject(new Error(`limit must be between 1 and ${MAX_PAGE}`));
+    }
+    if (!validRound(round)) return Promise.reject(new Error('invalid verification round'));
+    const entry = this.entries.get(changesetId);
+    if (entry === undefined) return Promise.resolve([]);
+    const items = pendingBefore(entry, round)
+      .sort((a, b) => compareTargetIds(a.targetId, b.targetId))
+      .slice(0, limit)
+      .map(copyItem);
+    return Promise.resolve(items);
+  }
+
+  recordVerification(
+    changesetId: string,
+    round: number,
+    outcomes: readonly VerificationOutcome[],
+  ): Promise<{ left: number; pending: number }> {
+    if (!validRound(round)) return Promise.reject(new Error('invalid verification round'));
+    const entry = this.entries.get(changesetId);
+    if (entry === undefined) return Promise.resolve({ left: 0, pending: 0 });
+    const seen = new Set<string>();
+    for (const o of outcomes) {
+      if (seen.has(o.targetId)) continue;
+      seen.add(o.targetId);
+      const current = entry.items.get(o.targetId);
+      // Only pending items change: a confirmed or unconfirmed item is final.
+      if (current?.verificationStatus !== 'pending') continue;
+      const { verificationCode: _code, ...rest } = current; // eslint-disable-line @typescript-eslint/no-unused-vars -- replaced below
+      if (o.confirmed) {
+        entry.items.set(o.targetId, { ...rest, verificationStatus: 'confirmed' });
+      } else {
+        entry.items.set(o.targetId, { ...rest, ...(o.code === undefined ? {} : { verificationCode: o.code }) });
+        entry.verificationRounds.set(o.targetId, round);
+      }
+    }
+    const stats = computeStats(entry.items);
+    entry.record = { ...entry.record, stats, updatedAt: new Date() };
+    return Promise.resolve({ left: pendingBefore(entry, round).length, pending: stats.verification?.pending ?? 0 });
+  }
+
+  async finishVerification(
+    changesetId: string,
+    fallbackCode: 'verify_timeout' | 'verify_cancelled',
+    audit: (counts: VerificationCounts) => AuditEventInput,
+  ): Promise<VerificationCounts> {
+    const entry = this.entries.get(changesetId);
+    if (entry === undefined) return { ...NO_VERIFICATION };
+    // Never begun, or already finished: nothing changes and nothing is appended.
+    if (entry.record.verificationUntil === undefined || entry.verificationFinished) {
+      return computeStats(entry.items).verification ?? { ...NO_VERIFICATION };
+    }
+    // Check and apply synchronously, undo if the audit append fails.
+    const replaced = new Map<string, ChangeItemRecord>();
+    for (const it of entry.items.values()) {
+      if (it.verificationStatus !== 'pending') continue;
+      replaced.set(it.targetId, it);
+      entry.items.set(it.targetId, {
+        ...it,
+        verificationStatus: 'unconfirmed',
+        verificationCode: it.verificationCode ?? fallbackCode,
+      });
+    }
+    const stats = computeStats(entry.items);
+    const counts = stats.verification ?? { ...NO_VERIFICATION };
+    const previous = entry.record;
+    entry.record = { ...entry.record, stats, updatedAt: new Date() };
+    entry.verificationFinished = true;
+    try {
+      await this.audit.append(audit({ ...counts }));
+    } catch (error) {
+      for (const [targetId, item] of replaced) entry.items.set(targetId, item);
+      entry.record = previous;
+      entry.verificationFinished = false;
+      throw error;
+    }
+    return { ...counts };
+  }
+
   /** Applies `next` synchronously, then appends `audit`; undoes the change if the append fails. */
   private async commit(entry: Entry, next: ChangeSetRecord, ...audit: AuditEventInput[]): Promise<void> {
     const previous = entry.record;
@@ -820,6 +945,17 @@ function isRollbackable(it: ChangeItemRecord): boolean {
   return it.status === 'written' && it.error === undefined && it.rollbackStatus === undefined;
 }
 
+function validRound(round: number): boolean {
+  return Number.isInteger(round) && round >= 0 && round <= MAX_ROUND;
+}
+
+/** EXE-12: items awaiting a look whose last miss was before `round`. */
+function pendingBefore(entry: Entry, round: number): ChangeItemRecord[] {
+  return [...entry.items.values()].filter(
+    (i) => i.verificationStatus === 'pending' && (entry.verificationRounds.get(i.targetId) ?? 0) < round,
+  );
+}
+
 function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetStats {
   const reasons: [string, number][] = [];
   let included = 0;
@@ -827,10 +963,16 @@ function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetSt
   let failed = 0;
   let skipped = 0;
   let rollback: { -readonly [K in keyof RollbackCounts]: number } | undefined;
+  let verification: Record<VerificationStatus, number> | undefined;
   for (const it of items.values()) {
     if (it.rollbackStatus !== undefined) {
       rollback ??= { restored: 0, skipped: 0, failed: 0 };
       rollback[it.rollbackStatus] += 1;
+    }
+    // EXE-12: present once an item has a verification status, so stats of an unverified run stay as they were.
+    if (it.verificationStatus !== undefined) {
+      verification ??= { pending: 0, confirmed: 0, unconfirmed: 0 };
+      verification[it.verificationStatus] += 1;
     }
     if (it.status === 'excluded') {
       if (it.reason !== undefined) reasons.push([it.reason, 1]);
@@ -841,5 +983,14 @@ function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetSt
     else if (it.status === 'failed') failed += 1;
     else if (it.status === 'skipped') skipped += 1;
   }
-  return { total: items.size, included, excluded: countExclusions(reasons), written, failed, skipped, ...(rollback === undefined ? {} : { rollback }) };
+  return {
+    total: items.size,
+    included,
+    excluded: countExclusions(reasons),
+    written,
+    failed,
+    skipped,
+    ...(rollback === undefined ? {} : { rollback }),
+    ...(verification === undefined ? {} : { verification }),
+  };
 }

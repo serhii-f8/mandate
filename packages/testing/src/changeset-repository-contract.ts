@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest';
 import {
   changesetBatchEvent,
   changesetRollbackBatchEvent,
+  changesetVerificationEvent,
   EMPTY_STATS,
+  hashStoredItems,
   ROLLBACK_REQUEST_MARGIN_MS,
   rollbackRequestEvents,
   startEventFactory,
@@ -26,6 +28,7 @@ import type {
   NotificationRow,
   RollbackItemOutcome,
   RollbackRequest,
+  VerificationCounts,
 } from '@mandate/core';
 
 /**
@@ -1870,6 +1873,229 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
             expect(await c.repository.nextRollbackBatch(c.id)).toBe(1);
           }));
       });
+    });
+
+    describe('EXE-12 verification storage', () => {
+      const SCHEDULE = {
+        firstAt: new Date('2026-12-01T00:00:30.000Z'),
+        until: new Date('2026-12-01T00:10:00.000Z'),
+      };
+
+      /** Executing, with `a`, `b`, `c` written, `d` failed and `e` excluded. */
+      async function executed(c: Ctx): Promise<void> {
+        await c.repository.create(newChangeSet(c.id), auditEvent(c.id));
+        await c.repository.appendItems(c.id, [
+          item('c'),
+          item('a'),
+          item('e', { status: 'excluded', reason: 'no_change' }),
+          item('b'),
+          item('d'),
+        ]);
+        await c.repository.completePreparation(
+          c.id,
+          { status: 'prepared', hashVersion: 1, hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
+          auditEvent(c.id),
+        );
+        expect((await start(c, c.id)).ok).toBe(true);
+        await c.repository.recordItemOutcomes(c.id, [
+          ...written(['a', 'b', 'c']),
+          { targetId: 'd', status: 'failed', error: 'upstream_5xx' },
+        ]);
+      }
+
+      function finishAudit(c: Ctx): (counts: VerificationCounts) => AuditEventInput {
+        return (counts) =>
+          changesetVerificationEvent({
+            id: randomUUID(),
+            changeset: { id: c.id, operation: 'catalog.update' },
+            end: 'timeout',
+            counts,
+            actor: 'system',
+            correlationId: 'corr-v',
+          });
+      }
+
+      async function verificationEvents(c: Ctx): Promise<readonly AuditEventInput[]> {
+        return (await c.events()).filter((e) => e.action === 'changeset.verification');
+      }
+
+      async function byTarget(c: Ctx): Promise<Record<string, ChangeItemRecord>> {
+        return Object.fromEntries((await c.repository.itemsPage(c.id, { limit: 10 })).map((i) => [i.targetId, i]));
+      }
+
+      async function ids(c: Ctx, round: number, limit: number): Promise<readonly string[]> {
+        return (await c.repository.verificationItems(c.id, round, limit)).map((i) => i.targetId);
+      }
+
+      /** What the hash and the execution own: verification must leave all of it as it was. */
+      async function sealed(c: Ctx): Promise<{ items: readonly unknown[]; hash: string }> {
+        const cs = await c.repository.get(c.id);
+        if (cs === undefined) throw new Error('change-set missing');
+        const items = (await c.repository.itemsPage(c.id, { limit: 10 })).map((i) => ({
+          targetId: i.targetId,
+          status: i.status,
+          reason: i.reason,
+          before: i.before,
+          after: i.after,
+          error: i.error,
+        }));
+        return { items, hash: await hashStoredItems(c.repository, cs) };
+      }
+
+      it('EXE-12 no verification key in stats and no verification fields before verification began', async () =>
+        withRepo(async (c) => {
+          await executed(c);
+          expect('verification' in (await c.repository.stats(c.id))).toBe(false);
+          const cs = await c.repository.get(c.id);
+          expect(cs !== undefined && 'verification' in cs.stats).toBe(false);
+          expect(cs !== undefined && 'verificationUntil' in cs).toBe(false);
+          for (const it of await c.repository.itemsPage(c.id, { limit: 10 })) {
+            expect('verificationStatus' in it).toBe(false);
+            expect('verificationCode' in it).toBe(false);
+          }
+        }));
+
+      it('EXE-12 NFR-2 beginVerification marks the written items pending and stores the schedule once', async () =>
+        withRepo(async (c) => {
+          await executed(c);
+          expect(await c.repository.beginVerification(c.id, SCHEDULE)).toEqual({ ...SCHEDULE, round: 0, pending: 3 });
+          const counts = { pending: 3, confirmed: 0, unconfirmed: 0 };
+          expect((await c.repository.stats(c.id)).verification).toEqual(counts);
+          const cs = await c.repository.get(c.id);
+          expect(cs?.stats.verification).toEqual(counts);
+          expect(cs?.verificationUntil).toEqual(SCHEDULE.until);
+          const items = await byTarget(c);
+          for (const t of ['a', 'b', 'c']) expect(items[t]?.verificationStatus).toBe('pending');
+          for (const t of ['d', 'e']) {
+            expect(items[t] !== undefined && 'verificationStatus' in items[t]).toBe(false);
+            expect(items[t] !== undefined && 'verificationCode' in items[t]).toBe(false);
+          }
+          // A retry or a continued run with a later clock answers the stored schedule.
+          const later = { firstAt: new Date('2026-12-02T00:00:00.000Z'), until: new Date('2026-12-02T01:00:00.000Z') };
+          expect(await c.repository.beginVerification(c.id, later)).toEqual({ ...SCHEDULE, round: 0, pending: 3 });
+          expect((await c.repository.get(c.id))?.verificationUntil).toEqual(SCHEDULE.until);
+        }));
+
+      it('EXE-12 rounds: items, outcomes, a confirmed item stays confirmed, the finish is written once', async () =>
+        withRepo(async (c) => {
+          await executed(c);
+          const before = await sealed(c);
+          await c.repository.beginVerification(c.id, SCHEDULE);
+          expect(await ids(c, 1, 2)).toEqual(['a', 'b']);
+          expect(
+            await c.repository.recordVerification(c.id, 1, [
+              { targetId: 'a', confirmed: true },
+              { targetId: 'b', confirmed: false, code: 'x' },
+            ]),
+          ).toEqual({ left: 1, pending: 2 });
+          expect(await ids(c, 1, 10)).toEqual(['c']);
+          expect(await ids(c, 2, 10)).toEqual(['b', 'c']);
+          expect((await c.repository.stats(c.id)).verification).toEqual({ pending: 2, confirmed: 1, unconfirmed: 0 });
+          // A continued run finds the highest round an item reached.
+          expect((await c.repository.beginVerification(c.id, SCHEDULE))?.round).toBe(1);
+
+          expect(await c.repository.recordVerification(c.id, 2, [{ targetId: 'a', confirmed: false, code: 'y' }])).toEqual({
+            left: 2,
+            pending: 2,
+          });
+          const a = (await byTarget(c)).a;
+          expect(a?.verificationStatus).toBe('confirmed');
+          expect(a !== undefined && 'verificationCode' in a).toBe(false);
+
+          const counts = { pending: 0, confirmed: 1, unconfirmed: 2 };
+          expect(await c.repository.finishVerification(c.id, 'verify_timeout', finishAudit(c))).toEqual(counts);
+          const items = await byTarget(c);
+          expect(items.b).toMatchObject({ verificationStatus: 'unconfirmed', verificationCode: 'x' });
+          expect(items.c).toMatchObject({ verificationStatus: 'unconfirmed', verificationCode: 'verify_timeout' });
+          expect(items.a?.verificationStatus).toBe('confirmed');
+          expect((await c.repository.get(c.id))?.stats.verification).toEqual(counts);
+          const events = await verificationEvents(c);
+          expect(events).toHaveLength(1);
+          expect(events[0]?.details).toMatchObject(counts);
+
+          // A retried finish changes nothing and appends nothing.
+          expect(await c.repository.finishVerification(c.id, 'verify_cancelled', finishAudit(c))).toEqual(counts);
+          expect((await byTarget(c)).c?.verificationCode).toBe('verify_timeout');
+          expect(await verificationEvents(c)).toHaveLength(1);
+          expect(await c.repository.recordVerification(c.id, 3, [{ targetId: 'b', confirmed: true }])).toEqual({
+            left: 0,
+            pending: 0,
+          });
+          expect((await byTarget(c)).b?.verificationStatus).toBe('unconfirmed');
+
+          // Item status, before, after and the hash inputs are untouched.
+          expect(await sealed(c)).toEqual(before);
+          expect((await c.repository.get(c.id))?.status).toBe('executing');
+        }));
+
+      it('EXE-12 finishVerification with nothing pending appends the audit row once', async () =>
+        withRepo(async (c) => {
+          await executed(c);
+          await c.repository.beginVerification(c.id, SCHEDULE);
+          await c.repository.recordVerification(c.id, 1, [
+            { targetId: 'a', confirmed: true },
+            { targetId: 'b', confirmed: true },
+            { targetId: 'c', confirmed: true },
+          ]);
+          const counts = { pending: 0, confirmed: 3, unconfirmed: 0 };
+          expect(await c.repository.finishVerification(c.id, 'verify_timeout', finishAudit(c))).toEqual(counts);
+          expect(await c.repository.finishVerification(c.id, 'verify_timeout', finishAudit(c))).toEqual(counts);
+          expect(await verificationEvents(c)).toHaveLength(1);
+        }));
+
+      it('EXE-12 finishVerification is atomic with its audit row', async () =>
+        withRepo(async (c) => {
+          await executed(c);
+          await c.repository.beginVerification(c.id, SCHEDULE);
+          c.failNextAudit();
+          await expect(c.repository.finishVerification(c.id, 'verify_timeout', finishAudit(c))).rejects.toThrow();
+          expect((await c.repository.stats(c.id)).verification).toEqual({ pending: 3, confirmed: 0, unconfirmed: 0 });
+          expect((await byTarget(c)).a?.verificationStatus).toBe('pending');
+          expect(await verificationEvents(c)).toHaveLength(0);
+          expect(await c.repository.finishVerification(c.id, 'verify_timeout', finishAudit(c))).toEqual({
+            pending: 0,
+            confirmed: 0,
+            unconfirmed: 3,
+          });
+          expect(await verificationEvents(c)).toHaveLength(1);
+        }));
+
+      it('EXE-12 beginVerification answers undefined unless the change-set is executing; bad IDs are not errors', async () =>
+        withRepo(async (c) => {
+          await executed(c);
+          await c.repository.transition(c.id, ['executing'], 'completed', auditEvent(c.id));
+          expect(await c.repository.beginVerification(c.id, SCHEDULE)).toBeUndefined();
+          expect((await c.repository.get(c.id))?.verificationUntil).toBeUndefined();
+          expect('verification' in (await c.repository.stats(c.id))).toBe(false);
+          for (const bad of ['x', "'; select 1; --", randomUUID()]) {
+            expect(await c.repository.beginVerification(bad, SCHEDULE)).toBeUndefined();
+            expect(await c.repository.verificationItems(bad, 1, 10)).toEqual([]);
+            expect(await c.repository.recordVerification(bad, 1, [{ targetId: 'a', confirmed: true }])).toEqual({
+              left: 0,
+              pending: 0,
+            });
+            expect(await c.repository.finishVerification(bad, 'verify_timeout', finishAudit(c))).toEqual({
+              pending: 0,
+              confirmed: 0,
+              unconfirmed: 0,
+            });
+          }
+          // Never begun: finishing appends nothing.
+          expect(await c.repository.finishVerification(c.id, 'verify_timeout', finishAudit(c))).toEqual({
+            pending: 0,
+            confirmed: 0,
+            unconfirmed: 0,
+          });
+          expect(await verificationEvents(c)).toHaveLength(0);
+        }));
+
+      it('EXE-12 verificationItems rejects limits outside 1..500', async () =>
+        withRepo(async (c) => {
+          await executed(c);
+          for (const limit of [0, 501, 1.5]) {
+            await expect(c.repository.verificationItems(c.id, 1, limit)).rejects.toThrow();
+          }
+        }));
     });
   });
 }

@@ -16,7 +16,9 @@ import type {
   RollbackCounts,
   RollbackItemStatus,
   RollbackRequest,
+  VerificationCounts,
 } from './model.js';
+import type { VerificationOutcome } from './verification.js';
 
 /**
  * A fixed preparation failure code. `duplicate_targets`: two records of a `records_arg` call name one
@@ -297,6 +299,39 @@ export interface ChangeSetRepository {
     outcomes: readonly RollbackItemOutcome[],
     audit: AuditEventInput,
   ): Promise<{ ok: true; counts: RollbackCounts } | { ok: false }>;
+  /**
+   * EXE-12, NFR-2: write-once. Only while `executing`: stores the schedule if none is stored and marks every
+   * `written` item whose verification status is NULL as `pending`. Answers the STORED schedule, the highest
+   * verification round of any item, and the pending count; undefined when the change-set is not `executing`
+   * (and for an unknown or non-UUID ID).
+   */
+  beginVerification(
+    changesetId: string,
+    schedule: { firstAt: Date; until: Date },
+  ): Promise<{ firstAt: Date; until: Date; round: number; pending: number } | undefined>;
+  /** EXE-12: items with verification status `pending` and verification round < `round`, ordered by compareTargetIds, limit 1..500. */
+  verificationItems(changesetId: string, round: number, limit: number): Promise<readonly ChangeItemRecord[]>;
+  /**
+   * EXE-12: per outcome (the first per target), only for an item still `pending`: confirmed → status `confirmed`,
+   * code NULL; otherwise the code and verification round = `round`. Stats recomputed. `left`: pending items with
+   * verification round < `round`; `pending`: all pending items.
+   */
+  recordVerification(
+    changesetId: string,
+    round: number,
+    outcomes: readonly VerificationOutcome[],
+  ): Promise<{ left: number; pending: number }>;
+  /**
+   * EXE-12: once per change-set whose verification began. Every `pending` item becomes `unconfirmed`, keeping its
+   * code or taking `fallbackCode`; stats recomputed; `audit` appended, built from the final counts, in the same
+   * transaction. A second call (and a call before verification began) changes nothing and appends nothing; it
+   * answers the current counts.
+   */
+  finishVerification(
+    changesetId: string,
+    fallbackCode: 'verify_timeout' | 'verify_cancelled',
+    audit: (counts: VerificationCounts) => AuditEventInput,
+  ): Promise<VerificationCounts>;
 }
 
 /** A claimed write batch (EXE-3). */
