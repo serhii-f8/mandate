@@ -250,6 +250,11 @@ function bindDefaults(raw: Record<string, unknown>, at: (path: readonly Property
             if (isRecord(check)) fixed(check.code, ['operations', index, 'manifest', 'checks', c, 'code']);
           });
         }
+        if (isRecord(op.manifest.verify_after) && Array.isArray(op.manifest.verify_after.checks)) {
+          op.manifest.verify_after.checks.forEach((check: unknown, c) => {
+            if (isRecord(check)) fixed(check.code, ['operations', index, 'manifest', 'verify_after', 'checks', c, 'code']);
+          });
+        }
       }
     });
   }

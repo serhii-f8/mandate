@@ -1735,6 +1735,751 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "verify_after": {
+                "additionalProperties": false,
+                "properties": {
+                  "after_seconds": {
+                    "default": 0,
+                    "maximum": 86400,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "checks": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "pattern": "^[a-z][a-z0-9_]{0,62}$",
+                          "type": "string"
+                        },
+                        "require": {
+                          "items": {
+                            "anyOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "present": {
+                                    "anyOf": [
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "after": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "after"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "before": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "before"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "record": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "record"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "arg": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "arg"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "field": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "lookup": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "lookup",
+                                          "field"
+                                        ],
+                                        "type": "object"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "present"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "absent": {
+                                    "anyOf": [
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "after": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "after"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "before": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "before"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "record": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "record"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "arg": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "arg"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "field": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "lookup": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "lookup",
+                                          "field"
+                                        ],
+                                        "type": "object"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "absent"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "equals": {
+                                    "items": false,
+                                    "maxItems": 2,
+                                    "minItems": 2,
+                                    "prefixItems": [
+                                      {
+                                        "anyOf": [
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "after": {
+                                                "maxLength": 128,
+                                                "minLength": 1,
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "after"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "before": {
+                                                "maxLength": 128,
+                                                "minLength": 1,
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "before"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "record": {
+                                                "maxLength": 128,
+                                                "minLength": 1,
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "record"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "arg": {
+                                                "maxLength": 128,
+                                                "minLength": 1,
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "arg"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "field": {
+                                                "maxLength": 128,
+                                                "minLength": 1,
+                                                "type": "string"
+                                              },
+                                              "lookup": {
+                                                "maxLength": 128,
+                                                "minLength": 1,
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "lookup",
+                                              "field"
+                                            ],
+                                            "type": "object"
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "anyOf": [
+                                          {
+                                            "anyOf": [
+                                              {
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "after": {
+                                                    "maxLength": 128,
+                                                    "minLength": 1,
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "after"
+                                                ],
+                                                "type": "object"
+                                              },
+                                              {
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "before": {
+                                                    "maxLength": 128,
+                                                    "minLength": 1,
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "before"
+                                                ],
+                                                "type": "object"
+                                              },
+                                              {
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "record": {
+                                                    "maxLength": 128,
+                                                    "minLength": 1,
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "record"
+                                                ],
+                                                "type": "object"
+                                              },
+                                              {
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "arg": {
+                                                    "maxLength": 128,
+                                                    "minLength": 1,
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "arg"
+                                                ],
+                                                "type": "object"
+                                              },
+                                              {
+                                                "additionalProperties": false,
+                                                "properties": {
+                                                  "field": {
+                                                    "maxLength": 128,
+                                                    "minLength": 1,
+                                                    "type": "string"
+                                                  },
+                                                  "lookup": {
+                                                    "maxLength": 128,
+                                                    "minLength": 1,
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "lookup",
+                                                  "field"
+                                                ],
+                                                "type": "object"
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "value": {
+                                                "anyOf": [
+                                                  {
+                                                    "anyOf": [
+                                                      {
+                                                        "maxLength": 4000,
+                                                        "type": "string"
+                                                      },
+                                                      {
+                                                        "type": "number"
+                                                      },
+                                                      {
+                                                        "type": "boolean"
+                                                      }
+                                                    ]
+                                                  },
+                                                  {
+                                                    "type": "null"
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "value"
+                                            ],
+                                            "type": "object"
+                                          }
+                                        ]
+                                      }
+                                    ],
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "equals"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "in": {
+                                    "anyOf": [
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "after": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "after"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "before": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "before"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "record": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "record"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "arg": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "arg"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "field": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "lookup": {
+                                            "maxLength": 128,
+                                            "minLength": 1,
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "lookup",
+                                          "field"
+                                        ],
+                                        "type": "object"
+                                      }
+                                    ]
+                                  },
+                                  "values": {
+                                    "items": {
+                                      "anyOf": [
+                                        {
+                                          "maxLength": 4000,
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        }
+                                      ]
+                                    },
+                                    "maxItems": 100,
+                                    "minItems": 1,
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [
+                                  "in",
+                                  "values"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "found": {
+                                    "maxLength": 128,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "found"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "not_found": {
+                                    "maxLength": 128,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "not_found"
+                                ],
+                                "type": "object"
+                              }
+                            ]
+                          },
+                          "maxItems": 10,
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        "title": {
+                          "maxLength": 120,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "require"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "every_seconds": {
+                    "default": 30,
+                    "maximum": 3600,
+                    "minimum": 10,
+                    "type": "integer"
+                  },
+                  "lookups": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "args": {
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "anyOf": [
+                                  {
+                                    "maxLength": 4000,
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
+                              },
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "arg": {
+                                    "maxLength": 128,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "default": {
+                                    "anyOf": [
+                                      {
+                                        "maxLength": 4000,
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "arg"
+                                ],
+                                "type": "object"
+                              }
+                            ]
+                          },
+                          "default": {},
+                          "propertyNames": {
+                            "maxLength": 256,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "fields": {
+                          "items": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 50,
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        "ids_arg": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "key": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "target": {
+                                  "const": true,
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "target"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "after": {
+                                  "maxLength": 128,
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "after"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "before": {
+                                  "maxLength": 128,
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "before"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "record": {
+                                  "maxLength": 128,
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "record"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "key_field": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "operation": {
+                          "maxLength": 64,
+                          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "operation",
+                        "ids_arg",
+                        "key_field",
+                        "key",
+                        "fields"
+                      ],
+                      "type": "object"
+                    },
+                    "propertyNames": {
+                      "pattern": "^[a-z][a-z0-9_]{0,62}$",
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "timeout_seconds": {
+                    "default": 600,
+                    "maximum": 604800,
+                    "minimum": 10,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "checks"
+                ],
+                "type": "object"
+              },
               "write": {
                 "additionalProperties": false,
                 "properties": {
@@ -2298,5 +3043,5 @@
     "version"
   ],
   "type": "object",
-  "x-mandate-schema-version": "1.2.0"
+  "x-mandate-schema-version": "1.3.0"
 }

@@ -907,25 +907,31 @@ function presetAlias(
         read_before: { ...m.read_before, operation: id(m.read_before.operation) },
         ...(m.selector === undefined ? {} : { selector: { ...m.selector, operation: id(m.selector.operation) } }),
         // OPS-7: a literal lookup on one of the preset's own reads follows the prefix; another ID, or
-        // one that came from a parameter, stays as it is.
-        ...(m.lookups === undefined
+        // one that came from a parameter, stays as it is. EXE-12: so do the lookups of verify_after.
+        ...(m.lookups === undefined ? {} : { lookups: aliasLookups(m.lookups, (name) => parameterLookup(raw, ['manifest', 'lookups', name])) }),
+        ...(m.verify_after === undefined
           ? {}
           : {
-              lookups: Object.fromEntries(
-                Object.entries(m.lookups).map(([name, l]) => [name, { ...l, operation: parameterLookup(raw, name) ? l.operation : id(l.operation) }]),
-              ),
+              verify_after: {
+                ...m.verify_after,
+                ...(m.verify_after.lookups === undefined
+                  ? {}
+                  : { lookups: aliasLookups(m.verify_after.lookups, (name) => parameterLookup(raw, ['manifest', 'verify_after', 'lookups', name])) }),
+              },
             }),
         rollback: m.rollback.strategy === 'inverse_operation' ? { ...m.rollback, operation: id(m.rollback.operation) } : m.rollback,
       },
     };
   };
+  const aliasLookups = <L extends { operation: string }>(lookups: Readonly<Record<string, L>>, fromParameter: (name: string) => boolean): Record<string, L> =>
+    Object.fromEntries(Object.entries(lookups).map(([name, l]) => [name, { ...l, operation: fromParameter(name) ? l.operation : id(l.operation) }]));
   return { id, operation };
 }
 
-/** Whether the preset file gives lookup `name` of this raw operation node its operation as a `{ $param }`. */
-function parameterLookup(raw: unknown, name: string): boolean {
+/** Whether the preset file gives the lookup at `path` (below the operation node) its operation as a `{ $param }`. */
+function parameterLookup(raw: unknown, path: readonly string[]): boolean {
   const child = (node: unknown, key: string): unknown => (isPlainRecord(node) && Object.hasOwn(node, key) ? node[key] : undefined);
-  const operation = child(child(child(child(raw, 'manifest'), 'lookups'), name), 'operation');
+  const operation = child(path.reduce(child, raw), 'operation');
   return isPlainRecord(operation) && isParamNode(operation);
 }
 

@@ -65,6 +65,13 @@ Two rules for you:
 - Keep `MANDATE_TEMPORAL_KEYS` and `MANDATE_MASTER_KEYS` the same across the upgrade, and never remove a
   key that open workflows or stored credentials still use.
 
+## Upgrading to 1.3.0
+
+1.3.0 is additive and needs no step: the configuration schema and the connector SDK are 1.3.0, and a
+configuration that loaded before still loads. A preset of your own that uses `verify_after` in a
+manifest declares `"sdk": "^1.3.0"` in its `package.json` (`mandate.sdk`), which an older platform
+refuses with `preset_sdk_incompatible`.
+
 ## Upgrading to 1.2.0
 
 Upgrade every `api` and `worker` instance before anyone prepares a new change-set. From 1.2.0 on, a

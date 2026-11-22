@@ -7,6 +7,7 @@
  */
 import {
   BUILTIN_EXCLUSION_REASONS,
+  VERIFICATION_CODES,
   type CheckPredicate,
   type CheckRef,
   type ManifestCheck,
@@ -14,6 +15,7 @@ import {
   type ManifestLookup,
   type ManifestLookupKey,
   type ManifestRead,
+  type ManifestVerifyAfter,
   type ManifestTemplate,
   type RollbackStrategy,
 } from '@mandate/core';
@@ -95,6 +97,34 @@ const manifestLookup = z.strictObject({
   args: templateMap,
 });
 
+const verificationCodes: readonly string[] = VERIFICATION_CODES;
+
+/** EXE-12: a verify check; its code is also not one of the fixed verification codes. */
+const verifyCheck = manifestCheck.refine((c) => !verificationCodes.includes(c.code), { path: ['code'], message: 'must not be a fixed verification code' });
+
+/** Looks at most this many times between `after_seconds` and `timeout_seconds` (EXE-12). */
+const MAX_VERIFY_LOOKS = 1000;
+
+/** The verify-after stage (EXE-12, ADR 0073): checks on the written items until they hold or time runs out. */
+const verifyAfter = z
+  .strictObject({
+    after_seconds: z.number().int().min(0).max(86_400).default(0),
+    every_seconds: z.number().int().min(10).max(3600).default(30),
+    timeout_seconds: z.number().int().min(10).max(604_800).default(600),
+    /** The stage's own namespace; each must be used by a verify check. */
+    lookups: z
+      .record(lookupName, manifestLookup)
+      .refine((lookups) => Object.keys(lookups).length <= 5, 'must declare at most 5 lookups')
+      .optional(),
+    checks: z.array(verifyCheck).min(1).max(20),
+  })
+  .superRefine((v, ctx) => {
+    if (v.timeout_seconds < v.after_seconds) ctx.addIssue({ code: 'custom', message: 'timeout_seconds must not be below after_seconds' });
+    else if ((v.timeout_seconds - v.after_seconds) / v.every_seconds > MAX_VERIFY_LOOKS) {
+      ctx.addIssue({ code: 'custom', message: `must allow at most ${MAX_VERIFY_LOOKS} looks: raise every_seconds or lower timeout_seconds` });
+    }
+  });
+
 export const manifestSchema = z.strictObject({
   /** What the call does to its targets (OPS-2, ADR 0071); a fixed node in presets. */
   action: z.enum(['update', 'create', 'delete']).default('update'),
@@ -132,6 +162,8 @@ export const manifestSchema = z.strictObject({
     .record(lookupName, manifestLookup)
     .refine((lookups) => Object.keys(lookups).length <= 5, 'must declare at most 5 lookups')
     .optional(),
+  /** Confirm the written items after the last batch (EXE-12, ADR 0073). */
+  verify_after: verifyAfter.optional(),
 });
 
 export type ManifestConfig = z.output<typeof manifestSchema>;
@@ -186,11 +218,14 @@ function toCheckPredicate(p: CheckPredicateConfig): CheckPredicate {
   return { not_found: p.not_found };
 }
 
+type CheckConfig = z.output<typeof manifestCheck>;
+
+function toCheckList(checks: readonly CheckConfig[]): ManifestCheck[] {
+  return checks.map((c) => ({ code: c.code, ...(c.title === undefined ? {} : { title: c.title }), require: c.require.map(toCheckPredicate) }));
+}
+
 function toChecks(checks: ManifestConfig['checks']): { checks?: ManifestCheck[] } {
-  if (checks === undefined) return {};
-  return {
-    checks: checks.map((c) => ({ code: c.code, ...(c.title === undefined ? {} : { title: c.title }), require: c.require.map(toCheckPredicate) })),
-  };
+  return checks === undefined ? {} : { checks: toCheckList(checks) };
 }
 
 type LookupConfig = z.output<typeof manifestLookup>;
@@ -211,6 +246,19 @@ function toLookups(lookups: ManifestConfig['lookups']): { lookups?: Record<strin
         { operation: l.operation, idsArg: l.ids_arg, keyField: l.key_field, key: toLookupKey(l.key), fields: [...l.fields], args: toTemplates(l.args) },
       ]),
     ),
+  };
+}
+
+function toVerifyAfter(v: ManifestConfig['verify_after']): { verifyAfter?: ManifestVerifyAfter } {
+  if (v === undefined) return {};
+  return {
+    verifyAfter: {
+      afterSeconds: v.after_seconds,
+      everySeconds: v.every_seconds,
+      timeoutSeconds: v.timeout_seconds,
+      checks: toCheckList(v.checks),
+      ...toLookups(v.lookups),
+    },
   };
 }
 
@@ -244,6 +292,7 @@ export function toManifestDefinition(m: ManifestConfig): ManifestDefinition {
     rollback: strategy,
     ...toChecks(m.checks),
     ...toLookups(m.lookups),
+    ...toVerifyAfter(m.verify_after),
   };
 }
 
@@ -305,12 +354,12 @@ function inverseMessage(wanted: 'create' | 'delete'): string {
     : 'must name an enabled create operation of the same connection whose manifest lists every field of this one';
 }
 
-/** Every reference of the checks with its path below `manifest` (CS-3). */
-function checkRefsOf(checks: ManifestConfig['checks']): { ref: CheckRefConfig; path: PropertyKey[] }[] {
+/** Every reference of the checks with its path below `manifest`; `base` is where the checks sit (CS-3, EXE-12). */
+function checkRefsOf(checks: readonly CheckConfig[] | undefined, base: readonly PropertyKey[]): { ref: CheckRefConfig; path: PropertyKey[] }[] {
   const out: { ref: CheckRefConfig; path: PropertyKey[] }[] = [];
   (checks ?? []).forEach((check, i) => {
     check.require.forEach((p, j) => {
-      const at = ['checks', i, 'require', j];
+      const at = [...base, 'checks', i, 'require', j];
       if ('present' in p) out.push({ ref: p.present, path: [...at, 'present'] });
       else if ('absent' in p) out.push({ ref: p.absent, path: [...at, 'absent'] });
       else if ('in' in p) out.push({ ref: p.in, path: [...at, 'in'] });
@@ -325,32 +374,58 @@ function checkRefsOf(checks: ManifestConfig['checks']): { ref: CheckRefConfig; p
 }
 
 /**
- * The cross-checks of the preparation checks and lookups that need no registry (CS-3, OPS-7): unique
- * codes, `after` and `before` within `fields`, every lookup reference declared and naming one of its
- * `fields`, and every lookup used by a check. Messages never quote configuration values.
+ * One list of checks with the lookups they read: the preparation checks (CS-3, OPS-7) or the
+ * verify-after checks (EXE-12), each with its own lookup namespace.
  */
-function checkChecks(manifest: ManifestConfig, mAt: (sub: readonly PropertyKey[], message: string) => void): void {
-  const lookups = manifest.lookups ?? {};
+interface CheckSet {
+  /** Where the set sits below `manifest`: nothing, or `verify_after`. */
+  readonly base: readonly PropertyKey[];
+  readonly checks: readonly CheckConfig[] | undefined;
+  readonly lookups: Readonly<Record<string, LookupConfig>> | undefined;
+  /** A verify check reads the record as it is now, whatever the action (EXE-12). */
+  readonly verify: boolean;
+}
+
+function checkSetsOf(manifest: ManifestConfig): CheckSet[] {
+  const sets: CheckSet[] = [{ base: [], checks: manifest.checks, lookups: manifest.lookups, verify: false }];
+  if (manifest.verify_after !== undefined) {
+    sets.push({ base: ['verify_after'], checks: manifest.verify_after.checks, lookups: manifest.verify_after.lookups, verify: true });
+  }
+  return sets;
+}
+
+/**
+ * The cross-checks of a set of checks and lookups that need no registry (CS-3, OPS-7, EXE-12):
+ * unique codes, `after` and `before` within `fields`, every lookup reference declared and naming one
+ * of its `fields`, and every lookup used by a check. Messages never quote configuration values.
+ */
+function checkChecks(manifest: ManifestConfig, set: CheckSet, mAt: (sub: readonly PropertyKey[], message: string) => void): void {
+  const { base } = set;
+  const lookups = set.lookups ?? {};
   // Own keys only: a name such as `constructor` must not resolve through Object.prototype.
   const declared = (lookupName: string): LookupConfig | undefined => (Object.hasOwn(lookups, lookupName) ? lookups[lookupName] : undefined);
   const used = new Set<string>();
   const seen = new Set<string>();
-  (manifest.checks ?? []).forEach((check, i) => {
-    if (seen.has(check.code)) mAt(['checks', i, 'code'], 'must be unique among the checks');
+  // One code, one meaning per operation: a verify code differs from the preparation codes (EXE-12).
+  const preparationCodes = new Set(set.verify ? (manifest.checks ?? []).map((c) => c.code) : []);
+  (set.checks ?? []).forEach((check, i) => {
+    if (seen.has(check.code)) mAt([...base, 'checks', i, 'code'], 'must be unique among the checks');
+    else if (preparationCodes.has(check.code)) mAt([...base, 'checks', i, 'code'], 'must not be a code of the preparation checks');
     seen.add(check.code);
     check.require.forEach((p, j) => {
       const named = 'found' in p ? { key: 'found', lookup: p.found } : 'not_found' in p ? { key: 'not_found', lookup: p.not_found } : undefined;
       if (named === undefined) return;
       used.add(named.lookup);
-      if (declared(named.lookup) === undefined) mAt(['checks', i, 'require', j, named.key], 'is not a declared lookup');
+      if (declared(named.lookup) === undefined) mAt([...base, 'checks', i, 'require', j, named.key], 'is not a declared lookup');
     });
   });
   const action = manifest.action;
   // A create has no current record (no `before`, no `record`); a delete has no `after` (CS-3, OPS-7).
+  // A verify check reads the record as it is now, which exists or not whatever the action (EXE-12).
   const unavailable = (side: 'after' | 'before' | 'record'): boolean =>
-    action === 'create' ? side === 'before' || side === 'record' : action === 'delete' && side === 'after';
+    side === 'record' && set.verify ? false : action === 'create' ? side === 'before' || side === 'record' : action === 'delete' && side === 'after';
   const notAvailable = `is not available for action ${action}`;
-  for (const { ref, path } of checkRefsOf(manifest.checks)) {
+  for (const { ref, path } of checkRefsOf(set.checks, base)) {
     if ('after' in ref && unavailable('after')) mAt([...path, 'after'], notAvailable);
     else if ('after' in ref && !manifest.fields.includes(ref.after)) mAt([...path, 'after'], 'must be one of fields');
     if ('before' in ref && unavailable('before')) mAt([...path, 'before'], notAvailable);
@@ -364,9 +439,9 @@ function checkChecks(manifest: ManifestConfig, mAt: (sub: readonly PropertyKey[]
     }
   }
   for (const [lookupName, lookup] of Object.entries(lookups)) {
-    if (!used.has(lookupName)) mAt(['lookups', lookupName], 'is not used by any check');
+    if (!used.has(lookupName)) mAt([...base, 'lookups', lookupName], 'is not used by any check');
     const key = lookup.key;
-    const keyAt = ['lookups', lookupName, 'key'];
+    const keyAt = [...base, 'lookups', lookupName, 'key'];
     if ('after' in key && unavailable('after')) mAt([...keyAt, 'after'], notAvailable);
     else if ('after' in key && !manifest.fields.includes(key.after)) mAt([...keyAt, 'after'], 'must be one of fields');
     if ('before' in key && unavailable('before')) mAt([...keyAt, 'before'], notAvailable);
@@ -454,7 +529,8 @@ export function checkManifests(input: ManifestCheckInput): void {
     manifest.sensitive_fields.forEach((f, index) => {
       if (!manifest.fields.includes(f)) mAt(['sensitive_fields', index], 'must be one of fields');
     });
-    checkChecks(manifest, mAt);
+    const sets = checkSetsOf(manifest);
+    for (const set of sets) checkChecks(manifest, set, mAt);
     if (!op.enabled) continue;
 
     const schema = op.definition.inputSchema;
@@ -500,8 +576,10 @@ export function checkManifests(input: ManifestCheckInput): void {
         if (!writeProps.has(arg)) mAt(['scope_args', arg], 'is not a property of input_schema');
       }
       // CS-3: a check reads call arguments the schema declares.
-      for (const { ref, path } of checkRefsOf(manifest.checks)) {
-        if ('arg' in ref && !writeProps.has(ref.arg)) mAt([...path, 'arg'], 'is not a property of input_schema');
+      for (const set of sets) {
+        for (const { ref, path } of checkRefsOf(set.checks, set.base)) {
+          if ('arg' in ref && !writeProps.has(ref.arg)) mAt([...path, 'arg'], 'is not a property of input_schema');
+        }
       }
     }
 
@@ -569,12 +647,14 @@ export function checkManifests(input: ManifestCheckInput): void {
           if (!known.has(field)) mAt(['scope_args', arg], notReturned);
         }
         // CS-3: the current-record fields of the checks are added to this read.
-        for (const { ref, path } of checkRefsOf(manifest.checks)) {
-          if ('record' in ref && !known.has(ref.record)) mAt([...path, 'record'], notReturned);
-        }
-        // OPS-7: so are the record fields that key a lookup.
-        for (const [lookupName, lookup] of Object.entries(manifest.lookups ?? {})) {
-          if ('record' in lookup.key && !known.has(lookup.key.record)) mAt(['lookups', lookupName, 'key', 'record'], notReturned);
+        // OPS-7: so are the record fields that key a lookup. EXE-12: and those of the verify checks.
+        for (const set of sets) {
+          for (const { ref, path } of checkRefsOf(set.checks, set.base)) {
+            if ('record' in ref && !known.has(ref.record)) mAt([...path, 'record'], notReturned);
+          }
+          for (const [lookupName, lookup] of Object.entries(set.lookups ?? {})) {
+            if ('record' in lookup.key && !known.has(lookup.key.record)) mAt([...set.base, 'lookups', lookupName, 'key', 'record'], notReturned);
+          }
         }
       }
     }
@@ -592,10 +672,12 @@ export function checkManifests(input: ManifestCheckInput): void {
       }
     }
 
-    // OPS-7: a lookup reads an enabled read operation with fields_arg on any connection.
-    for (const [lookupName, lookup] of Object.entries(manifest.lookups ?? {})) {
+    // OPS-7: a lookup reads an enabled read operation with fields_arg on any connection; EXE-12: the
+    // verify lookups obey the same rules.
+    const declaredLookups = sets.flatMap(({ base, lookups }) => Object.entries(lookups ?? {}).map(([lookupName, lookup]) => ({ base, lookupName, lookup })));
+    for (const { base, lookupName, lookup } of declaredLookups) {
       const lAt = (sub: readonly PropertyKey[], message: string): void => {
-        mAt(['lookups', lookupName, ...sub], message);
+        mAt([...base, 'lookups', lookupName, ...sub], message);
       };
       const target = all.get(lookup.operation);
       let lookupRead: RegisteredOperation | undefined;

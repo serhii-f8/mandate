@@ -246,6 +246,41 @@ total or holding a record without an identifier). A lookup that could not be rea
             - { in: { lookup: erp, field: state }, values: [released] }
 ```
 
+`manifest.verify_after` (since 1.3.0, optional) confirms the written items after the last batch: it
+re-checks each item that was written until its checks hold or the time runs out. It is allowed on a
+`write` or `destructive` operation with a manifest, not on an opaque one. The stage runs only when the
+batch loop ended with nothing left to do.
+
+| Key | Type | Default | Bounds / notes |
+| --- | --- | --- | --- |
+| `after_seconds` | integer | `0` | 0-86400. Wait before the first look, from the end of the last batch |
+| `every_seconds` | integer | `30` | 10-3600. Wait between looks |
+| `timeout_seconds` | integer | `600` | 10-604800, not below `after_seconds`. From the end of the last batch; items still pending then end `unconfirmed`. At most 1000 looks: `(timeout_seconds - after_seconds) / every_seconds` must not exceed 1000 |
+| `lookups` | map | none | At most 5, the shape of `manifest.lookups` above, with the same rules. Its own namespace: a verify check reads only these, never the preparation lookups. Every lookup must be used by a verify check |
+| `checks` | list | required | 1-20 checks of the shape of `manifest.checks`, each with at most 10 predicates, evaluated in order; all must hold for an item to be confirmed |
+
+A verify check `code` follows the rule of a preparation check and is also not one of the fixed
+verification codes (`verify_read_failed`, `verify_timeout`, `verify_cancelled`) nor the code of a
+preparation check of the same operation, so one code has one meaning per operation. The references
+are those of a preparation check, except that `{ record: f }` is the record as it is read at the
+look, so it is available for a create and a delete too (a deleted record is simply absent), and the
+`after` and `before` sides are the stored item, so `{ before: f }` is refused on a create and
+`{ after: f }` on a delete. The same holds for a lookup `key`.
+
+```yaml
+    manifest:
+      # ...
+      verify_after:
+        after_seconds: 60
+        every_seconds: 30
+        timeout_seconds: 900
+        checks:
+          - code: not_applied
+            title: Upstream still shows the old value
+            require:
+              - { equals: [{ record: name }, { after: name }] }
+```
+
 The `read_before` operation must be an enabled read operation that declares `fields_arg`; that
 argument must be a required property of its `input_schema` and equal `upstream.response.fields_from_arg`.
 A grant

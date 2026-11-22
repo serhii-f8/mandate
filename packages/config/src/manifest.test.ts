@@ -6,6 +6,7 @@ import { loadCodeFixture, presetWithoutUpdate } from '../test/code-fixture.js';
 import type { ConfigIssue } from './issues.js';
 import { loadConfigurationSources, type LoadedConfiguration, type LoadResult } from './load.js';
 import type { HttpOperationBinding } from './registry.js';
+import { VERIFICATION_CODES, type ManifestDefinition } from '@mandate/core';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -968,32 +969,33 @@ describe('CS-3 manifest checks', () => {
   });
 });
 
-describe('OPS-7 manifest lookups', () => {
-  const ERP = `version: 1
+const ERP = `version: 1
 operations:
-  - id: erp.get_parts
-    connection: other
-    risk: read
-    description: Parts.
-    upstream: { method: GET, path: /parts, query: { codes: { arg: codes, join: ',' }, plant: { arg: plant }, fields: { arg: fields, join: ',' } }, response: { items: items, fields_from_arg: fields } }
-    input_schema:
-      type: object
-      properties:
-        codes: { type: array, items: { type: string }, maxItems: 100 }
-        numbers: { type: array, items: { type: integer } }
-        plant: { type: string }
-        fields: { type: array, items: { enum: [code, cost, state] } }
-      required: [codes, fields]
-    fields_arg: fields
-  - id: erp.get_plain
-    connection: other
-    risk: read
-    description: No field list.
-    upstream: { method: GET, path: /plain, query: { codes: { arg: codes, join: ',' } } }
-    input_schema:
-      type: object
-      properties: { codes: { type: array, items: { type: string } } }
+- id: erp.get_parts
+  connection: other
+  risk: read
+  description: Parts.
+  upstream: { method: GET, path: /parts, query: { codes: { arg: codes, join: ',' }, plant: { arg: plant }, fields: { arg: fields, join: ',' } }, response: { items: items, fields_from_arg: fields } }
+  input_schema:
+    type: object
+    properties:
+      codes: { type: array, items: { type: string }, maxItems: 100 }
+      numbers: { type: array, items: { type: integer } }
+      plant: { type: string }
+      fields: { type: array, items: { enum: [code, cost, state] } }
+    required: [codes, fields]
+  fields_arg: fields
+- id: erp.get_plain
+  connection: other
+  risk: read
+  description: No field list.
+  upstream: { method: GET, path: /plain, query: { codes: { arg: codes, join: ',' } } }
+  input_schema:
+    type: object
+    properties: { codes: { type: array, items: { type: string } } }
 `;
+
+describe('OPS-7 manifest lookups', () => {
   const L = `${M}.lookups`;
   const lookup = (body: string, name = 'erp'): string => `        ${name}: { ${body} }\n`;
   const ERP_LOOKUP = 'operation: erp.get_parts, ids_arg: codes, key_field: code, key: { target: true }, fields: [cost], args: { plant: { arg: brand } }';
@@ -1117,5 +1119,167 @@ operations:
     const noPim = USES + '        - { code: no_pim, require: [{ found: pim }] }\n';
     const undeclared = await expectLookupIssue(lookup(ERP_LOOKUP), `${C}[1].require[0].found`, 'pim', noPim);
     expect(undeclared.message).toBe('is not a declared lookup');
+  });
+});
+
+describe('OPS-2 EXE-12 verify_after', () => {
+  const V = `${M}.verify_after`;
+  const CHECK = '{ code: x_missing, require: [{ present: { record: name } }] }';
+  /** The write with a `verify_after` block before its rollback. */
+  const withVerify = (body: string, t = WRITE): string => t.replace('      rollback:', `      verify_after:\n${body.replace(/^/gm, '        ')}\n      rollback:`);
+  const loadVerify = (body: string, files: Record<string, string> = {}): Promise<LoadResult> => load({ 'write.yaml': withVerify(body), 'erp.yaml': ERP, ...files });
+  const manifestOf = (config: LoadedConfiguration): ManifestDefinition | undefined => config.policy.operations.find((o) => o.id === 'catalog.update_content')?.manifest;
+  const ERP_LOOKUP = 'operation: erp.get_parts, ids_arg: codes, key_field: code, key: { target: true }, fields: [cost], args: { plant: { arg: brand } }';
+  /** Exactly one issue at `path` or below it, none quoting `value`. */
+  async function expectOne(body: string, path: string, value: string, files: Record<string, string> = {}): Promise<ConfigIssue> {
+    const found = issues(await loadVerify(body, files));
+    const match = found.filter((i) => i.path === path || i.path.startsWith(`${path}.`) || i.path.startsWith(`${path}[`));
+    expect(match, JSON.stringify(found)).toHaveLength(1);
+    const [issue] = match;
+    if (issue === undefined) throw new Error('unreachable: length checked above');
+    expect(issue.message).not.toContain(value);
+    return issue;
+  }
+
+  it('OPS-2 EXE-12 a minimal verify_after loads with the defaults 0, 30 and 600; a manifest without it has none', async () => {
+    const config = ok(await loadVerify(`checks: [${CHECK}]`));
+    expect(manifestOf(config)?.verifyAfter).toEqual({
+      afterSeconds: 0,
+      everySeconds: 30,
+      timeoutSeconds: 600,
+      checks: [{ code: 'x_missing', require: [{ present: { record: 'name' } }] }],
+    });
+    expect(manifestOf(ok(await load()))).not.toHaveProperty('verifyAfter');
+  });
+
+  it('OPS-2 EXE-12 the three timings and the lookups convert to the core type', async () => {
+    const config = ok(
+      await loadVerify(`after_seconds: 60\nevery_seconds: 10\ntimeout_seconds: 900\nlookups: { erp: { ${ERP_LOOKUP} } }\nchecks: [{ code: gone, title: Gone, require: [{ found: erp }, { present: { lookup: erp, field: cost } }] }]`),
+    );
+    expect(manifestOf(config)?.verifyAfter).toEqual({
+      afterSeconds: 60,
+      everySeconds: 10,
+      timeoutSeconds: 900,
+      lookups: { erp: { operation: 'erp.get_parts', idsArg: 'codes', keyField: 'code', key: { target: true }, fields: ['cost'], args: { plant: { arg: 'brand' } } } },
+      checks: [{ code: 'gone', title: 'Gone', require: [{ found: 'erp' }, { present: { lookup: 'erp', field: 'cost' } }] }],
+    });
+  });
+
+  it('OPS-2 EXE-12 the bounds: after_seconds 0..86400, every_seconds 10..3600, timeout_seconds 10..604800', async () => {
+    ok(await loadVerify(`after_seconds: 86400\nevery_seconds: 3600\ntimeout_seconds: 604800\nchecks: [${CHECK}]`));
+    ok(await loadVerify(`every_seconds: 10\ntimeout_seconds: 10\nchecks: [${CHECK}]`));
+    await expectOne(`every_seconds: 9\nchecks: [${CHECK}]`, `${V}.every_seconds`, '9');
+    await expectOne(`every_seconds: 3601\nchecks: [${CHECK}]`, `${V}.every_seconds`, '3601');
+    await expectOne(`after_seconds: 86401\ntimeout_seconds: 604800\nchecks: [${CHECK}]`, `${V}.after_seconds`, '86401');
+    await expectOne(`after_seconds: -1\nchecks: [${CHECK}]`, `${V}.after_seconds`, '-1');
+    await expectOne(`timeout_seconds: 9\nchecks: [${CHECK}]`, `${V}.timeout_seconds`, '9');
+    await expectOne(`timeout_seconds: 604801\nchecks: [${CHECK}]`, `${V}.timeout_seconds`, '604801');
+    await expectOne(`every_seconds: 30.5\nchecks: [${CHECK}]`, `${V}.every_seconds`, '30.5');
+  });
+
+  it('OPS-2 EXE-12 timeout_seconds is not below after_seconds', async () => {
+    const issue = await expectOne(`after_seconds: 60\ntimeout_seconds: 30\nchecks: [${CHECK}]`, V, '60');
+    expect(issue.path).toBe(V);
+    ok(await loadVerify(`after_seconds: 60\ntimeout_seconds: 60\nchecks: [${CHECK}]`));
+  });
+
+  it('OPS-2 EXE-12 at most 1000 looks between after_seconds and timeout_seconds', async () => {
+    ok(await loadVerify(`after_seconds: 0\nevery_seconds: 10\ntimeout_seconds: 10000\nchecks: [${CHECK}]`));
+    const issue = await expectOne(`after_seconds: 0\nevery_seconds: 10\ntimeout_seconds: 10010\nchecks: [${CHECK}]`, V, '10010');
+    expect(issue.path).toBe(V);
+  });
+
+  it('OPS-2 EXE-12 checks has 1 to 20 entries of at most 10 predicates; the check keys are closed', async () => {
+    await expectOne('checks: []', `${V}.checks`, 'x_missing');
+    const many = Array.from({ length: 21 }, (_, i) => `{ code: c${i}, require: [{ present: { record: name } }] }`).join(', ');
+    await expectOne(`checks: [${many}]`, `${V}.checks`, 'c20');
+    ok(await loadVerify(`checks: [${many.split('}] }, ').slice(0, 20).join('}] }, ')}}] }]`));
+    const wide = Array.from({ length: 11 }, () => '{ present: { record: name } }').join(', ');
+    await expectOne(`checks: [{ code: wide, require: [${wide}] }]`, `${V}.checks[0].require`, 'wide');
+    expect(issues(await loadVerify(`checks: [${CHECK}]\nextra: 1`)).map((i) => i.path)).toEqual([V]);
+    const missing = issues(await loadVerify('after_seconds: 5'));
+    expect(missing.map((i) => i.path)).toContain(`${V}.checks`);
+  });
+
+  it('OPS-2 EXE-12 at most 5 lookups', async () => {
+    const names = ['erp', 'b', 'c', 'd', 'e', 'f'];
+    const lookups = (list: readonly string[]): string => list.map((n) => `${n}: { ${ERP_LOOKUP} }`).join(', ');
+    const uses = (list: readonly string[]): string => `[{ code: uses_all, require: [${list.map((n) => `{ found: ${n} }`).join(', ')}] }]`;
+    ok(await loadVerify(`lookups: { ${lookups(names.slice(0, 5))} }\nchecks: ${uses(names.slice(0, 5))}`));
+    await expectOne(`lookups: { ${lookups(names)} }\nchecks: ${uses(names)}`, `${V}.lookups`, 'erp');
+  });
+
+  it('OPS-2 EXE-12 a code is not a built-in exclusion reason, a verification code or a code of the preparation checks', async () => {
+    await expectOne('checks: [{ code: not_found, require: [{ present: { record: name } }] }]', `${V}.checks[0].code`, 'not_found');
+    for (const code of VERIFICATION_CODES) {
+      const issue = await expectOne(`checks: [{ code: ${code}, require: [{ present: { record: name } }] }]`, `${V}.checks[0].code`, code);
+      expect(issue.message).toBe('must not be a fixed verification code');
+    }
+    const both = withVerify(`checks: [{ code: locked, require: [{ present: { record: name } }] }]`).replace(
+      '      verify_after:',
+      '      checks:\n        - { code: locked, require: [{ present: { after: name } }] }\n      verify_after:',
+    );
+    const found = issues(await load({ 'write.yaml': both }));
+    const match = found.filter((i) => i.path === `${V}.checks[0].code`);
+    expect(match, JSON.stringify(found)).toHaveLength(1);
+    expect(match[0]?.message).toBe('must not be a code of the preparation checks');
+    expect(match[0]?.message).not.toContain('locked');
+  });
+
+  it('OPS-2 EXE-12 codes are unique among the verify checks', async () => {
+    const issue = await expectOne(`checks: [${CHECK}, ${CHECK}]`, `${V}.checks[1].code`, 'x_missing');
+    expect(issue.message).toBe('must be unique among the checks');
+  });
+
+  it('OPS-2 EXE-12 verify checks read their own lookups: one declared only under the preparation lookups is refused', async () => {
+    const write = withVerify('checks: [{ code: gone, require: [{ found: shop }] }]').replace(
+      '      verify_after:',
+      `      lookups:\n        shop: { ${ERP_LOOKUP} }\n      checks:\n        - { code: unknown_shop, require: [{ found: shop }] }\n      verify_after:`,
+    );
+    const found = issues(await load({ 'write.yaml': write, 'erp.yaml': ERP }));
+    const match = found.filter((i) => i.path === `${V}.checks[0].require[0].found`);
+    expect(match, JSON.stringify(found)).toHaveLength(1);
+    expect(match[0]?.message).toBe('is not a declared lookup');
+  });
+
+  it('OPS-2 EXE-12 every verify lookup is used by a verify check', async () => {
+    const issue = await expectOne(`lookups: { erp: { ${ERP_LOOKUP} } }\nchecks: [${CHECK}]`, `${V}.lookups.erp`, 'erp');
+    expect(issue.message).toBe('is not used by any check');
+  });
+
+  it('OPS-2 EXE-12 a lookup operation is an enabled read operation, never a write', async () => {
+    const issue = await expectOne(
+      `lookups: { erp: { ${ERP_LOOKUP.replace('erp.get_parts', 'catalog.update_content')} } }\nchecks: [{ code: gone, require: [{ found: erp }] }]`,
+      `${V}.lookups.erp.operation`,
+      'catalog.update_content',
+    );
+    expect(issue.message).toBe('must name an enabled read operation');
+  });
+
+  it('OPS-2 EXE-12 lookup keys, fields, ids_arg and args get the checks of the preparation lookups', async () => {
+    const use = 'checks: [{ code: gone, require: [{ found: erp }] }]';
+    await expectOne(`lookups: { erp: { ${ERP_LOOKUP.replace('key_field: code', 'key_field: price')} } }\n${use}`, `${V}.lookups.erp.key_field`, 'price');
+    await expectOne(`lookups: { erp: { ${ERP_LOOKUP.replace('ids_arg: codes', 'ids_arg: numbers')} } }\n${use}`, `${V}.lookups.erp.ids_arg`, 'numbers');
+    await expectOne(`lookups: { erp: { ${ERP_LOOKUP.replace('{ target: true }', '{ after: price }')} } }\n${use}`, `${V}.lookups.erp.key.after`, 'price');
+    await expectOne(`lookups: { erp: { ${ERP_LOOKUP.replace('plant: { arg: brand }', 'store: 1')} } }\n${use}`, `${V}.lookups.erp.args.store`, 'store');
+  });
+
+  it('OPS-2 EXE-12 { record } and a record key are available for every action and name a field the read can return', async () => {
+    const use = 'checks: [{ code: gone, require: [{ found: erp }, { absent: { record: name } }] }]';
+    ok(await loadVerify(`lookups: { erp: { ${ERP_LOOKUP.replace('{ target: true }', '{ record: price }')} } }\n${use}`));
+    await expectOne('checks: [{ code: gone, require: [{ present: { record: colour } }] }]', `${V}.checks[0].require[0].present.record`, 'colour');
+  });
+
+  it('OPS-2 EXE-12 after, before and arg references are checked as in the preparation checks', async () => {
+    await expectOne('checks: [{ code: gone, require: [{ present: { after: price } }] }]', `${V}.checks[0].require[0].present.after`, 'price');
+    await expectOne('checks: [{ code: gone, require: [{ present: { before: price } }] }]', `${V}.checks[0].require[0].present.before`, 'price');
+    await expectOne('checks: [{ code: gone, require: [{ present: { arg: colour } }] }]', `${V}.checks[0].require[0].present.arg`, 'colour');
+    ok(await loadVerify('checks: [{ code: gone, require: [{ present: { arg: brand } }, { equals: [{ after: name }, { record: name }] }] }]'));
+  });
+
+  it('OPS-2 EXE-12 verify_after on an operation without a manifest is refused with the manifest', async () => {
+    const opaque = withVerify(`checks: [${CHECK}]`).replace('risk: write', 'risk: write_opaque');
+    const found = issues(await load({ 'write.yaml': opaque }));
+    expect(found.filter((i) => i.path === M)).toEqual([expect.objectContaining({ message: 'is not allowed on a write_opaque operation' })]);
   });
 });

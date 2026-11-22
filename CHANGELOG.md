@@ -2,6 +2,18 @@
 
 All notable changes are recorded here. The project follows [semantic versioning](docs/guide/versioning.md).
 
+## 1.3.0
+
+Additive release: the configuration schema and the connector SDK are 1.3.0. A preset that uses
+`verify_after` declares `mandate.sdk: ^1.3.0`. See [Upgrading](docs/guide/upgrading.md#upgrading-to-130).
+
+### Added
+
+- `manifest.verify_after` declares a verify-after stage: checks, with their own lookups and reason
+  codes, that confirm the written items after the last batch, with `after_seconds`, `every_seconds`
+  and `timeout_seconds`. The loader validates it; the stage itself is executed by later changes
+  (OPS-2, EXE-12, ADR 0073).
+
 ## 1.2.0
 
 Upgrade every `api` and `worker` before preparing new change-sets. See

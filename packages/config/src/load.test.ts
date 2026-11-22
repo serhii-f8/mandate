@@ -777,6 +777,25 @@ role_mapping:
     ]);
   });
 
+  it('CONN-8 EXE-12 a verify_after lookup follows the prefix like a preparation lookup', async () => {
+    const verify =
+      '      verify_after:\n' +
+      '        lookups:\n' +
+      '          own: { operation: fixture.get_many, ids_arg: ids, key_field: id, key: { target: true }, fields: [state] }\n' +
+      '          other: { operation: shop_b.get_many, ids_arg: ids, key_field: id, key: { target: true }, fields: [state] }\n' +
+      '        checks: [{ code: not_confirmed, require: [{ found: own }, { found: other }] }]\n';
+    const text = await presetWithoutUpdate();
+    const at = text.indexOf('  - id: fixture.set_tags\n');
+    const preset = text.slice(0, at) + text.slice(at).replace('      rollback: { strategy: replay_previous_state }', () => `${verify}      rollback: { strategy: replay_previous_state }`);
+    const result = await loadAliased(PREFIXED, preset);
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    const operations = result.configuration.policy.operations.filter((o) => o.id.endsWith('.set_tags'));
+    expect(operations.map((o) => [o.manifest?.verifyAfter?.lookups?.own?.operation, o.manifest?.verifyAfter?.lookups?.other?.operation])).toEqual([
+      ['shop_a.get_many', 'shop_b.get_many'],
+      ['shop_b.get_many', 'shop_b.get_many'],
+    ]);
+  });
+
   it('CONN-8 the preset test operation follows the prefix', async () => {
     const preset = (await presetWithoutUpdate()).replace('operations:\n', 'test: { operation: fixture.search, args: { page: 1, per_page: 1, fields: [id] } }\noperations:\n');
     const result = await loadAliased(PREFIXED, preset);
@@ -929,6 +948,13 @@ roles:
         '      values_arg: changes\n      checks: [{ code: { $param: p }, require: [{ present: { after: tags } }] }]\n',
         'operations[2].manifest.checks[0].code',
       ],
+      [
+        'operations[*].manifest.verify_after.checks[*].code',
+        'locked',
+        '      values_arg: changes\n',
+        '      values_arg: changes\n      verify_after: { checks: [{ code: { $param: p }, require: [{ present: { record: tags } }] }] }\n',
+        'operations[2].manifest.verify_after.checks[0].code',
+      ],
       ['test.operation', 'fixture.search', 'operations:\n', 'test: { operation: { $param: p }, args: { page: 1, per_page: 1, fields: [id] } }\noperations:\n', 'test.operation'],
     ] as const;
     for (const [node, value, from, to, path] of cases) {
@@ -938,7 +964,19 @@ roles:
       });
     }
 
-    it('CONN-8 OPS-7 a lookup operation may be a parameter: it names an operation of another connection', async () => {
+      it('CONN-8 EXE-12 a verify_after lookup operation may be a parameter and is used exactly as given', async () => {
+      const verify =
+        '      values_arg: changes\n' +
+        '      verify_after:\n' +
+        '        lookups: { known: { operation: { $param: p }, ids_arg: ids, key_field: id, key: { target: true }, fields: [state] } }\n' +
+        '        checks: [{ code: not_confirmed, require: [{ found: known }] }]\n';
+      const result = await loadWith(oneShop(), await withIdentityParam('fixture.get_many', '      values_arg: changes\n', verify));
+      if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+      const manifest = result.configuration.policy.operations.find((o) => o.id === 'fixture.set_tags')?.manifest;
+      expect(manifest?.verifyAfter?.lookups?.known?.operation).toBe('fixture.get_many');
+    });
+
+  it('CONN-8 OPS-7 a lookup operation may be a parameter: it names an operation of another connection', async () => {
       const lookup =
         '      values_arg: changes\n' +
         '      lookups: { known: { operation: { $param: p }, ids_arg: ids, key_field: id, key: { target: true }, fields: [state] } }\n' +

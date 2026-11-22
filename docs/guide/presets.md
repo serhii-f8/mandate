@@ -234,6 +234,12 @@ prefixed binding can name the read of an unprefixed binding of the same preset. 
 predicates are in the
 [Configuration reference](configuration.md).
 
+`verify_after` (since 1.3.0) adds a verify-after stage that confirms the written items with checks of
+the same shape and its own lookups. A verify check `code` cannot be a `$param`, and a lookup
+`operation` there behaves as in `lookups`: a literal naming one of the preset's own reads follows
+`operation_prefix`, one that comes from a `$param` is used exactly as given. A preset that uses
+`verify_after` declares `"sdk": "^1.3.0"`.
+
 ### Code operations
 
 Most operations are declarative. When an upstream cannot be described by a mapping, a preset ships

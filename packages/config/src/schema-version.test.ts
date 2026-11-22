@@ -8,7 +8,7 @@ import { PRODUCT_VERSION } from './product-version.js';
 
 describe('NFR-18 configuration schema and product versions', () => {
   it('NFR-18 the configuration schema major equals the YAML version literal', () => {
-    expect(CONFIG_SCHEMA_VERSION).toBe('1.2.0');
+    expect(CONFIG_SCHEMA_VERSION).toBe('1.3.0');
     const major = CONFIG_SCHEMA_VERSION.split('.')[0];
     expect(major).toBe('1');
     expect(configDocumentSchema.safeParse({ version: Number(major) }).success).toBe(true);
