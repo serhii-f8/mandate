@@ -256,6 +256,15 @@ describe('OPS-2 manifest configuration', () => {
     );
   });
 
+  it('OPS-2 check 3: values_arg must not declare patternProperties', async () => {
+    const issue = await expectIssue(
+      (t) => t.replace(CHANGES, "changes: { type: object, properties: { name: { type: string }, description: { type: string } }, patternProperties: { '^x': { type: string } }, additionalProperties: false }"),
+      `${M}.values_arg`,
+      'changes',
+    );
+    expect(issue.message).toBe('must not declare patternProperties');
+  });
+
   it('OPS-2 check 3: ids_arg items are strings or integers', async () => {
     const SKUS = 'skus: { type: array, items: { type: string } }\n        name_like';
     await expectIssue((t) => t.replace(SKUS, 'skus: { type: array, items: { type: number } }\n        name_like'), `${M}.ids_arg`, 'skus');
@@ -352,6 +361,22 @@ describe('OPS-2 records_arg', () => {
     await expectIssue(() => RECORDS.replace(RECORDS_PROP, 'records: { type: array }'), `${M}.records_arg`, 'records');
     await expectIssue(() => item(RECORDS, '{ type: object, properties: { sku: { type: string }, name: { type: string } }, required: [sku] }'), `${M}.records_arg`, 'records');
     await expectIssue(() => item(RECORDS, '{ type: object, additionalProperties: false, required: [sku] }'), `${M}.records_arg`, 'records');
+  });
+
+  it('OPS-2 the items must not declare patternProperties and the array must not declare prefixItems', async () => {
+    const pattern = await expectIssue(
+      () => item(RECORDS, "{ type: object, properties: { sku: { type: string }, name: { type: string } }, patternProperties: { '^x': { type: string } }, required: [sku], additionalProperties: false }"),
+      `${M}.records_arg`,
+      'records',
+    );
+    expect(pattern.message).toBe('must not declare patternProperties');
+    const prefix = await expectIssue(() => RECORDS.replace(RECORDS_PROP, `records: { type: array, prefixItems: [{ type: object }], items: ${ITEM} }`), `${M}.records_arg`, 'records');
+    expect(prefix.message).toBe('must not declare prefixItems');
+  });
+
+  it('OPS-2 the id_field is not one of fields', async () => {
+    const issue = await expectIssue(edit('fields: [name, description]', 'fields: [name, description, sku]'), `${M}.fields[2]`, 'sku');
+    expect(issue.message).toBe('must not be the id_field');
   });
 
   it('OPS-2 an item property outside id_field and fields is refused', async () => {
@@ -503,6 +528,55 @@ describe('OPS-2 manifest action', () => {
   it('OPS-2 POL-2 the scope field of a delete must be a field read_before can return (check 6)', async () => {
     const text = DELETE.replace('scope_args: { brand: brand }', 'scope_args: { brand: manufacturer }');
     expect((await at(text, `${M}.scope_args.brand`)).message).toBe('is not a field operation catalog.get_products_by_sku can return');
+  });
+
+  const withChecks = (t: string, require: string): string => t.replace('      rollback:', `      checks:\n        - { code: blocked, require: [${require}] }\n      rollback:`);
+  /** A lookup on the read_before operation itself, keyed by `key`, used by one check. */
+  const withLookup = (t: string, key: string): string =>
+    t.replace(
+      '      rollback:',
+      `      lookups:\n        same: { operation: catalog.get_products_by_sku, ids_arg: skus, key_field: sku, key: ${key}, fields: [name] }\n      checks:\n        - { code: blocked, require: [{ found: same }] }\n      rollback:`,
+    );
+
+  it('CS-3 a check reference to before or record is refused on a create, to after on a delete', async () => {
+    const C = `${M}.checks[0].require[0]`;
+    expect((await at(withChecks(CREATE, '{ present: { before: name } }'), `${C}.present.before`)).message).toBe('is not available for action create');
+    expect((await at(withChecks(CREATE, '{ in: { record: status }, values: [1] }'), `${C}.in.record`)).message).toBe('is not available for action create');
+    expect((await at(withChecks(CREATE, '{ equals: [{ after: name }, { before: name }] }'), `${C}.equals[1].before`)).message).toBe('is not available for action create');
+    expect((await at(withChecks(DELETE, '{ absent: { after: name } }'), `${C}.absent.after`)).message).toBe('is not available for action delete');
+    // What each action does have still loads.
+    ok(await load({ 'write.yaml': withChecks(CREATE, '{ present: { after: name } }, { equals: [{ arg: brand }, { value: acme }] }') }));
+    ok(await loadDelete(withChecks(DELETE, '{ present: { before: name } }, { in: { record: status }, values: [1] }')));
+  });
+
+  it('OPS-7 a lookup keyed by before or record is refused on a create, by after on a delete', async () => {
+    const K = `${M}.lookups.same.key`;
+    expect((await at(withLookup(CREATE, '{ before: name }'), `${K}.before`)).message).toBe('is not available for action create');
+    expect((await at(withLookup(CREATE, '{ record: status }'), `${K}.record`)).message).toBe('is not available for action create');
+    expect((await at(withLookup(DELETE, '{ after: name }'), `${K}.after`)).message).toBe('is not available for action delete');
+    for (const key of ['{ target: true }', '{ after: name }']) ok(await load({ 'write.yaml': withLookup(CREATE, key) }));
+    for (const key of ['{ target: true }', '{ before: name }', '{ record: status }']) ok(await loadDelete(withLookup(DELETE, key)));
+  });
+
+  it('OPS-2 a create types its id_field as string in the records items; an update may use integer', async () => {
+    const integerId = CREATE.replace('properties: { sku: { type: string }, name:', 'properties: { sku: { type: integer }, name:');
+    expect(integerId).not.toBe(CREATE);
+    expect((await at(integerId, `${M}.records_arg`)).message).toBe('must type sku as string for action create');
+  });
+
+  it('OPS-2 a create names its required_fields among fields', async () => {
+    const text = CREATE.replace('      fields: [name, description, brand]\n', '      fields: [name, description, brand]\n      required_fields: [name, status]\n');
+    expect((await at(text, `${M}.required_fields[1]`)).message).toBe('must be one of fields for action create');
+    ok(await load({ 'write.yaml': text.replace('required_fields: [name, status]', 'required_fields: [name]') }));
+  });
+
+  it('OPS-3 the inverse delete of a create declares no write.carry_fields', async () => {
+    const createInverse = CREATE.replace('rollback: { strategy: none }', 'rollback: { strategy: inverse_operation, operation: catalog.delete_content }');
+    const carrying = DELETE.replace('      rollback:', '      write: { carry_fields: [status] }\n      rollback:');
+    ok(await loadDelete(carrying));
+    expect((await at(both(createInverse, carrying), `${M}.rollback.operation`)).message).toBe(
+      'must name a delete operation without write.carry_fields: a rollback sends the identifier only',
+    );
   });
 
   it('OPS-2 replay_previous_state is not available for create or delete', async () => {

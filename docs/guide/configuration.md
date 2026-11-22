@@ -126,10 +126,10 @@ connections:
 | `action` | `update`, `create` or `delete` | `update` | Since 1.2.0. What the call does to its targets; a fixed node in presets. `create` needs `records_arg`, no `write.carry_fields`, and every `scope_args` field in `fields`. `delete` needs `ids_arg` or `selector`, neither `values_arg` nor `records_arg`, and `risk: destructive`, so it always needs approval and step-up authentication. `replay_previous_state` is not available for either. The `read_before` of a create or delete must find a record by identifier whatever its scope, so its `args` must not pass a scope argument (the platform checks the scope on the returned record); a create binding should refuse an existing identifier upstream. "Never overwritten" holds only under such a read |
 | `id_field` | string | required | |
 | `ids_arg` | string | none | With `values_arg`: give `ids_arg`, `selector` or both |
-| `values_arg` | string | one of two | Since 1.2.0 optional: declare exactly one of `values_arg` and `records_arg`. A required object property of `input_schema` with `additionalProperties: false`; one set of values for every target |
-| `records_arg` | string | one of two | Since 1.2.0. A required array property of `input_schema` whose items are closed objects (`additionalProperties: false`) with `id_field` (required, `string` or `integer`) and properties from `fields`; each record carries its own values. `ids_arg` and `selector` are not allowed with it. `fields_arg` defaults to it |
+| `values_arg` | string | one of two | Since 1.2.0 optional: declare exactly one of `values_arg` and `records_arg`. A required object property of `input_schema` with `additionalProperties: false` and no `patternProperties`; one set of values for every target |
+| `records_arg` | string | one of two | Since 1.2.0. A required array property of `input_schema` (no `prefixItems`) whose items are closed objects (`additionalProperties: false`, no `patternProperties`) with `id_field` (required, `string` or `integer`; `string` for a create, whose identifier is sent as the target ID string and is not stored with its JSON type) and properties from `fields`; each record carries its own values. `id_field` must not be one of `fields`. `ids_arg` and `selector` are not allowed with it. `fields_arg` defaults to it |
 | `fields` | list | required | At least 1 |
-| `required_fields` | list | `[]` | |
+| `required_fields` | list | `[]` | For a create each must be one of `fields` (they are checked against the new record) |
 | `sensitive_fields` | list | `[]` | Each must be in `fields`; the audit trail redacts their values |
 | `scope_args` | map | `{}` | Scope name to argument name |
 | `read_before` | object | required | `operation`, `ids_arg`, `args`. For an update `args` passes every scope argument as `{ arg: <name> }`; for a create or delete it must pass none, so the read finds a record by identifier whatever its scope |
@@ -137,7 +137,7 @@ connections:
 | `write.carry_fields` | list | none | At least 1 |
 | `batch_size` | integer | 100 | 1-1000 |
 | `max_targets` | integer | 10000 | 1-100000 |
-| `rollback` | object | required | `strategy: replay_previous_state`, `none`, or `inverse_operation` with `operation`. The inverse of a `create` is a `delete` operation of the same connection and `id_field`; the inverse of a `delete` is a `create` whose `fields` cover this one's. Rolling back a delete restores only the manifest's `fields`. The inverse of an `update` must be an `update` operation |
+| `rollback` | object | required | `strategy: replay_previous_state`, `none`, or `inverse_operation` with `operation`. The inverse of a `create` is a `delete` operation of the same connection and `id_field`; the inverse of a `delete` is a `create` whose `fields` cover this one's. The inverse delete of a create declares no `write.carry_fields`: the rollback sends the identifier only. Rolling back a delete restores only the manifest's `fields`. The inverse of an `update` must be an `update` operation |
 
 ```yaml
 operations:
@@ -171,7 +171,10 @@ Each predicate is an object with exactly one predicate key. A reference is `{ af
 `after`), `{ record: f }` (the current upstream record, which a create does not have; the field is
 added to the `read_before` read and must be one it can return), `{ arg: name }` (a property of
 `input_schema`) or `{ lookup: name, field: f }`. On an update, `{ before: f }` and `{ after: f }` see
-only the fields this item touches; for any other field of the record use `{ record: f }`.
+only the fields this item touches; for any other field of the record use `{ record: f }`. A reference
+that can never resolve for the action is refused at load (`is not available for action <action>`):
+`{ before: f }` and `{ record: f }` on a create, `{ after: f }` on a delete; the same holds for a
+lookup `key`.
 
 | Predicate | Holds when |
 | --- | --- |

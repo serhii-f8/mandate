@@ -30,6 +30,13 @@ option 3 makes the meaning of a configuration depend on its call.
   drift check, no idempotent retry and no verify, so such a call remains `write_opaque`. Scope
   arguments are checked against the new record's own values, so every `scope_args` field must be one of
   `fields` (`must be one of fields for action create`), and `write.carry_fields` is not allowed.
+  Its records type `id_field` as `string` (`must type <id_field> as string for action create`): the
+  identifier is sent as the normalised string target ID, and a typed identifier is not stored, so an
+  integer key would be sent as a string. `required_fields` must be among `fields` (`must be one of
+  fields for action create`), since they are checked against the new record's values, and a record
+  that carries no field of `fields` (only its identifier) is excluded `missing_data`. A check or
+  lookup key that reads the current record (`before`, `record`) is refused on a create, one that reads
+  `after` on a delete (`is not available for action <action>`).
   Preparation excludes a record that already exists as `already_exists`. **(call, controller ruling)**
   An `already_exists` item stores the existing record's values as `before` only when that record is
   inside the call's scope; otherwise it stores `before: null`, so a record the requester could not read
@@ -61,7 +68,10 @@ option 3 makes the meaning of a configuration depend on its call.
 - **Rollback.** `replay_previous_state` is refused for both (`is not available for action <action>`).
   `inverse_operation` works through the existing swap: the inverse of a create must be an enabled
   `delete` manifest operation of the same connection with the same `id_field`; the inverse of a delete
-  an enabled `create` of the same connection whose `fields` cover the delete's. The loader's rule that
+  an enabled `create` of the same connection whose `fields` cover the delete's. The rollback writes
+  with the create's manifest, which carries nothing, so the inverse delete must not declare
+  `write.carry_fields` (`must name a delete operation without write.carry_fields: a rollback sends the
+  identifier only`). The loader's rule that
   an inverse is a `write` operation accepts `destructive` for the inverse of a create. **(call)**
   Rolling back a delete restores only the manifest's `fields`, not other attributes of the record.
   The inverse of an `update` must itself be an update (`must name an update operation`), so a create or

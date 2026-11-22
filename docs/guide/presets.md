@@ -201,8 +201,8 @@ The argument's items must be closed objects; `ids_arg` and `selector` are not us
 `action: create` (records the caller identifies, written with one request each) and `action: delete`
 (targets named by `ids_arg` or `selector`, on a `destructive` operation) are available since 1.2.0.
 A delete always needs approval and step-up authentication. A create is undone by naming a delete
-operation as its `inverse_operation`, a delete by naming a create; rolling back a delete restores only
-the manifest's `fields`. `action` is fixed in the preset file and cannot be a `$param`.
+operation as its `inverse_operation` (one without `write.carry_fields`), a delete by naming a create;
+rolling back a delete restores only the manifest's `fields`. `action` is fixed in the preset file and cannot be a `$param`.
 The `read_before` of a create or delete must find a record by identifier whatever its scope, so it
 must not pass a scope argument; the platform checks the scope on the record it returns. Bind a
 create to an endpoint that refuses an existing identifier (not an upsert): a create never overwrites

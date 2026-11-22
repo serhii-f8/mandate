@@ -267,9 +267,11 @@ function fieldEnum(read: RegisteredOperation): ReadonlySet<unknown> | undefined 
 }
 
 /**
- * Check 3 for `records_arg` (ADR 0070): a required top-level array whose items are closed objects
- * (`properties` within `id_field` and `fields`, `additionalProperties: false`) that require
- * `id_field`, typed string or integer. Messages never quote configuration values.
+ * Check 3 for `records_arg` (ADR 0070): a required top-level array (no `prefixItems`) whose items are
+ * closed objects (`properties` within `id_field` and `fields`, `additionalProperties: false`, no
+ * `patternProperties`) that require `id_field`, typed string or integer; string for a create, whose
+ * identifier is sent as the normalised string target ID (ADR 0071). Messages never quote
+ * configuration values other than the id_field the create message names.
  */
 function checkRecordsSchema(schema: Readonly<Record<string, unknown>>, manifest: ManifestConfig): string | undefined {
   const recordsArg = manifest.records_arg;
@@ -277,18 +279,23 @@ function checkRecordsSchema(schema: Readonly<Record<string, unknown>>, manifest:
   const records = propertySchema(schema, recordsArg);
   if (records?.type !== 'array') return 'must name a top-level array property of input_schema';
   if (!requiredOf(schema).has(recordsArg)) return 'must name a required property of input_schema';
+  // Positional item schemas would let a record escape the closed items schema.
+  if (records.prefixItems !== undefined) return 'must not declare prefixItems';
   const items = records.items;
   const item = typeof items === 'object' && items !== null ? (items as Record<string, unknown>) : undefined;
   const declared = item?.properties;
   if (item?.type !== 'object' || typeof declared !== 'object' || declared === null || item.additionalProperties !== false) {
     return 'must declare items as objects with properties and additionalProperties: false in input_schema';
   }
+  // Keys matched by a pattern are not "additional": they would pass the schema and be dropped silently.
+  if (item.patternProperties !== undefined) return 'must not declare patternProperties';
   const allowed = new Set([manifest.id_field, ...manifest.fields]);
   if (Object.keys(declared).some((k) => !allowed.has(k))) return 'declares item properties that are not id_field or in fields';
   if (!requiredOf(item).has(manifest.id_field)) return 'must require the id_field in the items of input_schema';
   const idType = (declared as Record<string, unknown>)[manifest.id_field];
   const type = typeof idType === 'object' && idType !== null ? (idType as Record<string, unknown>).type : undefined;
   if (type !== 'string' && type !== 'integer') return 'must type the id_field of the items as string or integer in input_schema';
+  if (manifest.action === 'create' && type !== 'string') return `must type ${manifest.id_field} as string for action create`;
   return undefined;
 }
 
@@ -338,9 +345,17 @@ function checkChecks(manifest: ManifestConfig, mAt: (sub: readonly PropertyKey[]
       if (declared(named.lookup) === undefined) mAt(['checks', i, 'require', j, named.key], 'is not a declared lookup');
     });
   });
+  const action = manifest.action;
+  // A create has no current record (no `before`, no `record`); a delete has no `after` (CS-3, OPS-7).
+  const unavailable = (side: 'after' | 'before' | 'record'): boolean =>
+    action === 'create' ? side === 'before' || side === 'record' : action === 'delete' && side === 'after';
+  const notAvailable = `is not available for action ${action}`;
   for (const { ref, path } of checkRefsOf(manifest.checks)) {
-    if ('after' in ref && !manifest.fields.includes(ref.after)) mAt([...path, 'after'], 'must be one of fields');
-    if ('before' in ref && !manifest.fields.includes(ref.before)) mAt([...path, 'before'], 'must be one of fields');
+    if ('after' in ref && unavailable('after')) mAt([...path, 'after'], notAvailable);
+    else if ('after' in ref && !manifest.fields.includes(ref.after)) mAt([...path, 'after'], 'must be one of fields');
+    if ('before' in ref && unavailable('before')) mAt([...path, 'before'], notAvailable);
+    else if ('before' in ref && !manifest.fields.includes(ref.before)) mAt([...path, 'before'], 'must be one of fields');
+    if ('record' in ref && unavailable('record')) mAt([...path, 'record'], notAvailable);
     if ('lookup' in ref) {
       used.add(ref.lookup);
       const lookup = declared(ref.lookup);
@@ -351,8 +366,12 @@ function checkChecks(manifest: ManifestConfig, mAt: (sub: readonly PropertyKey[]
   for (const [lookupName, lookup] of Object.entries(lookups)) {
     if (!used.has(lookupName)) mAt(['lookups', lookupName], 'is not used by any check');
     const key = lookup.key;
-    if ('after' in key && !manifest.fields.includes(key.after)) mAt(['lookups', lookupName, 'key', 'after'], 'must be one of fields');
-    if ('before' in key && !manifest.fields.includes(key.before)) mAt(['lookups', lookupName, 'key', 'before'], 'must be one of fields');
+    const keyAt = ['lookups', lookupName, 'key'];
+    if ('after' in key && unavailable('after')) mAt([...keyAt, 'after'], notAvailable);
+    else if ('after' in key && !manifest.fields.includes(key.after)) mAt([...keyAt, 'after'], 'must be one of fields');
+    if ('before' in key && unavailable('before')) mAt([...keyAt, 'before'], notAvailable);
+    else if ('before' in key && !manifest.fields.includes(key.before)) mAt([...keyAt, 'before'], 'must be one of fields');
+    if ('record' in key && unavailable('record')) mAt([...keyAt, 'record'], notAvailable);
   }
 }
 
@@ -405,6 +424,16 @@ export function checkManifests(input: ManifestCheckInput): void {
       for (const [arg, field] of Object.entries(manifest.scope_args)) {
         if (!manifest.fields.includes(field)) mAt(['scope_args', arg], 'must be one of fields for action create');
       }
+      // Required fields are checked against the new record's values, which hold only `fields`.
+      manifest.required_fields.forEach((f, index) => {
+        if (!manifest.fields.includes(f)) mAt(['required_fields', index], 'must be one of fields for action create');
+      });
+    }
+    if (manifest.records_arg !== undefined) {
+      // A record's identifier names its target; as a value it would be dropped (CS-2, ADR 0070).
+      manifest.fields.forEach((f, index) => {
+        if (f === manifest.id_field) mAt(['fields', index], 'must not be the id_field');
+      });
     }
     if (action !== 'update' && manifest.rollback.strategy === 'replay_previous_state') {
       mAt(['rollback', 'strategy'], `is not available for action ${action}`);
@@ -458,6 +487,8 @@ export function checkManifests(input: ManifestCheckInput): void {
         // Keys outside fields would be dropped silently; the schema must refuse them instead.
         if (typeof declared !== 'object' || declared === null || values.additionalProperties !== false) {
           mAt(['values_arg'], 'must declare properties and additionalProperties: false in input_schema');
+        } else if (values.patternProperties !== undefined) {
+          mAt(['values_arg'], 'must not declare patternProperties');
         } else {
           const fields = new Set(manifest.fields);
           const outside = Object.keys(declared).filter((k) => !fields.has(k));
@@ -632,6 +663,10 @@ export function checkManifests(input: ManifestCheckInput): void {
           inverseAction === wanted &&
           (wanted === 'delete' ? inverse.definition.risk === 'destructive' && inverseManifest.id_field === manifest.id_field : inverse.definition.risk === 'write' && inverseManifest.id_field === manifest.id_field && covers);
         if (!matches) mAt(['rollback', 'operation'], inverseMessage(wanted));
+        // The rollback writes with this create's manifest, which carries nothing (EXE-8, ADR 0071).
+        else if (wanted === 'delete' && inverseManifest.write !== undefined) {
+          mAt(['rollback', 'operation'], 'must name a delete operation without write.carry_fields: a rollback sends the identifier only');
+        }
       } else if ((inverse.located.value.manifest?.action ?? 'update') !== 'update') {
         // A create or delete writes records of another shape: it undoes only its own action (ADR 0071).
         mAt(['rollback', 'operation'], 'must name an update operation');
