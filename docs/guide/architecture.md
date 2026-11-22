@@ -94,6 +94,7 @@ sequenceDiagram
   A->>W: wake workflow
   W->>W: guard: hash, policy, approvals re-checked
   W->>U: write in batches, record outcome per item
+  W->>U: verify_after: look again until the checks hold or the timeout
   W-->>A: status and statistics
   C->>A: get_changeset
 ```
@@ -111,6 +112,13 @@ What matters in this sequence:
   items and re-evaluates policy and approvals against the active configuration.
 - **Execution is durable and fenced.** Batches are claimed with an attempt number; a submission
   that was recorded is never sent twice; every item ends `written`, `failed` or `skipped`.
+- **Writes can be verified afterwards.** When the operation's manifest declares `verify_after` and
+  the batches ended with nothing left, the change-set stays `executing` while the worker looks at
+  the written items again on workflow timers (first after `after_seconds`, then every
+  `every_seconds`), read-only, until every check holds, `timeout_seconds` passes or a cancel stops
+  it. An item still not confirmed then is `unconfirmed` and makes the change-set
+  `completed_with_errors`; it stays written and can be rolled back. A worker restart loses nothing,
+  and a long verification continues as new with its stored deadline.
 - **Rollback uses recorded values.** A finished change-set can be rolled back within its window.
   The worker restores the `before` value of each item this run wrote and skips items that changed
   upstream in the meantime.

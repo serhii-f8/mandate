@@ -13,6 +13,9 @@ Additive release: the configuration schema and the connector SDK are 1.3.0. A pr
   codes, that confirm the written items after the last batch, with `after_seconds`, `every_seconds`
   and `timeout_seconds`. The loader validates it; the stage itself is executed by later changes
   (OPS-2, EXE-12, ADR 0073).
+- `changesetWorkflow` runs the verify-after stage after the last batch, on workflow timers, and
+  continues as new on long verifications. A cancel during verification stops it; the change-set then
+  ends with the status its items give, not `cancelled` (EXE-12, EXE-6, EXE-7, EXE-10).
 
 ## 1.2.0
 

@@ -51,6 +51,7 @@ import {
   waitForWorkflowStatus,
 } from '../test/support/prepared-by-workflow.js';
 import { startInfrastructure, startTestWorker, type Infra, type TestWorker, type TestWorkerOptions } from '../test/support/harness.js';
+import { LiveFromReader, withVerifyAfter, type VerifyTiming } from '../test/support/verification.js';
 
 type History = Awaited<ReturnType<WorkflowHandle['fetchHistory']>>;
 type Recorded = Readonly<Record<string, History>>;
@@ -160,6 +161,15 @@ async function executeToEnd(infra: Infra, opts: TestWorkerOptions, items: number
     await expectResult(handle, status);
     return handle.fetchHistory();
   });
+}
+
+/** EXE-12: looks at 0, 10, ... s until confirmed or `timeoutSeconds`. */
+const VERIFY_TIMING: VerifyTiming = { afterSeconds: 0, everySeconds: 10, timeoutSeconds: 60 };
+
+/** True when the history's last event starts a timer after at least `looks` verifyBatch calls: parked in a verification wait. */
+function parkedInVerifyWait(history: History, looks: number): boolean {
+  const verifyBatches = history.events?.filter((e) => e.activityTaskScheduledEventAttributes?.activityType?.name === 'verifyBatch').length ?? 0;
+  return history.events?.at(-1)?.timerStartedEventAttributes != null && verifyBatches >= looks;
 }
 
 const SCENARIOS: Readonly<Record<string, Scenario>> = {
@@ -641,6 +651,78 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
         const record = await infra.repository.get(id);
         if (record?.rollbackUntil !== undefined) throw new Error('an opaque change-set opened a rollback window');
         return { 'opaque-executed': await handle.fetchHistory() };
+      });
+    },
+  },
+
+  /** EXE-12: verify_after confirms both items at the second look; completed. */
+  'verify-confirmed': {
+    files: ['verify-confirmed'],
+    async run(infra) {
+      const opts = { reader: new LiveFromReader(2), configuration: withVerifyAfter(infra.configuration, VERIFY_TIMING) };
+      return { 'verify-confirmed': await executeToEnd(infra, opts, 2, 'completed') };
+    },
+  },
+
+  /** EXE-12: never confirmed; the 20 s deadline closes both items unconfirmed: completed_with_errors. */
+  'verify-timeout': {
+    files: ['verify-timeout'],
+    async run(infra) {
+      const opts = { reader: new LiveFromReader(Infinity), configuration: withVerifyAfter(infra.configuration, { ...VERIFY_TIMING, timeoutSeconds: 20 }) };
+      return { 'verify-timeout': await executeToEnd(infra, opts, 2, 'completed_with_errors') };
+    },
+  },
+
+  /** EXE-12: parked in the wait after the first look (history fetched while the timer runs), then confirmed. */
+  'verify-parked-wait': {
+    files: ['verify-parked-wait'],
+    async run(infra) {
+      const cs = await createPrepared(infra.repository, 2, { execute: {} });
+      const opts = { reader: new LiveFromReader(2), configuration: withVerifyAfter(infra.configuration, VERIFY_TIMING) };
+      return withWorker(infra, opts, async (worker) => {
+        const handle = await signalWithStart(infra, worker, cs.id);
+        await waitFor('the wait after the first look', async () => parkedInVerifyWait(await handle.fetchHistory(), 1));
+        const parked = await handle.fetchHistory();
+        if (!parkedInVerifyWait(parked, 1)) throw new Error('not parked in the verification wait');
+        await expectResult(handle, 'completed');
+        return { 'verify-parked-wait': parked };
+      });
+    },
+  },
+
+  /** EXE-12, EXE-7: a cancel during the wait before the first look: items verify_cancelled, completed_with_errors. */
+  'verify-cancelled': {
+    files: ['verify-cancelled'],
+    async run(infra) {
+      const cs = await createPrepared(infra.repository, 2, { execute: {} });
+      const timing = { afterSeconds: 600, everySeconds: 10, timeoutSeconds: 600 };
+      const opts = { reader: new LiveFromReader(1), configuration: withVerifyAfter(infra.configuration, timing) };
+      return withWorker(infra, opts, async (worker) => {
+        const handle = await signalWithStart(infra, worker, cs.id);
+        await waitFor('the wait before the first look', async () => parkedInVerifyWait(await handle.fetchHistory(), 0));
+        const cancelled = await worker.executor.cancel({ changesetId: cs.id, actor: 'bob', correlationId: 'corr-cancel' });
+        if (!cancelled.ok) throw new Error('cancel refused');
+        await expectResult(handle, 'completed_with_errors');
+        return { 'verify-cancelled': await handle.fetchHistory() };
+      });
+    },
+  },
+
+  /** EXE-12, EXE-9: 60 items in chunks of one: 50 looks in run 1, continue-as-new, run 2 finishes. */
+  'verify-continued': {
+    files: ['verify-continued-run1', 'verify-continued-run2'],
+    async run(infra) {
+      const cs = await createPrepared(infra.repository, 60, { execute: {} });
+      const opts = { reader: new LiveFromReader(1), configuration: withVerifyAfter(infra.configuration, VERIFY_TIMING, { batchSize: 1 }) };
+      return withWorker(infra, opts, async (worker) => {
+        const handle = await signalWithStart(infra, worker, cs.id);
+        await expectResult(handle, 'completed');
+        const run1 = await infra.client.workflow.getHandle(cs.id, handle.signaledRunId).fetchHistory();
+        const next = run1.events?.at(-1)?.workflowExecutionContinuedAsNewEventAttributes?.newExecutionRunId;
+        if (next === undefined || next === null) throw new Error('first run did not continue as new');
+        const run2 = await infra.client.workflow.getHandle(cs.id, next).fetchHistory();
+        if (run2.events?.at(-1)?.workflowExecutionCompletedEventAttributes == null) throw new Error('second run did not complete (more than two runs?)');
+        return { 'verify-continued-run1': run1, 'verify-continued-run2': run2 };
       });
     },
   },

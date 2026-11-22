@@ -46,6 +46,8 @@ function converterFor(type: string): DataConverter | undefined {
  * expired (also in `pending_approval`, and after a return and a resubmission), one per continue-as-new run.
  * The rollback patch: parked in the window, rolled back after completion and after a cancel, window
  * closed by the timer, a failed rollback, one per continue-as-new run of a rollback.
+ * The verify-after patch (EXE-12): confirmed, timed out, parked in the wait between looks, cancelled
+ * during the wait, one per continue-as-new run of a verification.
  */
 const REQUIRED_CHANGESET_FIXTURES = [
   'parked-prepared',
@@ -77,12 +79,18 @@ const REQUIRED_CHANGESET_FIXTURES = [
   'rollback-continued-run2',
   'rollback-continued-run3',
   'opaque-executed',
+  'verify-confirmed',
+  'verify-timeout',
+  'verify-parked-wait',
+  'verify-cancelled',
+  'verify-continued-run1',
+  'verify-continued-run2',
 ];
 
 /**
  * Histories recorded as production runs (`record-history <scenario> --traced`, NFR-11): the
  * `_tracer-data` headers and the OpenTelemetry interceptors' SDK flags. Parked at the wake condition,
- * completed, one per continue-as-new run, rolled back. They replay with the plugin (production) and
+ * completed, one per continue-as-new run, rolled back, verified. They replay with the plugin (production) and
  * without it (tracing switched off, `WORKFLOW_TRACING` fallback).
  */
 const REQUIRED_TRACED_FIXTURES = [
@@ -91,6 +99,7 @@ const REQUIRED_TRACED_FIXTURES = [
   'completed-continued-run1-traced',
   'completed-continued-run2-traced',
   'rolled-back-traced',
+  'verify-confirmed-traced',
 ];
 
 const isTraced = (name: string): boolean => name.endsWith('-traced.json');

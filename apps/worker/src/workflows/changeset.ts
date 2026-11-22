@@ -11,6 +11,10 @@
  * - first patch: `changeset-workflow-rollback-20261118` (EXE-8, ADR 0042) — after a finished status
  *   the workflow keeps a rollback window open and runs a requested rollback; executions that
  *   finished before it keep their old path on replay.
+ * - `changeset-workflow-verify-after-20261122` (EXE-12, ADR 0073) — after the last batch of an
+ *   operation with `verify_after` the workflow verifies the written items before it finishes;
+ *   checked only when `beginExecution` answered `verifyAfter: true` (absent in every older
+ *   history), so an execution without `verify_after` records no marker.
  */
 import {
   ActivityFailure,
@@ -34,6 +38,7 @@ import {
   type BatchResult,
   type BeginResult,
   type BeginRollbackResult,
+  type BeginVerificationResult,
   type ChangesetActivities,
   type ChangesetWorkflowInput,
   type ChangesetWorkflowResult,
@@ -42,6 +47,7 @@ import {
   type RollbackBatchResult,
   type RollbackOutcome,
   type RollbackWindow,
+  type VerifyBatchResult,
   type WorkflowProgress,
 } from '@mandate/temporal/contract';
 
@@ -52,6 +58,17 @@ import {
  * + 30 d assumed longest execution + 7 d namespace retention; recompute from the real deployment date.
  */
 const ROLLBACK_PATCH = 'changeset-workflow-rollback-20261118';
+
+/**
+ * EXE-12 (ADR 0073): after the last batch the workflow verifies the written items.
+ * remove not before 2027-07-04 — earliest deployment 2026-11-22 + 90 d maximum expiry
+ * (expire_after_hours ≤ 2160) + 7 d maximum verification (timeout_seconds ≤ 604800) + 90 d maximum
+ * rollback window (rollback_window_hours ≤ 2160) + 30 d assumed longest execution + 7 d namespace
+ * retention; recompute from the real deployment date.
+ */
+const VERIFY_PATCH = 'changeset-workflow-verify-after-20261122';
+/** Looks (verifyBatch calls plus waits) per run before continuing as new; keeps a run's history small. */
+const MAX_LOOKS_PER_RUN = 50;
 
 /** Statuses in which the workflow waits for a wake (a start or a cancel) until the change-set expires. */
 const WAITING: readonly ChangeSetStatus[] = ['prepared', 'pending_approval', 'approved'];
@@ -275,10 +292,88 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
     }
     if (!begin.ok) return finish(begin.outcome);
     progress = { status: 'executing', total: begin.total, done: begin.done, failed: begin.failed, skipped: begin.skipped };
-    if (begin.cancelRequested) return finish('cancelled');
+    // A run continued during verification (only new histories carry `verificationRound`) has
+    // written everything: a stored cancel stops its verification instead (EXE-7).
+    const verifying = input.resume?.verificationRound !== undefined;
+    if (begin.cancelRequested && !verifying) return finish('cancelled');
 
     let batchNo = input.resume?.nextBatch ?? 0;
     let thisRun = 0;
+
+    /**
+     * EXE-12: the batch loop ended with nothing left. With `verify_after` (behind VERIFY_PATCH),
+     * look at the written items until none is pending, the stored deadline passed or a cancel stops
+     * it, waiting on workflow timers between rounds; then finish `done` (the items give the status).
+     * Continues as new after MAX_LOOKS_PER_RUN looks; the next run comes back here through
+     * `inspect`, `beginExecution` and one empty `executeBatch`, and `beginVerification` answers the
+     * stored schedule.
+     */
+    const finishDone = async (): Promise<ChangesetWorkflowResult> => {
+      // The result field first: a run without verify_after records no marker (old histories never
+      // have the field). A continued verification run finishes even if the operation lost it since.
+      if ((begin.verifyAfter !== true && !verifying) || !patched(VERIFY_PATCH)) return finish('done');
+      // `woken` is not reset here: a wake during the batches (a cancel) ends the first wait at once.
+      let v: BeginVerificationResult;
+      try {
+        v = await slow.beginVerification(id);
+      } catch (e) {
+        if (e instanceof ActivityFailure) return finish('executor_error');
+        throw e;
+      }
+      if (!v.ok) return finish('done');
+      const schedule = v;
+      let round = input.resume?.verificationRound ?? v.round + 1;
+      let looks = 0;
+      // Waits until `untilMs` (workflow time) unless a wake (a cancel) starts the next look early.
+      const wait = async (untilMs: number): Promise<void> => {
+        const left = untilMs - Date.now(); // workflow time
+        if (left > 0) await condition(() => woken, left);
+      };
+      if (v.pending > 0 && !verifying) await wait(v.firstAtMs);
+      for (;;) {
+        // Reset before the look: a wake that arrives while it runs ends the next wait at once.
+        woken = false;
+        let r: VerifyBatchResult;
+        try {
+          r = await batches.verifyBatch(id, round);
+        } catch (e) {
+          if (!(e instanceof ActivityFailure)) throw e;
+          // Infrastructure only (upstream trouble is recorded per item): close what is left as not confirmed.
+          await db.finishVerification(id, 'timeout');
+          return finish('done');
+        }
+        looks += 1;
+        if (r.cancelRequested) {
+          await db.finishVerification(id, 'cancelled');
+          return finish('done');
+        }
+        if (r.pending === 0) {
+          await db.finishVerification(id, 'done');
+          return finish('done');
+        }
+        const roundOver = r.left === 0;
+        if (roundOver && Date.now() >= schedule.untilMs) {
+          await db.finishVerification(id, 'timeout');
+          return finish('done');
+        }
+        if (roundOver) {
+          round += 1;
+          await wait(Math.min(Date.now() + schedule.everyMs, schedule.untilMs));
+          looks += 1;
+        }
+        if (looks >= MAX_LOOKS_PER_RUN || workflowInfo().continueAsNewSuggested) {
+          await continueAsNew<typeof changesetWorkflow>({
+            changesetId: id,
+            resume: {
+              nextBatch: batchNo,
+              counts: { done: progress.done, failed: progress.failed, skipped: progress.skipped },
+              verified: true,
+              verificationRound: round,
+            },
+          });
+        }
+      }
+    };
     for (;;) {
       let r: BatchResult;
       try {
@@ -300,7 +395,7 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
       // in the in-memory executor. The empty-claim check between them is this workflow's own (the
       // in-memory executor treats an empty claim as done): a batch that took nothing while items
       // remain would loop forever, so it fails closed, deliberately before a stored cancel.
-      if (r.remaining === 0) return finish('done');
+      if (r.remaining === 0) return finishDone();
       if (processed === 0) return finish('executor_error');
       if (r.cancelRequested) return finish('cancelled');
       if (r.thresholdExceeded) return finish('failure_threshold');
