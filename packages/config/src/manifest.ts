@@ -60,8 +60,10 @@ const manifestCheck = z.strictObject({
   /** The exclusion reason shown to approvers and counted in stats; a fixed node in presets. */
   code: z
     .string()
-    .regex(/^[a-z][a-z0-9_]{0,62}$/)
-    .refine((code) => !builtinReasons.includes(code), 'must not be a built-in exclusion reason'),
+    .regex(/^[a-z][a-z0-9_]{0,62}$/, { abort: true })
+    .refine((code) => !builtinReasons.includes(code), 'must not be a built-in exclusion reason')
+    // A reason is a key of the stats object; `constructor` is the one prototype member the pattern admits.
+    .refine((code) => !(code in Object.prototype), 'must not be a reserved name'),
   title: z.string().min(1).max(120).optional(),
   require: z.array(checkPredicate).min(1).max(10),
 });

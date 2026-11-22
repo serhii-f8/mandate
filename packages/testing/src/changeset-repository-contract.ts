@@ -250,6 +250,29 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         });
       }));
 
+    it('CS-3 stats count check codes, including an Object.prototype member name, as numbers', async () =>
+      withRepo(async (c) => {
+        await created(c);
+        // `valueOf` bypasses the loader, which refuses such a code: the count must still be safe.
+        await c.repository.appendItems(c.id, [
+          item('a'),
+          item('b', { status: 'excluded', reason: 'locked' }),
+          item('c', { status: 'excluded', reason: 'locked' }),
+          item('d', { status: 'excluded', reason: 'valueOf' }),
+          item('e', { status: 'excluded', reason: 'constructor' }),
+        ]);
+        const stats = await c.repository.stats(c.id);
+        expect(stats).toEqual({
+          total: 5,
+          included: 1,
+          excluded: { locked: 2, valueOf: 1, constructor: 1 },
+          written: 0,
+          failed: 0,
+          skipped: 0,
+        });
+        expect(Object.values(stats.excluded).every((n) => typeof n === 'number')).toBe(true);
+      }));
+
     it('stats of an unknown change-set is a copy of EMPTY_STATS', async () =>
       withRepo(async (c) => {
         const s = await c.repository.stats(randomUUID());

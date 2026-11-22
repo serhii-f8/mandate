@@ -790,6 +790,13 @@ describe('CS-3 manifest checks', () => {
     }
   });
 
+  it('CS-3 a code is not an Object.prototype member name', async () => {
+    // Of the member names only `constructor` matches the pattern; `valueOf` and the like fail it.
+    const issue = await expectIssue((t) => withChecks(t, check('{ present: { after: name } }', 'constructor')), `${C}[0].code`, 'constructor');
+    expect(issue.message).toBe('must not be a reserved name');
+    await expectIssue((t) => withChecks(t, check('{ present: { after: name } }', 'valueOf')), `${C}[0].code`, 'valueOf');
+  });
+
   it('CS-3 codes are unique', async () => {
     const issue = await expectIssue((t) => withChecks(t, check('{ present: { after: name } }') + check('{ absent: { after: name } }')), `${C}[1].code`, 'locked');
     expect(issue.message).toBe('must be unique among the checks');

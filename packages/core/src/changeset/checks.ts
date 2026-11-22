@@ -26,12 +26,16 @@ function field(source: Fields | null | undefined, name: string): unknown {
   return source !== null && source !== undefined && Object.hasOwn(source, name) ? source[name] : undefined;
 }
 
+/** What a reference resolves to; `UNKNOWN_REF` for a shape outside the five, which fails its predicate. */
+const UNKNOWN_REF: unique symbol = Symbol('unknown reference');
+
 function resolve(ref: CheckRef, ctx: CheckContext): unknown {
   if ('after' in ref) return field(ctx.after, ref.after);
   if ('before' in ref) return field(ctx.before, ref.before);
   if ('record' in ref) return field(ctx.record, ref.record);
   if ('arg' in ref) return field(ctx.args, ref.arg);
-  return field(lookupResult(ctx, ref.lookup), ref.field);
+  if ('lookup' in ref) return field(lookupResult(ctx, ref.lookup), ref.field);
+  return UNKNOWN_REF;
 }
 
 function lookupResult(ctx: CheckContext, name: string): Fields | undefined {
@@ -57,20 +61,33 @@ function lookupFound(ctx: CheckContext, name: string): boolean {
   return lookupResult(ctx, name) !== undefined;
 }
 
+/**
+ * Whether one predicate holds. Fails closed: a predicate or a reference of a shape outside the closed
+ * set (which the loader cannot produce) never holds, so the item is excluded.
+ */
 function holds(p: CheckPredicate, ctx: CheckContext): boolean {
-  if ('present' in p) return present(resolve(p.present, ctx));
-  if ('absent' in p) return !present(resolve(p.absent, ctx));
+  if ('present' in p) {
+    const value = resolve(p.present, ctx);
+    return value !== UNKNOWN_REF && present(value);
+  }
+  if ('absent' in p) {
+    const value = resolve(p.absent, ctx);
+    return value !== UNKNOWN_REF && !present(value);
+  }
   if ('equals' in p) {
     const [left, right] = p.equals;
-    return equal(resolve(left, ctx), 'value' in right ? right.value : resolve(right, ctx));
+    const a = resolve(left, ctx);
+    const b = 'value' in right ? right.value : resolve(right, ctx);
+    return a !== UNKNOWN_REF && b !== UNKNOWN_REF && equal(a, b);
   }
   if ('in' in p) {
     const value = resolve(p.in, ctx);
     // Strict: no coercion between types; NaN matches nothing.
-    return p.values.some((v) => v === value);
+    return value !== UNKNOWN_REF && p.values.some((v) => v === value);
   }
   if ('found' in p) return lookupFound(ctx, p.found);
-  return !lookupFound(ctx, p.not_found);
+  if ('not_found' in p) return !lookupFound(ctx, p.not_found);
+  return false;
 }
 
 /** The `code` of the first check with a predicate that does not hold, or `undefined` when all hold. */

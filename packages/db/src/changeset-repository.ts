@@ -30,6 +30,7 @@ import type {
 } from '@mandate/core';
 import {
   changesetTransitionEvent,
+  countExclusions,
   EMPTY_STATS,
   evaluateLimits,
   isExpiryDue,
@@ -1320,7 +1321,7 @@ async function computeStats(db: Db | DbExecutor, changesetId: string): Promise<C
     .from(changeItem)
     .where(eq(changeItem.changesetId, changesetId))
     .groupBy(changeItem.status, changeItem.reason, changeItem.rollbackStatus);
-  const excluded: Record<string, number> = {};
+  const reasons: [string, number][] = [];
   let total = 0;
   let included = 0;
   let written = 0;
@@ -1334,7 +1335,7 @@ async function computeStats(db: Db | DbExecutor, changesetId: string): Promise<C
       rollback[rollbackStatus] += n;
     }
     if (status === 'excluded') {
-      if (reason !== null) excluded[reason] = (excluded[reason] ?? 0) + n;
+      if (reason !== null) reasons.push([reason, n]);
       continue;
     }
     included += n;
@@ -1342,5 +1343,7 @@ async function computeStats(db: Db | DbExecutor, changesetId: string): Promise<C
     else if (status === 'failed') failed += n;
     else if (status === 'skipped') skipped += n;
   }
+  // CS-3: any reason string is counted as its own key, never read from Object.prototype.
+  const excluded = countExclusions(reasons);
   return { total, included, excluded, written, failed, skipped, ...(rollback === undefined ? {} : { rollback }) };
 }

@@ -7,7 +7,7 @@ import type { ManifestDefinition, OperationDefinition } from '../policy-model.js
 import { compareTargetIds, normalizeArgs } from './canonical.js';
 import { ChangeSetHasher } from './hash.js';
 import { hashStoredItems } from './verify.js';
-import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats } from './model.js';
+import { countExclusions, type ChangeItemRecord, type ChangeSetRecord, type ChangeSetStats } from './model.js';
 import type {
   ItemsPageQuery,
   NewChangeSet,
@@ -58,15 +58,15 @@ class FakeRepository implements PreparationRepository {
     return Promise.resolve(n);
   }
   stats(id: string): Promise<ChangeSetStats> {
-    const excluded: Record<string, number> = {};
+    const reasons: [string, number][] = [];
     let included = 0;
     let total = 0;
     for (const item of this.items.get(id)?.values() ?? []) {
       total++;
-      if (item.status === 'excluded' && item.reason !== undefined) excluded[item.reason] = (excluded[item.reason] ?? 0) + 1;
+      if (item.status === 'excluded' && item.reason !== undefined) reasons.push([item.reason, 1]);
       else included++;
     }
-    return Promise.resolve({ total, included, excluded, written: 0, failed: 0, skipped: 0 });
+    return Promise.resolve({ total, included, excluded: countExclusions(reasons), written: 0, failed: 0, skipped: 0 });
   }
   get(id: string): Promise<ChangeSetRecord | undefined> {
     return Promise.resolve(this.sets.get(id));
@@ -320,6 +320,17 @@ describe('CS-1 CS-2 CS-4 preparation', () => {
       ['A', 'excluded', 'locked'],
       ['B', 'pending', undefined],
     ]);
+  });
+
+  it('CS-3 AUD-1 the prepared audit event counts custom codes as a number, even an Object.prototype member name', async () => {
+    const reader = new ScriptedReader({ A: { ...product('A'), status: 'locked' }, B: { ...product('B'), status: 'open' } });
+    const { deps, repository } = setup(reader);
+    // `constructor` bypasses the loader, which refuses it: the count must still be a number.
+    const checks = [{ code: 'constructor', require: [{ in: { record: 'status' }, values: ['open'] }] }];
+    const out = await prepareChangeSet(deps, request(explicitArgs, { checks }));
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(out.changeset.stats.excluded).toEqual({ constructor: 1 });
+    expect(repository.audit[1]?.details).toMatchObject({ included: 1, excluded: 1 });
   });
 
   it('CS-2 firstItems holds at most 20 items in item order', async () => {

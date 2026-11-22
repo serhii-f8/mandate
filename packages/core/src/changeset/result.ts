@@ -54,12 +54,15 @@ export function preparedResult(
   nextCursor?: string,
   kind: ChangeSetKind = 'diff',
 ): InvocationResult {
-  const order = exclusionOrder(cs.stats.excluded);
+  const excluded = cs.stats.excluded;
+  const order = exclusionOrder(excluded);
+  // Own keys only: a check code may name an Object.prototype member (CS-3).
+  const count = (r: string): number => (Object.hasOwn(excluded, r) ? (excluded[r] ?? 0) : 0);
   const reasons = order.flatMap((r) => {
-    const n = cs.stats.excluded[r] ?? 0;
+    const n = count(r);
     return n > 0 ? [`${r} ${String(n)}`] : [];
   });
-  const excludedTotal = order.reduce((sum, r) => sum + (cs.stats.excluded[r] ?? 0), 0);
+  const excludedTotal = order.reduce((sum, r) => sum + count(r), 0);
   const reasonPart = reasons.length > 0 ? ` (${reasons.join(', ')})` : '';
   const text =
     `${cs.operation} prepared change-set ${cs.id}: ${String(cs.stats.included)} change(s) to apply, ` +

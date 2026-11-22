@@ -8,6 +8,7 @@ import type { StatsModel } from '../model.js';
 const REASON_ORDER = ['not_found', 'out_of_scope', 'missing_data', 'no_change', 'already_exists', 'requester'];
 
 function reasonList(excluded: Record<string, number>): string[] {
+  // Own keys only, so a check code that names an Object.prototype member reads its own count (CS-3).
   const present = Object.keys(excluded).filter((r) => (excluded[r] ?? 0) > 0);
   const known = REASON_ORDER.filter((r) => present.includes(r));
   const other = present.filter((r) => !REASON_ORDER.includes(r)).sort();

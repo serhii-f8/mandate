@@ -5,7 +5,7 @@ import type { AuditEventInput } from '../audit.js';
 import type { Caller } from '../caller.js';
 import { compareTargetIds } from './canonical.js';
 import { deriveChangeSet, isValidTargetId, MAX_DERIVE_TARGETS, type DeriveRepository, type DeriveRequest } from './derive.js';
-import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats, ChangeSetStatus } from './model.js';
+import { countExclusions, type ChangeItemRecord, type ChangeSetRecord, type ChangeSetStats, type ChangeSetStatus } from './model.js';
 import { ChangeSetHasher, type HashVersion } from './hash.js';
 import type { ItemsPageQuery, NewChangeSet, PreparationCompletion } from './ports.js';
 import { hashStoredItems } from './verify.js';
@@ -44,16 +44,16 @@ class FakeDeriveRepository implements DeriveRepository {
     return Promise.resolve(this.sets.get(id));
   }
   stats(id: string): Promise<ChangeSetStats> {
-    const excluded: Record<string, number> = {};
+    const reasons: [string, number][] = [];
     let included = 0;
     let total = 0;
     for (const it of this.items.get(id)?.values() ?? []) {
       total++;
       if (it.status === 'excluded') {
-        if (it.reason !== undefined) excluded[it.reason] = (excluded[it.reason] ?? 0) + 1;
+        if (it.reason !== undefined) reasons.push([it.reason, 1]);
       } else included++;
     }
-    return Promise.resolve({ total, included, excluded, written: 0, failed: 0, skipped: 0 });
+    return Promise.resolve({ total, included, excluded: countExclusions(reasons), written: 0, failed: 0, skipped: 0 });
   }
   itemsPage(id: string, query: ItemsPageQuery): Promise<readonly ChangeItemRecord[]> {
     const all = [...(this.items.get(id)?.values() ?? [])].sort((a, b) => compareTargetIds(a.targetId, b.targetId));

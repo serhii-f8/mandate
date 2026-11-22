@@ -88,7 +88,7 @@ export type {
   RollbackItemStatus,
   RollbackRequest,
 } from './changeset/model.js';
-export { BUILTIN_EXCLUSION_REASONS, EMPTY_STATS } from './changeset/model.js';
+export { BUILTIN_EXCLUSION_REASONS, countExclusions, EMPTY_STATS } from './changeset/model.js';
 export { checkRecordFields, failedCheck, type CheckContext } from './changeset/checks.js';
 export {
   CANCELLABLE,

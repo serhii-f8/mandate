@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import type { CheckPredicate, ManifestCheck } from '../policy-model.js';
+import type { CheckPredicate, CheckRef, ManifestCheck } from '../policy-model.js';
 import { checkRecordFields, failedCheck, type CheckContext } from './checks.js';
 
 const ctx: CheckContext = {
@@ -61,6 +61,18 @@ describe('CS-3 preparation checks', () => {
       failedCheck([{ code: 'c', require: [{ equals: [{ arg: 'brand' }, { arg: 'brand' }] }] }], { ...ctx, args: { brand: Number.NaN } }),
     ).toBe('c');
     expect(failedCheck([{ code: 'c', require: [{ in: { arg: 'brand' }, values: [1] }] }], { ...ctx, args: { brand: Number.NaN } })).toBe('c');
+  });
+
+  it('CS-3 an unknown predicate or reference shape fails closed', () => {
+    // Shapes the loader cannot produce; the casts stand in for a malformed configuration object.
+    const unknownPredicate = { matches: { after: 'price' } } as unknown as CheckPredicate;
+    const unknownRef = { field: 'price' } as unknown as CheckRef;
+    expect(run([unknownPredicate])).toBe('c');
+    expect(run([{ absent: unknownRef }])).toBe('c');
+    expect(run([{ present: unknownRef }])).toBe('c');
+    expect(run([{ equals: [unknownRef, { value: null }] }])).toBe('c');
+    expect(run([{ equals: [{ before: 'nope' }, unknownRef] }])).toBe('c');
+    expect(run([{ in: unknownRef, values: [1] }])).toBe('c');
   });
 
   it('CS-3 the first failing check names the reason; no checks pass', () => {

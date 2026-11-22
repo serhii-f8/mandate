@@ -26,6 +26,7 @@ import type {
 import {
   changesetTransitionEvent,
   compareTargetIds,
+  countExclusions,
   EMPTY_STATS,
   evaluateLimits,
   isExpiryDue,
@@ -820,7 +821,7 @@ function isRollbackable(it: ChangeItemRecord): boolean {
 }
 
 function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetStats {
-  const excluded: Record<string, number> = {};
+  const reasons: [string, number][] = [];
   let included = 0;
   let written = 0;
   let failed = 0;
@@ -832,7 +833,7 @@ function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetSt
       rollback[it.rollbackStatus] += 1;
     }
     if (it.status === 'excluded') {
-      if (it.reason !== undefined) excluded[it.reason] = (excluded[it.reason] ?? 0) + 1;
+      if (it.reason !== undefined) reasons.push([it.reason, 1]);
       continue;
     }
     included += 1;
@@ -840,5 +841,5 @@ function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetSt
     else if (it.status === 'failed') failed += 1;
     else if (it.status === 'skipped') skipped += 1;
   }
-  return { total: items.size, included, excluded, written, failed, skipped, ...(rollback === undefined ? {} : { rollback }) };
+  return { total: items.size, included, excluded: countExclusions(reasons), written, failed, skipped, ...(rollback === undefined ? {} : { rollback }) };
 }

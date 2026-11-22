@@ -162,7 +162,7 @@ with its `code`, keeping its `before` and `after`. Checks run at preparation onl
 
 | Key | Type | Default | Bounds / notes |
 | --- | --- | --- | --- |
-| `code` | string | required | `^[a-z][a-z0-9_]{0,62}$`, unique within the manifest, not a built-in reason (`not_found`, `out_of_scope`, `missing_data`, `no_change`, `already_exists`, `requester`). The reason approvers see and stats count; a fixed node in presets |
+| `code` | string | required | `^[a-z][a-z0-9_]{0,62}$`, unique within the manifest, not a built-in reason (`not_found`, `out_of_scope`, `missing_data`, `no_change`, `already_exists`, `requester`) and not a reserved name (a member of JavaScript's `Object.prototype`, of which only `constructor` fits the pattern). The reason approvers see and stats count; a fixed node in presets |
 | `title` | string | none | 1-120 characters of plain text, shown beside the code on the approval page and in the widget |
 | `require` | list | required | 1-10 predicates, all of which must hold |
 
@@ -170,7 +170,8 @@ Each predicate is an object with exactly one predicate key. A reference is `{ af
 `{ before: f }` (a field of `fields`; the side is `null` for a create's `before` and a delete's
 `after`), `{ record: f }` (the current upstream record, which a create does not have; the field is
 added to the `read_before` read and must be one it can return), `{ arg: name }` (a property of
-`input_schema`) or `{ lookup: name, field: f }`.
+`input_schema`) or `{ lookup: name, field: f }`. On an update, `{ before: f }` and `{ after: f }` see
+only the fields this item touches; for any other field of the record use `{ record: f }`.
 
 | Predicate | Holds when |
 | --- | --- |

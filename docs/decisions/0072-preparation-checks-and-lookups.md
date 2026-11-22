@@ -34,8 +34,11 @@ preconditions and moves a policy decision into code an operator cannot read in t
   10 predicates each. They are evaluated in order on every item that passed the built-in exclusions;
   the first check with a predicate that does not hold excludes the item with reason `code`. An
   excluded item keeps its `before` and `after`, as `no_change` does.
-- **Codes.** `code` matches `^[a-z][a-z0-9_]{0,62}$`, is unique within the manifest and is not a
-  built-in reason. `ExclusionReason` becomes the built-in reasons or any such code; every place that
+- **Codes.** `code` matches `^[a-z][a-z0-9_]{0,62}$`, is unique within the manifest, is not a
+  built-in reason and is not a reserved name (`must not be a reserved name`): a member of
+  `Object.prototype`, of which only `constructor` fits the pattern. Independently of the loader, every
+  place that counts reasons counts into a map (core `countExclusions`) and every reader uses own keys,
+  so even a code written to storage directly, such as `valueOf`, stays a number. `ExclusionReason` becomes the built-in reasons or any such code; every place that
   shows or counts reasons shows an unknown code as it is, after the built-ins, ordered by code.
   **(call)** `checks[*].code` is a fixed node in presets (`must not be a parameter`), like `action` and
   `values_arg`: it is the reason approvers see and stats count, so one preset operation means one set
@@ -54,7 +57,8 @@ preconditions and moves a policy decision into code an operator cannot read in t
 - **Semantics.** "Present" is not `null`, not missing and not `''`. Equality is canonical JSON with
   `null` and missing equal. `in` compares strictly, without coercion. A value that cannot be compared
   (a non-finite number, a value canonical JSON refuses) makes the predicate false, so the item is
-  excluded; evaluation never throws.
+  excluded; evaluation never throws. A predicate or reference of a shape outside the closed set, which
+  the loader cannot produce, also fails closed: its predicate is false.
 - **When.** Checks run at preparation only. Their outcome is in the hash through each item's status and
   reason. Execution re-checks the written fields (CS-7) but not the check inputs; re-checking them is
   plan 3's verify stage.
@@ -90,4 +94,7 @@ check naming the reason, the lookup predicates over supplied results, update, cr
 counting a custom code. Loader tests refuse each schema bound and each cross-check at its path with
 its message; a load test refuses a check code as a preset parameter. Component tests show
 `excluded: Note is locked (locked)`, `excluded: locked` without a title, and custom codes after the
-built-ins in the stats summary and the prepared result text.
+built-ins in the stats summary and the prepared result text. Fix round 1: a repository contract test
+(PostgreSQL and in-memory) stores items excluded with `locked`, `valueOf` and `constructor` and reads
+numeric counts; a core test shows the `prepared` audit event counting a `constructor` code as a number;
+a loader test refuses `constructor`; core tests show an unknown predicate or reference shape failing.

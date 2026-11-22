@@ -139,6 +139,18 @@ export interface ChangeItemRecord {
   readonly rollbackError?: string;
 }
 
+/**
+ * `ChangeSetStats.excluded` from `[reason, count]` pairs, summed per reason. Safe for any string: a
+ * check code that names an `Object.prototype` member (`constructor`, `valueOf`) is counted as its
+ * own key, never read from the prototype (CS-3).
+ */
+export function countExclusions(pairs: Iterable<readonly [ExclusionReason, number]>): Record<string, number> {
+  const counts = new Map<string, number>();
+  for (const [reason, n] of pairs) counts.set(reason, (counts.get(reason) ?? 0) + n);
+  // fromEntries defines own data properties, so even `__proto__` stays a plain key.
+  return Object.fromEntries(counts);
+}
+
 export const EMPTY_STATS: ChangeSetStats = Object.freeze({
   total: 0,
   included: 0,
