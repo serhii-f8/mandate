@@ -24,6 +24,7 @@ import type {
   NewChangeSet,
   NewNotification,
   PlanRecord,
+  PlanStep,
   PreparationCompletion,
   RollbackCounts,
   RollbackItemOutcome,
@@ -39,6 +40,7 @@ import {
   EMPTY_STATS,
   evaluateLimits,
   isExpiryDue,
+  planAllowsRollback,
   planShapeRefusal,
   planStepMayStart,
   rollbackFromFinished,
@@ -753,6 +755,9 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     return guarded('change-set start', () =>
       this.db.transaction(
         async (tx): Promise<StartResult> => {
+          // ADR 0074: a plan step's start excludes a rollback request of an earlier step through the plan row's lock,
+          // taken before the change-set's own. Outside a plan nothing more is locked.
+          const lockedPlan = await lockPlanOf(tx, req.changesetId);
           // The row lock serializes starts of one change-set: a second start finds it executing.
           const [row] = await tx.select().from(changeSet).where(eq(changeSet.id, req.changesetId)).for('update');
           if (row === undefined) return { ok: false, reason: 'not_found' };
@@ -771,9 +776,13 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           if (record.status === 'approved' && !(await approvalsCover(tx, record, req.expectedHash))) {
             return { ok: false, reason: 'not_approved' };
           }
-          // EXE-13: a plan step starts only after the step before it completed, read in this transaction. No second
-          // row lock: createPlan locks its rows in ID order, and a lock taken here in step order could deadlock it.
+          // EXE-13: a plan step starts only after the step before it completed, read in this transaction under the
+          // plan lock. No second row lock: createPlan locks its rows in ID order, and a lock taken here in step order
+          // could deadlock it. A membership that changed between the unlocked read and the row lock (a derive handover
+          // moves a step out; createPlan could put it in another plan) is judged without the plan lock it needs:
+          // outside a plan it starts as any change-set, inside another plan above step 1 it is refused (fail closed).
           if (record.plan !== undefined && record.plan.step > 1) {
+            if (record.plan.id !== lockedPlan) return { ok: false, reason: 'plan_blocked' };
             const predecessor = await tx
               .select({ id: changeSet.id, operation: changeSet.operation, status: changeSet.status, step: changeSet.planStep })
               .from(changeSet)
@@ -884,27 +893,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     return guarded('plan read', async () => {
       const [row] = await this.db.select().from(plan).where(eq(plan.id, planId));
       if (row === undefined) return undefined;
-      const steps = await this.db
-        .select({
-          step: changeSet.planStep,
-          changesetId: changeSet.id,
-          operation: changeSet.operation,
-          status: changeSet.status,
-          executionStartedAt: changeSet.executionStartedAt,
-        })
-        .from(changeSet)
-        .where(eq(changeSet.planId, planId))
-        .orderBy(asc(changeSet.planStep));
-      return {
-        plan: toPlan(row),
-        steps: steps.map((s) => ({
-          step: s.step ?? 0,
-          changesetId: s.changesetId,
-          operation: s.operation,
-          status: s.status,
-          executionStarted: s.executionStartedAt !== null,
-        })),
-      };
+      return { plan: toPlan(row), steps: await stepsOfPlan(this.db, planId) };
     });
   }
 
@@ -1136,39 +1125,53 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
   async requestRollback(req: RollbackRequestOf): Promise<RollbackResult> {
     if (!UUID.test(req.changesetId)) return { ok: false, reason: 'not_found' };
     return guarded('rollback request', () =>
-      this.db.transaction(async (tx): Promise<RollbackResult> => {
-        // The row lock serializes requests: a second one finds the first one's status and request.
-        const [row] = await tx.select().from(changeSet).where(eq(changeSet.id, req.changesetId)).for('update');
-        if (row === undefined) return { ok: false, reason: 'not_found' };
-        const record = toRecord(row);
-        if (record.status === 'rolling_back' || record.status === 'rolled_back' || row.rollbackRequestedAt !== null) {
-          return { ok: false, reason: 'already_rolled_back' };
-        }
-        if (!rollbackFromFinished(record)) return { ok: false, reason: 'not_finished' };
-        // SEC-8: judged again on the database clock, read after the lock is held (statement_timestamp(), not the
-        // transaction start of now()), so neither an api clock nor a wait on the lock opens the window.
-        const clock = await tx.execute<{ ms: number }>(
-          sql`SELECT (extract(epoch FROM statement_timestamp()) * 1000)::float8 AS ms`,
-        );
-        const now = new Date(clock.rows[0]?.ms ?? Number.NaN);
-        if (!rollbackWindowOpen(record.rollbackUntil, now, req.marginMs)) return { ok: false, reason: 'window_closed' };
-        const [updated] = await tx
-          .update(changeSet)
-          .set({
-            status: 'rolling_back',
-            rollbackRequestedAt: req.request.requestedAt,
-            rollbackActor: req.request.actor,
-            rollbackClientId: req.request.clientId ?? null,
-            rollbackCorrelationId: req.request.correlationId,
-            updatedAt: sql`now()`,
-          })
-          .where(and(eq(changeSet.id, req.changesetId), eq(changeSet.status, record.status)))
-          .returning();
-        if (updated === undefined) throw new Error('rollback request update returned no row');
-        const audit = this.auditFor(tx);
-        for (const event of req.audit) await audit.append(event);
-        return { ok: true, changeset: toRecord(updated) };
-      }),
+      this.db.transaction(
+        async (tx): Promise<RollbackResult> => {
+          // ADR 0074: the plan row's lock, before the change-set's own, excludes the start of a later step meanwhile.
+          const lockedPlan = await lockPlanOf(tx, req.changesetId);
+          // The row lock serializes requests: a second one finds the first one's status and request.
+          const [row] = await tx.select().from(changeSet).where(eq(changeSet.id, req.changesetId)).for('update');
+          if (row === undefined) return { ok: false, reason: 'not_found' };
+          const record = toRecord(row);
+          if (record.status === 'rolling_back' || record.status === 'rolled_back' || row.rollbackRequestedAt !== null) {
+            return { ok: false, reason: 'already_rolled_back' };
+          }
+          if (!rollbackFromFinished(record)) return { ok: false, reason: 'not_finished' };
+          // SEC-8: judged again on the database clock, read after the lock is held (statement_timestamp(), not the
+          // transaction start of now()), so neither an api clock nor a wait on the lock opens the window.
+          const clock = await tx.execute<{ ms: number }>(
+            sql`SELECT (extract(epoch FROM statement_timestamp()) * 1000)::float8 AS ms`,
+          );
+          const now = new Date(clock.rows[0]?.ms ?? Number.NaN);
+          if (!rollbackWindowOpen(record.rollbackUntil, now, req.marginMs)) return { ok: false, reason: 'window_closed' };
+          // EXE-8, EXE-13: a plan step rolls back only once every later step that started is rolled back, read under
+          // the plan lock. Membership is frozen once a change-set left `prepared` (migration 0017), so a plan other than
+          // the locked one cannot appear here; were it to, the request is refused (fail closed).
+          if (record.plan !== undefined) {
+            if (record.plan.id !== lockedPlan || !planAllowsRollback(record.plan.step, await stepsOfPlan(tx, record.plan.id))) {
+              return { ok: false, reason: 'plan_order' };
+            }
+          }
+          const [updated] = await tx
+            .update(changeSet)
+            .set({
+              status: 'rolling_back',
+              rollbackRequestedAt: req.request.requestedAt,
+              rollbackActor: req.request.actor,
+              rollbackClientId: req.request.clientId ?? null,
+              rollbackCorrelationId: req.request.correlationId,
+              updatedAt: sql`now()`,
+            })
+            .where(and(eq(changeSet.id, req.changesetId), eq(changeSet.status, record.status)))
+            .returning();
+          if (updated === undefined) throw new Error('rollback request update returned no row');
+          const audit = this.auditFor(tx);
+          for (const event of req.audit) await audit.append(event);
+          return { ok: true, changeset: toRecord(updated) };
+        },
+        // Statements after the plan lock wait must see what the transaction holding it committed.
+        { isolationLevel: 'read committed' },
+      ),
     );
   }
 
@@ -1549,6 +1552,41 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
       }),
     );
   }
+}
+
+/**
+ * ADR 0074: locks the plan row of a change-set FOR NO KEY UPDATE, the first lock of every transaction that needs
+ * plan-wide exclusion, and answers its ID; undefined, and nothing locked, outside a plan. The membership is read
+ * without a lock, so the caller compares it with the one it reads under its own row lock.
+ */
+async function lockPlanOf(tx: DbExecutor, changesetId: string): Promise<string | undefined> {
+  const [unlocked] = await tx.select({ planId: changeSet.planId }).from(changeSet).where(eq(changeSet.id, changesetId));
+  const planId = unlocked?.planId ?? null;
+  if (planId === null) return undefined;
+  await tx.select({ id: plan.id }).from(plan).where(eq(plan.id, planId)).for('no key update');
+  return planId;
+}
+
+/** CS-9: the steps of a plan in step order, with whether each one's execution was requested. */
+async function stepsOfPlan(db: Db | DbExecutor, planId: string): Promise<(PlanStep & { executionStarted: boolean })[]> {
+  const rows = await db
+    .select({
+      step: changeSet.planStep,
+      changesetId: changeSet.id,
+      operation: changeSet.operation,
+      status: changeSet.status,
+      executionStartedAt: changeSet.executionStartedAt,
+    })
+    .from(changeSet)
+    .where(eq(changeSet.planId, planId))
+    .orderBy(asc(changeSet.planStep));
+  return rows.map((s) => ({
+    step: s.step ?? 0,
+    changesetId: s.changesetId,
+    operation: s.operation,
+    status: s.status,
+    executionStarted: s.executionStartedAt !== null,
+  }));
 }
 
 /**

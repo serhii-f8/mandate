@@ -5,6 +5,7 @@ import type { Caller } from '../caller.js';
 import type { EvaluationRequest, PolicyDecision } from '../policy-engine.js';
 import type { ManifestDefinition, OperationDefinition, RollbackStrategy } from '../policy-model.js';
 import type { ChangeSetRecord, ChangeSetStatus, RollbackRequest } from './model.js';
+import type { PlanStep } from './plan.js';
 import {
   changesetRollbackBatchEvent,
   ROLLBACK_REQUEST_MARGIN_MS,
@@ -75,12 +76,18 @@ function record(patch: { [K in keyof ChangeSetRecord]?: ChangeSetRecord[K] | und
   return Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined)) as unknown as ChangeSetRecord;
 }
 
+type StartedStep = PlanStep & { executionStarted: boolean };
+
 class FakeReads implements RollbackReads {
   readonly gets: string[] = [];
   constructor(
     private readonly row: ChangeSetRecord | undefined,
     private readonly count = 4,
+    private readonly steps?: readonly StartedStep[],
   ) {}
+  planSteps(planId: string): Promise<{ steps: readonly StartedStep[] } | undefined> {
+    return Promise.resolve(this.row?.plan?.id === planId && this.steps !== undefined ? { steps: this.steps } : undefined);
+  }
   get(changesetId: string): Promise<ChangeSetRecord | undefined> {
     this.gets.push(changesetId);
     return Promise.resolve(this.row?.id === changesetId ? this.row : undefined);
@@ -104,11 +111,17 @@ const EARLY = new Date(UNTIL.getTime() - 61_000);
 
 function deps(
   row: ChangeSetRecord | undefined,
-  opts: { count?: number; engine?: FakeEngine; operations?: readonly OperationDefinition[]; now?: Date } = {},
+  opts: {
+    count?: number;
+    engine?: FakeEngine;
+    operations?: readonly OperationDefinition[];
+    now?: Date;
+    steps?: readonly StartedStep[];
+  } = {},
 ): RollbackEligibilityDeps & { repository: FakeReads } {
   const now = opts.now ?? EARLY;
   return {
-    repository: new FakeReads(row, opts.count ?? 4),
+    repository: new FakeReads(row, opts.count ?? 4, opts.steps),
     engine: opts.engine ?? new FakeEngine(),
     operations: opts.operations ?? [operation()],
     now: () => now,
@@ -207,6 +220,34 @@ describe('EXE-8 rollback eligibility', () => {
     expect(await ask(deps(record({ rollbackUntil: new Date(Number.NaN) })))).toEqual(notRollbackable('window_closed'));
     expect(await ask(deps(record(), { now: new Date(Number.NaN) }))).toEqual(notRollbackable('window_closed'));
     expect(await ask(deps(record(), { count: Number.NaN }))).toEqual(notRollbackable('nothing_written'));
+  });
+
+  describe('EXE-8 plan order', () => {
+    const PLAN = 'plan-1';
+    const stepOne = record({ plan: { id: PLAN, step: 1 } });
+    const later = (status: ChangeSetStatus, executionStarted = true): StartedStep[] => [
+      { step: 1, changesetId: ID, operation: OP, status: 'completed', executionStarted: true },
+      { step: 2, changesetId: 'cs-2', operation: OP, status, executionStarted },
+    ];
+
+    it('EXE-8 EXE-13 a step whose later step completed is not_rollbackable plan_order', async () => {
+      expect(await ask(deps(stepOne, { steps: later('completed') }))).toEqual(notRollbackable('plan_order'));
+      expect(await ask(deps(stepOne, { steps: later('failed') }))).toEqual(notRollbackable('plan_order'));
+      // Its permanent reasons come first: nothing written, closed window.
+      expect(await ask(deps(stepOne, { steps: later('completed'), count: 0 }))).toEqual(notRollbackable('nothing_written'));
+    });
+
+    it('EXE-8 EXE-13 a step whose later step was rolled back, or never started, is eligible', async () => {
+      expect(await ask(deps(stepOne, { steps: later('rolled_back') }))).toEqual({ ok: true, count: 4, until: UNTIL });
+      expect(await ask(deps(stepOne, { steps: later('approved', false) }))).toEqual({ ok: true, count: 4, until: UNTIL });
+      // The last step of a plan has no later step.
+      const last = record({ plan: { id: PLAN, step: 2 } });
+      expect(await ask(deps(last, { steps: later('completed') }))).toEqual({ ok: true, count: 4, until: UNTIL });
+    });
+
+    it('EXE-8 EXE-13 a plan that cannot be read fails closed', async () => {
+      expect(await ask(deps(stepOne))).toEqual(notRollbackable('plan_order'));
+    });
   });
 
   it('EXE-8 an eligible change-set answers the count and the window end', async () => {

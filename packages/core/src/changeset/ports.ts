@@ -191,7 +191,8 @@ export interface ChangeSetRepository {
    * One transaction (EXE-11, POL-4, POL-6): not found, expiry (CAS to `expired`, event `expired`),
    * no hash, hash mismatch, status not `prepared|approved`; from `approved` the current round's
    * approvals must cover every plan step for `expectedHash` (SEC-9, `not_approved`); a plan step whose predecessor,
-   * read in the same transaction, is not `completed` answers `plan_blocked` and writes nothing (EXE-13); then the
+   * read in the same transaction under the plan row's lock (taken before the change-set's own, ADR 0074), is not
+   * `completed` answers `plan_blocked` and writes nothing (EXE-13); then the
    * limits under a per-requester
    * lock (refusal appends `limit_denied` and leaves the status); then CAS to `executing` with the
    * event `executing`, the execution request and `startedAt = now`.
@@ -276,8 +277,10 @@ export interface ChangeSetRepository {
    * EXE-8, SEC-8: one transaction. Locks the change-set FOR UPDATE and reads the database clock; refuses
    * `not_found`; `already_rolled_back` (status rolling_back/rolled_back, or a request stored); `not_finished`
    * (status not in ROLLBACK_FROM, or cancelled/failed without execution); `window_closed` (rollback_until NULL or
-   * `now() >= rollback_until − marginMs`). Then sets status `rolling_back` with the four request columns and
-   * `updated_at`, appends `audit` in order, and answers the record. A refusal writes nothing.
+   * `now() >= rollback_until − marginMs`); `plan_order` for a plan step when a later step of its plan started and
+   * is not `rolled_back`, read under the plan row's lock taken before the change-set's own (EXE-8, EXE-13,
+   * ADR 0074). Then sets status `rolling_back` with the four request columns and `updated_at`, appends `audit` in
+   * order, and answers the record. A refusal writes nothing.
    */
   requestRollback(req: {
     readonly changesetId: string;
@@ -286,7 +289,7 @@ export interface ChangeSetRepository {
     readonly audit: readonly AuditEventInput[];
   }): Promise<
     | { ok: true; changeset: ChangeSetRecord }
-    | { ok: false; reason: 'not_found' | 'already_rolled_back' | 'not_finished' | 'window_closed' }
+    | { ok: false; reason: 'not_found' | 'already_rolled_back' | 'not_finished' | 'window_closed' | 'plan_order' }
   >;
   /**
    * EXE-8: the open rollback batch's number, else the highest done batch + 1, else 1 (ruling R12); 1 for an
@@ -558,7 +561,7 @@ export type RollbackRequestOutcome =
   | {
       readonly ok: false;
       readonly reason: 'not_found' | 'not_rollbackable';
-      readonly detail?: 'already_rolled_back' | 'not_finished' | 'window_closed';
+      readonly detail?: 'already_rolled_back' | 'not_finished' | 'window_closed' | 'plan_order';
     };
 
 /** `plan_blocked`: a plan step whose predecessor is not `completed` (EXE-13). */

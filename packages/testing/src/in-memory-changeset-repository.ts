@@ -36,6 +36,7 @@ import {
   EMPTY_STATS,
   evaluateLimits,
   isExpiryDue,
+  planAllowsRollback,
   planShapeRefusal,
   planStepMayStart,
   rollbackFromFinished,
@@ -589,12 +590,16 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
   planSteps(planId: string): Promise<PlanStepsResult> {
     const plan = this.plans.get(planId);
     if (plan === undefined) return Promise.resolve(undefined);
-    const steps = [...this.entries.values()]
+    return Promise.resolve({ plan: structuredClone(plan), steps: this.startedStepsOf(planId) });
+  }
+
+  /** The steps of a plan in step order, with whether each one's execution was requested. */
+  private startedStepsOf(planId: string): (PlanStep & { executionStarted: boolean })[] {
+    return [...this.entries.values()]
       .map((e) => e.record)
       .filter((r) => r.plan?.id === planId)
       .map((r) => ({ ...stepOf(r), executionStarted: r.executionRequest !== undefined }))
       .sort((a, b) => a.step - b.step);
-    return Promise.resolve({ plan: structuredClone(plan), steps });
   }
 
   requestCancel(
@@ -727,6 +732,11 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     if (!rollbackFromFinished(record)) return { ok: false, reason: 'not_finished' };
     const now = this.now();
     if (!rollbackWindowOpen(record.rollbackUntil, now, req.marginMs)) return { ok: false, reason: 'window_closed' };
+    // EXE-8, EXE-13: a plan step rolls back only once every later step that started is rolled back. Read and applied
+    // synchronously with the start's own check, so a start and a request never both pass (ADR 0074's plan lock).
+    if (record.plan !== undefined && !planAllowsRollback(record.plan.step, this.startedStepsOf(record.plan.id))) {
+      return { ok: false, reason: 'plan_order' };
+    }
     const next: ChangeSetRecord = {
       ...record,
       status: 'rolling_back',

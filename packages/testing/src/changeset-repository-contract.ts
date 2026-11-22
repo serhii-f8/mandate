@@ -1531,6 +1531,75 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
           expect((await c.repository.get(second))?.status).toBe('prepared');
         }));
 
+      /** Rollback requests of a plan step, as the executor sends them; the window is judged on the store's clock. */
+      async function requestRollbackOf(c: Ctx, id: string): ReturnType<ChangeSetRepository['requestRollback']> {
+        const cs = await c.repository.get(id);
+        if (cs === undefined) throw new Error('missing change-set');
+        const req: RollbackRequest = { actor: 'alice', correlationId: `corr-rb-${randomUUID()}`, requestedAt: new Date() };
+        const audit = rollbackRequestEvents({ newId: randomUUID, changeset: cs, request: req, channel: 'page', count: 1 });
+        return c.repository.requestRollback({ changesetId: id, request: req, marginMs: ROLLBACK_REQUEST_MARGIN_MS, audit });
+      }
+
+      /** A two-step plan whose step 1 completed with an open rollback window; step 2 is still `prepared`. */
+      async function firstCompleted(c: Ctx, owner: string): Promise<{ planId: string; first: string; second: string }> {
+        const plan = await twoStepPlan(c, owner);
+        expect((await start(c, plan.first)).ok).toBe(true);
+        await c.repository.transition(plan.first, ['executing'], 'completed', auditEvent(plan.first));
+        await c.repository.openRollbackWindow(plan.first, new Date(Date.now() + HOUR));
+        return plan;
+      }
+
+      it('EXE-8 EXE-13 requestRollback of a step refuses plan_order while a later step started, writing nothing; admits it once that step is rolled back', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          const { first, second } = await firstCompleted(c, owner);
+          expect((await start(c, second)).ok).toBe(true);
+          const before = (await eventsOf(c, first)).length;
+          expect(await requestRollbackOf(c, first)).toEqual({ ok: false, reason: 'plan_order' });
+          const unchanged = await c.repository.get(first);
+          expect(unchanged?.status).toBe('completed');
+          expect(unchanged?.rollbackRequest).toBeUndefined();
+          expect(await eventsOf(c, first)).toHaveLength(before);
+
+          await c.repository.transition(second, ['executing'], 'completed', auditEvent(second));
+          await c.repository.openRollbackWindow(second, new Date(Date.now() + HOUR));
+          expect(await requestRollbackOf(c, first)).toEqual({ ok: false, reason: 'plan_order' });
+          // The later step goes first; once it is rolled back, the earlier one may follow.
+          expect((await requestRollbackOf(c, second)).ok).toBe(true);
+          expect(await requestRollbackOf(c, first)).toEqual({ ok: false, reason: 'plan_order' });
+          await c.repository.transition(second, ['rolling_back'], 'rolled_back', auditEvent(second));
+          expect((await requestRollbackOf(c, first)).ok).toBe(true);
+          expect((await c.repository.get(first))?.status).toBe('rolling_back');
+        }));
+
+      it('EXE-8 EXE-13 a start of step 2 and a rollback request of step 1 at the same moment do not both succeed', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          // PostgreSQL: each call checks out its own pooled connection, so the two transactions really race; several
+          // rounds make the interleaving the plan lock closes likely.
+          for (let round = 0; round < 8; round += 1) {
+            const { first, second } = await firstCompleted(c, owner);
+            const [started, rolledBack] = await Promise.all([start(c, second), requestRollbackOf(c, first)]);
+            expect([started.ok, rolledBack.ok].filter(Boolean), `round ${String(round)}`).toHaveLength(1);
+            if (started.ok) {
+              expect(rolledBack).toEqual({ ok: false, reason: 'plan_order' });
+              expect((await c.repository.get(first))?.status).toBe('completed');
+            } else {
+              expect(started).toEqual({ ok: false, reason: 'plan_blocked' });
+              expect((await c.repository.get(second))?.status).toBe('prepared');
+            }
+          }
+        }));
+
+      it('EXE-8 a change-set outside a plan is rolled back as before', async () =>
+        withRepo(async (c) => {
+          await preparedSet(c, c.id, 1);
+          expect((await start(c, c.id)).ok).toBe(true);
+          await c.repository.transition(c.id, ['executing'], 'completed', auditEvent(c.id));
+          await c.repository.openRollbackWindow(c.id, new Date(Date.now() + HOUR));
+          expect((await requestRollbackOf(c, c.id)).ok).toBe(true);
+        }));
+
       /** A change-set derived from `source` with its items copied, still `preparing`. */
       async function derivedFrom(c: Ctx, owner: string, source: string): Promise<string> {
         const derived = randomUUID();

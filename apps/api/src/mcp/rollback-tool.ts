@@ -40,6 +40,7 @@ const REASON_TEXT: Readonly<Record<RollbackReason, (id: string, status: string) 
   strategy_none: (id) => `The operation of change-set ${id} does not allow rollback.`,
   window_closed: (id) => `The rollback window of change-set ${id} has closed.`,
   nothing_written: (id) => `Change-set ${id} wrote no item that can be rolled back.`,
+  plan_order: (id) => `A later step of the plan of change-set ${id} has run; roll that step back first.`,
 };
 
 /** The fixed answer of a refusal; `status` is the change-set's current one. */
