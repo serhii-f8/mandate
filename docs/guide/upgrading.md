@@ -82,8 +82,17 @@ A preset of your own that uses `verify_after` in a manifest declares `"sdk": "^1
 template preset does so, and shows the stage on `notes.update_title`.
 
 The migration `0016_verification` adds nullable (or defaulted) columns to `change_item` and
-`change_set` that record how far a verification got, and runs on start, as every migration does.
-Change-sets that are already running or finished are not affected.
+`change_set` that record how far a verification got, adds a check constraint and replaces the update
+guard, and runs on start, as every migration does. Change-sets that are already running or finished
+are not affected.
+
+The migration `0017_plans` adds the `plan` table and two nullable columns on `change_set` that place
+a change-set in a plan, with their check and unique index, and redefines the update guard so a
+plan membership cannot change once a change-set left `prepared`. It also runs on start. Upgrade
+every `worker` and `api` instance before anyone creates a plan: an older `api` does not know the
+`create_plan` tool, and an older `worker` would not start the next step of a plan after one
+completed. Change-sets outside a plan are not affected. The tool name `create_plan` is now reserved,
+so an operation named exactly `create_plan` no longer loads: rename it before you upgrade.
 
 ## Upgrading to 1.2.0
 

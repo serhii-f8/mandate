@@ -135,16 +135,68 @@ Things to know when you run it:
 
 ## Plans
 
-A requester who prepared several change-sets that must run in order asks for a plan:
-`create_plan` with a title and the change-set IDs in order, 2 to 20 of them, each prepared by the
-caller, not expired and in no other plan. Each step keeps its own approval, and steps can be
-approved in any order, but a step starts only after the one before it is `completed`; until then a
-start answers `plan_blocked` and the step stays as it is. When a step ends `completed`, the next
-step starts by itself if it is already approved, under the requester's identity and role limits; a
-next step that is only prepared waits for its requester, even when it needs no approval. A step that
-ends any other way stops the plan: the later steps wait until they expire or are cancelled.
-`get_changeset` of a step shows the plan and the status of every step. A step can be rolled back
-only after every later step that ran was rolled back.
+Some changes need several change-sets that must run in a fixed order: create the records, then link
+them, then publish them. A plan puts change-sets in that order. It does not merge them: each step is
+still its own change-set with its own hash, approval, workflow and result.
+
+**Create a plan.** The requester prepares the change-sets first, then calls `create_plan` with a
+title and the change-set IDs. The order of the list is the order of the steps.
+
+- A plan has 2 to 20 steps. Every change-set must be one the caller prepared, still `prepared` (not
+  yet submitted), not expired, in no other plan, and listed once. A call that breaks one of these
+  rules is refused and writes nothing.
+- The title is free text of 1 to 200 characters. It is shown to the approvers of every step of the
+  plan, so keep it free of anything they should not see.
+
+**Approval stays per change-set.** An approver approves exactly the hash of the step in front of
+them, and steps can be approved in any order. Approving step 3 early is safe: it cannot start before
+step 2 is done.
+
+**Order is enforced at the start.** A step above the first cannot start until the step before it is
+`completed`. With a [verify-after stage](#verify-after) that means every written item was confirmed.
+A start that comes too early is refused with `plan_blocked` and changes nothing: the step stays
+`prepared` or `approved`.
+
+**The next step starts by itself.** When a step ends `completed`, the platform starts the next step
+if it is `approved`. It does so on the requester's behalf, with the limits of the requester's role.
+Things to know:
+
+- A next step that is only `prepared` is never started by the platform, even if its operation needs
+  no approval. Nobody confirmed it; the requester submits it as usual.
+- If a limit refuses the start (for example `limits.concurrent_executions`), the step stays
+  `approved` and the requester or the approver can start it later.
+- If the platform cannot reach Temporal to start it, the next step ends `failed` with
+  `executor_unavailable`, as when an approver's start meets the same failure, and the plan stops.
+
+**A step that does not complete stops the plan.** A step that ends `completed_with_errors`, `failed`,
+`cancelled`, `rejected`, `expired` or `rolled_back` leaves every later step blocked. There is no
+override. The later steps expire, or the requester cancels them; after the cause is fixed, prepare a
+new plan.
+
+**Expiry is per change-set.** An approved step that waits behind a long step can expire
+(`changesets.expire_after_hours`, 72 hours by default) before its turn. Set `expire_after_hours` for
+the whole plan, not for one step.
+
+**Rollback goes backwards.** A step can be rolled back only when no later step has started
+executing, or when every later step that did is `rolled_back`. Otherwise the request is refused
+with `plan_order`. To undo a plan, roll back the last step that ran first.
+
+**Excluding items from a step.** Deriving a change-set from a plan step that is still `prepared`
+(to exclude items) puts the derived change-set in the step's place once it is prepared; the source
+leaves the plan. Derived from a step in any other status, the new change-set is outside the plan and
+the source keeps its place.
+
+**What a plan cannot do.** Every step is prepared before the plan exists, from the state of the
+system at that time. A step whose preparation depends on the effect of an earlier step, such as
+updating a record that an earlier step creates, cannot be in a plan, because the record is not
+there to read yet. Fold the update into the create, or prepare that step after the earlier step ran
+and run it outside a plan. A step whose stored `before` values went stale because an earlier step
+changed the same fields is skipped as `drift`, like any change-set.
+
+**See it.** `get_changeset`, the change-set page, the approval page and the widgets show "Step N of
+M in plan ...", the status of every step and, for a step whose predecessor is not `completed`, what
+it waits for. A step's row shows only its number, ID, operation and status; opening another step
+needs your own right to it. Plans need migration `0017`; see [Upgrading](upgrading.md#upgrading-to-130).
 
 ## Roll back
 

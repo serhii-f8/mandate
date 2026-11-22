@@ -119,6 +119,14 @@ What matters in this sequence:
   it. An item still not confirmed then is `unconfirmed` and makes the change-set
   `completed_with_errors`; it stays written and can be rolled back. A worker restart loses nothing,
   and a long verification continues as new with its stored deadline.
+- **A plan orders change-sets without joining them.** Each step is its own change-set and workflow.
+  A start of a step above the first reads the step before it in the start transaction and is
+  refused with `plan_blocked` unless it is `completed`; the execution guard checks the same. When a
+  step ends `completed`, its workflow runs the `advancePlan` activity, which starts the next step
+  through the same executor start an approver's start uses (start checks, limits, move to
+  `executing`, wake) when that step is `approved`, as actor `system` with the requester's identity.
+  A limit refusal leaves it `approved`. Any other end of a step starts nothing and later steps stay
+  blocked.
 - **Rollback uses recorded values.** A finished change-set can be rolled back within its window.
   The worker restores the `before` value of each item this run wrote and skips items that changed
   upstream in the meantime.

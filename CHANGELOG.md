@@ -34,6 +34,9 @@ Additive release: the configuration schema and the connector SDK are 1.3.0. A pr
 - The change-set and approval views, on the pages and in the widgets, show the plan: "Step N of M in
   plan ...", one row per step and, for a step whose predecessor is not `completed`, what it waits
   for. The page answer marks the steps the viewer may open; only those link (UI-4, APR-5, CS-9).
+- The usage guide explains plans (ordering, per-change-set approval, expiry sizing, rollback order, what a
+  plan cannot do), the architecture guide the start path of an advanced step, and the upgrade guide
+  migration `0017` (CS-9, EXE-13, NFR-9).
 
 ## 1.2.0
 

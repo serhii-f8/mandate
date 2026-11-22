@@ -126,6 +126,8 @@ verification ends. Both are documented.
 - Every look adds reads on the write's connection and on each lookup's connection, at most 1000
   looks per change-set; an unavailable upstream during a look keeps items pending instead of
   failing them, until the deadline.
+- The interval between looks (`every_seconds`) comes from the current configuration, while the first
+  look and the deadline are stored when verification begins.
 - A change-set without `verify_after` runs exactly as before: no marker, no new activity, and old
   workflow histories replay unchanged.
 

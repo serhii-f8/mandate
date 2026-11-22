@@ -87,7 +87,8 @@ skipped as `drift` by CS-7, as today.
   the source is still `prepared` in the same plan.
 - **Expiry** is per change-set, as today. An approved step waiting behind a long predecessor can
   expire; the guide says to size `expire_after_hours` for the whole plan.
-- **Views.** `get_changeset` and the change-set pages carry
+- **Views.** The plan title reaches the approvers of any one step of the plan and every
+  `review_changeset` caller who may view a step. `get_changeset` and the change-set pages carry
   `plan: { id, title, step, of, steps: [{ step, id, operation, status }] }`. A sibling's row shows
   only those four values; opening it needs the viewer's own right to it.
 - **Versions.** Plans change no versioned surface of the connector SDK or the configuration schema.
