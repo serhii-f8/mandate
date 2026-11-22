@@ -1,7 +1,7 @@
 # Versioning
 
 This page says what you can rely on when you upgrade, and how breaking changes are announced.
-The product follows [semantic versioning](https://semver.org). The current release is 1.0.0.
+The product follows [semantic versioning](https://semver.org). The current release is 1.0.1.
 
 ## What is versioned
 
@@ -9,7 +9,7 @@ Four things carry a version, and two of them are public interfaces with a writte
 
 | Artifact | Version | Where you see it | Public contract |
 | --- | --- | --- | --- |
-| Product (`api`, `worker`, images) | 1.0.0 | `version` field of `GET /healthz`; image label `org.opencontainers.image.version` | The behaviour this guide describes |
+| Product (`api`, `worker`, images) | 1.0.1 | `version` field of `GET /healthz`; image label `org.opencontainers.image.version` | The behaviour this guide describes |
 | Connector SDK (`@mandate/connector-sdk`) | 1.0.0 | package version; `CONNECTOR_SDK_VERSION` | `packages/connector-sdk/api-report.d.ts`; the preset format in `packages/config/schema/mandate-preset.v1.json` |
 | Configuration schema | 1.0.0 | `CONFIG_SCHEMA_VERSION`; the `version: 1` line of every YAML file is its major | `packages/config/schema/mandate-config.v1.json` |
 | Presets (`@mandate/magento2-catalog`, `@mandate/gitea-issues`) | 1.0.0 | package version | Each preset's `mandate.sdk` range |
@@ -18,7 +18,7 @@ Four things carry a version, and two of them are public interfaces with a writte
 curl -fsS "http://localhost:${MANDATE_API_PORT:-8400}/healthz"
 ```
 
-The answer is `{"ok":true,"version":"1.0.0"}`. The worker answers the same on its health port.
+The answer is `{"ok":true,"version":"1.0.1"}`. The worker answers the same on its health port.
 
 ## The rules
 

@@ -17,7 +17,7 @@ describe('NFR-18 configuration schema and product versions', () => {
 
   it('NFR-18 PRODUCT_VERSION equals the root package version', () => {
     const root = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')) as { version?: string };
-    expect(PRODUCT_VERSION).toBe('1.0.0');
+    expect(PRODUCT_VERSION).toBe('1.0.1');
     expect(root.version).toBe(PRODUCT_VERSION);
   });
 });

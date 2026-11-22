@@ -1,6 +1,6 @@
 {
   "name": "mandate",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Mandate: self-hosted MCP server with policy, change-sets, approvals and audit",

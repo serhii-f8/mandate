@@ -2,6 +2,24 @@
 
 All notable changes are recorded here. The project follows [semantic versioning](docs/guide/versioning.md).
 
+## 1.0.1
+
+A maintenance release. No upgrade steps: the connector SDK, the configuration schema and both
+presets stay at 1.0.0.
+
+### Changed
+
+- Dependencies: Temporal SDK 1.26.0, NestJS 12.5.1, OpenTelemetry 2.12.1 and 0.223.2 (patches within
+  the 2.x line), jose 6.2.18, nodemailer 10.6.0.
+- Build and CI: vitest 5.1.1, turbo 2.11.13, `actions/checkout` and `actions/setup-node` v7.
+
+### Fixed
+
+- A unit test bounded 10,000 policy evaluations to 200 ms and failed on shared CI runners. The
+  bound is now 2 s.
+- Three integration tests that stop a worker by force matched an error text that Temporal SDK
+  1.26 no longer reports first. They now match the timeout error the SDK raises.
+
 ## 1.0.0
 
 First stable release. The connector SDK and the configuration schema are now public, versioned
