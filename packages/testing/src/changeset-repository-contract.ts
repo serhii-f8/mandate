@@ -8,6 +8,7 @@ import {
   changesetVerificationEvent,
   EMPTY_STATS,
   hashStoredItems,
+  planCreatedEvent,
   ROLLBACK_REQUEST_MARGIN_MS,
   rollbackRequestEvents,
   startEventFactory,
@@ -21,11 +22,13 @@ import type {
   ChangeSetRepository,
   ChangeSetStats,
   ChangeSetStatus,
+  CreatePlanRefusal,
   ExecutionLimits,
   ItemOutcome,
   NewChangeSet,
   NewNotification,
   NotificationRow,
+  PlanRecord,
   RollbackItemOutcome,
   RollbackRequest,
   VerificationCounts,
@@ -1351,6 +1354,208 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
           for (const id of [randomUUID(), 'x']) {
             expect(await c.repository.deriveCheck(id, ['a', 'b', 'a'], ['b', 'c'])).toEqual({ unknown: 3, includedAfter: 0 });
           }
+        }));
+    });
+
+    describe('CS-9 EXE-13 plans', () => {
+      type PlanResult = Awaited<ReturnType<ChangeSetRepository['createPlan']>>;
+
+      function makePlan(
+        c: Ctx,
+        ids: readonly string[],
+        opts: { owner: string; id?: string; now?: Date },
+      ): Promise<PlanResult> {
+        const id = opts.id ?? randomUUID();
+        const now = opts.now ?? NOW;
+        const plan: PlanRecord = { id, title: 'Launch', requester: opts.owner, createdAt: now };
+        return c.repository.createPlan({
+          id,
+          title: 'Launch',
+          requester: opts.owner,
+          changesetIds: ids,
+          now,
+          audit: planCreatedEvent({ id: randomUUID(), plan, steps: ids.length, correlationId: 'corr-plan' }),
+        });
+      }
+
+      async function planEvents(c: Ctx, planId: string): Promise<readonly AuditEventInput[]> {
+        return (await c.auditEvents()).filter((e) => e.action === 'plan.created' && e.details.planId === planId);
+      }
+
+      /** `n` prepared change-sets of one requester, one item each, hash `h`. */
+      async function preparedSteps(c: Ctx, owner: string, n: number): Promise<string[]> {
+        const ids = Array.from({ length: n }, () => randomUUID());
+        for (const id of ids) await preparedSet(c, id, 1, { requester: owner });
+        return ids;
+      }
+
+      /** A plan over two prepared change-sets of `owner`, listed in reverse creation order. */
+      async function twoStepPlan(c: Ctx, owner: string): Promise<{ planId: string; first: string; second: string }> {
+        const [second, first] = await preparedSteps(c, owner, 2);
+        if (first === undefined || second === undefined) throw new Error('two change-sets expected');
+        const planId = randomUUID();
+        expect((await makePlan(c, [first, second], { owner, id: planId })).ok).toBe(true);
+        return { planId, first, second };
+      }
+
+      it('CS-9 createPlan puts prepared change-sets of one requester in list order and audits plan.created once', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          const [b, a] = await preparedSteps(c, owner, 2);
+          if (a === undefined || b === undefined) throw new Error('two change-sets expected');
+          const planId = randomUUID();
+          const result = await makePlan(c, [a, b], { owner, id: planId });
+          expect(result).toEqual({ ok: true, plan: { id: planId, title: 'Launch', requester: owner, createdAt: NOW } });
+          expect((await c.repository.get(a))?.plan).toEqual({ id: planId, step: 1 });
+          expect((await c.repository.get(b))?.plan).toEqual({ id: planId, step: 2 });
+          expect(await c.repository.planSteps(planId)).toEqual({
+            plan: { id: planId, title: 'Launch', requester: owner, createdAt: NOW },
+            steps: [
+              { step: 1, changesetId: a, operation: 'catalog.update', status: 'prepared', executionStarted: false },
+              { step: 2, changesetId: b, operation: 'catalog.update', status: 'prepared', executionStarted: false },
+            ],
+          });
+          const events = await planEvents(c, planId);
+          expect(events).toHaveLength(1);
+          expect(events[0]).toMatchObject({ actor: owner, action: 'plan.created', details: { planId, steps: 2 } });
+        }));
+
+      it('CS-9 a change-set outside a plan carries no plan; planSteps of an unknown or non-UUID ID is undefined', async () =>
+        withRepo(async (c) => {
+          await prepared(c);
+          expect(await c.repository.get(c.id)).not.toHaveProperty('plan');
+          expect(await c.repository.planSteps(randomUUID())).toBeUndefined();
+          expect(await c.repository.planSteps('not-a-uuid')).toBeUndefined();
+        }));
+
+      it('CS-9 each createPlan refusal writes nothing', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          const a = randomUUID();
+          const b = randomUUID();
+          const foreign = randomUUID();
+          const preparing = randomUUID();
+          const late = randomUUID();
+          const missing = randomUUID();
+          await preparedSet(c, a, 1, { requester: owner });
+          await preparedSet(c, b, 1, { requester: owner });
+          await preparedSet(c, foreign, 1, { requester: requester('bob') });
+          await c.repository.create({ ...newChangeSet(preparing), requester: owner }, auditEvent(preparing));
+          await preparedSet(c, late, 1, { requester: owner, expiresAt: at(1) });
+          const { second: planned } = await twoStepPlan(c, owner);
+
+          const cases: { list: string[]; now?: Date; expected: { reason: CreatePlanRefusal; changesetId?: string } }[] = [
+            { list: [a, missing], expected: { reason: 'not_found', changesetId: missing } },
+            { list: [a, 'not-a-uuid'], expected: { reason: 'not_found', changesetId: 'not-a-uuid' } },
+            { list: [a, foreign], expected: { reason: 'not_requester', changesetId: foreign } },
+            { list: [a, preparing], expected: { reason: 'not_prepared', changesetId: preparing } },
+            { list: [a, late], now: at(1), expected: { reason: 'not_prepared', changesetId: late } },
+            { list: [a, planned], expected: { reason: 'already_in_plan', changesetId: planned } },
+            { list: [a, b, a], expected: { reason: 'duplicate_step' } },
+            { list: [a], expected: { reason: 'too_few_steps' } },
+            { list: Array.from({ length: 21 }, () => randomUUID()), expected: { reason: 'too_many_steps' } },
+          ];
+          for (const k of cases) {
+            const planId = randomUUID();
+            const result = await makePlan(c, k.list, { owner, id: planId, ...(k.now === undefined ? {} : { now: k.now }) });
+            expect(result, k.expected.reason).toMatchObject({ ok: false, ...k.expected });
+            expect(await c.repository.planSteps(planId)).toBeUndefined();
+            expect(await planEvents(c, planId)).toHaveLength(0);
+          }
+          for (const id of [a, b, foreign, preparing, late]) {
+            expect(await c.repository.get(id)).not.toHaveProperty('plan');
+          }
+          // A refusal for expiry does not expire the change-set: createPlan writes nothing.
+          expect((await c.repository.get(late))?.status).toBe('prepared');
+        }));
+
+      it('CS-9 createPlan is atomic with its audit event', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          const ids = await preparedSteps(c, owner, 2);
+          const planId = randomUUID();
+          c.failNextAudit();
+          await expect(makePlan(c, ids, { owner, id: planId })).rejects.toThrow();
+          expect(await c.repository.planSteps(planId)).toBeUndefined();
+          for (const id of ids) expect(await c.repository.get(id)).not.toHaveProperty('plan');
+          expect((await makePlan(c, ids, { owner, id: planId })).ok).toBe(true);
+        }));
+
+      it('CS-9 two concurrent createPlan calls sharing a change-set: exactly one succeeds', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          const [shared, x, y] = await preparedSteps(c, owner, 3);
+          if (shared === undefined || x === undefined || y === undefined) throw new Error('ids expected');
+          const [left, right] = await Promise.all([makePlan(c, [x, shared], { owner }), makePlan(c, [shared, y], { owner })]);
+          expect([left.ok, right.ok].filter(Boolean)).toHaveLength(1);
+          expect([left, right].filter((r) => !r.ok)).toEqual([{ ok: false, reason: 'already_in_plan', changesetId: shared }]);
+          const loser = left.ok ? y : x;
+          expect(await c.repository.get(loser)).not.toHaveProperty('plan');
+        }));
+
+      it('EXE-13 startExecution refuses a step before the step ahead of it completed, changing nothing', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          const { planId, first, second } = await twoStepPlan(c, owner);
+          const before = (await eventsOf(c, second)).length;
+          expect(await start(c, second)).toEqual({ ok: false, reason: 'plan_blocked' });
+          // The gate comes after the hash and status checks and before the limits: no limit_denied row.
+          expect(await start(c, second, { expectedHash: 'wrong' })).toEqual({ ok: false, reason: 'hash_mismatch' });
+          expect(await start(c, second, { limits: { role: 'editor', recordsPerOperation: 0 } })).toEqual({
+            ok: false,
+            reason: 'plan_blocked',
+          });
+          const blocked = await c.repository.get(second);
+          expect(blocked?.status).toBe('prepared');
+          expect(blocked?.executionRequest).toBeUndefined();
+          expect(await eventsOf(c, second)).toHaveLength(before);
+
+          expect((await start(c, first)).ok).toBe(true);
+          expect(await start(c, second)).toEqual({ ok: false, reason: 'plan_blocked' });
+          await c.repository.transition(first, ['executing'], 'completed', auditEvent(first));
+          const result = await start(c, second);
+          expect(result.ok).toBe(true);
+          expect((await c.repository.planSteps(planId))?.steps).toMatchObject([
+            { step: 1, status: 'completed', executionStarted: true },
+            { step: 2, status: 'executing', executionStarted: true },
+          ]);
+        }));
+
+      it('EXE-13 a step whose predecessor completed with errors stays blocked', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          const { first, second } = await twoStepPlan(c, owner);
+          expect((await start(c, first)).ok).toBe(true);
+          await c.repository.transition(first, ['executing'], 'completed_with_errors', auditEvent(first));
+          expect(await start(c, second)).toEqual({ ok: false, reason: 'plan_blocked' });
+          expect((await c.repository.get(second))?.status).toBe('prepared');
+        }));
+
+      it('CS-5 a change-set derived from a prepared step takes its place; the source leaves the plan', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          const { planId, first, second } = await twoStepPlan(c, owner);
+          const derived = randomUUID();
+          await c.repository.create({ ...newChangeSet(derived), requester: owner, derivedFrom: second }, auditEvent(derived));
+          expect(await c.repository.copyItems(derived, second, [], [])).toBe(1);
+          expect((await c.repository.get(derived))?.plan).toEqual({ id: planId, step: 2 });
+          expect(await c.repository.get(second)).not.toHaveProperty('plan');
+          expect((await c.repository.planSteps(planId))?.steps.map((s) => [s.step, s.changesetId, s.status])).toEqual([
+            [1, first, 'prepared'],
+            [2, derived, 'preparing'],
+          ]);
+        }));
+
+      it('CS-5 a change-set derived from a step that is no longer prepared stays outside the plan', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          const { planId, second } = await twoStepPlan(c, owner);
+          await c.repository.transition(second, ['prepared'], 'cancelled', auditEvent(second));
+          const derived = randomUUID();
+          await c.repository.create({ ...newChangeSet(derived), requester: owner, derivedFrom: second }, auditEvent(derived));
+          expect(await c.repository.copyItems(derived, second, [], [])).toBe(1);
+          expect(await c.repository.get(derived)).not.toHaveProperty('plan');
+          expect((await c.repository.get(second))?.plan).toEqual({ id: planId, step: 2 });
         }));
     });
 

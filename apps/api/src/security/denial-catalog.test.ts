@@ -34,6 +34,7 @@ const START_REFUSALS = {
   not_executable: false,
   limit_exceeded: true,
   not_approved: true,
+  plan_blocked: false,
 } as const satisfies Record<StartRefusal, boolean>;
 const REQUIREMENTS = ['MCP-3', 'POL-1', 'POL-2', 'POL-3', 'POL-4', 'POL-5', 'POL-6', 'POL-7', 'POL-8', 'SEC-10'] as const;
 

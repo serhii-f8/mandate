@@ -138,6 +138,8 @@ export interface ChangeSetRecord {
   readonly rollbackRequest?: RollbackRequest;
   /** EXE-12: the verification deadline, written once when verification begins. */
   readonly verificationUntil?: Date;
+  /** CS-9: the plan this change-set is a step of, and its 1-based step; absent outside a plan. */
+  readonly plan?: { readonly id: string; readonly step: number };
 }
 
 export interface ChangeItemRecord {

@@ -13,11 +13,14 @@ import type {
   ChangeSetRepository,
   ChangeSetStats,
   ChangeSetStatus,
+  CreatePlanRefusal,
   ExecutionUsage,
   ItemOutcome,
   ItemsPageQuery,
   NewChangeSet,
   NewNotification,
+  PlanRecord,
+  PlanStep,
   PreparationCompletion,
   RollbackCounts,
   RollbackItemOutcome,
@@ -33,6 +36,8 @@ import {
   EMPTY_STATS,
   evaluateLimits,
   isExpiryDue,
+  planShapeRefusal,
+  planStepMayStart,
   rollbackFromFinished,
   rollbackWindowOpen,
 } from '@mandate/core';
@@ -87,6 +92,9 @@ type RollbackClaimResult = Awaited<ReturnType<ChangeSetRepository['claimRollback
 type RollbackCompleteResult = Awaited<ReturnType<ChangeSetRepository['completeRollbackBatch']>>;
 type RollbackRequestOf = Parameters<ChangeSetRepository['requestRollback']>[0];
 type RollbackResult = Awaited<ReturnType<ChangeSetRepository['requestRollback']>>;
+type CreatePlanRequest = Parameters<ChangeSetRepository['createPlan']>[0];
+type CreatePlanResult = Awaited<ReturnType<ChangeSetRepository['createPlan']>>;
+type PlanStepsResult = Awaited<ReturnType<ChangeSetRepository['planSteps']>>;
 
 export interface InMemoryChangeSetRepositoryOptions {
   /** The clock `requestRollback` judges the window on and stamps `updatedAt` with (PostgreSQL: `statement_timestamp()`). */
@@ -121,6 +129,8 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
   private readonly rollbackBatches = new Map<string, Map<number, RollbackBatch>>();
   /** Highest rollback batch number per change-set, tracked as rollback batches are created. */
   private readonly highestRollbackBatch = new Map<string, number>();
+  /** CS-9: plan rows; membership lives on the records (`plan`). */
+  private readonly plans = new Map<string, PlanRecord>();
 
   private readonly now: () => Date;
 
@@ -293,8 +303,17 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     if (entry.items.size > 0) return Promise.reject(new Error('change-set already has items'));
     const ex = new Set(exclude);
     const inc = new Set(include);
-    const source = this.entries.get(sourceId)?.items ?? new Map<string, ChangeItemRecord>();
+    const sourceEntry = this.entries.get(sourceId);
+    const source = sourceEntry?.items ?? new Map<string, ChangeItemRecord>();
     for (const it of source.values()) entry.items.set(it.targetId, derivedItem(it, ex, inc));
+    // CS-5, CS-9: a prepared plan step hands its place to the derived change-set.
+    const plan = sourceEntry?.record.plan;
+    if (sourceEntry !== undefined && plan !== undefined && sourceEntry.record.status === 'prepared') {
+      const left: { -readonly [K in keyof ChangeSetRecord]: ChangeSetRecord[K] } = { ...sourceEntry.record, updatedAt: new Date() };
+      delete left.plan;
+      sourceEntry.record = left;
+      entry.record = { ...entry.record, plan: { ...plan }, updatedAt: new Date() };
+    }
     return Promise.resolve(source.size);
   }
 
@@ -496,6 +515,10 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     if (record.status === 'approved' && !approvalsCover(record, entry.approvals, req.expectedHash)) {
       return { ok: false, reason: 'not_approved' };
     }
+    // EXE-13: a plan step starts only after the step before it completed.
+    if (record.plan !== undefined && !planStepMayStart(record.plan.step, this.stepsOf(record.plan.id))) {
+      return { ok: false, reason: 'plan_blocked' };
+    }
     if (req.limits !== undefined) {
       const since = new Date(req.now.getTime() - DAY_MS);
       const limit = evaluateLimits(req.limits, record.stats.included, this.usageOf(record.requester, since));
@@ -514,6 +537,55 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     await this.commit(entry, executing, req.event({ kind: 'executing', from: record.status }, copyRecord(record)));
     this.outbox.enqueue(req.changesetId, req.notifications ?? [], req.now);
     return { ok: true, changeset: copyRecord(executing) };
+  }
+
+  async createPlan(req: CreatePlanRequest): Promise<CreatePlanResult> {
+    // Checks and writes run synchronously up to the audit append: the in-memory form of one transaction.
+    const shape = planShapeRefusal(req.changesetIds);
+    if (shape !== undefined) return { ok: false, reason: shape };
+    const entries = req.changesetIds.map((id) => ({ id, entry: this.entries.get(id) }));
+    const refusal = (
+      reason: CreatePlanRefusal,
+      fails: (e: Entry) => boolean,
+    ): { ok: false; reason: CreatePlanRefusal; changesetId: string } | undefined => {
+      const hit = entries.find(({ entry }) => entry === undefined || fails(entry));
+      return hit === undefined ? undefined : { ok: false, reason, changesetId: hit.id };
+    };
+    const refused =
+      refusal('not_found', () => false) ??
+      refusal('not_requester', (e) => e.record.requester !== req.requester) ??
+      refusal('not_prepared', (e) => e.record.status !== 'prepared' || e.record.expiresAt.getTime() <= req.now.getTime()) ??
+      refusal('already_in_plan', (e) => e.record.plan !== undefined);
+    if (refused !== undefined) return refused;
+    const plan: PlanRecord = { id: req.id, title: req.title, requester: req.requester, createdAt: copyDate(req.now) };
+    if (this.plans.has(plan.id)) throw new Error('plan already exists');
+    const previous = entries.map(({ entry }) => entry?.record);
+    this.plans.set(plan.id, plan);
+    entries.forEach(({ entry }, i) => {
+      if (entry !== undefined) entry.record = { ...entry.record, plan: { id: plan.id, step: i + 1 }, updatedAt: new Date() };
+    });
+    try {
+      await this.audit.append(req.audit);
+    } catch (error) {
+      this.plans.delete(plan.id);
+      entries.forEach(({ entry }, i) => {
+        const before = previous[i];
+        if (entry !== undefined && before !== undefined) entry.record = before;
+      });
+      throw error;
+    }
+    return { ok: true, plan: structuredClone(plan) };
+  }
+
+  planSteps(planId: string): Promise<PlanStepsResult> {
+    const plan = this.plans.get(planId);
+    if (plan === undefined) return Promise.resolve(undefined);
+    const steps = [...this.entries.values()]
+      .map((e) => e.record)
+      .filter((r) => r.plan?.id === planId)
+      .map((r) => ({ ...stepOf(r), executionStarted: r.executionRequest !== undefined }))
+      .sort((a, b) => a.step - b.step);
+    return Promise.resolve({ plan: structuredClone(plan), steps });
   }
 
   requestCancel(
@@ -883,6 +955,10 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     }
   }
 
+  private stepsOf(planId: string): PlanStep[] {
+    return [...this.entries.values()].map((e) => e.record).filter((r) => r.plan?.id === planId).map(stepOf);
+  }
+
   private usageOf(requester: string, since: Date): ExecutionUsage {
     let recordsSince = 0;
     let executing = 0;
@@ -894,6 +970,10 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     }
     return { recordsSince, executing };
   }
+}
+
+function stepOf(r: ChangeSetRecord): PlanStep {
+  return { step: r.plan?.step ?? 0, changesetId: r.id, operation: r.operation, status: r.status };
 }
 
 function claimed(

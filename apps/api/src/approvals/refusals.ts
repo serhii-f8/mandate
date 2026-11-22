@@ -29,7 +29,8 @@ export type PageRefusal =
   | 'nothing_left'
   | 'not_excludable'
   | 'policy_denied'
-  | 'not_rollbackable';
+  | 'not_rollbackable'
+  | 'plan_blocked';
 
 export const REFUSAL_STATUS: Readonly<Record<PageRefusal, 400 | 403 | 404 | 409>> = {
   not_found: 404,
@@ -62,6 +63,8 @@ export const REFUSAL_STATUS: Readonly<Record<PageRefusal, 400 | 403 | 404 | 409>
   not_excludable: 409,
   policy_denied: 403,
   not_rollbackable: 409,
+  // EXE-13: an earlier step of the plan has not completed.
+  plan_blocked: 409,
 };
 
 /** Non-sensitive fields a refusal answer adds beside `error`, e.g. a count or a limit name (SEC-3). */

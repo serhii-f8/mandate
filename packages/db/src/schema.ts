@@ -147,6 +147,18 @@ export const webSession = pgTable(
 );
 
 /**
+ * Plans (CS-9, ADR 0074): an ordered group of 2 to 20 prepared change-sets of one requester. The order lives on
+ * the change-sets (`plan_id`, `plan_step`), outside every hash; migration `0017_plans` fixes it once a change-set
+ * has left `preparing` or `prepared`.
+ */
+export const plan = pgTable('plan', {
+  id: uuid('id').primaryKey(),
+  title: text('title').notNull(),
+  requester: text('requester').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+});
+
+/**
  * Change-sets (CS-2, CS-4, CS-6). Immutability after `prepared` is enforced by triggers of
  * migration `0004_change_set_immutability`; status transitions are compare-and-set in the
  * repository and checked in core.
@@ -209,6 +221,10 @@ export const changeSet = pgTable(
     verificationFirstAt: timestamp('verification_first_at', { withTimezone: true }),
     verificationUntil: timestamp('verification_until', { withTimezone: true }),
     verificationFinishedAt: timestamp('verification_finished_at', { withTimezone: true }),
+    // CS-9, EXE-13 (migration `0017_plans`): the plan and the 1-based step, both set or both NULL, unique per plan;
+    // written by createPlan and the derive handover only, while the row is `preparing` or `prepared` (the guard).
+    planId: uuid('plan_id').references(() => plan.id),
+    planStep: integer('plan_step'),
   },
   (t) => [
     index('change_set_requester_created_at_idx').on(t.requester, t.createdAt),
@@ -221,6 +237,11 @@ export const changeSet = pgTable(
     ),
     check('change_set_hash_version_check', sql`${t.hashVersion} >= 1`),
     check('change_set_action_check', sql`${t.action} IS NULL OR ${t.action} IN ('update', 'create', 'delete')`),
+    check(
+      'change_set_plan_check',
+      sql`(${t.planId} IS NULL AND ${t.planStep} IS NULL) OR (${t.planId} IS NOT NULL AND ${t.planStep} IS NOT NULL AND ${t.planStep} >= 1)`,
+    ),
+    uniqueIndex('change_set_plan_step_idx').on(t.planId, t.planStep),
   ],
 );
 

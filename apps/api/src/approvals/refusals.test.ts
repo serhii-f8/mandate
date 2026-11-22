@@ -89,6 +89,7 @@ describe('AUD-1 refusal answers', () => {
       not_excludable: 409,
       policy_denied: 403,
       not_rollbackable: 409,
+      plan_blocked: 409,
     });
   });
 

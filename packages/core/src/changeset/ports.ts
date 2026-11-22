@@ -18,6 +18,7 @@ import type {
   RollbackRequest,
   VerificationCounts,
 } from './model.js';
+import type { CreatePlanRefusal, PlanRecord, PlanStep } from './plan.js';
 import type { VerificationOutcome } from './verification.js';
 
 /**
@@ -125,7 +126,9 @@ export interface ChangeSetRepository {
    * item of `sourceId` with the copy rules: a `pending` target in `exclude` becomes `excluded` with reason
    * `requester`; a target in `include` (and not in `exclude`) excluded with reason `requester` becomes `pending`
    * without a reason; every other item keeps status and reason. `before`, `after` and `target_id` are copied and
-   * `error` stays empty. Returns the number of rows copied.
+   * `error` stays empty. When the source is a plan step and still `prepared`, the same transaction moves its
+   * `plan`/`step` to `newId` and the source leaves the plan (CS-5, CS-9); a source in any other status moves
+   * nothing. Returns the number of rows copied.
    */
   copyItems(newId: string, sourceId: string, exclude: readonly string[], include: readonly string[]): Promise<number>;
   /** Compare-and-set from preparing. */
@@ -185,7 +188,9 @@ export interface ChangeSetRepository {
   /**
    * One transaction (EXE-11, POL-4, POL-6): not found, expiry (CAS to `expired`, event `expired`),
    * no hash, hash mismatch, status not `prepared|approved`; from `approved` the current round's
-   * approvals must cover every plan step for `expectedHash` (SEC-9, `not_approved`); then the limits under a per-requester
+   * approvals must cover every plan step for `expectedHash` (SEC-9, `not_approved`); a plan step whose predecessor,
+   * read in the same transaction, is not `completed` answers `plan_blocked` and writes nothing (EXE-13); then the
+   * limits under a per-requester
    * lock (refusal appends `limit_denied` and leaves the status); then CAS to `executing` with the
    * event `executing`, the execution request and `startedAt = now`.
    */
@@ -200,6 +205,24 @@ export interface ChangeSetRepository {
     now: Date;
     event: (e: StartEvent, changeset: ChangeSetRecord) => AuditEventInput;
   }): Promise<{ ok: true; changeset: ChangeSetRecord } | Exclude<StartOutcome, { ok: true }>>;
+  /**
+   * CS-9: one transaction, the listed change-sets locked FOR UPDATE in ID order: each must exist (`not_found`,
+   * also for a non-UUID ID), belong to `requester` (`not_requester`), be `prepared` and not expired at `now`
+   * (`not_prepared`) and have no plan (`already_in_plan`); the shape refusals of `planShapeRefusal` come first.
+   * Then the plan row, the memberships in list order from step 1, and `audit`. A refusal writes nothing.
+   */
+  createPlan(req: {
+    id: string;
+    title: string;
+    requester: string;
+    changesetIds: readonly string[];
+    now: Date;
+    audit: AuditEventInput;
+  }): Promise<{ ok: true; plan: PlanRecord } | { ok: false; reason: CreatePlanRefusal; changesetId?: string }>;
+  /** CS-9: the plan and its steps in step order; undefined for an unknown or non-UUID ID. */
+  planSteps(
+    planId: string,
+  ): Promise<{ plan: PlanRecord; steps: readonly (PlanStep & { executionStarted: boolean })[] } | undefined>;
   /**
    * Stores the cancel request only while executing and only the first one (EXE-7). `ok: true`
    * with the record (an earlier request kept) while executing; otherwise the current status
@@ -536,7 +559,15 @@ export type RollbackRequestOutcome =
       readonly detail?: 'already_rolled_back' | 'not_finished' | 'window_closed';
     };
 
-export type StartRefusal = 'not_found' | 'hash_mismatch' | 'expired' | 'not_executable' | 'limit_exceeded' | 'not_approved';
+/** `plan_blocked`: a plan step whose predecessor is not `completed` (EXE-13). */
+export type StartRefusal =
+  | 'not_found'
+  | 'hash_mismatch'
+  | 'expired'
+  | 'not_executable'
+  | 'limit_exceeded'
+  | 'not_approved'
+  | 'plan_blocked';
 
 /** Executor port (EXE-11). `cancel` may answer `{ ok: true, status: 'executing' }` while a run winds down. */
 export interface ChangeSetExecutor {

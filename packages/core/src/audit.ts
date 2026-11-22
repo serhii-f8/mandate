@@ -26,6 +26,8 @@ export const AUDIT_ACTIONS = [
   'changeset.rollback',
   /** EXE-12: once, when verification of an executed change-set ends; counts only. */
   'changeset.verification',
+  /** CS-9: once, when a plan orders prepared change-sets; the plan ID and step count, never the title. */
+  'plan.created',
   'notification.sent',
   'notification.failed',
   'audit.search',

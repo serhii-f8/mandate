@@ -16,12 +16,14 @@ import type {
   ChangeSetRepository,
   ChangeSetStats,
   ChangeSetStatus,
+  CreatePlanRefusal,
   ExecutionUsage,
   HashVersion,
   ItemOutcome,
   ItemsPageQuery,
   NewChangeSet,
   NewNotification,
+  PlanRecord,
   PreparationCompletion,
   RollbackCounts,
   RollbackItemOutcome,
@@ -37,6 +39,8 @@ import {
   EMPTY_STATS,
   evaluateLimits,
   isExpiryDue,
+  planShapeRefusal,
+  planStepMayStart,
   rollbackFromFinished,
   rollbackWindowOpen,
 } from '@mandate/core';
@@ -45,7 +49,7 @@ import { guarded, isUniqueViolation } from './errors.js';
 import type { Db, DbExecutor } from './client.js';
 import { START_LOCK_NAMESPACE } from './locks.js';
 import { insertNotifications } from './notification-outbox.js';
-import { approval, changeBatch, changeItem, changeRollbackBatch, changeSet, type StoredSubmission } from './schema.js';
+import { approval, changeBatch, changeItem, changeRollbackBatch, changeSet, plan, type StoredSubmission } from './schema.js';
 
 const MAX_PAGE = 500;
 const MAX_BATCH = 1000;
@@ -98,6 +102,10 @@ type RollbackResult = Awaited<ReturnType<ChangeSetRepository['requestRollback']>
 type RollbackClaimResult = Awaited<ReturnType<ChangeSetRepository['claimRollbackBatch']>>;
 type RollbackCompleteResult = Awaited<ReturnType<ChangeSetRepository['completeRollbackBatch']>>;
 type BeginVerificationResult = Awaited<ReturnType<ChangeSetRepository['beginVerification']>>;
+type CreatePlanRequest = Parameters<ChangeSetRepository['createPlan']>[0];
+type CreatePlanResult = Awaited<ReturnType<ChangeSetRepository['createPlan']>>;
+type PlanStepsResult = Awaited<ReturnType<ChangeSetRepository['planSteps']>>;
+type PlanRow = typeof plan.$inferSelect;
 
 function toRecord(row: ChangeSetRow): ChangeSetRecord {
   return {
@@ -162,7 +170,12 @@ function toRecord(row: ChangeSetRow): ChangeSetRecord {
           },
         }),
     ...(row.verificationUntil === null ? {} : { verificationUntil: row.verificationUntil }),
+    ...(row.planId === null || row.planStep === null ? {} : { plan: { id: row.planId, step: row.planStep } }),
   };
+}
+
+function toPlan(row: PlanRow): PlanRecord {
+  return { id: row.id, title: row.title, requester: row.requester, createdAt: row.createdAt };
 }
 
 function toStoredSubmission(s: Submission): StoredSubmission {
@@ -450,11 +463,14 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     if (!UUID.test(newId)) throw new Error('unknown change-set');
     return guarded('change items copy', () =>
       this.db.transaction(async (tx) => {
-        const [parent] = await tx
-          .select({ status: changeSet.status })
+        // Both rows locked in ID order (as createPlan locks), so the plan handover below cannot deadlock it.
+        const locked = await tx
+          .select({ id: changeSet.id, status: changeSet.status, planId: changeSet.planId, planStep: changeSet.planStep })
           .from(changeSet)
-          .where(eq(changeSet.id, newId))
+          .where(inArray(changeSet.id, UUID.test(sourceId) ? [newId, sourceId] : [newId]))
+          .orderBy(asc(changeSet.id))
           .for('update');
+        const parent = locked.find((r) => r.id === newId.toLowerCase());
         if (parent === undefined) throw new Error('unknown change-set');
         if (parent.status !== 'preparing') throw new Error('change-set is not preparing');
         const [existing] = await tx
@@ -473,6 +489,20 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
             ci.before, ci.after
           FROM change_item ci
           WHERE ci.changeset_id = ${sourceId}::uuid`);
+        // CS-5, CS-9: a plan step that is still `prepared` hands its place to the derived change-set. The source
+        // row lock orders this against a submission, a start and createPlan; the source leaves the plan first, so
+        // the unique (plan_id, plan_step) index holds after each statement.
+        const source = locked.find((r) => r.id === sourceId.toLowerCase());
+        if (source?.status === 'prepared' && source.planId !== null && source.planStep !== null) {
+          await tx
+            .update(changeSet)
+            .set({ planId: null, planStep: null, updatedAt: sql`now()` })
+            .where(eq(changeSet.id, sourceId));
+          await tx
+            .update(changeSet)
+            .set({ planId: source.planId, planStep: source.planStep, updatedAt: sql`now()` })
+            .where(eq(changeSet.id, newId));
+        }
         return result.rowCount ?? 0;
       }),
     );
@@ -733,6 +763,16 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           if (record.status === 'approved' && !(await approvalsCover(tx, record, req.expectedHash))) {
             return { ok: false, reason: 'not_approved' };
           }
+          // EXE-13: a plan step starts only after the step before it completed, read in this transaction. No second
+          // row lock: createPlan locks its rows in ID order, and a lock taken here in step order could deadlock it.
+          if (record.plan !== undefined && record.plan.step > 1) {
+            const predecessor = await tx
+              .select({ id: changeSet.id, operation: changeSet.operation, status: changeSet.status, step: changeSet.planStep })
+              .from(changeSet)
+              .where(and(eq(changeSet.planId, record.plan.id), eq(changeSet.planStep, record.plan.step - 1)));
+            const steps = predecessor.map((p) => ({ step: p.step ?? 0, changesetId: p.id, operation: p.operation, status: p.status }));
+            if (!planStepMayStart(record.plan.step, steps)) return { ok: false, reason: 'plan_blocked' };
+          }
           // Starts of one requester serialize here, before the usage is read (POL-4). At READ
           // COMMITTED each later statement sees the starts that committed while this one waited.
           await tx.execute(
@@ -771,6 +811,93 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
         { isolationLevel: 'read committed' },
       ),
     );
+  }
+
+  async createPlan(req: CreatePlanRequest): Promise<CreatePlanResult> {
+    const shape = planShapeRefusal(req.changesetIds);
+    if (shape !== undefined) return { ok: false, reason: shape };
+    // A non-UUID ID is not found: refused here, never a database error.
+    const malformed = req.changesetIds.find((id) => !UUID.test(id));
+    if (malformed !== undefined) return { ok: false, reason: 'not_found', changesetId: malformed };
+    if (!UUID.test(req.id)) throw new Error('invalid plan id');
+    const ids = req.changesetIds.map((id) => id.toLowerCase());
+    if (new Set(ids).size !== ids.length) return { ok: false, reason: 'duplicate_step' };
+    return guarded('plan create', () =>
+      this.db.transaction(
+        async (tx): Promise<CreatePlanResult> => {
+          // Locked in ID order, so two createPlan calls over overlapping lists queue instead of deadlocking; the
+          // second reads the first one's committed membership (read committed re-reads a locked row).
+          const rows = await tx
+            .select({
+              id: changeSet.id,
+              requester: changeSet.requester,
+              status: changeSet.status,
+              expiresAt: changeSet.expiresAt,
+              planId: changeSet.planId,
+            })
+            .from(changeSet)
+            .where(inArray(changeSet.id, ids))
+            .orderBy(asc(changeSet.id))
+            .for('update');
+          const byId = new Map(rows.map((r) => [r.id, r]));
+          const listed = req.changesetIds.map((id, i) => ({ id, row: byId.get(ids[i] ?? '') }));
+          type Row = (typeof rows)[number];
+          const refusal = (reason: CreatePlanRefusal, fails: (r: Row) => boolean): CreatePlanResult | undefined => {
+            const hit = listed.find(({ row }) => row === undefined || fails(row));
+            return hit === undefined ? undefined : { ok: false, reason, changesetId: hit.id };
+          };
+          const refused =
+            refusal('not_found', () => false) ??
+            refusal('not_requester', (r) => r.requester !== req.requester) ??
+            refusal('not_prepared', (r) => r.status !== 'prepared' || r.expiresAt.getTime() <= req.now.getTime()) ??
+            refusal('already_in_plan', (r) => r.planId !== null);
+          if (refused !== undefined) return refused;
+          const [created] = await tx
+            .insert(plan)
+            .values({ id: req.id, title: req.title, requester: req.requester, createdAt: req.now })
+            .returning();
+          if (created === undefined) throw new Error('plan insert returned no row');
+          for (const [i, id] of ids.entries()) {
+            await tx
+              .update(changeSet)
+              .set({ planId: req.id, planStep: i + 1, updatedAt: sql`now()` })
+              .where(eq(changeSet.id, id));
+          }
+          await this.auditFor(tx).append(req.audit);
+          return { ok: true, plan: toPlan(created) };
+        },
+        { isolationLevel: 'read committed' },
+      ),
+    );
+  }
+
+  async planSteps(planId: string): Promise<PlanStepsResult> {
+    if (!UUID.test(planId)) return undefined;
+    return guarded('plan read', async () => {
+      const [row] = await this.db.select().from(plan).where(eq(plan.id, planId));
+      if (row === undefined) return undefined;
+      const steps = await this.db
+        .select({
+          step: changeSet.planStep,
+          changesetId: changeSet.id,
+          operation: changeSet.operation,
+          status: changeSet.status,
+          executionStartedAt: changeSet.executionStartedAt,
+        })
+        .from(changeSet)
+        .where(eq(changeSet.planId, planId))
+        .orderBy(asc(changeSet.planStep));
+      return {
+        plan: toPlan(row),
+        steps: steps.map((s) => ({
+          step: s.step ?? 0,
+          changesetId: s.changesetId,
+          operation: s.operation,
+          status: s.status,
+          executionStarted: s.executionStartedAt !== null,
+        })),
+      };
+    });
   }
 
   async requestCancel(changesetId: string, cancel: CancelRequest): Promise<CancelResult> {

@@ -22,6 +22,9 @@ Additive release: the configuration schema and the connector SDK are 1.3.0. A pr
 - `get_changeset`, the execution answer, the change-set page and the widget show the verification:
   confirmed and not-confirmed counts, `Verifying: N of M confirmed` while checks are pending, and
   `Not confirmed: <check title or code>` on an unconfirmed item (MCP-4, UI-4, EXE-12).
+- Plans: change-sets of one requester can be put in order (2 to 20 steps); a step starts only after
+  the one before it completed, and a change-set derived from a prepared step takes its place
+  (CS-9, EXE-13, CS-5, ADR 0074).
 
 ## 1.2.0
 

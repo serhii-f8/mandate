@@ -149,3 +149,63 @@ describe('CS-5 derived change-set storage', () => {
     );
   });
 });
+
+describe('CS-9 EXE-13 plan storage', () => {
+  async function insertPlan(db: Database['db']): Promise<string> {
+    const id = randomUUID();
+    await db.execute(sql`INSERT INTO plan (id, title, requester, created_at) VALUES (${id}, 'Launch', 'alice', now())`);
+    return id;
+  }
+
+  async function setPlan(db: Database['db'], id: string, planId: string | null, step: number | null): Promise<void> {
+    await db.execute(sql`UPDATE change_set SET plan_id = ${planId}, plan_step = ${step} WHERE id = ${id}`);
+  }
+
+  it('CS-9 plan membership changes while preparing or prepared and is refused once the change-set moved on', async () => {
+    const planId = await insertPlan(database.db);
+    const preparing = await insertChangeSet(database.db, 'preparing');
+    const prepared = await insertChangeSet(database.db, 'prepared');
+    await setPlan(database.db, preparing, planId, 1);
+    await setPlan(database.db, prepared, planId, 2);
+    // The derive handover: a prepared step leaves the plan.
+    await setPlan(database.db, prepared, null, null);
+    await setPlan(database.db, prepared, planId, 2);
+
+    for (const status of ['pending_approval', 'approved', 'executing', 'completed', 'cancelled', 'expired']) {
+      const id = await insertChangeSet(database.db, status);
+      expect(await rejection(setPlan(database.db, id, planId, 3)), status).toBe(
+        'change_set update rejected: plan membership changes only while preparing or prepared',
+      );
+    }
+    // A step that left `prepared` keeps its place: the submission moves the status, not the plan.
+    await database.db.execute(sql`UPDATE change_set SET status = 'approved' WHERE id = ${prepared}`);
+    expect(await rejection(database.db.execute(sql`UPDATE change_set SET plan_id = NULL, plan_step = NULL WHERE id = ${prepared}`))).toBe(
+      'change_set update rejected: plan membership changes only while preparing or prepared',
+    );
+    expect(await rejection(database.db.execute(sql`UPDATE change_set SET plan_step = 5 WHERE id = ${prepared}`))).toBe(
+      'change_set update rejected: plan membership changes only while preparing or prepared',
+    );
+    const row = await database.db.execute(sql`SELECT plan_id, plan_step FROM change_set WHERE id = ${prepared}`);
+    expect(row.rows).toEqual([{ plan_id: planId, plan_step: 2 }]);
+  });
+
+  it('CS-9 plan and step are both set or both NULL, the step is at least 1 and unique per plan', async () => {
+    const planId = await insertPlan(database.db);
+    const a = await insertChangeSet(database.db, 'prepared');
+    const b = await insertChangeSet(database.db, 'prepared');
+    expect(await rejection(setPlan(database.db, a, planId, null))).toBe('change_set_plan_check');
+    expect(await rejection(setPlan(database.db, a, null, 1))).toBe('change_set_plan_check');
+    expect(await rejection(setPlan(database.db, a, planId, 0))).toBe('change_set_plan_check');
+    await setPlan(database.db, a, planId, 1);
+    expect(await rejection(setPlan(database.db, b, planId, 1))).toBe('change_set_plan_step_idx');
+    expect(await rejection(setPlan(database.db, b, randomUUID(), 1))).toBe('change_set_plan_id_plan_id_fk');
+  });
+
+  it('EXE-12 the 0016 verification rule still holds after 0017', async () => {
+    const id = await insertChangeSet(database.db, 'executing');
+    await database.db.execute(sql`UPDATE change_set SET verification_until = now() WHERE id = ${id}`);
+    expect(
+      await rejection(database.db.execute(sql`UPDATE change_set SET verification_until = now() + interval '1 hour' WHERE id = ${id}`)),
+    ).toBe('change_set update rejected: verification schedule is fixed');
+  });
+});

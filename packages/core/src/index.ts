@@ -95,6 +95,17 @@ export type {
 } from './changeset/model.js';
 export { BUILTIN_EXCLUSION_REASONS, countExclusions, EMPTY_STATS } from './changeset/model.js';
 export { checkRecordFields, failedCheck, type CheckContext } from './changeset/checks.js';
+export {
+  PLAN_MAX_STEPS,
+  PLAN_MIN_STEPS,
+  planAllowsRollback,
+  planCreatedEvent,
+  planShapeRefusal,
+  planStepMayStart,
+  type CreatePlanRefusal,
+  type PlanRecord,
+  type PlanStep,
+} from './changeset/plan.js';
 export { lookupKey, readLookups } from './changeset/lookups.js';
 export {
   changesetVerificationEvent,
