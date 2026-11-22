@@ -8,7 +8,7 @@ import { compareTargetIds } from './canonical.js';
 import { ChangeSetHasher } from './hash.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats } from './model.js';
 import { OPAQUE_TARGET_ID, changesetKind, isOpaque, runOpaquePreparation } from './opaque.js';
-import type { ItemsPageQuery, NewChangeSet, PreparationRepository } from './ports.js';
+import type { ItemsPageQuery, NewChangeSet, PreparationCompletion, PreparationRepository } from './ports.js';
 import { createChangeSet } from './prepare.js';
 
 const MANIFEST: ManifestDefinition = {
@@ -98,16 +98,22 @@ class FakeRepository implements PreparationRepository {
   }
   completePreparation(
     id: string,
-    outcome:
-      | { status: 'prepared'; hash: string; stats: ChangeSetStats; preparedAt: Date }
-      | { status: 'failed'; errorCode: string; upstreamStatus?: number },
+    outcome: PreparationCompletion,
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined> {
     const cs = this.sets.get(id);
     if (cs?.status !== 'preparing') return Promise.resolve(undefined);
     const next: ChangeSetRecord =
       outcome.status === 'prepared'
-        ? { ...cs, status: 'prepared', hash: outcome.hash, stats: outcome.stats, preparedAt: outcome.preparedAt }
+        ? {
+            ...cs,
+            status: 'prepared',
+            hash: outcome.hash,
+            hashVersion: outcome.hashVersion,
+            ...(outcome.action === undefined ? {} : { action: outcome.action }),
+            stats: outcome.stats,
+            preparedAt: outcome.preparedAt,
+          }
         : { ...cs, status: 'failed', errorCode: outcome.errorCode };
     this.sets.set(id, next);
     this.audit.push(audit);
@@ -152,7 +158,8 @@ function runRequest(changesetId: string, operation: OperationDefinition = OPAQUE
 }
 
 function expectedHash(args: Record<string, unknown>): string {
-  const hasher = new ChangeSetHasher(OPAQUE_OP.id, args);
+  // A new opaque preparation seals version 2 with no action (CS-4).
+  const hasher = new ChangeSetHasher(OPAQUE_OP.id, args, { version: 2 });
   hasher.add({ targetId: 'call', status: 'pending', before: null, after: args });
   return hasher.digest();
 }
@@ -166,6 +173,9 @@ describe('CS-1 CS-4 opaque preparation', () => {
     expect(out.changeset.status).toBe('prepared');
     expect(out.changeset.stats).toMatchObject({ total: 1, included: 1 });
     expect(out.changeset.preparedAt?.toISOString()).toBe('2026-11-19T10:00:00.000Z');
+    // CS-4: sealed with version 2 and no action (an opaque change-set has no manifest).
+    expect(out.changeset.hashVersion).toBe(2);
+    expect(out.changeset.action).toBeUndefined();
     const items = [{ targetId: 'call', status: 'pending', before: null, after: ARGS }];
     expect(out.firstItems).toEqual(items);
     expect([...(repository.items.get(cs.id)?.values() ?? [])]).toEqual(items);

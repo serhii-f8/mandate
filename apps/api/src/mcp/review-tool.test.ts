@@ -115,7 +115,7 @@ async function setup(options: { items?: number; widget?: boolean; after?: (i: nu
   const excluded = items.filter((i) => i.status === 'excluded').length;
   const prepared = await repository.completePreparation(
     ID,
-    { status: 'prepared', hash: HASH, stats: { total: n, included: n - excluded, excluded: excluded === 0 ? {} : { no_change: excluded }, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+    { status: 'prepared', hashVersion: 1, hash: HASH, stats: { total: n, included: n - excluded, excluded: excluded === 0 ? {} : { no_change: excluded }, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
     { ...event, id: 'e1' },
   );
   if (prepared === undefined) throw new Error('preparation failed');

@@ -129,7 +129,7 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
       await created(c);
       await c.repository.completePreparation(
         c.id,
-        { status: 'prepared', hash: 'h', stats: stats(), preparedAt: NOW },
+        { status: 'prepared', hashVersion: 1, hash: 'h', stats: stats(), preparedAt: NOW },
         auditEvent(c.id),
       );
     }
@@ -264,7 +264,7 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         const preparedAt = new Date('2026-01-01T00:00:05.000Z');
         const rec = await c.repository.completePreparation(
           c.id,
-          { status: 'prepared', hash: 'h1', stats: st, preparedAt },
+          { status: 'prepared', hashVersion: 1, hash: 'h1', stats: st, preparedAt },
           auditEvent(c.id),
         );
         expect(rec?.status).toBe('prepared');
@@ -275,7 +275,7 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         const before = (await c.events()).length;
         const again = await c.repository.completePreparation(
           c.id,
-          { status: 'prepared', hash: 'h2', stats: st, preparedAt },
+          { status: 'prepared', hashVersion: 1, hash: 'h2', stats: st, preparedAt },
           auditEvent(c.id),
         );
         expect(again).toBeUndefined();
@@ -285,6 +285,48 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         expect(
           await c.repository.completePreparation(unknown, { status: 'failed', errorCode: 'x' }, auditEvent(unknown)),
         ).toBeUndefined();
+      }));
+
+    it('CS-4 completePreparation stores the hash version and action, and get returns them', async () =>
+      withRepo(async (c) => {
+        await created(c);
+        const rec = await c.repository.completePreparation(
+          c.id,
+          { status: 'prepared', hash: 'h1', hashVersion: 2, action: 'create', stats: stats(), preparedAt: NOW },
+          auditEvent(c.id),
+        );
+        expect(rec?.hashVersion).toBe(2);
+        expect(rec?.action).toBe('create');
+        const read = await c.repository.get(c.id);
+        expect(read?.hashVersion).toBe(2);
+        expect(read?.action).toBe('create');
+      }));
+
+    it('CS-4 a version 2 change-set without an action (opaque) reads no action', async () =>
+      withRepo(async (c) => {
+        await created(c);
+        await c.repository.completePreparation(
+          c.id,
+          { status: 'prepared', hash: 'h1', hashVersion: 2, stats: stats(), preparedAt: NOW },
+          auditEvent(c.id),
+        );
+        const read = await c.repository.get(c.id);
+        expect(read?.hashVersion).toBe(2);
+        expect(read && 'action' in read).toBe(false);
+      }));
+
+    it('CS-4 a change-set created and never prepared reads hash version 1 and no action', async () =>
+      withRepo(async (c) => {
+        const rec = await c.repository.create(newChangeSet(c.id), auditEvent(c.id));
+        expect(rec.hashVersion).toBe(1);
+        expect('action' in rec).toBe(false);
+        const read = await c.repository.get(c.id);
+        expect(read?.hashVersion).toBe(1);
+        expect(read && 'action' in read).toBe(false);
+        await c.repository.completePreparation(c.id, { status: 'failed', errorCode: 'x' }, auditEvent(c.id));
+        const failed = await c.repository.get(c.id);
+        expect(failed?.hashVersion).toBe(1);
+        expect(failed && 'action' in failed).toBe(false);
       }));
 
     it('completePreparation failed stores the error code', async () =>
@@ -329,7 +371,7 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
           ['h1', 'h2'].map((hash) =>
             c.repository.completePreparation(
               c.id,
-              { status: 'prepared', hash, stats: stats(), preparedAt: NOW },
+              { status: 'prepared', hashVersion: 1, hash, stats: stats(), preparedAt: NOW },
               auditEvent(c.id),
             ),
           ),
@@ -353,7 +395,7 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         await expect(
           c.repository.completePreparation(
             c.id,
-            { status: 'prepared', hash: 'h', stats: stats(), preparedAt: NOW },
+            { status: 'prepared', hashVersion: 1, hash: 'h', stats: stats(), preparedAt: NOW },
             auditEvent(c.id),
           ),
         ).rejects.toThrow();
@@ -434,7 +476,7 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
       await c.repository.appendItems(c.id, items);
       await c.repository.completePreparation(
         c.id,
-        { status: 'prepared', hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
+        { status: 'prepared', hashVersion: 1, hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
         auditEvent(c.id),
       );
       await c.repository.transition(c.id, ['prepared'], 'executing', auditEvent(c.id));
@@ -447,7 +489,7 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         await expect(c.repository.recordItemOutcomes(c.id, [{ targetId: 'a', status: 'written' }])).rejects.toThrow();
         await c.repository.completePreparation(
           c.id,
-          { status: 'prepared', hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
+          { status: 'prepared', hashVersion: 1, hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
           auditEvent(c.id),
         );
         for (const status of ['prepared', 'pending_approval', 'approved'] as const) {
@@ -539,7 +581,7 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
       await c.repository.appendItems(id, [...extra, ...targets(n).reverse().map((t) => item(t))]);
       await c.repository.completePreparation(
         id,
-        { status: 'prepared', hash: 'h', stats: await c.repository.stats(id), preparedAt: NOW },
+        { status: 'prepared', hashVersion: 1, hash: 'h', stats: await c.repository.stats(id), preparedAt: NOW },
         auditEvent(id),
       );
     }
@@ -1180,7 +1222,7 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         ]);
         await c.repository.completePreparation(
           c.id,
-          { status: 'prepared', hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
+          { status: 'prepared', hashVersion: 1, hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
           auditEvent(c.id),
         );
       }
@@ -1198,7 +1240,7 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         expect(await c.repository.copyItems(d, c.id, ['t-0002'], [])).toBe(4);
         await c.repository.completePreparation(
           d,
-          { status: 'prepared', hash: 'h2', stats: await c.repository.stats(d), preparedAt: NOW },
+          { status: 'prepared', hashVersion: 1, hash: 'h2', stats: await c.repository.stats(d), preparedAt: NOW },
           auditEvent(d),
         );
         return d;
@@ -1412,7 +1454,7 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         await c.repository.appendItems(c.id, items.map((o) => item(o.targetId)));
         await c.repository.completePreparation(
           c.id,
-          { status: 'prepared', hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
+          { status: 'prepared', hashVersion: 1, hash: 'h', stats: await c.repository.stats(c.id), preparedAt: NOW },
           auditEvent(c.id),
         );
         expect((await start(c, c.id)).ok).toBe(true);

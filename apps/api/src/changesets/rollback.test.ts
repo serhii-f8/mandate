@@ -38,7 +38,7 @@ async function executed(written = 2): Promise<InMemoryChangeSetRepository> {
   await repository.appendItems(ID, targets.map((targetId) => ({ targetId, status: 'pending' as const, before: { name: 'old' }, after: { name: 'new' } })));
   await repository.completePreparation(
     ID,
-    { status: 'prepared', hash: 'sha256:x', stats: { total: 3, included: 3, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+    { status: 'prepared', hashVersion: 1, hash: 'sha256:x', stats: { total: 3, included: 3, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
     { ...event, id: 'e1' },
   );
   await repository.transition(ID, ['prepared'], 'executing', { ...event, id: 'e2' });

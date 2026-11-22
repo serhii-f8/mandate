@@ -29,6 +29,7 @@ export { toolCallAuditEvent, type ToolCallRecord } from './tool-call-audit.js';
 export type {
   DisabledOperation,
   GrantDefinition,
+  ManifestAction,
   ManifestDefinition,
   ManifestRead,
   ManifestTemplate,
@@ -58,7 +59,15 @@ export { readErrorResult, readToolResult, READ_RESULT_TEXT, type ReadToolResultI
 export type { CredentialHandle, CredentialStatus, CredentialVault } from './credential-vault.js';
 export { parseVersionedKeys, type VersionedKeys } from './keys.js';
 export { CanonicalJsonError, canonicalJson, compareTargetIds, normalizeArgs } from './changeset/canonical.js';
-export { ChangeSetHasher, type HashableItem } from './changeset/hash.js';
+export {
+  ChangeSetHasher,
+  CURRENT_HASH_VERSION,
+  isKnownHashVersion,
+  UnknownHashVersionError,
+  type HashableItem,
+  type HashSeal,
+  type HashVersion,
+} from './changeset/hash.js';
 export type {
   CancelRequest,
   ExecutionRequest,
@@ -119,6 +128,7 @@ export type {
   OpaqueCallOutcome,
   OpaqueNotSentCode,
   PlanEntry,
+  PreparationCompletion,
   PreparationRepository,
   PrepareFailure,
   RateCounter,

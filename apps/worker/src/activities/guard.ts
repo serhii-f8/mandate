@@ -9,6 +9,7 @@ import {
   isOpaque,
   OPAQUE_TARGET_ID,
   policyDecisionAuditEvent,
+  UnknownHashVersionError,
   type AuditLog,
   type Caller,
   type ChangeSetKind,
@@ -102,7 +103,13 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
   }
   return (configuration) => ({
     async check(changeset) {
-      const hash = changeset.hash === undefined ? undefined : await hashStoredItems(repository, changeset);
+      let hash: string | undefined;
+      try {
+        hash = changeset.hash === undefined ? undefined : await hashStoredItems(repository, changeset);
+      } catch (error) {
+        // CS-4: a hash version this release cannot compute is a mismatch (fail closed).
+        if (!(error instanceof UnknownHashVersionError)) throw error;
+      }
       if (hash === undefined || hash !== changeset.hash) {
         return { ok: false, outcome: 'hash_mismatch' };
       }

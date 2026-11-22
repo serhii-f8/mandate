@@ -67,7 +67,7 @@ function build(
     const stats = { ...EMPTY_STATS, ...(await repository.stats(id)) };
     const record = await repository.completePreparation(
       id,
-      { status: 'prepared', hash: EXECUTOR_CONTRACT_HASH, stats, preparedAt: now },
+      { status: 'prepared', hashVersion: 1, hash: EXECUTOR_CONTRACT_HASH, stats, preparedAt: now },
       { id: randomUUID(), actor: 'system', action: 'changeset.transition', outcome: 'ok', correlationId: 'corr-prep', changesetId: id, details: { from: 'preparing', to: 'prepared' } },
     );
     if (record === undefined) throw new Error('preparation failed');

@@ -51,7 +51,7 @@ async function setup(options: { expiresAt?: Date; stage?: ChangeSetStatus; risk?
   ]);
   await repository.completePreparation(
     SOURCE,
-    { status: 'prepared', hash: HASH, stats: { total: 4, included: 3, excluded: { not_found: 1 }, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+    { status: 'prepared', hashVersion: 1, hash: HASH, stats: { total: 4, included: 3, excluded: { not_found: 1 }, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
     { ...event, id: 'a1' },
   );
   if (options.stage !== undefined && options.stage !== 'prepared') {

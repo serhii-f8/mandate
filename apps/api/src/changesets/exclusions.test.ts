@@ -42,7 +42,7 @@ async function setup() {
   await repository.appendItems(SOURCE, ['t-1', 't-2', 't-3'].map((targetId) => ({ targetId, status: 'pending' as const, before: null, after: null })));
   await repository.completePreparation(
     SOURCE,
-    { status: 'prepared', hash: HASH, stats: { total: 3, included: 3, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+    { status: 'prepared', hashVersion: 1, hash: HASH, stats: { total: 3, included: 3, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
     { ...event, id: 'a1' },
   );
   let n = 0;

@@ -106,7 +106,7 @@ describeExecutorContract('temporal', async () => {
     const stats = { ...EMPTY_STATS, ...(await repository.stats(id)) };
     const record = await repository.completePreparation(
       id,
-      { status: 'prepared', hash: EXECUTOR_CONTRACT_HASH, stats, preparedAt: now },
+      { status: 'prepared', hashVersion: 1, hash: EXECUTOR_CONTRACT_HASH, stats, preparedAt: now },
       event(id, { from: 'preparing', to: 'prepared' }),
     );
     if (record === undefined) throw new Error('preparation failed');

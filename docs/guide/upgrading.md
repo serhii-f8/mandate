@@ -65,6 +65,20 @@ Two rules for you:
 - Keep `MANDATE_TEMPORAL_KEYS` and `MANDATE_MASTER_KEYS` the same across the upgrade, and never remove a
   key that open workflows or stored credentials still use.
 
+## Upgrading to 1.2.0
+
+Upgrade every `api` and `worker` instance before anyone prepares a new change-set. From 1.2.0 on, a
+change-set records the version of its hash format, and new change-sets use version 2 (see
+[ADR 0069](../decisions/0069-change-set-hash-version.md)). Change-sets prepared before the upgrade
+keep version 1 and verify, execute and roll back as before. A 1.1 process that is still running
+cannot compute a version 2 hash: it refuses such a change-set as `hash_mismatch` when it checks the
+hash before execution or rollback, so the change-set fails instead of running. With the single-host
+Compose setup, `docker compose up -d --wait` replaces both containers together and there is nothing
+more to do.
+
+The migration `0015_change_set_hash_version` adds two columns to `change_set` with defaults and runs
+on start, as every migration does.
+
 ## Upgrading to 1.1.0
 
 1.1.0 is additive, with one step for most installations. The image ships the Magento preset 1.1.0

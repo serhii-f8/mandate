@@ -124,7 +124,7 @@ async function preparedWithItems(): Promise<string> {
   const stats = await repo.stats(id);
   await repo.completePreparation(
     id,
-    { status: 'prepared', hash: 'h', stats, preparedAt: new Date('2026-01-01T00:00:01.000Z') },
+    { status: 'prepared', hashVersion: 1, hash: 'h', stats, preparedAt: new Date('2026-01-01T00:00:01.000Z') },
     audit(id),
   );
   return id;

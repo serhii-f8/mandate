@@ -224,7 +224,7 @@ async function setup(
     await repository.appendItems(ID, items.map((targetId) => ({ targetId, status: 'pending' as const, before: null, after: null })));
     await repository.completePreparation(
       ID,
-      { status: 'prepared', hash: HASH, stats: { total: items.length, included: items.length, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+      { status: 'prepared', hashVersion: 1, hash: HASH, stats: { total: items.length, included: items.length, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
       { ...event, id: 'a1' },
     );
   }

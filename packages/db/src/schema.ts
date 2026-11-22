@@ -28,6 +28,7 @@ import type {
   ConfigRevisionSummary,
   ExclusionReason,
   ItemStatus,
+  ManifestAction,
   NotificationError,
   NotificationKind,
   NotificationState,
@@ -159,6 +160,12 @@ export const changeSet = pgTable(
     clientId: text('client_id'),
     args: jsonb('args').$type<Record<string, unknown>>().notNull(),
     hash: text('hash'),
+    // CS-4 (ADR 0069): the seal of `hash`, written with it by completePreparation and fixed from then
+    // on by the guard of migration `0015_change_set_hash_version`. A row an older process prepared
+    // keeps the default 1 and NULL, the version its hash was computed with. Any version >= 1 is
+    // stored, so a newer release's row reads back and fails verification closed.
+    hashVersion: integer('hash_version').notNull().default(1),
+    action: text('action').$type<ManifestAction>(),
     status: text('status').$type<ChangeSetStatus>().notNull(),
     stats: jsonb('stats').$type<ChangeSetStats>().notNull(),
     errorCode: text('error_code'),
@@ -206,6 +213,8 @@ export const changeSet = pgTable(
       'change_set_status_check',
       sql`${t.status} IN ('preparing', 'prepared', 'pending_approval', 'approved', 'executing', 'completed', 'completed_with_errors', 'failed', 'rejected', 'expired', 'cancelled', 'rolling_back', 'rolled_back')`,
     ),
+    check('change_set_hash_version_check', sql`${t.hashVersion} >= 1`),
+    check('change_set_action_check', sql`${t.action} IS NULL OR ${t.action} IN ('update', 'create', 'delete')`),
   ],
 );
 

@@ -40,7 +40,12 @@ export interface ManifestRead {
   readonly args: Readonly<Record<string, ManifestTemplate>>;
 }
 
+/** What a manifest operation does to its targets (OPS-2, CS-4); absent on a manifest means `update`. */
+export type ManifestAction = 'update' | 'create' | 'delete';
+
 export interface ManifestDefinition {
+  /** Absent means `update`. Sealed into the change-set hash from version 2 on (CS-4). */
+  readonly action?: ManifestAction;
   readonly idField: string;
   readonly idsArg?: string;
   readonly valuesArg: string;

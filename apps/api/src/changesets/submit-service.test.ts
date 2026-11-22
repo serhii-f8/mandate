@@ -208,7 +208,7 @@ async function setup(options: { stage?: Stage; racing?: boolean; refusing?: 'has
   const count = targets.length;
   await repository.completePreparation(
     ID,
-    { status: 'prepared', hash: HASH, stats: { total: count, included: count, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+    { status: 'prepared', hashVersion: 1, hash: HASH, stats: { total: count, included: count, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
     { ...event, id: 'a1' },
   );
   const stage = options.stage ?? 'prepared';

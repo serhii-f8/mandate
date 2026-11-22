@@ -75,7 +75,7 @@ async function setup(o: Setup = {}) {
   await repository.appendItems(ID, targets.map((targetId) => ({ targetId, status: 'pending' as const, before: { name: 'old' }, after: { name: 'new' } })));
   await repository.completePreparation(
     ID,
-    { status: 'prepared', hash: HASH, stats: { total: 3, included: 3, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+    { status: 'prepared', hashVersion: 1, hash: HASH, stats: { total: 3, included: 3, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
     { ...event, id: 'e1' },
   );
   const status = o.status ?? 'completed';

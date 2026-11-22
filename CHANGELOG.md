@@ -2,6 +2,17 @@
 
 All notable changes are recorded here. The project follows [semantic versioning](docs/guide/versioning.md).
 
+## 1.2.0
+
+Upgrade every `api` and `worker` before preparing new change-sets. See
+[Upgrading](docs/guide/upgrading.md#upgrading-to-120).
+
+### Added
+
+- Change-sets record the version of their hash format and their manifest action (`hash_version`,
+  `action`, migration `0015`); new change-sets use version 2, which binds the action into the hash,
+  and change-sets prepared before the upgrade keep verifying under version 1 (CS-4, ADR 0069).
+
 ## 1.1.0
 
 Additive release: the connector SDK (1.1.0) and the configuration schema (1.1.0) gain optional members

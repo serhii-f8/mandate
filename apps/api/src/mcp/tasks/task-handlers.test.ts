@@ -71,7 +71,7 @@ async function setup(kind: TaskKind, stage: Stage, changesetKind: ChangeSetKind 
   if (stage !== 'preparing') {
     const targets = Array.from({ length: 25 }, (_, i) => `t${String(i).padStart(2, '0')}`);
     await repository.appendItems(CS, targets.map((targetId) => ({ targetId, status: 'pending' as const, before: null, after: null })));
-    await repository.completePreparation(CS, { status: 'prepared', hash: 'sha256:x', stats: STATS, preparedAt: NOW }, { ...event, id: 'a1' });
+    await repository.completePreparation(CS, { status: 'prepared', hashVersion: 1, hash: 'sha256:x', stats: STATS, preparedAt: NOW }, { ...event, id: 'a1' });
   }
   const move = async (from: ChangeSetStatus, to: ChangeSetStatus) => {
     if ((await repository.transition(CS, [from], to, { ...event, id: `t-${to}` })) === undefined) throw new Error(`transition to ${to} failed`);

@@ -209,7 +209,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 - **CS-1** Preparation performs no writes upstream.
 - **CS-2** Store one ChangeItem per target with `before` and `after` values for the manifest's fields that the call changes (ADR 0024).
 - **CS-3** Exclude targets that fail validation or lack required data, and record the reason per item.
-- **CS-4** Compute a SHA-256 hash over operation ID, normalized arguments and ordered items. The hash is shown on approval and verified before execution.
+- **CS-4** Compute a SHA-256 hash over operation ID, normalized arguments and ordered items. The hash is shown on approval and verified before execution. Each change-set stores the version of the hash format it was sealed with and, from version 2, its manifest action, which version 2 binds into the hash. Both are fixed with the hash. Every verification recomputes with the stored version; an unknown version is a hash mismatch. New preparations use the current version; a derived change-set keeps its source's version and action (ADR 0069).
 - **CS-5** Allow the requester to exclude items before submission. Exclusion produces a new hash.
 - **CS-6** Expire change-sets after a configurable period. Expired change-sets cannot be approved or executed.
 - **CS-7** Detect drift at execution: if an item's current upstream value differs from its stored `before`, skip the item and report it.

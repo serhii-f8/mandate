@@ -2,7 +2,9 @@
 // Copyright 2026 The Mandate Authors
 import type { ApprovalPlan, ApprovalRecord, NewNotification, Submission } from '../approval/model.js';
 import type { AuditEventInput } from '../audit.js';
+import type { ManifestAction } from '../policy-model.js';
 import type { BatchCounts } from './execution.js';
+import type { HashVersion } from './hash.js';
 import type {
   CancelRequest,
   ChangeItemRecord,
@@ -32,6 +34,23 @@ export interface NewChangeSet {
   /** CS-5: the source change-set of a derived one. */
   readonly derivedFrom?: string;
 }
+
+/** The outcome `completePreparation` stores. */
+export type PreparationCompletion =
+  /**
+   * CS-4: `hashVersion` and `action` are the seal `hash` was computed with; stored with it and fixed from
+   * then on. `action` is absent for an opaque change-set and for a version 1 one.
+   */
+  | {
+      status: 'prepared';
+      hash: string;
+      hashVersion: HashVersion;
+      action?: ManifestAction;
+      stats: ChangeSetStats;
+      preparedAt: Date;
+    }
+  /** `upstreamStatus`: the HTTP status of the failed read, when there was one (a number, never upstream text). */
+  | { status: 'failed'; errorCode: string; upstreamStatus?: number };
 
 export interface ItemsPageQuery {
   readonly after?: string;
@@ -97,14 +116,7 @@ export interface ChangeSetRepository {
    */
   copyItems(newId: string, sourceId: string, exclude: readonly string[], include: readonly string[]): Promise<number>;
   /** Compare-and-set from preparing. */
-  completePreparation(
-    changesetId: string,
-    outcome:
-      | { status: 'prepared'; hash: string; stats: ChangeSetStats; preparedAt: Date }
-      /** `upstreamStatus`: the HTTP status of the failed read, when there was one (a number, never upstream text). */
-      | { status: 'failed'; errorCode: string; upstreamStatus?: number },
-    audit: AuditEventInput,
-  ): Promise<ChangeSetRecord | undefined>;
+  completePreparation(changesetId: string, outcome: PreparationCompletion, audit: AuditEventInput): Promise<ChangeSetRecord | undefined>;
   /**
    * Undefined when status is not in `from` (or the change-set is not expired before `expiredBefore`,
    * or `unlessBatches` is set and a batch of it exists). `unlessBatches` is checked under the same

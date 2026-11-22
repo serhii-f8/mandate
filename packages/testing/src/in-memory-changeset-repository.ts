@@ -19,6 +19,7 @@ import type {
   ItemsPageQuery,
   NewChangeSet,
   NewNotification,
+  PreparationCompletion,
   RollbackCounts,
   RollbackItemOutcome,
   Submission,
@@ -132,6 +133,8 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       requester: cs.requester,
       ...(cs.clientId === undefined ? {} : { clientId: cs.clientId }),
       args: structuredClone(cs.args),
+      // CS-4: as the column default; the seal is written by completePreparation.
+      hashVersion: 1,
       status: 'preparing',
       stats: EMPTY_STATS,
       configHash: cs.configHash,
@@ -281,9 +284,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
 
   async completePreparation(
     changesetId: string,
-    outcome:
-      | { status: 'prepared'; hash: string; stats: ChangeSetStats; preparedAt: Date }
-      | { status: 'failed'; errorCode: string; upstreamStatus?: number },
+    outcome: PreparationCompletion,
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined> {
     const entry = this.entries.get(changesetId);
@@ -295,6 +296,9 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
             ...entry.record,
             status: 'prepared',
             hash: outcome.hash,
+            // CS-4: the seal is written with the hash, as the database writes both in one update.
+            hashVersion: outcome.hashVersion,
+            ...(outcome.action === undefined ? {} : { action: outcome.action }),
             stats: structuredClone(outcome.stats),
             preparedAt: copyDate(outcome.preparedAt),
             updatedAt: new Date(),

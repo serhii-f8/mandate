@@ -6,8 +6,16 @@ import type { Caller } from '../caller.js';
 import type { ManifestDefinition, OperationDefinition } from '../policy-model.js';
 import { compareTargetIds, normalizeArgs } from './canonical.js';
 import { ChangeSetHasher } from './hash.js';
+import { hashStoredItems } from './verify.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats, ExclusionReason } from './model.js';
-import type { ItemsPageQuery, NewChangeSet, PreparationRepository, ReadPage, UpstreamReader } from './ports.js';
+import type {
+  ItemsPageQuery,
+  NewChangeSet,
+  PreparationCompletion,
+  PreparationRepository,
+  ReadPage,
+  UpstreamReader,
+} from './ports.js';
 import {
   createChangeSet,
   prepareChangeSet,
@@ -73,16 +81,22 @@ class FakeRepository implements PreparationRepository {
   }
   completePreparation(
     id: string,
-    outcome:
-      | { status: 'prepared'; hash: string; stats: ChangeSetStats; preparedAt: Date }
-      | { status: 'failed'; errorCode: string; upstreamStatus?: number },
+    outcome: PreparationCompletion,
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined> {
     const cs = this.sets.get(id);
     if (cs?.status !== 'preparing') return Promise.resolve(undefined);
     const next: ChangeSetRecord =
       outcome.status === 'prepared'
-        ? { ...cs, status: 'prepared', hash: outcome.hash, stats: outcome.stats, preparedAt: outcome.preparedAt }
+        ? {
+            ...cs,
+            status: 'prepared',
+            hash: outcome.hash,
+            hashVersion: outcome.hashVersion,
+            ...(outcome.action === undefined ? {} : { action: outcome.action }),
+            stats: outcome.stats,
+            preparedAt: outcome.preparedAt,
+          }
         : {
             ...cs,
             status: 'failed',
@@ -217,6 +231,20 @@ function request(
 }
 
 const explicitArgs = { brand: 'acme', skus: ['B', 'A', 'A'], changes: { description: 'new' } };
+/** The seal of every new preparation of an update manifest (CS-4 hash version 2). */
+const V2_UPDATE = { version: 2, action: 'update' } as const;
+
+describe('CS-4 hash version', () => {
+  it('CS-4 a newly prepared change-set is sealed with version 2 and its manifest action', async () => {
+    const { deps, repository } = setup(new ScriptedReader({ A: product('A'), B: product('B') }));
+    const out = await prepareChangeSet(deps, request(explicitArgs));
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(out.changeset.hashVersion).toBe(2);
+    expect(out.changeset.action).toBe('update');
+    expect(out.changeset.hash).toBe(await hashStoredItems(repository, out.changeset));
+    expect(out.changeset.hash).not.toBe(await hashStoredItems(repository, { ...out.changeset, hashVersion: 1 }));
+  });
+});
 
 describe('CS-1 CS-2 CS-4 preparation', () => {
   it('CS-1 CS-2 CS-4 explicit ids are read in sorted chunks and the change-set is prepared with a stable hash', async () => {
@@ -237,7 +265,7 @@ describe('CS-1 CS-2 CS-4 preparation', () => {
     expect(out.changeset.requester).toBe('alice');
     expect(out.changeset.clientId).toBe('client-1');
 
-    const hasher = new ChangeSetHasher('catalog.update_content', normalizeArgs(explicitArgs, 'skus'));
+    const hasher = new ChangeSetHasher('catalog.update_content', normalizeArgs(explicitArgs, 'skus'), V2_UPDATE);
     for (const t of ['A', 'B']) {
       hasher.add({ targetId: t, status: 'pending', before: { description: 'old' }, after: { description: 'new' } });
     }
@@ -485,7 +513,7 @@ describe('NFR-7 preparation streams items in pages', () => {
     expect(repository.largestPageLimit).toBeLessThanOrEqual(500);
     expect(Math.max(...reader.calls.map((c) => (c.args.skus as string[]).length))).toBeLessThanOrEqual(100);
 
-    const hasher = new ChangeSetHasher('catalog.update_content', normalizeArgs({ ...explicitArgs, skus }, 'skus'));
+    const hasher = new ChangeSetHasher('catalog.update_content', normalizeArgs({ ...explicitArgs, skus }, 'skus'), V2_UPDATE);
     for (const t of skus) {
       hasher.add({ targetId: t, status: 'pending', before: { description: 'old' }, after: { description: 'new' } });
     }

@@ -74,7 +74,7 @@ export async function createPrepared(
   const hash = opts.hash ?? (await hashStoredItems(repository, created));
   const prepared = await repository.completePreparation(
     created.id,
-    { status: 'prepared', hash, stats: await repository.stats(created.id), preparedAt: new Date() },
+    { status: 'prepared', hashVersion: 1, hash, stats: await repository.stats(created.id), preparedAt: new Date() },
     changesetTransitionEvent({
       id: randomUUID(),
       actor: created.requester,

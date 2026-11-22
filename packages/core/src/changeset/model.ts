@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import type { ApprovalPlan, Submission } from '../approval/model.js';
+import type { ManifestAction } from '../policy-model.js';
+import type { HashVersion } from './hash.js';
 
 export type ChangeSetStatus =
   | 'preparing'
@@ -71,6 +73,13 @@ export interface ChangeSetRecord {
   readonly clientId?: string;
   readonly args: Readonly<Record<string, unknown>>;
   readonly hash?: string;
+  /**
+   * CS-4: the format `hash` was sealed with, written together with it at preparation and fixed from
+   * then on. Absent means 1 (a record from before 1.2.0); the repository always returns it.
+   */
+  readonly hashVersion?: HashVersion;
+  /** CS-4: the manifest action sealed into a version 2 hash; absent for version 1 and for an opaque change-set. */
+  readonly action?: ManifestAction;
   readonly status: ChangeSetStatus;
   readonly stats: ChangeSetStats;
   readonly errorCode?: string;

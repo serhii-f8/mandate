@@ -2,6 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import type { Caller } from '../caller.js';
 import { changesetTransitionEvent } from './audit.js';
+import { isKnownHashVersion } from './hash.js';
 import { isExpiryDue } from './lifecycle.js';
 import type { ChangeSetRecord, ChangeSetStatus } from './model.js';
 import type { ChangeSetRepository } from './ports.js';
@@ -96,6 +97,8 @@ export async function deriveChangeSet(deps: DeriveDeps, req: DeriveRequest): Pro
   // 4–5.
   if (source.status !== 'prepared') return { ok: false, reason: 'not_prepared', status: source.status };
   if (source.hash !== req.hash) return { ok: false, reason: 'hash_mismatch' };
+  // CS-4: a seal this release cannot recompute is a mismatch, refused before any row is created.
+  if (!isKnownHashVersion(source.hashVersion ?? 1)) return { ok: false, reason: 'hash_mismatch' };
 
   // 6–7.
   if (req.exclude.length + req.include.length > MAX_DERIVE_TARGETS) return { ok: false, reason: 'invalid_request' };
@@ -144,12 +147,17 @@ export async function deriveChangeSet(deps: DeriveDeps, req: DeriveRequest): Pro
   await repository.copyItems(id, source.id, req.exclude, req.include);
 
   const stats = await repository.stats(id);
-  const hash = await hashStoredItems(repository, { id, operation: source.operation, args: source.args });
+  // CS-4: a derived change-set keeps its source's seal, so a version 1 source derives version 1 (ADR 0069).
+  const seal = {
+    hashVersion: source.hashVersion ?? 1,
+    ...(source.action === undefined ? {} : { action: source.action }),
+  };
+  const hash = await hashStoredItems(repository, { id, operation: source.operation, args: source.args, ...seal });
   const excluded = Object.values(stats.excluded).reduce((sum, n) => sum + n, 0);
   const excludedByRequester = stats.excluded.requester ?? 0;
   const changeset = await repository.completePreparation(
     id,
-    { status: 'prepared', hash, stats, preparedAt: deps.now() },
+    { status: 'prepared', hash, ...seal, stats, preparedAt: deps.now() },
     changesetTransitionEvent({
       id: deps.newId(),
       ...actor,

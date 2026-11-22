@@ -180,7 +180,7 @@ async function setup(
   const n = targets.length;
   const prepared = await repository.completePreparation(
     ID,
-    { status: 'prepared', hash: HASH, stats: { total: n, included: n, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+    { status: 'prepared', hashVersion: 1, hash: HASH, stats: { total: n, included: n, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
     { ...event, id: 'e1' },
   );
   if (prepared === undefined) throw new Error('preparation failed');

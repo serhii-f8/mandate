@@ -2,7 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
-import { hashStoredItems, type ApprovalRecord, type ChangeSetRecord } from '@mandate/core';
+import { hashStoredItems, type ApprovalRecord, type ChangeSetRecord, type HashVersion } from '@mandate/core';
 import { InMemoryAuditLog } from '@mandate/testing';
 import { createExecutionGuard } from './guard.js';
 
@@ -122,6 +122,29 @@ describe('POL-5 POL-6 execution guard routes approval per touched field', () => 
     const guardFor = createExecutionGuard({ repository, audit: new InMemoryAuditLog(), newId: () => 'id' });
     expect(await guardFor(B).check(changeset)).toEqual({ ok: false, outcome: 'approval_missing' });
     expect(await guardFor(A).check(changeset)).toEqual({ ok: true });
+  });
+});
+
+describe('CS-4 POL-6 execution guard recomputes the hash with the stored version', () => {
+  const approvedRepository = (hash: string) => ({ ...noItems, approvals: () => Promise.resolve([approvedBy('content_lead', hash)]) });
+
+  it('CS-4 a version 2 change-set verifies against its version 2 hash', async () => {
+    const base = await record({ skus: ['a'], changes: { name: 'N' } });
+    const sealed = { ...base, hashVersion: 2 as const, action: 'update' as const };
+    const v2 = { ...sealed, hash: await hashStoredItems(noItems, sealed) };
+    expect(v2.hash).not.toBe(base.hash);
+    const guardFor = createExecutionGuard({ repository: approvedRepository(v2.hash), audit: new InMemoryAuditLog(), newId: () => 'id' });
+    expect(await guardFor(A).check(v2)).toEqual({ ok: true });
+    // The version 1 hash no longer matches a change-set stored as version 2.
+    expect(await guardFor(A).check({ ...v2, hash: base.hash ?? '' })).toEqual({ ok: false, outcome: 'hash_mismatch' });
+  });
+
+  it('CS-4 an unknown hash version is answered hash_mismatch', async () => {
+    const base = await record({ skus: ['a'], changes: { name: 'N' } });
+    // A row from a newer release: the type does not admit 3, the database column does.
+    const newer = { ...base, hashVersion: 3 as HashVersion };
+    const guardFor = createExecutionGuard({ repository: approvedRepository(base.hash ?? ''), audit: new InMemoryAuditLog(), newId: () => 'id' });
+    expect(await guardFor(A).check(newer)).toEqual({ ok: false, outcome: 'hash_mismatch' });
   });
 });
 

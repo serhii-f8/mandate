@@ -18,10 +18,12 @@ import type {
   ChangeSetStatus,
   ExclusionReason,
   ExecutionUsage,
+  HashVersion,
   ItemOutcome,
   ItemsPageQuery,
   NewChangeSet,
   NewNotification,
+  PreparationCompletion,
   RollbackCounts,
   RollbackItemOutcome,
   RollbackItemStatus,
@@ -97,6 +99,10 @@ function toRecord(row: ChangeSetRow): ChangeSetRecord {
     ...(row.clientId === null ? {} : { clientId: row.clientId }),
     args: row.args,
     ...(row.hash === null ? {} : { hash: row.hash }),
+    // CS-4: passed through as stored, unchecked: a version this release does not know (a newer
+    // release's row) must reach hashStoredItems, which refuses it as a mismatch (fail closed).
+    hashVersion: row.hashVersion as HashVersion,
+    ...(row.action === null ? {} : { action: row.action }),
     status: row.status,
     stats: row.stats,
     ...(row.errorCode === null ? {} : { errorCode: row.errorCode }),
@@ -462,9 +468,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
 
   async completePreparation(
     changesetId: string,
-    outcome:
-      | { status: 'prepared'; hash: string; stats: ChangeSetStats; preparedAt: Date }
-      | { status: 'failed'; errorCode: string; upstreamStatus?: number },
+    outcome: PreparationCompletion,
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined> {
     if (!UUID.test(changesetId)) return undefined;
@@ -473,6 +477,9 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
         ? {
             status: 'prepared' as const,
             hash: outcome.hash,
+            // CS-4: the seal, in the same update as the hash; the guard fixes all three from here on.
+            hashVersion: outcome.hashVersion,
+            action: outcome.action ?? null,
             stats: outcome.stats,
             preparedAt: outcome.preparedAt,
             updatedAt: sql`now()`,

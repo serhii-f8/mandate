@@ -63,7 +63,7 @@ export function describeApprovalRepositoryContract(label: string, setup: () => P
       ]);
       const record = await c.repository.completePreparation(
         c.id,
-        { status: 'prepared', hash: HASH, stats: await c.repository.stats(c.id), preparedAt: NOW },
+        { status: 'prepared', hashVersion: 1, hash: HASH, stats: await c.repository.stats(c.id), preparedAt: NOW },
         auditEvent(c.id),
       );
       if (record === undefined) throw new Error('preparation failed');

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startPostgres, type StartedPostgres } from '@mandate/testing';
+import { PostgresChangeSetRepository } from '../../src/changeset-repository.js';
 import { createDb, type Database } from '../../src/client.js';
 import { runMigrations } from '../../src/migrate.js';
 
@@ -119,6 +120,50 @@ describe('AUD-3 APR-1 approval storage guards', () => {
     const id = await insertChangeSet('pending_approval');
     expect(await rejection(database.db.execute(sql`UPDATE change_set SET hash = 'other' WHERE id = ${id}`))).toBe(
       'change_set update rejected: hash is fixed once prepared',
+    );
+  });
+});
+
+describe('CS-4 hash version and action columns', () => {
+  const HASH_FIXED = 'change_set update rejected: hash is fixed once prepared';
+
+  it('CS-4 hash_version and action are fixed once the change-set left preparing', async () => {
+    for (const status of ['prepared', 'pending_approval', 'executing', 'failed']) {
+      const id = await insertChangeSet(status);
+      expect(await rejection(database.db.execute(sql`UPDATE change_set SET hash_version = 2 WHERE id = ${id}`))).toBe(
+        HASH_FIXED,
+      );
+      expect(await rejection(database.db.execute(sql`UPDATE change_set SET action = 'update' WHERE id = ${id}`))).toBe(
+        HASH_FIXED,
+      );
+    }
+  });
+
+  it('CS-4 hash_version and action are written together with the hash while preparing', async () => {
+    const id = await insertChangeSet('preparing');
+    await database.db.execute(
+      sql`UPDATE change_set SET hash = 'h2', hash_version = 2, action = 'create', status = 'prepared', prepared_at = now() WHERE id = ${id}`,
+    );
+    const rows = await database.db.execute(sql`SELECT hash_version, action FROM change_set WHERE id = ${id}`);
+    expect(rows.rows[0]).toEqual({ hash_version: 2, action: 'create' });
+  });
+
+  it('CS-4 a row inserted without the columns, as an old process does, reads version 1 and no action', async () => {
+    const id = await insertChangeSet('prepared');
+    const rows = await database.db.execute(sql`SELECT hash_version, action FROM change_set WHERE id = ${id}`);
+    expect(rows.rows[0]).toEqual({ hash_version: 1, action: null });
+    const record = await new PostgresChangeSetRepository(database.db).get(id);
+    expect(record?.hashVersion).toBe(1);
+    expect(record !== undefined && 'action' in record).toBe(false);
+  });
+
+  it('CS-4 the checks refuse a hash version below 1 and an unknown action', async () => {
+    const id = await insertChangeSet('preparing');
+    expect(await rejection(database.db.execute(sql`UPDATE change_set SET hash_version = 0 WHERE id = ${id}`))).toBe(
+      'change_set_hash_version_check',
+    );
+    expect(await rejection(database.db.execute(sql`UPDATE change_set SET action = 'upsert' WHERE id = ${id}`))).toBe(
+      'change_set_action_check',
     );
   });
 });

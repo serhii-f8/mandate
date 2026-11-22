@@ -26,6 +26,7 @@ import {
   rollbackWindowEnd,
   runOpaquePreparation,
   runPreparation,
+  UnknownHashVersionError,
   type BatchContext,
   type ChangeSetRecord,
   type ChangeSetRepository,
@@ -388,7 +389,13 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
           return repository.itemsPage(id, query);
         },
       };
-      const hash = changeset.hash === undefined ? undefined : await hashStoredItems(pages, changeset);
+      let hash: string | undefined;
+      try {
+        hash = changeset.hash === undefined ? undefined : await hashStoredItems(pages, changeset);
+      } catch (error) {
+        // CS-4: a hash version this release cannot compute is a mismatch (fail closed).
+        if (!(error instanceof UnknownHashVersionError)) throw error;
+      }
       if (hash === undefined || hash !== changeset.hash) return { ok: false, outcome: 'hash_mismatch' };
       const configuration = deps.configuration();
       // Ruling R13: no rollback writer (strategy none, operation or binding gone) ends the rollback failed.

@@ -4,6 +4,7 @@ import type { Caller } from '../caller.js';
 import type { ManifestDefinition, ManifestTemplate, OperationDefinition } from '../policy-model.js';
 import { changesetTransitionEvent } from './audit.js';
 import { normalizeArgs } from './canonical.js';
+import { CURRENT_HASH_VERSION } from './hash.js';
 import { buildItems, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStatus } from './model.js';
 import { isOpaque } from './opaque.js';
@@ -307,11 +308,13 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
     }
 
     const stats = await repository.stats(id);
-    const hash = await hashStoredItems(repository, current);
+    // CS-4: new preparations seal with the current version and the manifest's action (ADR 0069).
+    const seal = { hashVersion: CURRENT_HASH_VERSION, action: manifest.action ?? 'update' } as const;
+    const hash = await hashStoredItems(repository, { ...current, ...seal });
     const excluded = Object.values(stats.excluded).reduce((sum, n) => sum + n, 0);
     changeset = await repository.completePreparation(
       id,
-      { status: 'prepared', hash, stats, preparedAt: deps.now() },
+      { status: 'prepared', hash, ...seal, stats, preparedAt: deps.now() },
       event('preparing', 'prepared', { included: stats.included, excluded }),
     );
   } catch (err) {

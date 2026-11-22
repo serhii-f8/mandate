@@ -92,7 +92,7 @@ async function setup(expiresAt = new Date('2026-01-02T12:00:00Z')) {
   await repository.appendItems(ID, ['a', 'b', 'c'].map((targetId) => ({ targetId, status: 'pending' as const, before: null, after: null })));
   await repository.completePreparation(
     ID,
-    { status: 'prepared', hash: 'sha256:x', stats: { total: 3, included: 3, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+    { status: 'prepared', hashVersion: 1, hash: 'sha256:x', stats: { total: 3, included: 3, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
     { ...audit, id: 'a1' },
   );
   let n = 0;

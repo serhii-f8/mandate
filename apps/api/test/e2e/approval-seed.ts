@@ -94,6 +94,7 @@ async function prepare(repo: ChangeSetRepository, o: PrepareOptions, correlation
     {
       status: 'prepared',
       hash,
+      hashVersion: 1,
       stats: { total: items.length, included, excluded: excludedStats, written: 0, failed: 0, skipped: 0 },
       preparedAt: at,
     },

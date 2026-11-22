@@ -148,7 +148,7 @@ async function setup(options: { steps?: readonly string[]; widget?: boolean } = 
   await repository.appendItems(ID, ['a', 'b'].map((targetId) => ({ targetId, status: 'pending' as const, before: null, after: null })));
   const prepared = await repository.completePreparation(
     ID,
-    { status: 'prepared', hash: HASH, stats: { total: 2, included: 2, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+    { status: 'prepared', hashVersion: 1, hash: HASH, stats: { total: 2, included: 2, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
     { ...event, id: 'e1' },
   );
   if (prepared === undefined) throw new Error('preparation failed');

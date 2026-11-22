@@ -2,6 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import type { OperationDefinition } from '../policy-model.js';
 import { changesetTransitionEvent } from './audit.js';
+import { CURRENT_HASH_VERSION } from './hash.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStatus } from './model.js';
 import type { PrepareDeps, PrepareOutcome } from './prepare.js';
 import { hashStoredItems } from './verify.js';
@@ -91,10 +92,16 @@ export async function runOpaquePreparation(
     const item: ChangeItemRecord = { targetId: OPAQUE_TARGET_ID, status: 'pending', before: null, after: current.args };
     await repository.appendItems(id, [item]);
     const stats = await repository.stats(id);
-    const hash = await hashStoredItems(repository, current);
+    // CS-4: the current version; an opaque change-set has no manifest, so no action (hashed as null).
+    const hash = await hashStoredItems(repository, {
+      id: current.id,
+      operation: current.operation,
+      args: current.args,
+      hashVersion: CURRENT_HASH_VERSION,
+    });
     changeset = await repository.completePreparation(
       id,
-      { status: 'prepared', hash, stats, preparedAt: deps.now() },
+      { status: 'prepared', hash, hashVersion: CURRENT_HASH_VERSION, stats, preparedAt: deps.now() },
       event('prepared', { included: 1, excluded: 0 }),
     );
   } catch (err) {

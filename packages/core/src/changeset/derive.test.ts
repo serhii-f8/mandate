@@ -6,7 +6,8 @@ import type { Caller } from '../caller.js';
 import { compareTargetIds } from './canonical.js';
 import { deriveChangeSet, isValidTargetId, MAX_DERIVE_TARGETS, type DeriveRepository, type DeriveRequest } from './derive.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats, ChangeSetStatus, ExclusionReason } from './model.js';
-import type { ItemsPageQuery, NewChangeSet } from './ports.js';
+import { ChangeSetHasher, type HashVersion } from './hash.js';
+import type { ItemsPageQuery, NewChangeSet, PreparationCompletion } from './ports.js';
 import { hashStoredItems } from './verify.js';
 
 const isRequesterExclusion = (it: ChangeItemRecord) => it.status === 'excluded' && it.reason === 'requester';
@@ -103,7 +104,7 @@ class FakeDeriveRepository implements DeriveRepository {
   }
   completePreparation(
     id: string,
-    outcome: { status: 'prepared'; hash: string; stats: ChangeSetStats; preparedAt: Date } | { status: 'failed'; errorCode: string },
+    outcome: PreparationCompletion,
     audit: AuditEventInput,
   ): Promise<ChangeSetRecord | undefined> {
     const cs = this.sets.get(id);
@@ -111,7 +112,15 @@ class FakeDeriveRepository implements DeriveRepository {
     if (this.expireOnComplete || cs?.status !== 'preparing') return Promise.resolve(undefined);
     const next: ChangeSetRecord =
       outcome.status === 'prepared'
-        ? { ...cs, status: 'prepared', hash: outcome.hash, stats: outcome.stats, preparedAt: outcome.preparedAt }
+        ? {
+            ...cs,
+            status: 'prepared',
+            hash: outcome.hash,
+            hashVersion: outcome.hashVersion,
+            ...(outcome.action === undefined ? {} : { action: outcome.action }),
+            stats: outcome.stats,
+            preparedAt: outcome.preparedAt,
+          }
         : { ...cs, status: 'failed', errorCode: outcome.errorCode };
     this.sets.set(id, next);
     this.audit.push(audit);
@@ -131,9 +140,10 @@ function item(targetId: string, over: Partial<ChangeItemRecord> = {}): ChangeIte
 }
 
 /** The source: t-0001..t-0003 pending, t-0004 excluded not_found, prepared with its real hash. */
-async function setup(status: ChangeSetStatus = 'prepared') {
+async function setup(status: ChangeSetStatus = 'prepared', seal: Pick<ChangeSetRecord, 'hashVersion' | 'action'> = {}) {
   const repo = new FakeDeriveRepository();
   const base: ChangeSetRecord = {
+    ...seal,
     id: SOURCE_ID,
     operation: 'catalog.update_content',
     connection: 'magento',
@@ -339,6 +349,48 @@ describe('CS-5 derived change-sets', () => {
       changesetId: SOURCE_ID,
       correlationId: 'corr-derive',
       details: { from: 'prepared', to: 'expired' },
+    });
+  });
+
+  describe('CS-4 CS-5 hash version of a derived change-set', () => {
+    /** The hash of the derived items (t-0002 excluded by the requester) under one seal. */
+    async function expected(seal?: { version: 1 | 2; action?: 'update' | 'create' | 'delete' }): Promise<string> {
+      const s = await setup();
+      const items = await s.repo.itemsPage(SOURCE_ID, { limit: 10 });
+      const h = seal === undefined ? new ChangeSetHasher(s.source.operation, s.source.args) : new ChangeSetHasher(s.source.operation, s.source.args, seal);
+      for (const i of items) {
+        h.add(i.targetId === 't-0002' ? { ...i, status: 'excluded', reason: 'requester' } : i);
+      }
+      return h.digest();
+    }
+
+    it('CS-4 CS-5 a version 1 source yields a version 1 derived change-set with a version 1 hash', async () => {
+      const s = await setup();
+      const r = await deriveChangeSet(s.deps, s.req({ exclude: ['t-0002'] }));
+      if (!r.ok) throw new Error(`refused: ${r.reason}`);
+      expect(r.changeset.hashVersion).toBe(1);
+      expect(r.changeset.action).toBeUndefined();
+      expect(r.changeset.hash).toBe(await expected());
+    });
+
+    it('CS-4 CS-5 a version 2 source yields version 2 and the source action', async () => {
+      const s = await setup('prepared', { hashVersion: 2, action: 'create' });
+      expect(s.source.hash).toBe(await hashStoredItems(s.repo, { ...s.source, hashVersion: 2, action: 'create' }));
+      const r = await deriveChangeSet(s.deps, s.req({ exclude: ['t-0002'] }));
+      if (!r.ok) throw new Error(`refused: ${r.reason}`);
+      expect(r.changeset.hashVersion).toBe(2);
+      expect(r.changeset.action).toBe('create');
+      expect(r.changeset.hash).toBe(await expected({ version: 2, action: 'create' }));
+      expect(r.changeset.hash).toBe(await hashStoredItems(s.repo, r.changeset));
+    });
+
+    it('CS-4 CS-5 a source with an unknown hash version is refused hash_mismatch and creates no row', async () => {
+      const s = await setup();
+      // A row from a newer release: the type does not admit 3, the database column does.
+      const newer = { ...s.source, hashVersion: 3 as HashVersion };
+      s.repo.sets.set(SOURCE_ID, newer);
+      expect(await deriveChangeSet(s.deps, s.req({ exclude: ['t-0002'] }))).toEqual({ ok: false, reason: 'hash_mismatch' });
+      expect([...s.repo.sets.keys()]).toEqual([SOURCE_ID]);
     });
   });
 
