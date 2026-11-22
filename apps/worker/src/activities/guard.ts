@@ -9,6 +9,7 @@ import {
   isOpaque,
   manifestAction,
   OPAQUE_TARGET_ID,
+  planStepMayStart,
   policyDecisionAuditEvent,
   UnknownHashVersionError,
   type AuditLog,
@@ -50,7 +51,7 @@ export function storedActionMatches(
 }
 
 export interface ExecutionGuardDeps {
-  readonly repository: Pick<ChangeSetRepository, 'itemsPage' | 'approvals'>;
+  readonly repository: Pick<ChangeSetRepository, 'itemsPage' | 'approvals' | 'planSteps'>;
   readonly audit: AuditLog;
   readonly newId: () => string;
   /** Called once per stored-items page while hashing, so a long hash keeps its activity alive. */
@@ -70,7 +71,11 @@ export interface ExecutionGuardDeps {
  *    unapproved (APR-4); otherwise, or when no step is configured, `approval_missing`. A change-set started from
  *    `prepared` that now needs approval fails closed (design §7).
  *
- * Before 2, the kind the change-set was prepared as (its stored items) must equal the kind of its
+ * Before 2, a plan step above step 1 needs its predecessor `completed`, read now: the stored status may have
+ * moved since the start, so a step that may no longer start is refused as `policy_denied` (EXE-13, fail closed).
+ * It is not a policy decision and is not audited as one.
+ *
+ * Also before 2, the kind the change-set was prepared as (its stored items) must equal the kind of its
  * operation under the current configuration; a reload that flips an operation between
  * `write_opaque` and a diff kind refuses it as `policy_denied`, so a diff is never sent as an opaque
  * call nor an opaque call re-checked and written as a diff (EXE-4, SEC-9, APR-5). Likewise the
@@ -147,6 +152,10 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
       }
       const request = changeset.executionRequest;
       if (request === undefined) return { ok: false, outcome: 'policy_denied' };
+      if (changeset.plan !== undefined && changeset.plan.step > 1) {
+        const plan = await deps.repository.planSteps(changeset.plan.id);
+        if (plan === undefined || !planStepMayStart(changeset.plan.step, plan.steps)) return { ok: false, outcome: 'policy_denied' };
+      }
       const operation = configuration.policy.operations.find((o) => o.id === changeset.operation);
       if (changesetKind(operation) !== (await storedKind(changeset))) return { ok: false, outcome: 'policy_denied' };
       // A change-set stored without an action is an update, so it never runs as a create or a delete (OPS-2, ADR 0071).

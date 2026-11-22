@@ -11,7 +11,7 @@ import { CookieJar, loginWithPkce, pageLogin, registerClient, startKeycloak, typ
 import { auditRows, connectClient, FIXTURE_CONFIG, modernRequest, rawPost, startApi, startDatabase, withFreePort, type RunningApi } from './helpers.js';
 
 /** Built-in tools every authenticated user sees (MCP-8). */
-const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset', 'submit_for_approval', 'exclude_changeset_items', 'rollback_changeset'];
+const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset', 'submit_for_approval', 'exclude_changeset_items', 'rollback_changeset', 'create_plan'];
 const PASSWORD = 'dev-only-password';
 const LOOPBACK = 'http://localhost:33418/callback';
 const SERVICE_CLIENT = 'mandate-sa-ci';

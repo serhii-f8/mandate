@@ -2,7 +2,14 @@
 // Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import type { LoadedConfiguration } from '@mandate/config';
-import { OPAQUE_TARGET_ID, type OperationDefinition, type RoleApprovalRule } from '@mandate/core';
+import {
+  changesetTransitionEvent,
+  OPAQUE_TARGET_ID,
+  planCreatedEvent,
+  type ChangeSetRecord,
+  type OperationDefinition,
+  type RoleApprovalRule,
+} from '@mandate/core';
 import { DrizzleAuditLog, PostgresChangeSetRepository } from '@mandate/db';
 import { recordApproval, submitChangeSet } from '@mandate/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -225,5 +232,62 @@ describe('execution guard operation kind re-check', () => {
     const cs = await createPrepared(repository, 3, { execute: { groups: [EDITOR_GROUP] } });
     const asOpaque = withOperation(WRITE_OPERATION, (op) => ({ ...op, risk: 'write_opaque' }));
     await expect(guardFor(asOpaque).check(cs)).resolves.toEqual({ ok: false, outcome: 'policy_denied' });
+  });
+});
+
+describe('EXE-13 execution guard plan gate', () => {
+  /** Two prepared change-sets of alice in a plan, step 1 started; answers the records. */
+  async function planOfTwo(): Promise<{ first: ChangeSetRecord; second: ChangeSetRecord }> {
+    const first = await createPrepared(repository, 1);
+    const second = await createPrepared(repository, 1);
+    const id = randomUUID();
+    const plan = { id, title: 'Launch', requester: 'alice', createdAt: new Date() };
+    const created = await repository.createPlan({
+      id,
+      title: plan.title,
+      requester: 'alice',
+      changesetIds: [first.id, second.id],
+      now: plan.createdAt,
+      audit: planCreatedEvent({ id: randomUUID(), plan, steps: 2, correlationId: 'corr-plan' }),
+    });
+    expect(created.ok).toBe(true);
+    const planned = await repository.get(second.id);
+    if (planned?.plan === undefined) throw new Error('step 2 is not in the plan');
+    return { first: await startExecutionOf(repository, first), second: planned };
+  }
+
+  const move = (cs: ChangeSetRecord, from: ChangeSetRecord['status'], to: ChangeSetRecord['status']) =>
+    repository.transition(cs.id, [from], to, changesetTransitionEvent({ id: randomUUID(), actor: 'system', changeset: cs, from, to, correlationId: 'corr-move' }));
+
+  it('EXE-13 the guard admits a step whose predecessor is completed', async () => {
+    const { first, second } = await planOfTwo();
+    await move(first, 'executing', 'completed');
+    const started = await startExecutionOf(repository, second);
+    await expect(guardFor(configuration).check(started)).resolves.toEqual({ ok: true });
+  });
+
+  it('EXE-13 a step whose predecessor is not completed at beginExecution is policy_denied', async () => {
+    const { first, second } = await planOfTwo();
+    // Step 2 as beginExecution would see it had it started while step 1 is still executing (the start refuses
+    // that, so the record is built here): the guard reads the plan again and fails closed.
+    const { executionRequest } = first;
+    if (executionRequest === undefined) throw new Error('step 1 has no execution request');
+    const started: ChangeSetRecord = { ...second, status: 'executing', executionRequest };
+    await expect(guardFor(configuration).check(started)).resolves.toEqual({ ok: false, outcome: 'policy_denied' });
+    for (const status of ['completed_with_errors', 'failed'] as const) {
+      const other = await planOfTwo();
+      await move(other.first, 'executing', status);
+      await expect(guardFor(configuration).check({ ...other.second, status: 'executing', executionRequest }), status).resolves.toEqual({
+        ok: false,
+        outcome: 'policy_denied',
+      });
+    }
+    // Not a policy decision: nothing is recorded as one.
+    expect((await auditEventsOf(postgres.database, second.id)).filter((e) => e.action === 'policy.decision')).toEqual([]);
+  });
+
+  it('EXE-13 step 1 of a plan passes the gate', async () => {
+    const { first } = await planOfTwo();
+    await expect(guardFor(configuration).check(first)).resolves.toEqual({ ok: true });
   });
 });

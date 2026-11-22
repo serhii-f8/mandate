@@ -434,6 +434,11 @@ describe('MCP-8 POL-6 POL-5 POL-4 submit_for_approval', () => {
       'Execution refused: limit records_per_day of role content_manager reached.',
       'limit_exceeded',
     ],
+    [
+      { ok: false, reason: 'plan_blocked' },
+      `Change-set ${ID} cannot start yet: the step before it in its plan has not completed.`,
+      'plan_blocked',
+    ],
   ];
   for (const [outcome, expected, code] of refusals) {
     it(`MCP-8 POL-4 the refusal ${code} maps to a fixed text`, async () => {

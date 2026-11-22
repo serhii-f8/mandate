@@ -74,7 +74,7 @@ const BY_INDEX = await configuration(ROLE_RULE, `      - { operation: catalog.ge
 const BY_ID = await configuration(ROLE_RULE, `      - { operation: catalog.update, id: prices, ${GRANT_RULE} }`);
 
 const NOW = new Date('2026-11-22T10:00:00.000Z');
-const noItems = { itemsPage: () => Promise.resolve([]) };
+const noItems = { itemsPage: () => Promise.resolve([]), planSteps: () => Promise.resolve(undefined) };
 
 async function record(args: Record<string, unknown>): Promise<ChangeSetRecord> {
   const base = { id: 'cs-1', operation: 'catalog.update', args };

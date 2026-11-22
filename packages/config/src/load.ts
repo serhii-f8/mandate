@@ -52,6 +52,7 @@ export const BUILTIN_TOOL_NAMES: readonly string[] = [
   'exclude_changeset_items',
   'decide_changeset',
   'review_changeset',
+  'create_plan',
 ];
 
 export type { OperationBinding };

@@ -175,6 +175,52 @@ describe('MCP-8 CS-6 built-in change-set tools', () => {
     });
   });
 
+  it('MCP-10 CS-9 get_changeset shows the plan of a step: title, position and each step\'s four values only', async () => {
+    const { get, ctx, repository } = await setup();
+    const before = plain(await get.handler({ changeset_id: ID }, ctx(alice)));
+    expect(before.structuredContent).not.toHaveProperty('plan');
+
+    const SECOND = '22222222-2222-4222-8222-222222222222';
+    const audit = { id: 'p0', actor: 'alice', action: 'changeset.transition' as const, outcome: 'ok' as const, correlationId: 'c0', details: {} };
+    await repository.create(
+      { id: SECOND, operation: 'shop.retire_content', connection: 'shop', requester: 'alice', args: { secret: 'ARG-SECRET' }, configHash: 'h', correlationId: 'c0', createdAt: NOW, expiresAt: new Date('2026-01-02T12:00:00Z') },
+      audit,
+    );
+    await repository.appendItems(SECOND, [{ targetId: 'SKU-SECRET', status: 'pending', before: null, after: null }]);
+    await repository.completePreparation(
+      SECOND,
+      { status: 'prepared', hashVersion: 1, hash: 'sha256:y', stats: { total: 1, included: 1, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+      { ...audit, id: 'p1' },
+    );
+    const PLAN = '33333333-3333-4333-8333-333333333333';
+    const created = await repository.createPlan({
+      id: PLAN,
+      title: 'Spring launch',
+      requester: 'alice',
+      changesetIds: [SECOND, ID],
+      now: NOW,
+      audit: { ...audit, id: 'p2', action: 'plan.created' as const },
+    });
+    expect(created.ok).toBe(true);
+
+    const result = plain(await get.handler({ changeset_id: ID }, ctx(alice)));
+    const plan = (result.structuredContent as { plan?: unknown }).plan;
+    expect(plan).toEqual({
+      id: PLAN,
+      title: 'Spring launch',
+      step: 2,
+      of: 2,
+      steps: [
+        { step: 1, id: SECOND, operation: 'shop.retire_content', status: 'prepared' },
+        { step: 2, id: ID, operation: 'shop.update_content', status: 'prepared' },
+      ],
+    });
+    // A sibling's row carries nothing else: no arguments, items or hash.
+    expect(JSON.stringify(plan)).not.toMatch(/SECRET|sha256/);
+    // The JSON block repeats the structured answer.
+    expect(result.content[1]).toEqual({ type: 'text', text: JSON.stringify(result.structuredContent) });
+  });
+
   it('MCP-8 an invalid cursor is refused without echoing it', async () => {
     const { get, ctx } = await setup();
     const result = plain(await get.handler({ changeset_id: ID, cursor: '!!bad!!' }, ctx(alice)));

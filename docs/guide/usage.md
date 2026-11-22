@@ -34,6 +34,7 @@ tools below. An operation that is not granted is not listed and cannot be called
 | `exclude_changeset_items` | Derives a new change-set without the named items |
 | `cancel_changeset` | Cancels a change-set that has not finished |
 | `rollback_changeset` | Says whether a rollback is possible and links to the page that confirms it |
+| `create_plan` | Puts change-sets the caller prepared in an order, so each starts only after the one before it completed |
 | `review_changeset` | For approvers: the data of a change-set awaiting their decision |
 | `ping` | Checks the connection and the login |
 
@@ -131,6 +132,16 @@ Things to know when you run it:
   mind.
 - The time limit is counted from the end of the last batch and stored when verification begins. A
   restart of the worker does not move it.
+
+## Plans
+
+A requester who prepared several change-sets that must run in order asks for a plan:
+`create_plan` with a title and the change-set IDs in order, 2 to 20 of them, each prepared by the
+caller, not expired and in no other plan. Each step keeps its own approval, and steps can be
+approved in any order, but a step starts only after the one before it is `completed`; until then a
+start answers `plan_blocked` and the step stays as it is. `get_changeset` of a step shows the plan
+and the status of every step. A step can be rolled back only after every later step that ran was
+rolled back.
 
 ## Roll back
 

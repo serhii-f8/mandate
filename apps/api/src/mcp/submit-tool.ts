@@ -58,7 +58,7 @@ function refusalText(id: string, role: string, refusal: Exclude<StartOutcome, { 
     case 'limit_exceeded':
       return `Execution refused: limit ${refusal.limit} of role ${role} reached.`;
     case 'plan_blocked':
-      return `Change-set ${id} cannot start: an earlier step of the plan has not completed.`;
+      return `Change-set ${id} cannot start yet: the step before it in its plan has not completed.`;
   }
 }
 

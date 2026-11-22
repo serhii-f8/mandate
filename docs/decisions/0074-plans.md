@@ -126,4 +126,8 @@ a `prepared` step, its absence when the copy alone ran, when the preparation fai
 append failed and when the source was cancelled first. The integration test of migration `0017` shows the guard refusing a membership
 change on `pending_approval`, `approved`, `executing`, `completed`, `cancelled` and `expired` rows
 and admitting it on `preparing` and `prepared` ones, the check and unique index, and the `0016`
-verification rule still in force.
+verification rule still in force. The contract also covers the rollback order in the request transaction (`plan_order` while
+a later step that started is not `rolled_back`, admitted once it is) and a start of step 2 racing a
+rollback request of step 1 (`Promise.all`, eight rounds): before both took the plan lock first, the
+PostgreSQL run let both succeed; with it, exactly one does. The execution guard refuses a step whose
+predecessor is not `completed` as `policy_denied`.

@@ -25,6 +25,9 @@ Additive release: the configuration schema and the connector SDK are 1.3.0. A pr
 - Plans: change-sets of one requester can be put in order (2 to 20 steps); a step starts only after
   the one before it completed, and a change-set derived from a prepared step takes its place
   (CS-9, EXE-13, CS-5, ADR 0074).
+- `create_plan` creates a plan from MCP, `get_changeset` shows a step's plan, the execution guard
+  refuses a step whose predecessor is not `completed`, and a step rolls back only after every later
+  step that ran was rolled back; `create_plan` is now a reserved tool name (MCP-10, EXE-13, EXE-8).
 
 ## 1.2.0
 

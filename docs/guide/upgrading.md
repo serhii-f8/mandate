@@ -68,8 +68,9 @@ Two rules for you:
 ## Upgrading to 1.3.0
 
 1.3.0 is additive: the configuration schema and the connector SDK are 1.3.0, and a configuration that
-loaded before still loads. A change-set whose operation declares no `verify_after` runs exactly as
-before.
+loaded before still loads, unless an operation's ID or tool name is `create_plan`: that is now the name
+of a built-in tool, so rename the operation. A change-set whose operation declares no
+`verify_after` runs exactly as before.
 
 Upgrade every `worker` and `api` instance before you add `verify_after` to an operation. A 1.2
 process does not know the key or the verification stage, so a configuration that uses it must not
