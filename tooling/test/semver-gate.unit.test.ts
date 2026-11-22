@@ -113,6 +113,21 @@ describe('NFR-18 semver gate', () => {
       const iface = (end: string) => sdk(`export interface I {\n    id: string;\n${end}\nexport type T = 1;\n`);
       expect(judge(iface('};'), iface('} | {\n    x: string;\n};'), '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
     });
+    it('NFR-18 a single type literal that becomes a union is breaking', () => {
+      // `x.json` no longer compiles once the type is a union: only an existing union may grow a variant
+      const one = sdk('export type Result = {\n    status: number;\n    json: unknown;\n};\nexport type T = 1;\n');
+      const two = sdk('export type Result = {\n    status: number;\n    json: unknown;\n} | {\n    error: string;\n};\nexport type T = 1;\n');
+      expect(judge(one, two, '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+    });
+    it('NFR-18 a nested closing line that becomes a union is breaking', () => {
+      // inside an interface member
+      const member = (end: string) => sdk(`export interface I {\n    readonly opts: {\n        a: string;\n    ${end}\n}\nexport type T = 1;\n`);
+      expect(judge(member('};'), member('} | {\n        b: string;\n    };'), '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+      // inside a nested member of a root type that is already a union
+      const nested = (end: string) =>
+        sdk(`export type U = {\n    a: string;\n} | {\n    readonly opts: {\n        b: string;\n    ${end}\n};\nexport type T = 1;\n`);
+      expect(judge(nested('};'), nested('} | {\n        c: string;\n    };'), '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+    });
   });
 
   describe('context-keyed classification', () => {

@@ -176,12 +176,15 @@ function compare(oldText, newText) {
     if (left > 0) ca.set(e.key, left - 1);
     else addedEntries.push(e);
   }
-  // The closing `};` of a root type declaration (a union's last variant) that became `} | {` in the same
-  // frame: a variant appended to the union. Every other line of the union is compared as usual, so a
-  // changed or removed member or variant still counts (NFR-18).
+  // The closing `};` of a root type declaration that was already a union of type literals (the frame
+  // is a second or later variant) and became `} | {` in the same frame: a variant appended to the union.
+  // A single literal that becomes a union is breaking (code reading its members stops compiling), and
+  // so is a nested `};`. Every other line of the union is compared as usual, so a changed or removed
+  // member or variant still counts (NFR-18).
   for (let i = removedEntries.length - 1; i >= 0; i -= 1) {
     const r = removedEntries[i];
     if (r.line !== '};' || r.frame.kind !== 'literal' || r.frame.path.split(SEP).length !== 2) continue;
+    if (r.frame.variant === 0) continue;
     const at = addedEntries.findIndex((e) => e.line === '} | {' && e.frame.path === r.frame.path);
     if (at === -1) continue;
     addedEntries.splice(at, 1, { ...addedEntries[at], appended: true });
