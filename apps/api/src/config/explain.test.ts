@@ -183,6 +183,11 @@ role_mapping:
       explain({ operationId: 'catalog.update', groups: ['content'], args: { skus: ['a'], changes } }, loaded.configuration).at(-1);
     expect(approval({ price: '1' })).toBe('approval: required: steps pricing_owner; reason role_always');
     expect(approval({ name: 'x' })).toBe('approval: required: steps content_lead; reason role_always');
+    // Touched fields that cannot be read cannot be routed past a field rule (fail closed).
+    // The schema would refuse a string here, so the validator is replaced to reach the policy and approval.
+    const lenient = { ...loaded.configuration, validators: new Map([['catalog.update', () => ({ ok: true as const })]]) };
+    const unreadable = (changes: unknown) => explainCall(lenient, { operationId: 'catalog.update', groups: ['content'], args: { skus: ['a'], changes }, records: 1 });
+    expect(formatExplain(unreadable('price')).at(-1)).toBe('approval: unroutable; reason role_always');
   });
 
   it('MCP-3 POL-7 arguments are checked against the input schema before the policy', () => {

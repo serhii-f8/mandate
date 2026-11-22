@@ -26,12 +26,12 @@ describe('POL-5 approvalRuleFor', () => {
     expect(approvalRuleFor(configuration, 'role:editor/grant:prices/scope:brand', operation, { changes: {} })).toBe(grantRule);
   });
 
-  it('POL-5 an operation that cannot be found reads its fields as unreadable and takes the first field rule', () => {
-    expect(approvalRuleFor(configuration, 'role:editor/grant:0', undefined, { changes: { name: 'x' } })?.steps).toEqual(['pricing_owner']);
+  it('POL-5 an operation that cannot be found reads its fields as unreadable: the change cannot be routed', () => {
+    expect(approvalRuleFor(configuration, 'role:editor/grant:0', undefined, { changes: { name: 'x' } })).toEqual({ required: 'always', steps: [], allowWidget: false });
   });
 
-  it('POL-5 unreadable fields take the first field rule; no role and a non-role rule give none', () => {
-    expect(approvalRuleFor(configuration, 'role:editor/grant:0', operation, { changes: 'price' })?.steps).toEqual(['pricing_owner']);
+  it('POL-5 unreadable fields cannot be routed; no role and a non-role rule give none', () => {
+    expect(approvalRuleFor(configuration, 'role:editor/grant:0', operation, { changes: 'price' })?.steps).toEqual([]);
     expect(approvalRuleFor(configuration, 'role:nobody/grant:0', operation, {})).toBeUndefined();
     expect(approvalRuleFor(configuration, 'default-deny', operation, {})).toBeUndefined();
   });

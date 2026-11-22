@@ -108,4 +108,13 @@ describe('POL-5 POL-6 execution guard routes approval per touched field', () => 
     const guardFor = createExecutionGuard({ repository, audit: new InMemoryAuditLog(), newId: () => 'id' });
     expect(await guardFor(B).check(changeset)).toEqual({ ok: true });
   });
+
+  it('POL-5 unreadable touched fields under field rules fail the approval check, however many approvals exist', async () => {
+    const changeset = await record({ skus: ['a'], changes: 'price' });
+    const hash = changeset.hash ?? '';
+    const repository = { ...noItems, approvals: () => Promise.resolve([approvedBy('content_lead', hash), approvedBy('pricing_owner', hash)]) };
+    const guardFor = createExecutionGuard({ repository, audit: new InMemoryAuditLog(), newId: () => 'id' });
+    expect(await guardFor(B).check(changeset)).toEqual({ ok: false, outcome: 'approval_missing' });
+    expect(await guardFor(A).check(changeset)).toEqual({ ok: true });
+  });
 });

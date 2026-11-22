@@ -179,7 +179,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 - **POL-2** Evaluate scope constraints against call arguments, for example allowed brands or categories.
 - **POL-3** Reject calls that touch fields listed in `deny_fields` or outside an allow-list when one is set.
 - **POL-4** Enforce limits per role: records per operation, records per day, calls per minute, concurrent executions.
-- **POL-5** Determine whether approval is required from operation risk class, record count thresholds and role rules. A grant may carry its own rule, which replaces the role's for the calls it allows, and a rule may list field rules: the first one naming a field the call touches replaces it. The same resolution applies at submission, at execution start and in `config explain`; fields that cannot be read select the first field rule (ADR 0066).
+- **POL-5** Determine whether approval is required from operation risk class, record count thresholds and role rules. A grant may carry its own rule, which replaces the role's for the calls it allows, and a rule may list field rules: the first one naming a field the call touches replaces it. The same resolution applies at submission, at execution start and in `config explain`; when the touched fields cannot be read and the rule has field rules, the change is unroutable and is not approved or executed (ADR 0066).
 - **POL-6** Re-evaluate policy at execution start, so a role change after preparation is honoured.
 - **POL-7** Provide a dry evaluation entry point that returns the decision and the matching rule without side effects.
 - **POL-8** Record every decision, allow or deny, as an audit event with the rule that produced it.

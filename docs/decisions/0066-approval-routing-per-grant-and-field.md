@@ -33,7 +33,11 @@ Option 3.
   rule of the chosen rule that names a touched field; else the chosen rule. `approvalRequirement` runs
   unchanged on the result.
 - "Touched" is what POL-3 reads from the operation's `fields_arg` (`touchedCallFields`). When the
-  fields cannot be read, or the operation cannot be found, the first field rule applies (fail closed).
+  fields cannot be read, or the operation cannot be found, and the chosen rule has field rules, the change
+  cannot be routed: the resolved rule requires approval and has no steps, which `approvalRequirement`
+  reports as unroutable, so submission is refused (`approval_unroutable`), the guard denies and
+  `config explain` prints unroutable. Picking the first field rule would be wrong: it can be weaker than
+  the base rule. A chosen rule without field rules is returned unchanged.
 - The decision rule of an allow (`role:<role>/grant:<id|index>`) names the grant. The loaded
   configuration carries `grantApproval`, keyed by that reference, and `approvalRuleFor` in
   `@mandate/config` looks both maps up. A trailing suffix such as `/scope:brand` is ignored.
@@ -54,7 +58,7 @@ Option 3.
 - Rule order matters among field rules; the first match wins, not the strictest. A configuration that
   wants the strictest must list it first.
 - A role approval that sets `required: never` with a field rule `required: always` approves only the
-  touched-field changes; an unreadable `fields_arg` argument takes the first field rule.
+  touched-field changes; an unreadable `fields_arg` argument makes the change unroutable.
 - A change-set approved before a configuration change must have the approvals the new configuration
   asks for, or the guard refuses it as `approval_missing`.
 

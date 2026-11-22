@@ -144,7 +144,8 @@ A change of `name` alone waits for `content_lead`; a change that includes `price
 `pricing_owner` only. A grant can carry its own `approval`, which replaces the role's for the calls
 that grant allows. The operation needs `fields_arg` (a manifest operation uses its `values_arg`).
 `config explain` with `--args` naming `price` in `changes` prints the approval line with the steps
-that apply. If the fields of a call cannot be read, the first field rule applies.
+that apply. If the fields of a call cannot be read, a role or grant that has field rules cannot route it: the
+change is refused as unroutable instead of being routed to a possibly weaker rule.
 
 ## Review and apply
 

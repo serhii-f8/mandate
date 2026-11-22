@@ -167,7 +167,7 @@ class RefusingRepository extends InMemoryChangeSetRepository {
 
 type Stage = 'prepared' | 'pending_approval' | 'approved';
 
-async function setup(options: { stage?: Stage; racing?: boolean; refusing?: 'hash_mismatch' | 'expired'; opaque?: boolean; changes?: Record<string, string> } = {}) {
+async function setup(options: { stage?: Stage; racing?: boolean; refusing?: 'hash_mismatch' | 'expired'; opaque?: boolean; changes?: unknown } = {}) {
   const opaque = options.opaque === true;
   const audit = new InMemoryAuditLog();
   const repository =
@@ -280,6 +280,12 @@ describe('MCP-8 SubmitService', () => {
     expect(other.kind).toBe('pending_approval');
     if (other.kind !== 'pending_approval') return;
     expect(other.plan.steps).toEqual(['content_manager']);
+  });
+
+  it('POL-5 unreadable touched fields under a rule with field rules are refused as unroutable', async () => {
+    const { submit, repository } = await setup({ changes: 'price' });
+    expect(await submit(alicePricing)).toMatchObject({ kind: 'refused', reason: 'approval_unroutable' });
+    expect((await repository.get(ID))?.status).toBe('prepared');
   });
 
   it('POL-5 an opaque change-set under above_threshold is submitted for approval', async () => {
