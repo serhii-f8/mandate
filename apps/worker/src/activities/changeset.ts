@@ -99,6 +99,11 @@ function executionCorrelation(changeset: ChangeSetRecord): string {
   return changeset.executionRequest?.correlationId ?? changeset.correlationId;
 }
 
+/** EXE-13: why the next plan step was not started; fixed codes and IDs only (SEC-3). */
+function notStartedLog(changesetId: string, nextChangesetId: string, reason: string): void {
+  Context.current().log.warn('plan step not started', { changesetId, nextChangesetId, reason });
+}
+
 function remaining(stats: ChangeSetStats): number {
   return stats.included - stats.written - stats.failed - stats.skipped;
 }
@@ -490,12 +495,17 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
           },
           ...(limits === undefined ? {} : { limits }),
         });
-        // A refusal (plan_blocked, limit_exceeded, expired, ...) is audited by the start itself where it is audited at all.
-        return { started: outcome.ok };
+        if (outcome.ok) return { started: true };
+        // A refusal that changes nothing (plan_blocked, limit_exceeded, not_approved, ...) leaves the step as it was;
+        // only a limit refusal is audited, so the worker log says why the plan did not advance.
+        notStartedLog(finished.id, next.id, outcome.reason);
+        return notStarted;
       } catch (error) {
-        // Temporal unreachable: the step stays approved; the requester or the approver can start it later.
-        if (error instanceof ExecutorUnavailable) return notStarted;
-        throw error;
+        // Temporal unreachable after the move to `executing`: the executor has already failed the next
+        // step with executor_unavailable, as for an approver's start; the plan stops there.
+        if (!(error instanceof ExecutorUnavailable)) throw error;
+        notStartedLog(finished.id, next.id, 'executor_unavailable');
+        return notStarted;
       }
     },
 

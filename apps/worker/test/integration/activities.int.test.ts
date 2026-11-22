@@ -1019,23 +1019,74 @@ describe('change-set activities', () => {
       ]);
     });
 
-    it('EXE-13 a refused start and an unreachable Temporal answer started false; an unexpected error propagates', async () => {
-      const { first } = await completedFirstStep();
-      const refused = recordingExecutor({ ok: false, reason: 'limit_exceeded', limit: 'records_per_operation' });
-      await expect(attempt(1, () => activities({ executor: refused.executor }).advancePlan(first.id))).resolves.toEqual({ started: false });
-      const blocked = recordingExecutor({ ok: false, reason: 'plan_blocked' });
-      await expect(attempt(1, () => activities({ executor: blocked.executor }).advancePlan(first.id))).resolves.toEqual({ started: false });
+    /** Runs `advancePlan` with a logger that keeps the activity's own `plan step not started` lines. */
+    async function advanceLogged(executor: ActivityDeps['executor'], changesetId: string) {
+      const entries: { level: string; message: string; meta?: Record<string, unknown> }[] = [];
+      const env = new MockActivityEnvironment(
+        { attempt: 1 },
+        { logger: new DefaultLogger('WARN', (entry) => entries.push({ level: entry.level, message: entry.message, ...(entry.meta === undefined ? {} : { meta: entry.meta }) })) },
+      );
+      const result = await env.run(() => activities({ executor }).advancePlan(changesetId));
+      const logged = entries
+        .filter((e) => e.message === 'plan step not started')
+        .map((e) => ({ level: e.level, changesetId: e.meta?.changesetId, nextChangesetId: e.meta?.nextChangesetId, reason: e.meta?.reason }));
+      return { result, logged, entries };
+    }
+
+    it('EXE-13 SEC-3 a refused start answers started false and logs the fixed code with both IDs, no other value', async () => {
+      const { first, second } = await completedFirstStep();
+      const refused = recordingExecutor({ ok: false, reason: 'plan_blocked' });
+      const { result, logged, entries } = await advanceLogged(refused.executor, first.id);
+      expect(result).toEqual({ started: false });
+      expect(logged).toEqual([{ level: 'WARN', changesetId: first.id, nextChangesetId: second.id, reason: 'plan_blocked' }]);
+      const line = entries.find((e) => e.message === 'plan step not started');
+      // The SDK adds the activity's own info; the activity adds exactly these three fields.
+      expect(Object.keys(line?.meta ?? {})).toEqual(expect.arrayContaining(['changesetId', 'nextChangesetId', 'reason']));
+      expect(JSON.stringify(line)).not.toContain(second.hash ?? 'no-hash');
+
+      const limited = recordingExecutor({ ok: false, reason: 'limit_exceeded', limit: 'records_per_operation' });
+      expect((await advanceLogged(limited.executor, first.id)).logged.map((l) => l.reason)).toEqual(['limit_exceeded']);
+    });
+
+    it('EXE-13 ExecutorUnavailable from the start answers started false and logs executor_unavailable; the executor decides the next step state', async () => {
+      // A stub that changes no state: the real TemporalExecutor throws this only after it failed the step (executor_unavailable).
+      const { first, second } = await completedFirstStep();
       const unavailable = recordingExecutor(new ExecutorUnavailable());
-      await expect(attempt(1, () => activities({ executor: unavailable.executor }).advancePlan(first.id))).resolves.toEqual({ started: false });
+      const { result, logged } = await advanceLogged(unavailable.executor, first.id);
+      expect(result).toEqual({ started: false });
+      expect(logged).toEqual([{ level: 'WARN', changesetId: first.id, nextChangesetId: second.id, reason: 'executor_unavailable' }]);
+    });
+
+    it('EXE-13 an unexpected error from the start propagates, so the activity retries', async () => {
+      const { first } = await completedFirstStep();
       const broken = recordingExecutor(new Error('database gone'));
       await expect(attempt(1, () => activities({ executor: broken.executor }).advancePlan(first.id))).rejects.toThrow('database gone');
+    });
+
+    it('EXE-13 NFR-2 a retry after the next step started answers started false without a second start or a log line', async () => {
+      const { first, second } = await completedFirstStep();
+      const requests: StartRequest[] = [];
+      // Moves the next step to executing as the real start does.
+      const executor: ActivityDeps['executor'] = {
+        start: async (req) => {
+          requests.push(req);
+          await startExecutionOf(repository, second, { correlationId: req.correlationId });
+          return { ok: true };
+        },
+      };
+      await expect(advanceLogged(executor, first.id)).resolves.toMatchObject({ result: { started: true }, logged: [] });
+      const retry = await advanceLogged(executor, first.id);
+      expect(retry).toMatchObject({ result: { started: false }, logged: [] });
+      expect(requests).toHaveLength(1);
+      expect((await repository.get(second.id))?.status).toBe('executing');
     });
 
     it('EXE-13 starts nothing for a prepared next step, the last step, a step not completed or a change-set outside a plan', async () => {
       const { executor, requests } = recordingExecutor({ ok: true });
       const a = activities({ executor });
       const prepared = await completedFirstStep([true, false]);
-      await expect(attempt(1, () => a.advancePlan(prepared.first.id))).resolves.toEqual({ started: false });
+      // The normal quiet case: no log line.
+      await expect(advanceLogged(executor, prepared.first.id)).resolves.toMatchObject({ result: { started: false }, logged: [] });
 
       const { second } = await completedFirstStep();
       await startExecutionOf(repository, second);
