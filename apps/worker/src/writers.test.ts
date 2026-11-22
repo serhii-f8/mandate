@@ -575,3 +575,132 @@ describe('CONN-4 worker writerFor of opaque MCP operations', () => {
     expect(adapter.sent).toBe(0);
   });
 });
+
+/** A create and the delete that undoes it, both per-record bindings on the preset's connection (OPS-2, EXE-8). */
+const CREATE_AND_DELETE = `version: 1
+operations:
+  - id: catalog.create_product
+    connection: magento
+    risk: write
+    description: Create products.
+    input_schema:
+      type: object
+      properties:
+        brand: { type: string }
+        records:
+          type: array
+          items:
+            type: object
+            properties: { sku: { type: string }, description: { type: string }, brand: { type: string } }
+            required: [sku]
+            additionalProperties: false
+      required: [brand, records]
+      additionalProperties: false
+    upstream: { method: POST, path: /V1/products }
+    manifest:
+      action: create
+      id_field: sku
+      records_arg: records
+      fields: [description, brand]
+      scope_args: { brand: brand }
+      read_before:
+        operation: catalog.get_products_by_sku
+        ids_arg: skus
+        args: { brand: { arg: brand } }
+      rollback: { strategy: inverse_operation, operation: catalog.delete_product }
+  - id: catalog.delete_product
+    connection: magento
+    risk: destructive
+    description: Delete products.
+    input_schema:
+      type: object
+      properties:
+        brand: { type: string }
+        skus: { type: array, items: { type: string } }
+      required: [brand, skus]
+      additionalProperties: false
+    upstream: { method: DELETE, path: '/V1/products/{sku}', path_params: { sku: { record: sku } } }
+    manifest:
+      action: delete
+      id_field: sku
+      ids_arg: skus
+      fields: [description, brand]
+      scope_args: { brand: brand }
+      read_before:
+        operation: catalog.get_products_by_sku
+        ids_arg: skus
+        args: { brand: { arg: brand } }
+      rollback: { strategy: none }
+`;
+
+describe('OPS-2 EXE-8 create and its rollback through the worker writers', () => {
+  let up: FakeUpstream;
+  let configuration: LoadedConfiguration;
+  let vault: MemoryVault;
+  let lines: UpstreamCallLog[];
+  let catalog: FakeMagentoCatalog;
+  const sent: { method: string; path: string; body: string }[] = [];
+
+  beforeEach(async () => {
+    up = await startFakeUpstream();
+    sent.length = 0;
+    catalog = installFakeMagentoCatalog(up, { basePath: MAGENTO_BASE_PATH, products: [] });
+    // The per-record routes apply to the fake catalog, so the verify after the write sees the new state.
+    up.route('POST', `${MAGENTO_BASE_PATH}/V1/products`, (req) => {
+      sent.push({ method: req.method, path: req.path, body: req.body });
+      const { sku, ...fields } = JSON.parse(req.body) as { sku: string };
+      catalog.set(sku, { name: 'New', status: 1, ...fields });
+      return { status: 200, body: {} };
+    });
+    up.routeMatch('DELETE', /\/V1\/products\/.+$/, (req) => {
+      sent.push({ method: req.method, path: req.path, body: req.body });
+      catalog.remove(decodeURIComponent(req.path.split('/').pop() ?? ''));
+      return { status: 200, body: true };
+    });
+    configuration = await loadMagentoPreset(`${up.url}${MAGENTO_BASE_PATH}`, [{ file: 'operations.yaml', text: CREATE_AND_DELETE }]);
+    vault = await vaultWithToken(FAKE_TOKEN);
+    lines = [];
+  });
+  afterEach(async () => {
+    await up.close();
+  });
+
+  const deps = () => ({ vault, adapter: createOpenApiAdapter(), clock: new FakeClock(), log: (l: UpstreamCallLog) => lines.push(l) });
+  const statusPolls = (): number => up.requests.filter((r) => r.method === 'GET' && r.path.endsWith('/detailed-status')).length;
+  const NEW = { description: 'fresh', brand: 'acme' };
+  const created: ChangeItemRecord = { targetId: 'N1', status: 'pending', before: null, after: NEW };
+  const createdChangeset = (): ChangeSetRecord => ({
+    ...changesetFor('catalog.create_product'),
+    args: { brand: 'acme', records: [{ sku: 'N1', ...NEW }] },
+    status: 'rolling_back',
+    executionRequest: EXECUTION_REQUEST,
+    rollbackRequest: { actor: 'alice', correlationId: 'corr-rollback', requestedAt: new Date(2_000) },
+  });
+
+  it('OPS-2 createWriterFor sends the created record, id_field and the after fields, through the per-record POST binding', async () => {
+    const writer = createWriterFor(deps())(configuration, 'catalog.create_product');
+    expect(writer).toBeInstanceOf(ManifestBatchWriter);
+
+    const outcomes = await writer.writeBatch({ changeset: createdChangeset(), items: [created], batch: new FakeBatch(statusPolls) });
+
+    expect(outcomes).toEqual([{ targetId: 'N1', status: 'written' }]);
+    expect(sent.map((r) => [r.method, r.path])).toEqual([['POST', `${MAGENTO_BASE_PATH}/V1/products`]]);
+    expect(JSON.parse(sent[0]?.body ?? 'null')).toEqual({ sku: 'N1', ...NEW });
+    expect(catalog.product('N1')).toMatchObject(NEW);
+    expect(lines.filter((l) => l.method === 'POST').map((l) => l.operation)).toEqual(['catalog.create_product']);
+  });
+
+  it('OPS-2 EXE-8 createRollbackWriterFor deletes the created record through the inverse delete operation', async () => {
+    catalog.set('N1', { name: 'New', status: 1, ...NEW });
+    const writer = createRollbackWriterFor(deps())(configuration, 'catalog.create_product');
+    expect(writer).toBeInstanceOf(ManifestBatchWriter);
+
+    const outcomes = await writer?.writeBatch({ changeset: createdChangeset(), items: [{ ...created, status: 'written' }], batch: new FakeBatch(statusPolls) });
+
+    expect(outcomes).toEqual([{ targetId: 'N1', status: 'written' }]);
+    expect(sent.map((r) => [r.method, r.path])).toEqual([['DELETE', `${MAGENTO_BASE_PATH}/V1/products/N1`]]);
+    expect(lines.filter((l) => l.method === 'DELETE').map((l) => l.operation)).toEqual(['catalog.delete_product']);
+    expect(lines.filter((l) => l.method === 'POST')).toEqual([]);
+    expect(catalog.product('N1')).toBeUndefined();
+  });
+});

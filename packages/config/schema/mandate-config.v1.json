@@ -725,6 +725,15 @@
           "manifest": {
             "additionalProperties": false,
             "properties": {
+              "action": {
+                "default": "update",
+                "enum": [
+                  "update",
+                  "create",
+                  "delete"
+                ],
+                "type": "string"
+              },
               "batch_size": {
                 "default": 100,
                 "maximum": 1000,

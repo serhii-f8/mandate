@@ -138,7 +138,7 @@ Approvals are stored as rows linked to a change-set: `approver`, `decision`, `co
 | `read` | No state change upstream | Policy check, direct call, audit |
 | `write` | State change with a manifest | Change-set, approval per role rules, workflow execution |
 | `write_opaque` | State change without a manifest | Approval shows raw arguments; no diff, no rollback |
-| `destructive` | Deletes or irreversible effects | Always requires approval and step-up authentication |
+| `destructive` | Deletes or irreversible effects | Always requires approval and step-up authentication; the only risk class for a manifest `delete` (ADR 0071) |
 
 ### Change-set lifecycle
 
@@ -198,7 +198,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 ### 5.5 Operations and manifests
 
 - **OPS-1** An operation is enabled only when declared in configuration or in an applied preset.
-- **OPS-2** A manifest declares: identifier argument, scope arguments, the read operation that returns current state, the fields subject to diff, batch size, and the rollback strategy. The values come either as one object for every target (`values_arg`) or as an array of records, each with its own values (`records_arg`, which names the targets itself); exactly one of the two (ADR 0070).
+- **OPS-2** A manifest declares: identifier argument, scope arguments, the read operation that returns current state, the fields subject to diff, batch size, and the rollback strategy. The values come either as one object for every target (`values_arg`) or as an array of records, each with its own values (`records_arg`, which names the targets itself); exactly one of the two (ADR 0070). `action: update | create | delete` (default `update`) says what the call does to its targets: a `create` needs `records_arg`, and a `delete` needs `ids_arg` or `selector`, takes no values and needs risk `destructive` (ADR 0071).
 - **OPS-3** Supported rollback strategies: `replay_previous_state`, `inverse_operation`, `none`.
 - **OPS-4** Support a selector form of input, for example brand plus filter, that the platform resolves to a concrete list of target IDs during preparation.
 - **OPS-5** Allow an operation to be implemented in code through the connector SDK when a manifest is insufficient.
@@ -212,7 +212,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 - **CS-4** Compute a SHA-256 hash over operation ID, normalized arguments and ordered items. The hash is shown on approval and verified before execution. Each change-set stores the version of the hash format it was sealed with and, from version 2, its manifest action, which version 2 binds into the hash. Both are fixed with the hash. Every verification recomputes with the stored version; an unknown version is a hash mismatch. New preparations use the current version; a derived change-set keeps its source's version and action (ADR 0069).
 - **CS-5** Allow the requester to exclude items before submission. Exclusion produces a new hash.
 - **CS-6** Expire change-sets after a configurable period. Expired change-sets cannot be approved or executed.
-- **CS-7** Detect drift at execution: if an item's current upstream value differs from its stored `before`, skip the item and report it.
+- **CS-7** Detect drift at execution: if an item's current upstream value differs from its stored `before`, skip the item and report it. Absent is `null`: a create item has `before: null`, a delete item `after: null`; a current state equal to `after` is already applied, one equal to neither is drift, and after a write the state must equal `after` or the item fails `not_applied` (ADR 0071). The stored action must equal the operation's current action, else execution is refused as `policy_denied`; a change-set without a stored action counts as `update`.
 - **CS-8** Provide export of a change-set as CSV and XLSX.
 
 ### 5.7 Approvals
@@ -235,7 +235,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 - **EXE-5** Record per-item outcome. A failed item does not stop the remaining batches unless the failure rate exceeds a configured threshold.
 - **EXE-6** Expose progress through a workflow query: total, done, failed, skipped.
 - **EXE-7** Support cancellation before and during execution. Cancellation during execution stops after the current batch.
-- **EXE-8** Rollback runs as a compensation phase of the same workflow, restoring `before` values for successfully written items. The workflow accepts a rollback request until a configured window after execution ends (ADR 0042).
+- **EXE-8** Rollback runs as a compensation phase of the same workflow, restoring `before` values for successfully written items. For a create the inverse operation is a delete of the same identifier field, for a delete a create that restores the manifest's `fields` only (ADR 0071). The workflow accepts a rollback request until a configured window after execution ends (ADR 0042).
 - **EXE-9** Use child workflows or continue-as-new for change-sets above a configured item count.
 - **EXE-10** Define workflow versioning rules (patch IDs, lifecycle, mandatory replay tests against recorded histories) so that workflows waiting for approval survive a deployment; a patch may be deprecated no earlier than the approval expiry period plus the longest execution time after its deployment, and removed only once those executions have left retention (ADR 0006).
 - **EXE-11** The executor is accessed through an interface with a Temporal implementation and an in-memory implementation for tests.

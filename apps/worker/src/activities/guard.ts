@@ -7,6 +7,7 @@ import {
   createPolicyEngine,
   hashStoredItems,
   isOpaque,
+  manifestAction,
   OPAQUE_TARGET_ID,
   policyDecisionAuditEvent,
   UnknownHashVersionError,
@@ -43,7 +44,9 @@ export interface ExecutionGuardDeps {
  * Before 2, the kind the change-set was prepared as (its stored items) must equal the kind of its
  * operation under the current configuration; a reload that flips an operation between
  * `write_opaque` and a diff kind refuses it as `policy_denied`, so a diff is never sent as an opaque
- * call nor an opaque call re-checked and written as a diff (EXE-4, SEC-9, APR-5).
+ * call nor an opaque call re-checked and written as a diff (EXE-4, SEC-9, APR-5). Likewise the
+ * stored `action` (none counts as `update`) must equal the operation's: an update is never run as a
+ * create or a delete, and neither is a copy that lost its action (OPS-2, ADR 0071).
  */
 export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: LoadedConfiguration) => ExecutionGuard {
   const { heartbeat } = deps;
@@ -117,6 +120,9 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
       if (request === undefined) return { ok: false, outcome: 'policy_denied' };
       const operation = configuration.policy.operations.find((o) => o.id === changeset.operation);
       if (changesetKind(operation) !== (await storedKind(changeset))) return { ok: false, outcome: 'policy_denied' };
+      // A change-set stored without an action is an update, so it never runs as a create or a delete (OPS-2, ADR 0071).
+      const currentAction = operation?.manifest === undefined ? 'update' : manifestAction(operation.manifest);
+      if ((changeset.action ?? 'update') !== currentAction) return { ok: false, outcome: 'policy_denied' };
       const caller: Caller = {
         subject: request.actor,
         groups: request.groups,

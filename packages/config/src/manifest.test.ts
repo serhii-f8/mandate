@@ -375,6 +375,135 @@ describe('OPS-2 records_arg', () => {
   });
 });
 
+describe('OPS-2 manifest action', () => {
+  const ITEM = '{ type: object, properties: { sku: { type: string }, name: { type: string }, description: { type: string }, brand: { type: string } }, required: [sku], additionalProperties: false }';
+  const CHANGES_PROP = 'changes: { type: object, properties: { name: { type: string }, description: { type: string } }, additionalProperties: false }';
+  const NO_SELECTOR = / {6}selector:\n(?: {8}.*\n)+/;
+  const HEADER = 'version: 1\noperations:\n';
+  /** A create: records with their own values, the caller supplies the identifier. */
+  const CREATE = WRITE.replace(CHANGES_PROP, `records: { type: array, items: ${ITEM} }`)
+    .replace('required: [brand, changes]', 'required: [brand, records]')
+    .replace('      ids_arg: skus\n      values_arg: changes\n      fields: [name, description]\n', '      action: create\n      records_arg: records\n      fields: [name, description, brand]\n')
+    .replace(NO_SELECTOR, '')
+    .replace('rollback: { strategy: replay_previous_state }', 'rollback: { strategy: none }');
+  /** A delete: names its targets, takes no values. */
+  const DELETE = WRITE.replace('risk: write', 'risk: destructive')
+    .replace(`        ${CHANGES_PROP}\n`, '')
+    .replace('required: [brand, changes]', 'required: [brand]')
+    .replace('      values_arg: changes\n', '      action: delete\n')
+    .replace('fields: [name, description]\n', 'fields: [name, description, brand]\n')
+    .replace('rollback: { strategy: replay_previous_state }', 'rollback: { strategy: none }');
+  /** Two operations in one file; the second is renamed so the role's grant keeps naming the first. */
+  const both = (first: string, second: string): string => first + second.replace(HEADER, '').replace('id: catalog.update_content', 'id: catalog.delete_content');
+  /** A destructive grant needs an approval step. */
+  const DELETE_ROLES = ROLES.replace('approval: { required: never }', 'approval: { required: always, steps: [{ role: content_manager }] }');
+  const at = (text: string, path: string): Promise<ConfigIssue> => expectAt(text, path);
+  const loadDelete = (text: string): Promise<LoadResult> => load({ 'write.yaml': text, 'roles.yaml': DELETE_ROLES });
+
+  async function expectAt(text: string, path: string): Promise<ConfigIssue> {
+    const found = issues(await load({ 'write.yaml': text, 'roles.yaml': DELETE_ROLES }));
+    const match = found.filter((i) => i.path === path);
+    expect(match, JSON.stringify(found)).toHaveLength(1);
+    const [issue] = match;
+    if (issue === undefined) throw new Error('unreachable: length checked above');
+    return issue;
+  }
+
+  it('OPS-2 a create with records_arg and rollback none loads with action create', async () => {
+    const config = ok(await load({ 'write.yaml': CREATE }));
+    const op = config.policy.operations.find((o) => o.id === 'catalog.update_content');
+    expect(op?.manifest).toMatchObject({ action: 'create', recordsArg: 'records', fields: ['name', 'description', 'brand'] });
+    expect(op?.manifest).not.toHaveProperty('valuesArg');
+  });
+
+  it('OPS-2 an update leaves action off the converted manifest', async () => {
+    const config = ok(await load());
+    expect(config.policy.operations.find((o) => o.id === 'catalog.update_content')?.manifest).not.toHaveProperty('action');
+    const explicit = ok(await load({ 'write.yaml': WRITE.replace('      id_field: sku\n', '      action: update\n      id_field: sku\n') }));
+    expect(explicit.policy.operations.find((o) => o.id === 'catalog.update_content')?.manifest).not.toHaveProperty('action');
+  });
+
+  it('OPS-2 a delete on a destructive operation with ids_arg loads with action delete and no values', async () => {
+    const config = ok(await loadDelete(DELETE));
+    const op = config.policy.operations.find((o) => o.id === 'catalog.update_content');
+    expect(op?.manifest).toMatchObject({ action: 'delete', idsArg: 'skus' });
+    expect(op?.manifest).not.toHaveProperty('valuesArg');
+    expect(op?.manifest).not.toHaveProperty('recordsArg');
+  });
+
+  it('OPS-2 a create names a delete with the same id_field as its inverse, a delete a create covering its fields', async () => {
+    const createInverse = CREATE.replace('rollback: { strategy: none }', 'rollback: { strategy: inverse_operation, operation: catalog.delete_content }');
+    const deleteInverse = DELETE.replace('rollback: { strategy: none }', 'rollback: { strategy: inverse_operation, operation: catalog.update_content }');
+    ok(await load({ 'write.yaml': both(createInverse, DELETE) }));
+    ok(await load({ 'write.yaml': both(CREATE, deleteInverse) }));
+    ok(await load({ 'write.yaml': both(createInverse, deleteInverse) }));
+  });
+
+  it('OPS-2 a create without records_arg is refused at action', async () => {
+    const text = CREATE.replace('      records_arg: records\n', '      ids_arg: skus\n      values_arg: records\n');
+    expect((await at(text, `${M}.action`)).message).toBe('action create needs records_arg');
+  });
+
+  it('OPS-2 a create with write.carry_fields is refused at write', async () => {
+    const text = CREATE.replace('      rollback:', '      write: { carry_fields: [status] }\n      rollback:');
+    expect((await at(text, `${M}.write`)).message).toBe('is not allowed with action create');
+  });
+
+  it('OPS-2 a create whose scope_args field is not one of fields is refused at scope_args.<arg>', async () => {
+    const text = CREATE.replace('fields: [name, description, brand]', 'fields: [name, description]');
+    expect((await at(text.replace(', brand: { type: string } }', ' }'), `${M}.scope_args.brand`)).message).toBe('must be one of fields for action create');
+  });
+
+  it('OPS-2 a delete with values_arg or records_arg is refused', async () => {
+    const withValues = DELETE.replace('      action: delete\n', '      action: delete\n      values_arg: changes\n');
+    expect((await at(withValues, `${M}.values_arg`)).message).toBe('is not allowed with action delete');
+    const withRecords = DELETE.replace('      action: delete\n', '      action: delete\n      records_arg: records\n');
+    expect((await at(withRecords, `${M}.records_arg`)).message).toBe('is not allowed with action delete');
+  });
+
+  it('OPS-2 a delete needs ids_arg or selector', async () => {
+    const text = DELETE.replace('      ids_arg: skus\n', '').replace(NO_SELECTOR, '');
+    expect((await at(text, M)).message).toBe('must declare ids_arg, selector or both');
+    ok(await loadDelete(DELETE.replace('      ids_arg: skus\n', '')));
+  });
+
+  it('OPS-2 a delete on a write operation is refused at action', async () => {
+    const text = DELETE.replace('risk: destructive', 'risk: write');
+    expect((await at(text, `${M}.action`)).message).toBe('action delete needs risk destructive');
+  });
+
+  it('OPS-2 replay_previous_state is not available for create or delete', async () => {
+    const replay = 'rollback: { strategy: replay_previous_state }';
+    const c = await at(CREATE.replace('rollback: { strategy: none }', replay), `${M}.rollback.strategy`);
+    expect(c.message).toBe('is not available for action create');
+    const d = await at(DELETE.replace('rollback: { strategy: none }', replay), `${M}.rollback.strategy`);
+    expect(d.message).toBe('is not available for action delete');
+  });
+
+  it('OPS-2 the inverse of a create must be an enabled delete operation of the same connection and id_field', async () => {
+    const inverse = (op: string): string => CREATE.replace('rollback: { strategy: none }', `rollback: { strategy: inverse_operation, operation: ${op} }`);
+    const path = `${M}.rollback.operation`;
+    const message = 'must name an enabled delete operation of the same connection with the same id_field';
+    // Another create, an update and a missing operation are not deletes.
+    const other = WRITE.replace('id: catalog.update_content', 'id: catalog.other_update');
+    expect((await at(both(inverse('catalog.other_update'), other), path)).message).toBe(message);
+    expect((await at(both(inverse('catalog.other_update'), CREATE.replace('id: catalog.update_content', 'id: catalog.other_update')), path)).message).toBe(message);
+    expect((await at(inverse('catalog.gone'), path)).message).toBe(message);
+    // A delete with another id_field.
+    const otherKey = DELETE.replace('id_field: sku', 'id_field: brand');
+    expect((await at(both(inverse('catalog.delete_content'), otherKey), path)).message).toBe(message);
+  });
+
+  it('OPS-2 the inverse of a delete must be a create whose fields cover its fields', async () => {
+    const inverse = (text: string): string => DELETE.replace('rollback: { strategy: none }', 'rollback: { strategy: inverse_operation, operation: catalog.update_content }').replace('fields: [name, description, brand]', text);
+    const message = 'must name an enabled create operation of the same connection whose manifest lists every field of this one';
+    const text = both(CREATE, inverse('fields: [name, description, brand, status]'));
+    expect((await at(text, 'operations[1].manifest.rollback.operation')).message).toBe(message);
+    // An update is not a create.
+    expect((await at(both(WRITE, inverse('fields: [name, description, brand]')), 'operations[1].manifest.rollback.operation')).message).toBe(message);
+  });
+});
+
 describe('OPS-3 rollback strategy', () => {
   it('OPS-3 requires a rollback strategy', async () => {
     const issue = await expectIssue((t) => t.replace('      rollback: { strategy: replay_previous_state }\n', ''), `${M}.rollback`, 'replay');

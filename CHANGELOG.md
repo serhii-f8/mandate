@@ -16,6 +16,9 @@ Upgrade every `api` and `worker` before preparing new change-sets. See
   own values. `values_arg` becomes optional (exactly one of the two); the touched fields of a records
   call, for deny and allow fields and approval field rules, are the union of the records' keys without
   `id_field` (OPS-2, CS-2, POL-3, POL-5, ADR 0070). Configuration schema and connector SDK 1.2.0.
+- `manifest.action: update | create | delete` lets a change-set create or delete records, with the same
+  diff, drift check, verification and rollback; a delete needs a `destructive` operation. Execution
+  refuses a change-set whose stored action differs from the operation's (OPS-2, EXE-8, ADR 0071).
 
 ## 1.1.0
 

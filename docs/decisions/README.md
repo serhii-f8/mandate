@@ -66,3 +66,4 @@ Requirements cited in the records (`MCP-1`, `POL-3`, `NFR-18`) are defined in th
 | [0068](0068-semver-gate-relaxed-required.md) | The semver gate judges a key removed from `required` additive | 2026-11-22 |
 | [0069](0069-change-set-hash-version.md) | Change-sets record the version of their hash format | 2026-11-22 |
 | [0070](0070-per-record-values.md) | A write can carry per-record values | 2026-11-22 |
+| [0071](0071-create-and-delete-change-sets.md) | Change-sets can create and delete records | 2026-11-22 |

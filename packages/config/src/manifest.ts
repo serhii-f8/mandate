@@ -25,6 +25,8 @@ const rollback = z.discriminatedUnion('strategy', [
 ]);
 
 export const manifestSchema = z.strictObject({
+  /** What the call does to its targets (OPS-2, ADR 0071); a fixed node in presets. */
+  action: z.enum(['update', 'create', 'delete']).default('update'),
   id_field: name,
   ids_arg: name.optional(),
   /** The alternative to `records_arg`: one values object for every target (CS-2). */
@@ -87,6 +89,7 @@ export function toManifestDefinition(m: ManifestConfig): ManifestDefinition {
   const readBefore: ManifestRead & { idsArg: string } = { operation: m.read_before.operation, idsArg: m.read_before.ids_arg, args: toTemplates(m.read_before.args) };
   const strategy: RollbackStrategy = m.rollback.strategy === 'inverse_operation' ? { strategy: 'inverse_operation', operation: m.rollback.operation } : { strategy: m.rollback.strategy };
   return {
+    ...(m.action === 'update' ? {} : { action: m.action }),
     idField: m.id_field,
     ...(m.ids_arg === undefined ? {} : { idsArg: m.ids_arg }),
     ...(m.values_arg === undefined ? {} : { valuesArg: m.values_arg }),
@@ -158,6 +161,12 @@ function checkRecordsSchema(schema: Readonly<Record<string, unknown>>, manifest:
   return undefined;
 }
 
+function inverseMessage(wanted: 'create' | 'delete'): string {
+  return wanted === 'delete'
+    ? 'must name an enabled delete operation of the same connection with the same id_field'
+    : 'must name an enabled create operation of the same connection whose manifest lists every field of this one';
+}
+
 export interface ManifestCheckInput {
   readonly all: ReadonlyMap<string, RegisteredOperation>;
   /** A bound preset failed to load, so an unknown operation ID may be one of its operations. */
@@ -189,17 +198,39 @@ export function checkManifests(input: ManifestCheckInput): void {
       mAt([], `is not allowed on a ${value.risk} operation`);
       continue;
     }
-    // The one place that decides how the values arrive; an action that takes none (`delete`) will exempt itself here.
-    if ((manifest.values_arg === undefined) === (manifest.records_arg === undefined)) mAt([], 'must declare exactly one of values_arg and records_arg');
+    const action = manifest.action;
+    // The one place that decides how the values arrive; a delete takes none.
+    if (action === 'delete') {
+      if (manifest.values_arg !== undefined) mAt(['values_arg'], 'is not allowed with action delete');
+      if (manifest.records_arg !== undefined) mAt(['records_arg'], 'is not allowed with action delete');
+      if (value.fields_arg !== undefined) at(source, [...path, 'fields_arg'], 'is not allowed with action delete');
+      if (value.risk !== 'destructive') mAt(['action'], 'action delete needs risk destructive');
+      if (manifest.ids_arg === undefined && manifest.selector === undefined) mAt([], 'must declare ids_arg, selector or both');
+    } else if ((manifest.values_arg === undefined) === (manifest.records_arg === undefined)) {
+      mAt([], 'must declare exactly one of values_arg and records_arg');
+    }
+    if (action === 'create') {
+      if (manifest.records_arg === undefined) mAt(['action'], 'action create needs records_arg');
+      if (manifest.write !== undefined) mAt(['write'], 'is not allowed with action create');
+      // The scope is checked against the new record's own values (ADR 0071).
+      for (const [arg, field] of Object.entries(manifest.scope_args)) {
+        if (!manifest.fields.includes(field)) mAt(['scope_args', arg], 'must be one of fields for action create');
+      }
+    }
+    if (action !== 'update' && manifest.rollback.strategy === 'replay_previous_state') {
+      mAt(['rollback', 'strategy'], `is not available for action ${action}`);
+    }
     const valuesKey = manifest.records_arg === undefined ? 'values_arg' : 'records_arg';
-    if (manifest.records_arg !== undefined) {
+    if (action === 'delete') {
+      // Reported above; the targets of a delete come from ids_arg or the selector.
+    } else if (manifest.records_arg !== undefined) {
       // The records name the targets (CS-2, ADR 0070).
       if (manifest.ids_arg !== undefined) mAt(['ids_arg'], 'is not allowed with records_arg');
       if (manifest.selector !== undefined) mAt(['selector'], 'is not allowed with records_arg');
     } else if (manifest.values_arg !== undefined && manifest.ids_arg === undefined && manifest.selector === undefined) {
       mAt([], 'must declare ids_arg, selector or both');
     }
-    if (value.fields_arg !== undefined && value.fields_arg !== (manifest.records_arg ?? manifest.values_arg)) {
+    if (action !== 'delete' && value.fields_arg !== undefined && value.fields_arg !== (manifest.records_arg ?? manifest.values_arg)) {
       at(source, [...path, 'fields_arg'], `must equal manifest.${valuesKey}`);
     }
     manifest.sensitive_fields.forEach((f, index) => {
@@ -222,11 +253,11 @@ export function checkManifests(input: ManifestCheckInput): void {
         }
       }
       // Declaring both or neither is reported once above; the schema checks follow what is declared.
-      if (manifest.records_arg !== undefined) {
+      if (manifest.records_arg !== undefined && action !== 'delete') {
         const recordsIssue = checkRecordsSchema(schema, manifest);
         if (recordsIssue !== undefined) mAt(['records_arg'], recordsIssue);
       }
-      const valuesArg = manifest.values_arg;
+      const valuesArg = action === 'delete' ? undefined : manifest.values_arg;
       const values = valuesArg === undefined ? undefined : propertySchema(schema, valuesArg);
       if (valuesArg === undefined) {
         // No values object to check.
@@ -334,11 +365,24 @@ export function checkManifests(input: ManifestCheckInput): void {
       }
     }
 
-    // Check 7: the inverse is an enabled write operation on the same connection.
+    // Check 7: the inverse is an enabled write operation on the same connection. A create is undone by
+    // a delete (destructive) with the same id_field, a delete by a create covering its fields (ADR 0071).
     if (manifest.rollback.strategy === 'inverse_operation') {
       const inverse = all.get(manifest.rollback.operation);
+      const wanted = action === 'create' ? 'delete' : action === 'delete' ? 'create' : undefined;
       if (inverse === undefined) {
-        if (!input.operationsIncomplete) mAt(['rollback', 'operation'], 'must name an enabled write operation');
+        if (!input.operationsIncomplete) mAt(['rollback', 'operation'], wanted === undefined ? 'must name an enabled write operation' : inverseMessage(wanted));
+      } else if (wanted !== undefined) {
+        const inverseManifest = inverse.located.value.manifest;
+        const inverseAction = inverseManifest?.action ?? 'update';
+        const covers = inverseManifest !== undefined && manifest.fields.every((f) => inverseManifest.fields.includes(f));
+        const matches =
+          inverse.enabled &&
+          inverse.definition.connection === op.definition.connection &&
+          inverseManifest !== undefined &&
+          inverseAction === wanted &&
+          (wanted === 'delete' ? inverse.definition.risk === 'destructive' && inverseManifest.id_field === manifest.id_field : inverse.definition.risk === 'write' && inverseManifest.id_field === manifest.id_field && covers);
+        if (!matches) mAt(['rollback', 'operation'], inverseMessage(wanted));
       } else if (!inverse.enabled || inverse.definition.risk !== 'write') mAt(['rollback', 'operation'], 'must name an enabled write operation');
       else if (inverse.definition.connection !== op.definition.connection) mAt(['rollback', 'operation'], 'must name an operation of the same connection');
       else {

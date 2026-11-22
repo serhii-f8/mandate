@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
 import { hashStoredItems, type ApprovalRecord, type ChangeSetRecord, type HashVersion } from '@mandate/core';
 import { InMemoryAuditLog } from '@mandate/testing';
@@ -45,7 +45,7 @@ operations:
 `,
 };
 
-async function configuration(editorApproval: string, grants = '      - { operation: catalog.update }'): Promise<LoadedConfiguration> {
+async function configuration(editorApproval: string, grants = '      - { operation: catalog.update }', files: Record<string, string> = FILES): Promise<LoadedConfiguration> {
   const roles = `version: 1
 roles:
   - id: editor
@@ -59,7 +59,7 @@ ${grants}
 role_mapping:
   - { group: content, roles: [editor] }
 `;
-  const loaded = await loadConfigurationSources(Object.entries({ ...FILES, 'roles.yaml': roles }).map(([file, text]) => ({ file, text })));
+  const loaded = await loadConfigurationSources(Object.entries({ ...files, 'roles.yaml': roles }).map(([file, text]) => ({ file, text })));
   if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
   return loaded.configuration;
 }
@@ -158,5 +158,96 @@ describe('POL-5 POL-6 execution guard routes approval per grant', () => {
       expect(await guardWith('content_lead').check(changeset)).toEqual({ ok: false, outcome: 'approval_missing' });
       expect(await guardWith('pricing_owner').check(changeset)).toEqual({ ok: true });
     }
+  });
+});
+
+describe('OPS-2 EXE-8 POL-6 execution guard compares the stored action with the current action of the operation', () => {
+  const READ_OPERATIONS = FILES['operations.yaml'].slice(0, FILES['operations.yaml'].indexOf('  - id: catalog.update'));
+  const withUpdateAs = (operation: string): Record<string, string> => ({ ...FILES, 'operations.yaml': READ_OPERATIONS + operation });
+  const CREATE_OPERATION = `  - id: catalog.update
+    connection: magento
+    risk: write
+    description: Create.
+    upstream: { method: POST, path: /async/bulk/V1/products }
+    input_schema:
+      type: object
+      properties:
+        records: { type: array, items: { type: object, properties: { sku: { type: string }, name: { type: string }, price: { type: string } }, required: [sku], additionalProperties: false } }
+      required: [records]
+    manifest:
+      action: create
+      id_field: sku
+      records_arg: records
+      fields: [name, price]
+      scope_args: {}
+      read_before: { operation: catalog.get_products, ids_arg: skus }
+      rollback: { strategy: none }
+`;
+  const DELETE_OPERATION = `  - id: catalog.update
+    connection: magento
+    risk: destructive
+    description: Delete.
+    upstream: { method: POST, path: /async/bulk/V1/products }
+    input_schema:
+      type: object
+      properties:
+        skus: { type: array, items: { type: string } }
+      required: [skus]
+    manifest:
+      action: delete
+      id_field: sku
+      ids_arg: skus
+      fields: [name, price]
+      scope_args: {}
+      read_before: { operation: catalog.get_products, ids_arg: skus }
+      rollback: { strategy: none }
+`;
+  const RULE = '{ required: always, steps: [{ role: content_lead }] }';
+  let asCreate: LoadedConfiguration;
+  let asDelete: LoadedConfiguration;
+  beforeAll(async () => {
+    asCreate = await configuration(RULE, undefined, withUpdateAs(CREATE_OPERATION));
+    asDelete = await configuration(RULE, undefined, withUpdateAs(DELETE_OPERATION));
+  });
+
+  /** Sealed as version 2, with `action` stored only when given: an action-less copy is what an older process derives. */
+  async function sealed(args: Record<string, unknown>, action?: 'update' | 'create' | 'delete'): Promise<ChangeSetRecord> {
+    const base = { ...(await record(args)), hashVersion: 2 as const, ...(action === undefined ? {} : { action }) };
+    return { ...base, hash: await hashStoredItems(noItems, base) };
+  }
+  const guardFor = (cs: ChangeSetRecord) =>
+    createExecutionGuard({ repository: { ...noItems, approvals: () => Promise.resolve([approvedBy('content_lead', cs.hash ?? '')]) }, audit: new InMemoryAuditLog(), newId: () => 'id' });
+  const CREATE_ARGS = { records: [{ sku: 'n1', name: 'N' }] };
+  const DELETE_ARGS = { skus: ['a'] };
+
+  it('OPS-2 a change-set stored as create is refused when the operation is now an update', async () => {
+    const cs = await sealed({ skus: ['a'], changes: { name: 'N' } }, 'create');
+    expect(await guardFor(cs)(A).check(cs)).toEqual({ ok: false, outcome: 'policy_denied' });
+  });
+
+  it('OPS-2 a change-set stored without an action passes against an update operation', async () => {
+    const cs = await sealed({ skus: ['a'], changes: { name: 'N' } });
+    expect(await guardFor(cs)(A).check(cs)).toEqual({ ok: true });
+  });
+
+  it('OPS-2 a change-set stored as create passes against a create operation, one stored as delete against a delete operation', async () => {
+    const created = await sealed(CREATE_ARGS, 'create');
+    expect(await guardFor(created)(asCreate).check(created)).toEqual({ ok: true });
+    const deleted = await sealed(DELETE_ARGS, 'delete');
+    expect(await guardFor(deleted)(asDelete).check(deleted)).toEqual({ ok: true });
+  });
+
+  it('OPS-2 a change-set stored without an action counts as update and is refused against a create or delete operation', async () => {
+    const created = await sealed(CREATE_ARGS);
+    expect(await guardFor(created)(asCreate).check(created)).toEqual({ ok: false, outcome: 'policy_denied' });
+    const deleted = await sealed(DELETE_ARGS);
+    expect(await guardFor(deleted)(asDelete).check(deleted)).toEqual({ ok: false, outcome: 'policy_denied' });
+  });
+
+  it('OPS-2 a stored create is refused against a delete operation and the other way round', async () => {
+    const created = await sealed(DELETE_ARGS, 'create');
+    expect(await guardFor(created)(asDelete).check(created)).toEqual({ ok: false, outcome: 'policy_denied' });
+    const deleted = await sealed(CREATE_ARGS, 'delete');
+    expect(await guardFor(deleted)(asCreate).check(deleted)).toEqual({ ok: false, outcome: 'policy_denied' });
   });
 });

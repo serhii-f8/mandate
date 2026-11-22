@@ -146,7 +146,7 @@ connections:
   `test`. A list value replaces the node as a whole (here the whole `enum`); it is not spliced into a
   surrounding list. Any other mapping, including one with `$param` and other keys, stays as it is.
 - The nodes that name an operation or its field list cannot be parameters: `operations[*].id`,
-  `operations[*].fields_arg`, `operations[*].manifest.values_arg`, `operations[*].manifest.records_arg` and `test.operation`. A
+  `operations[*].fields_arg`, `operations[*].manifest.action`, `operations[*].manifest.values_arg`, `operations[*].manifest.records_arg` and `test.operation`. A
   `{ $param }` there is refused in the preset file (`must not be a parameter`), so a connection
   cannot rename an operation, retarget the test, or move the fields that grants and approval rules
   read.
@@ -196,6 +196,12 @@ key list is in the [Configuration reference](configuration.md).
 Instead of `values_arg` a manifest can declare `records_arg` (since 1.2.0): an array of records, each
 with its `id_field` and its own values, so one change-set changes different targets differently.
 The argument's items must be closed objects; `ids_arg` and `selector` are not used with it.
+
+`action: create` (records the caller identifies, written with one request each) and `action: delete`
+(targets named by `ids_arg` or `selector`, on a `destructive` operation) are available since 1.2.0.
+A delete always needs approval and step-up authentication. A create is undone by naming a delete
+operation as its `inverse_operation`, a delete by naming a create; rolling back a delete restores only
+the manifest's `fields`. `action` is fixed in the preset file and cannot be a `$param`.
 
 ### Code operations
 

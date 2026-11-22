@@ -123,6 +123,7 @@ connections:
 
 | Key | Type | Default | Bounds / notes |
 | --- | --- | --- | --- |
+| `action` | `update`, `create` or `delete` | `update` | Since 1.2.0. What the call does to its targets; a fixed node in presets. `create` needs `records_arg`, no `write.carry_fields`, and every `scope_args` field in `fields`. `delete` needs `ids_arg` or `selector`, neither `values_arg` nor `records_arg`, and `risk: destructive`, so it always needs approval and step-up authentication. `replay_previous_state` is not available for either |
 | `id_field` | string | required | |
 | `ids_arg` | string | none | With `values_arg`: give `ids_arg`, `selector` or both |
 | `values_arg` | string | one of two | Since 1.2.0 optional: declare exactly one of `values_arg` and `records_arg`. A required object property of `input_schema` with `additionalProperties: false`; one set of values for every target |
@@ -136,7 +137,7 @@ connections:
 | `write.carry_fields` | list | none | At least 1 |
 | `batch_size` | integer | 100 | 1-1000 |
 | `max_targets` | integer | 10000 | 1-100000 |
-| `rollback` | object | required | `strategy: replay_previous_state`, `none`, or `inverse_operation` with `operation` |
+| `rollback` | object | required | `strategy: replay_previous_state`, `none`, or `inverse_operation` with `operation`. The inverse of a `create` is a `delete` operation of the same connection and `id_field`; the inverse of a `delete` is a `create` whose `fields` cover this one's. Rolling back a delete restores only the manifest's `fields` |
 
 ```yaml
 operations:
