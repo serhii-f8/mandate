@@ -25,7 +25,7 @@ export async function loadMagentoPreset(
   const connections = [
     'version: 1',
     'presets:',
-    "  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '1.0.0' }",
+    "  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '1.1.0' }",
     'connections:',
     '  - id: magento',
     '    adapter: openapi',
