@@ -14,6 +14,7 @@ import { Writable } from 'node:stream';
 import { promisify } from 'node:util';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CONNECTOR_SDK_VERSION } from '@mandate/connector-sdk';
 import { READ_RESULT_TEXT } from '@mandate/core';
 import { ConfigurationHolder, type ConfigurationLogger } from '@mandate/config';
 import { createDb, DrizzleAuditLog, PostgresConfigRevisionStore, type Database } from '@mandate/db';
@@ -225,6 +226,6 @@ describe('CONN-8 OPS-5 a tarball-installed code preset behind MCP tools', () => 
     const lines: string[] = [];
     const code = await runApiCli(['validate', configDir, '--preset-dir', incompatibleDir], (line) => lines.push(line), { env: {}, defaultPresetDir: null });
     expect(code).toBe(1);
-    expect(lines.join('\n')).toContain('preset_sdk_incompatible: the preset requires connector SDK ^9.0.0; this platform provides 1.0.0');
+    expect(lines.join('\n')).toContain(`preset_sdk_incompatible: the preset requires connector SDK ^9.0.0; this platform provides ${CONNECTOR_SDK_VERSION}`);
   });
 });
