@@ -68,3 +68,4 @@ Requirements cited in the records (`MCP-1`, `POL-3`, `NFR-18`) are defined in th
 | [0070](0070-per-record-values.md) | A write can carry per-record values | 2026-11-22 |
 | [0071](0071-create-and-delete-change-sets.md) | Change-sets can create and delete records | 2026-11-22 |
 | [0072](0072-preparation-checks-and-lookups.md) | Preparation checks and lookups | 2026-11-22 |
+| [0073](0073-verify-after-stage.md) | Verify-after stage | 2026-11-22 |

@@ -53,6 +53,17 @@ export interface ChangeSetStats {
   readonly skipped: number;
   /** EXE-8: rollback outcomes, present once an item has a rollback status. */
   readonly rollback?: RollbackCounts;
+  /** EXE-12: verification outcomes, present once verification began. */
+  readonly verification?: VerificationCounts;
+}
+
+/** EXE-12 (ADR 0073): an item's verification state; absent on an item that was never verified. */
+export type VerificationStatus = 'pending' | 'confirmed' | 'unconfirmed';
+
+export interface VerificationCounts {
+  readonly pending: number;
+  readonly confirmed: number;
+  readonly unconfirmed: number;
 }
 
 export type RollbackItemStatus = 'restored' | 'skipped' | 'failed';
@@ -137,6 +148,13 @@ export interface ChangeItemRecord {
   /** EXE-8: the outcome of restoring this item's `before` value. */
   readonly rollbackStatus?: RollbackItemStatus;
   readonly rollbackError?: string;
+  /** EXE-12: the verification state of a written item; the item's `status` stays `written`. */
+  readonly verificationStatus?: VerificationStatus;
+  /**
+   * EXE-12: the code of the first failing verify check, or a fixed verification code
+   * (`verify_read_failed`, `verify_timeout`, `verify_cancelled`). Never a value (SEC-3).
+   */
+  readonly verificationCode?: string;
 }
 
 /**

@@ -38,6 +38,7 @@ export type {
   ManifestLookup,
   ManifestLookupKey,
   ManifestRead,
+  ManifestVerifyAfter,
   ManifestTemplate,
   RollbackStrategy,
   OperationDefinition,
@@ -89,10 +90,20 @@ export type {
   RollbackCounts,
   RollbackItemStatus,
   RollbackRequest,
+  VerificationCounts,
+  VerificationStatus,
 } from './changeset/model.js';
 export { BUILTIN_EXCLUSION_REASONS, countExclusions, EMPTY_STATS } from './changeset/model.js';
 export { checkRecordFields, failedCheck, type CheckContext } from './changeset/checks.js';
 export { lookupKey, readLookups } from './changeset/lookups.js';
+export {
+  changesetVerificationEvent,
+  VERIFICATION_CODES,
+  verificationSchedule,
+  verifyChunk,
+  type VerificationEnd,
+  type VerificationOutcome,
+} from './changeset/verification.js';
 export {
   CANCELLABLE,
   canTransition,

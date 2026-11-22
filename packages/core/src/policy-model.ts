@@ -100,9 +100,29 @@ export interface ManifestLookup {
   readonly args: Readonly<Record<string, ManifestTemplate>>;
 }
 
+/**
+ * The verify-after stage (EXE-12, ADR 0073): after the last batch, look again at the written items
+ * on a schedule until every check holds or the timeout passes. Its lookups are its own namespace;
+ * `{ record }` means the record as read at the look, through `read_before`.
+ */
+export interface ManifestVerifyAfter {
+  /** Wait before the first look, from the end of the last batch. */
+  readonly afterSeconds: number;
+  /** Wait between looks. */
+  readonly everySeconds: number;
+  /** From the end of the last batch: still-pending items then end `unconfirmed`. */
+  readonly timeoutSeconds: number;
+  /** Evaluated in order on each pending item; all hold means confirmed. */
+  readonly checks: readonly ManifestCheck[];
+  /** Lookups by name that the verify checks read; absent means none. */
+  readonly lookups?: Readonly<Record<string, ManifestLookup>>;
+}
+
 export interface ManifestDefinition {
   /** Absent means `update`. Sealed into the change-set hash from version 2 on (CS-4). */
   readonly action?: ManifestAction;
+  /** The verify-after stage (EXE-12, ADR 0073); absent means none. Not part of the hash. */
+  readonly verifyAfter?: ManifestVerifyAfter;
   /** Preparation checks in order (CS-3, ADR 0072); absent means none. */
   readonly checks?: readonly ManifestCheck[];
   /** Lookups by name that the checks read (OPS-7, ADR 0072); absent means none. */

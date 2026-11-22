@@ -24,6 +24,8 @@ export const AUDIT_ACTIONS = [
   'changeset.submit',
   'changeset.exclude',
   'changeset.rollback',
+  /** EXE-12: once, when verification of an executed change-set ends; counts only. */
+  'changeset.verification',
   'notification.sent',
   'notification.failed',
   'audit.search',

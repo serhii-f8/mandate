@@ -3,7 +3,7 @@
 import type { ManifestDefinition, OperationDefinition } from '../policy-model.js';
 import { CanonicalJsonError, canonicalJson } from './canonical.js';
 import { itemFields, manifestAction } from './fields.js';
-import { existenceReadIncomplete, inScope, touchedFields } from './items.js';
+import { existenceReadIncomplete, inScope, recordsById, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord } from './model.js';
 import type { BatchContext, ChangeWriter, ItemOutcome, PlanEntry, ReadPage, UpstreamReader } from './ports.js';
 import { resolveTemplates } from './templates.js';
@@ -418,30 +418,66 @@ export class ManifestBatchWriter implements ChangeWriter {
     return outcomesOf(plan, decided);
   }
 
-  /** One `read_before` read of `targetIds`, indexed by id (first record wins). */
+  /** One `read_before` read of `targetIds`, indexed by id (first record wins); a failed or incomplete read throws (EXE-4). */
   private async read(
     changeset: ChangeSetRecord,
     reader: UpstreamReader,
     targetIds: readonly string[],
     fields: readonly string[],
   ): Promise<Current> {
-    const rb = this.manifest.readBefore;
-    const args: Record<string, unknown> = { ...resolveTemplates(rb.args, changeset.args), [rb.idsArg]: [...targetIds] };
-    if (this.deps.readFieldsArg !== undefined) args[this.deps.readFieldsArg] = [...fields];
-    const page: ReadPage = await reader.read(rb.operation, args);
-    if (!page.ok) throw new RetryableWriteError('read_failed');
-    if (page.truncated) throw new RetryableWriteError('incomplete_read');
-    // CS-7: for a create or delete (either direction) a short page could hide a record that exists.
-    if (existenceReadIncomplete(this.manifest, page)) throw new RetryableWriteError('incomplete_read');
-    const byId = new Map<string, Readonly<Record<string, unknown>>>();
-    for (const record of page.items) {
-      const id = record[this.manifest.idField];
-      if (typeof id !== 'string' && typeof id !== 'number') continue;
-      const key = String(id);
-      if (!byId.has(key)) byId.set(key, record);
-    }
-    return byId;
+    const read = await readCurrentRecords({
+      manifest: this.manifest,
+      args: changeset.args,
+      reader,
+      readFieldsArg: this.deps.readFieldsArg,
+      targetIds,
+      fields,
+    });
+    if (!read.ok) throw new RetryableWriteError(read.code);
+    return read.records;
   }
+}
+
+/** The answer of `readCurrentRecords`. */
+export type CurrentRecordsRead =
+  | {
+      readonly ok: true;
+      /** The read records by their `idField` as a string; a record without one is skipped and the first wins. */
+      readonly records: ReadonlyMap<string, Readonly<Record<string, unknown>>>;
+      /** The page holds fewer records than the `total` the upstream reports (only possible for an update). */
+      readonly shorterThanTotal: boolean;
+    }
+  | { readonly ok: false; readonly code: 'read_failed' | 'incomplete_read' };
+
+/**
+ * One `read_before` read of `targetIds` with the change-set's arguments: the manifest's templates,
+ * the ids and, when the read takes one, the field list. A failed read is `read_failed`, a truncated one
+ * `incomplete_read`, and so is, for a create or delete (CS-7), a page shorter than its total or with a
+ * record without a readable identifier. Shared by the writer and verification (EXE-12).
+ */
+export async function readCurrentRecords(input: {
+  readonly manifest: ManifestDefinition;
+  readonly args: Readonly<Record<string, unknown>>;
+  readonly reader: UpstreamReader;
+  /** `fields_arg` of `manifest.readBefore.operation`; undefined when that read takes no field list. */
+  readonly readFieldsArg: string | undefined;
+  readonly targetIds: readonly string[];
+  readonly fields: readonly string[];
+}): Promise<CurrentRecordsRead> {
+  const { manifest } = input;
+  const rb = manifest.readBefore;
+  const args: Record<string, unknown> = { ...resolveTemplates(rb.args, input.args), [rb.idsArg]: [...input.targetIds] };
+  if (input.readFieldsArg !== undefined) args[input.readFieldsArg] = [...input.fields];
+  const page: ReadPage = await input.reader.read(rb.operation, args);
+  if (!page.ok) return { ok: false, code: 'read_failed' };
+  if (page.truncated) return { ok: false, code: 'incomplete_read' };
+  // CS-7: for a create or delete (either direction) a short page could hide a record that exists.
+  if (existenceReadIncomplete(manifest, page)) return { ok: false, code: 'incomplete_read' };
+  return {
+    ok: true,
+    records: recordsById(manifest, page.items),
+    shorterThanTotal: page.total !== undefined && page.total > page.items.length,
+  };
 }
 
 /**
