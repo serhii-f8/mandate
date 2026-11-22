@@ -463,14 +463,11 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     if (!UUID.test(newId)) throw new Error('unknown change-set');
     return guarded('change items copy', () =>
       this.db.transaction(async (tx) => {
-        // Both rows locked in ID order (as createPlan locks), so the plan handover below cannot deadlock it.
-        const locked = await tx
-          .select({ id: changeSet.id, status: changeSet.status, planId: changeSet.planId, planStep: changeSet.planStep })
+        const [parent] = await tx
+          .select({ status: changeSet.status })
           .from(changeSet)
-          .where(inArray(changeSet.id, UUID.test(sourceId) ? [newId, sourceId] : [newId]))
-          .orderBy(asc(changeSet.id))
+          .where(eq(changeSet.id, newId))
           .for('update');
-        const parent = locked.find((r) => r.id === newId.toLowerCase());
         if (parent === undefined) throw new Error('unknown change-set');
         if (parent.status !== 'preparing') throw new Error('change-set is not preparing');
         const [existing] = await tx
@@ -489,20 +486,6 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
             ci.before, ci.after
           FROM change_item ci
           WHERE ci.changeset_id = ${sourceId}::uuid`);
-        // CS-5, CS-9: a plan step that is still `prepared` hands its place to the derived change-set. The source
-        // row lock orders this against a submission, a start and createPlan; the source leaves the plan first, so
-        // the unique (plan_id, plan_step) index holds after each statement.
-        const source = locked.find((r) => r.id === sourceId.toLowerCase());
-        if (source?.status === 'prepared' && source.planId !== null && source.planStep !== null) {
-          await tx
-            .update(changeSet)
-            .set({ planId: null, planStep: null, updatedAt: sql`now()` })
-            .where(eq(changeSet.id, sourceId));
-          await tx
-            .update(changeSet)
-            .set({ planId: source.planId, planStep: source.planStep, updatedAt: sql`now()` })
-            .where(eq(changeSet.id, newId));
-        }
         return result.rowCount ?? 0;
       }),
     );
@@ -527,7 +510,32 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
             updatedAt: sql`now()`,
           }
         : { status: 'failed' as const, errorCode: outcome.errorCode, errorStatus: outcome.upstreamStatus ?? null, updatedAt: sql`now()` };
-    return this.compareAndSet(changesetId, ['preparing'], set, audit);
+    if (outcome.status !== 'prepared') return this.compareAndSet(changesetId, ['preparing'], set, audit);
+    return guarded('change-set update', () =>
+      this.db.transaction(async (tx) => {
+        // CS-5, CS-9: a derived change-set takes its source's plan slot in the transaction that seals it.
+        const slot = await lockPlanHandover(tx, changesetId);
+        // The source leaves the plan first, so the unique (plan_id, plan_step) index holds after each statement.
+        if (slot !== undefined) {
+          await tx
+            .update(changeSet)
+            .set({ planId: null, planStep: null, updatedAt: sql`now()` })
+            .where(eq(changeSet.id, slot.sourceId));
+        }
+        const [row] = await tx
+          .update(changeSet)
+          .set({ ...set, ...(slot === undefined ? {} : { planId: slot.planId, planStep: slot.planStep }) })
+          .where(and(eq(changeSet.id, changesetId), eq(changeSet.status, 'preparing')))
+          .returning();
+        if (row === undefined) {
+          // Unreachable with a slot: the row was locked `preparing`. Throwing rolls the source's change back.
+          if (slot !== undefined) throw new Error('change-set left preparing during the plan handover');
+          return undefined;
+        }
+        await this.auditFor(tx).append(audit);
+        return toRecord(row);
+      }),
+    );
   }
 
   async transition(
@@ -1541,6 +1549,37 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
       }),
     );
   }
+}
+
+/**
+ * CS-5, CS-9 (ADR 0074): the plan slot a change-set being sealed takes over from its source, with the locks
+ * held: the `plan` row FOR NO KEY UPDATE first (it does not conflict with the KEY SHARE of foreign-key checks),
+ * then both change_set rows in ID order. Undefined unless the change-set is derived and still `preparing`, and its
+ * source is, under the lock, still `prepared` in the same plan.
+ */
+async function lockPlanHandover(
+  tx: DbExecutor,
+  changesetId: string,
+): Promise<{ sourceId: string; planId: string; planStep: number } | undefined> {
+  const [own] = await tx.select({ derivedFrom: changeSet.derivedFrom }).from(changeSet).where(eq(changeSet.id, changesetId));
+  const sourceId = own?.derivedFrom ?? null;
+  if (sourceId === null) return undefined;
+  const [unlocked] = await tx.select({ planId: changeSet.planId }).from(changeSet).where(eq(changeSet.id, sourceId));
+  const planId = unlocked?.planId ?? null;
+  if (planId === null) return undefined;
+  await tx.select({ id: plan.id }).from(plan).where(eq(plan.id, planId)).for('no key update');
+  const locked = await tx
+    .select({ id: changeSet.id, status: changeSet.status, planId: changeSet.planId, planStep: changeSet.planStep })
+    .from(changeSet)
+    .where(inArray(changeSet.id, [changesetId, sourceId]))
+    .orderBy(asc(changeSet.id))
+    .for('update');
+  const self = locked.find((r) => r.id === changesetId.toLowerCase());
+  const source = locked.find((r) => r.id === sourceId);
+  if (self?.status !== 'preparing' || source?.status !== 'prepared' || source.planId !== planId || source.planStep === null) {
+    return undefined;
+  }
+  return { sourceId, planId, planStep: source.planStep };
 }
 
 function assertRound(round: number): void {

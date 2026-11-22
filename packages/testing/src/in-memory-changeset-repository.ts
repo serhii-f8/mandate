@@ -303,17 +303,8 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     if (entry.items.size > 0) return Promise.reject(new Error('change-set already has items'));
     const ex = new Set(exclude);
     const inc = new Set(include);
-    const sourceEntry = this.entries.get(sourceId);
-    const source = sourceEntry?.items ?? new Map<string, ChangeItemRecord>();
+    const source = this.entries.get(sourceId)?.items ?? new Map<string, ChangeItemRecord>();
     for (const it of source.values()) entry.items.set(it.targetId, derivedItem(it, ex, inc));
-    // CS-5, CS-9: a prepared plan step hands its place to the derived change-set.
-    const plan = sourceEntry?.record.plan;
-    if (sourceEntry !== undefined && plan !== undefined && sourceEntry.record.status === 'prepared') {
-      const left: { -readonly [K in keyof ChangeSetRecord]: ChangeSetRecord[K] } = { ...sourceEntry.record, updatedAt: new Date() };
-      delete left.plan;
-      sourceEntry.record = left;
-      entry.record = { ...entry.record, plan: { ...plan }, updatedAt: new Date() };
-    }
     return Promise.resolve(source.size);
   }
 
@@ -324,6 +315,13 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
   ): Promise<ChangeSetRecord | undefined> {
     const entry = this.entries.get(changesetId);
     if (entry?.record.status !== 'preparing') return undefined;
+    // CS-5, CS-9: a derived change-set takes a still-prepared source's plan slot when it is sealed.
+    const sourceEntry = entry.record.derivedFrom === undefined ? undefined : this.entries.get(entry.record.derivedFrom);
+    const sourcePlan = sourceEntry?.record.status === 'prepared' ? sourceEntry.record.plan : undefined;
+    const handover =
+      outcome.status === 'prepared' && sourceEntry !== undefined && sourcePlan !== undefined
+        ? { source: sourceEntry, before: sourceEntry.record, plan: sourcePlan }
+        : undefined;
     // Check and apply synchronously (compare-and-set); undo if the audit append fails.
     const next: ChangeSetRecord =
       outcome.status === 'prepared'
@@ -337,6 +335,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
             stats: structuredClone(outcome.stats),
             preparedAt: copyDate(outcome.preparedAt),
             updatedAt: new Date(),
+            ...(handover === undefined ? {} : { plan: { ...handover.plan } }),
           }
         : {
             ...entry.record,
@@ -345,7 +344,17 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
             ...(outcome.upstreamStatus === undefined ? {} : { errorStatus: outcome.upstreamStatus }),
             updatedAt: new Date(),
           };
-    await this.commit(entry, next, audit);
+    if (handover !== undefined) {
+      const left: { -readonly [K in keyof ChangeSetRecord]: ChangeSetRecord[K] } = { ...handover.before, updatedAt: new Date() };
+      delete left.plan;
+      handover.source.record = left;
+    }
+    try {
+      await this.commit(entry, next, audit);
+    } catch (error) {
+      if (handover !== undefined) handover.source.record = handover.before;
+      throw error;
+    }
     return copyRecord(next);
   }
 

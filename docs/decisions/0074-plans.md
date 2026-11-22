@@ -79,9 +79,12 @@ skipped as `drift` by CS-7, as today.
 - **Rollback order (amends EXE-8).** A step can be rolled back only when no later step of its plan
   has started executing, or every later step that did is `rolled_back` (`plan_order` otherwise).
 - **Deriving (amends CS-5).** A change-set derived from a plan step that is still `prepared` takes
-  the source's place in the plan in the same transaction as its item copy; the source leaves the
-  plan **(call)**. Derived from a source in any other status, it is outside the plan. The copy
-  locks the source and the new change-set in ID order, the order `create_plan` locks in.
+  the source's place in the plan in the transaction that seals it (its move to `prepared`); the
+  source leaves the plan **(call)**. Derived from a source in any other status, or when its
+  preparation fails, it is outside the plan and the source keeps its slot. The item copy moves
+  nothing, so a derivation that never completes never holds a step. The sealing transaction locks
+  the `plan` row `FOR NO KEY UPDATE`, then both change-sets in ID order, and moves the slot only if
+  the source is still `prepared` in the same plan.
 - **Expiry** is per change-set, as today. An approved step waiting behind a long predecessor can
   expire; the guide says to size `expire_after_hours` for the whole plan.
 - **Views.** `get_changeset` and the change-set pages carry
@@ -105,6 +108,9 @@ skipped as `drift` by CS-7, as today.
 - Rolling back a step waits for every later step that started to be rolled back first.
 - A change-set outside a plan starts, executes and rolls back exactly as before, and old workflow
   histories replay unchanged.
+- Every transaction that needs plan-wide exclusion locks the `plan` row `FOR NO KEY UPDATE` first,
+  then the `change_set` rows in ID order; `FOR NO KEY UPDATE` does not conflict with the `KEY SHARE`
+  lock a foreign-key check takes, but does conflict with itself.
 
 ## Verified
 
@@ -115,8 +121,9 @@ predecessor blocks) and the rollback order. The repository contract, run against
 in-memory store, covers `createPlan` in list order with one `plan.created` row, every refusal with
 nothing written, atomicity with the audit row, two concurrent calls sharing a change-set (exactly
 one succeeds), the `plan_blocked` start that writes nothing and comes before the limits, the start
-after the predecessor completed, and the derive handover from a `prepared` step and its absence from
-a cancelled one. The integration test of migration `0017` shows the guard refusing a membership
+after the predecessor completed, and the derive handover when the derived change-set is sealed from
+a `prepared` step, its absence when the copy alone ran, when the preparation failed, when the audit
+append failed and when the source was cancelled first. The integration test of migration `0017` shows the guard refusing a membership
 change on `pending_approval`, `approved`, `executing`, `completed`, `cancelled` and `expired` rows
 and admitting it on `preparing` and `prepared` ones, the check and unique index, and the `0016`
 verification rule still in force.

@@ -1531,30 +1531,68 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
           expect((await c.repository.get(second))?.status).toBe('prepared');
         }));
 
-      it('CS-5 a change-set derived from a prepared step takes its place; the source leaves the plan', async () =>
+      /** A change-set derived from `source` with its items copied, still `preparing`. */
+      async function derivedFrom(c: Ctx, owner: string, source: string): Promise<string> {
+        const derived = randomUUID();
+        await c.repository.create({ ...newChangeSet(derived), requester: owner, derivedFrom: source }, auditEvent(derived));
+        expect(await c.repository.copyItems(derived, source, [], [])).toBe(1);
+        return derived;
+      }
+
+      function seal(c: Ctx, id: string): Promise<ChangeSetRecord | undefined> {
+        return c.repository.completePreparation(
+          id,
+          { status: 'prepared', hashVersion: 1, hash: 'h', stats: stats({ total: 1, included: 1 }), preparedAt: NOW },
+          auditEvent(id),
+        );
+      }
+
+      it('CS-5 a change-set derived from a prepared step takes its place when it is sealed; the source leaves the plan', async () =>
         withRepo(async (c) => {
           const owner = requester('alice');
           const { planId, first, second } = await twoStepPlan(c, owner);
-          const derived = randomUUID();
-          await c.repository.create({ ...newChangeSet(derived), requester: owner, derivedFrom: second }, auditEvent(derived));
-          expect(await c.repository.copyItems(derived, second, [], [])).toBe(1);
+          const derived = await derivedFrom(c, owner, second);
+          // The copy moves nothing: the slot moves with the seal.
+          expect(await c.repository.get(derived)).not.toHaveProperty('plan');
+          expect((await c.repository.get(second))?.plan).toEqual({ id: planId, step: 2 });
+          expect((await seal(c, derived))?.plan).toEqual({ id: planId, step: 2 });
           expect((await c.repository.get(derived))?.plan).toEqual({ id: planId, step: 2 });
           expect(await c.repository.get(second)).not.toHaveProperty('plan');
           expect((await c.repository.planSteps(planId))?.steps.map((s) => [s.step, s.changesetId, s.status])).toEqual([
             [1, first, 'prepared'],
-            [2, derived, 'preparing'],
+            [2, derived, 'prepared'],
           ]);
+        }));
+
+      it('CS-5 a derivation whose preparation fails leaves the source in its plan slot', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          const { planId, second } = await twoStepPlan(c, owner);
+          const derived = await derivedFrom(c, owner, second);
+          await c.repository.completePreparation(derived, { status: 'failed', errorCode: 'cancelled' }, auditEvent(derived));
+          expect(await c.repository.get(derived)).not.toHaveProperty('plan');
+          expect((await c.repository.get(second))?.plan).toEqual({ id: planId, step: 2 });
+        }));
+
+      it('CS-5 the seal and the handover are atomic with the audit event', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          const { planId, second } = await twoStepPlan(c, owner);
+          const derived = await derivedFrom(c, owner, second);
+          c.failNextAudit();
+          await expect(seal(c, derived)).rejects.toThrow();
+          expect((await c.repository.get(derived))?.status).toBe('preparing');
+          expect(await c.repository.get(derived)).not.toHaveProperty('plan');
+          expect((await c.repository.get(second))?.plan).toEqual({ id: planId, step: 2 });
         }));
 
       it('CS-5 a change-set derived from a step that is no longer prepared stays outside the plan', async () =>
         withRepo(async (c) => {
           const owner = requester('alice');
           const { planId, second } = await twoStepPlan(c, owner);
+          const derived = await derivedFrom(c, owner, second);
           await c.repository.transition(second, ['prepared'], 'cancelled', auditEvent(second));
-          const derived = randomUUID();
-          await c.repository.create({ ...newChangeSet(derived), requester: owner, derivedFrom: second }, auditEvent(derived));
-          expect(await c.repository.copyItems(derived, second, [], [])).toBe(1);
-          expect(await c.repository.get(derived)).not.toHaveProperty('plan');
+          expect(await seal(c, derived)).not.toHaveProperty('plan');
           expect((await c.repository.get(second))?.plan).toEqual({ id: planId, step: 2 });
         }));
     });

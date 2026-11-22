@@ -126,12 +126,14 @@ export interface ChangeSetRepository {
    * item of `sourceId` with the copy rules: a `pending` target in `exclude` becomes `excluded` with reason
    * `requester`; a target in `include` (and not in `exclude`) excluded with reason `requester` becomes `pending`
    * without a reason; every other item keeps status and reason. `before`, `after` and `target_id` are copied and
-   * `error` stays empty. When the source is a plan step and still `prepared`, the same transaction moves its
-   * `plan`/`step` to `newId` and the source leaves the plan (CS-5, CS-9); a source in any other status moves
-   * nothing. Returns the number of rows copied.
+   * `error` stays empty. Returns the number of rows copied.
    */
   copyItems(newId: string, sourceId: string, exclude: readonly string[], include: readonly string[]): Promise<number>;
-  /** Compare-and-set from preparing. */
+  /**
+   * Compare-and-set from preparing. A `prepared` outcome of a derived change-set whose source is, under the lock,
+   * still `prepared` in a plan takes over the source's plan and step in the same transaction, and the source leaves
+   * the plan (CS-5, CS-9); a `failed` outcome moves nothing.
+   */
   completePreparation(changesetId: string, outcome: PreparationCompletion, audit: AuditEventInput): Promise<ChangeSetRecord | undefined>;
   /**
    * Undefined when status is not in `from` (or the change-set is not expired before `expiredBefore`,
