@@ -21,8 +21,11 @@ export type ChangeSetStatus =
 
 export type ItemStatus = 'pending' | 'excluded' | 'written' | 'failed' | 'skipped';
 
-/** `requester`: excluded by the requester when deriving a change-set (CS-5). */
-export type ExclusionReason = 'not_found' | 'out_of_scope' | 'missing_data' | 'no_change' | 'requester';
+/**
+ * `requester`: excluded by the requester when deriving a change-set (CS-5). `already_exists`: a
+ * create whose record is already upstream (OPS-2, ADR 0071).
+ */
+export type ExclusionReason = 'not_found' | 'out_of_scope' | 'missing_data' | 'no_change' | 'already_exists' | 'requester';
 
 export interface ChangeSetStats {
   readonly total: number;

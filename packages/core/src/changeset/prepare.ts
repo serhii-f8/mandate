@@ -234,10 +234,11 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
   const readFieldsArg = req.readFieldsArg(manifest.readBefore.operation);
   const readFields = [
     // Required fields are checked on every record (CS-3), so they are read even when the call does not touch them.
+    // A delete stores every manifest field as its `before` (OPS-2); a create reads its records' fields.
     ...new Set([
       manifest.idField,
       ...Object.values(manifest.scopeArgs),
-      ...touchedFields(manifest, args),
+      ...(manifestAction(manifest) === 'delete' ? manifest.fields : touchedFields(manifest, args)),
       ...manifest.requiredFields,
     ]),
   ];

@@ -563,6 +563,68 @@ describe('EXE-4 CS-7 NFR-2 manifest batch writer', () => {
       ]);
     });
 
+    it('EXE-4 CS-2 resume polls the recorded submission without reading, maps states by plan index and verifies each item over its own fields', async () => {
+      const plan = [
+        { targetId: 'a2', action: 'write' },
+        { targetId: 'c', action: 'outcome', status: 'skipped', error: 'drift' },
+        { targetId: 'b', action: 'write' },
+      ] as const;
+      const c: ChangeItemRecord = { targetId: 'c', status: 'pending', before: { name: 'C1' }, after: { name: 'C2' } };
+
+      const { events, reader, bulk, batch, writer } = setup(recordsOperation);
+      batch.submission = { upstreamBatchId: 'u-7', plan: [...plan] };
+      // Each item reads back its own `after`; the field the other record touches holds anything.
+      reader.pages = [page({ sku: 'a2', brand: 'acme', name: 'A2', price: 9 }, { sku: 'b', brand: 'acme', name: 'changed', price: 2 })];
+      bulk.statuses = [{ ok: true, items: [{ index: 1, state: 'ok' }, { index: 0, state: 'ok' }] }];
+      const outcomes = await writer.writeBatch({ changeset: recordsChangeset, items: [a2, c, b], batch });
+      expect(bulk.submitted).toEqual([]);
+      expect(batch.recorded).toEqual([]);
+      expect(bulk.statusKeys).toEqual([['a2', 'b']]);
+      expect(events.indexOf('read')).toBeGreaterThan(events.indexOf('status'));
+      expect(reader.calls).toHaveLength(1);
+      expect(reader.calls[0]?.args).toMatchObject({ skus: ['a2', 'b'], fields: ['sku', 'name', 'price'] });
+      expect(outcomes).toEqual([
+        { targetId: 'a2', status: 'written' },
+        { targetId: 'c', status: 'skipped', error: 'drift' },
+        { targetId: 'b', status: 'written' },
+      ]);
+
+      // Index 0 is a2 and index 1 is b: a2 failed, b is verified alone and over `price` only.
+      const second = setup(recordsOperation);
+      second.batch.submission = { upstreamBatchId: 'u-8', plan: [...plan] };
+      second.reader.pages = [page({ sku: 'b', brand: 'acme', name: 'changed', price: 3 })];
+      second.bulk.statuses = [{ ok: true, items: [{ index: 1, state: 'ok' }, { index: 0, state: 'failed' }] }];
+      const again = await second.writer.writeBatch({ changeset: recordsChangeset, items: [a2, c, b], batch: second.batch });
+      expect(second.reader.calls[0]?.args).toMatchObject({ skus: ['b'], fields: ['sku', 'price'] });
+      expect(again).toEqual([
+        { targetId: 'a2', status: 'failed', error: 'upstream_failed' },
+        { targetId: 'c', status: 'skipped', error: 'drift' },
+        { targetId: 'b', status: 'skipped', error: 'drift' },
+      ]);
+    });
+
+    it('EXE-8 CS-2 reverse restores each record over its own fields and verifies them', async () => {
+      const { reader, bulk, batch, writer } = setup(recordsOperation, 'reverse');
+      reader.pages = [
+        page({ sku: 'a2', brand: 'acme', name: 'A2', price: 9 }, { sku: 'b', brand: 'acme', name: 'other', price: 2 }),
+        page({ sku: 'a2', brand: 'acme', name: 'A1', price: 9 }, { sku: 'b', brand: 'acme', name: 'changed', price: 1 }),
+      ];
+      bulk.statuses = [states('ok', 'ok')];
+      const outcomes = await writer.writeBatch({ changeset: recordsChangeset, items: [a2, b], batch });
+      expect(bulk.submitted).toEqual([
+        [
+          { sku: 'a2', name: 'A1' },
+          { sku: 'b', price: 1 },
+        ],
+      ]);
+      expect(reader.calls[0]?.args).toMatchObject({ skus: ['a2', 'b'], fields: ['sku', 'name', 'price', 'brand', 'status'] });
+      expect(reader.calls[1]?.args).toMatchObject({ skus: ['a2', 'b'], fields: ['sku', 'name', 'price'] });
+      expect(outcomes).toEqual([
+        { targetId: 'a2', status: 'written' },
+        { targetId: 'b', status: 'written' },
+      ]);
+    });
+
     it('CS-7 a batch of items that all hold no manifest field reads nothing', async () => {
       const { events, batch, writer } = setup(recordsOperation);
       const none: ChangeItemRecord = { targetId: 'c', status: 'pending', before: { other: 1 }, after: { other: 2 } };
@@ -948,14 +1010,14 @@ class FakeDirect implements DirectWriter {
   }
 }
 
-function directSetup(direction?: WriteDirection) {
+function directSetup(direction?: WriteDirection, op: OperationDefinition & { manifest: ManifestDefinition } = operation) {
   const events: string[] = [];
   const reader = new FakeReader(events);
   const direct = new FakeDirect(events);
   const clock = new FakeClock(events);
   const batch = new FakeBatch(events);
   const writer = new ManifestBatchWriter({
-    operation,
+    operation: op,
     readFieldsArg: 'fields',
     readerFor: () => reader,
     directFor: () => direct,
@@ -1128,5 +1190,152 @@ describe('OPS-6 OPS-5 direct write mode', () => {
       ['Z', 'X'],
       ['Z', 'X'],
     ]);
+  });
+});
+
+// ---- Create and delete (CS-7, OPS-2): a `null` side stands for "no record". ----
+
+describe('CS-7 OPS-2 create and delete', () => {
+  const createManifest: ManifestDefinition = {
+    action: 'create',
+    idField: 'sku',
+    recordsArg: 'records',
+    fields: ['name', 'price'],
+    requiredFields: [],
+    scopeArgs: {},
+    readBefore: { operation: 'catalog.get_products_by_sku', args: {}, idsArg: 'skus' },
+    batchSize: 100,
+    maxTargets: 1000,
+    rollback: { strategy: 'inverse_operation', operation: 'catalog.delete_products' },
+  };
+  const createOperation = { ...operation, id: 'catalog.create_products', fieldsArg: 'records', manifest: createManifest };
+  const deleteManifest: ManifestDefinition = {
+    action: 'delete',
+    idField: 'sku',
+    idsArg: 'skus',
+    fields: ['name', 'price'],
+    requiredFields: [],
+    scopeArgs: { brand: 'brand' },
+    readBefore: { operation: 'catalog.get_products_by_sku', args: { brand: { arg: 'brand' } }, idsArg: 'skus' },
+    batchSize: 100,
+    maxTargets: 1000,
+    rollback: { strategy: 'inverse_operation', operation: 'catalog.create_products' },
+  };
+  const deleteOperation = { ...operation, id: 'catalog.delete_products', risk: 'destructive' as const, manifest: deleteManifest };
+  const createChangeset = (...records: Record<string, unknown>[]): ChangeSetRecord => ({
+    ...changesetFor([]),
+    operation: createOperation.id,
+    args: { records },
+  });
+  const deleteChangeset: ChangeSetRecord = { ...changesetFor(['A']), operation: deleteOperation.id, args: { brand: 'acme', skus: ['A'] } };
+  const created = (targetId: string, name: string): ChangeItemRecord => ({ targetId, status: 'pending', before: null, after: { name } });
+  const deleted: ChangeItemRecord = { targetId: 'A', status: 'pending', before: { name: 'N', price: 1 }, after: null };
+
+  it('OPS-2 a create sends the identifier and its values and ends written once the verify read finds the record', async () => {
+    const { events, reader, direct, batch, writer } = directSetup(undefined, createOperation);
+    reader.pages = [page(), page({ sku: 'n1', name: 'N' })];
+    const outcomes = await writer.writeBatch({ changeset: createChangeset({ sku: 'n1', name: 'N' }), items: [created('n1', 'N')], batch });
+    expect(direct.written).toEqual([[{ sku: 'n1', name: 'N' }]]);
+    expect(events).toEqual(['read', 'write', 'read']);
+    expect(reader.calls[1]?.args).toMatchObject({ skus: ['n1'], fields: ['sku', 'name'] });
+    expect(outcomes).toEqual([{ targetId: 'n1', status: 'written' }]);
+  });
+
+  it('CS-7 a create the upstream answers ok but the verify read does not find ends failed not_applied', async () => {
+    const { reader, batch, writer } = directSetup(undefined, createOperation);
+    reader.pages = [page(), page()];
+    const outcomes = await writer.writeBatch({ changeset: createChangeset({ sku: 'n1', name: 'N' }), items: [created('n1', 'N')], batch });
+    expect(outcomes).toEqual([{ targetId: 'n1', status: 'failed', error: 'not_applied' }]);
+  });
+
+  it('CS-7 a create whose verify read finds other values ends skipped drift', async () => {
+    const { reader, batch, writer } = directSetup(undefined, createOperation);
+    reader.pages = [page(), page({ sku: 'n1', name: 'other' })];
+    const outcomes = await writer.writeBatch({ changeset: createChangeset({ sku: 'n1', name: 'N' }), items: [created('n1', 'N')], batch });
+    expect(outcomes).toEqual([{ targetId: 'n1', status: 'skipped', error: 'drift' }]);
+  });
+
+  // A delete call has no values argument: the batch-wide "touches no field" guard must not fire.
+  it('OPS-2 a delete sends only the identifier and ends written when the verify read no longer finds the record', async () => {
+    const { events, reader, direct, batch, writer } = directSetup(undefined, deleteOperation);
+    reader.pages = [page({ sku: 'A', brand: 'acme', name: 'N', price: 1, status: 2 }), page()];
+    const outcomes = await writer.writeBatch({ changeset: deleteChangeset, items: [deleted], batch });
+    expect(direct.written).toEqual([[{ sku: 'A' }]]);
+    expect(events).toEqual(['read', 'write', 'read']);
+    expect(reader.calls[0]?.args).toMatchObject({ skus: ['A'], fields: ['sku', 'name', 'price', 'brand'] });
+    expect(outcomes).toEqual([{ targetId: 'A', status: 'written' }]);
+  });
+
+  it('OPS-6 a delete carries the carry fields of the current record', async () => {
+    const carrying = { ...deleteOperation, manifest: { ...deleteManifest, write: { carryFields: ['status'] } } };
+    const { reader, direct, batch, writer } = directSetup(undefined, carrying);
+    reader.pages = [page({ sku: 'A', brand: 'acme', name: 'N', price: 1, status: 2 }), page()];
+    const outcomes = await writer.writeBatch({ changeset: deleteChangeset, items: [deleted], batch });
+    expect(direct.written).toEqual([[{ sku: 'A', status: 2 }]]);
+    expect(outcomes).toEqual([{ targetId: 'A', status: 'written' }]);
+  });
+
+  it('CS-7 a delete the upstream answers ok but the verify read still finds ends failed not_applied', async () => {
+    const { reader, batch, writer } = directSetup(undefined, deleteOperation);
+    const current = page({ sku: 'A', brand: 'acme', name: 'N', price: 1 });
+    reader.pages = [current, current];
+    const outcomes = await writer.writeBatch({ changeset: deleteChangeset, items: [deleted], batch });
+    expect(outcomes).toEqual([{ targetId: 'A', status: 'failed', error: 'not_applied' }]);
+  });
+
+  it('NFR-2 a retry after write_retriable re-reads and reports the record already created as already_applied', async () => {
+    const { reader, direct, batch, writer } = directSetup(undefined, createOperation);
+    const cs = createChangeset({ sku: 'n1', name: 'N1' }, { sku: 'n2', name: 'N2' });
+    const items = [created('n1', 'N1'), created('n2', 'N2')];
+    reader.pages = [page(), page({ sku: 'n1', name: 'N1' }), page({ sku: 'n1', name: 'N1' }, { sku: 'n2', name: 'N2' })];
+    direct.answers = [directStates('ok', 'retriable'), directStates('ok')];
+    await expect(writer.writeBatch({ changeset: cs, items, batch })).rejects.toMatchObject({
+      name: 'RetryableWriteError',
+      code: 'write_retriable',
+    });
+    const outcomes = await writer.writeBatch({ changeset: cs, items, batch });
+    expect(direct.written).toEqual([
+      [
+        { sku: 'n1', name: 'N1' },
+        { sku: 'n2', name: 'N2' },
+      ],
+      [{ sku: 'n2', name: 'N2' }],
+    ]);
+    expect(outcomes).toEqual([
+      { targetId: 'n1', status: 'written', error: 'already_applied' },
+      { targetId: 'n2', status: 'written' },
+    ]);
+  });
+
+  it('EXE-8 reverse of a written create sends a delete-shaped record and ends written once the record is gone', async () => {
+    const { reader, direct, batch, writer } = directSetup('reverse', createOperation);
+    reader.pages = [page({ sku: 'n1', name: 'N' }), page()];
+    const outcomes = await writer.writeBatch({
+      changeset: createChangeset({ sku: 'n1', name: 'N' }),
+      items: [{ ...created('n1', 'N'), status: 'written' }],
+      batch,
+    });
+    expect(direct.written).toEqual([[{ sku: 'n1' }]]);
+    expect(outcomes).toEqual([{ targetId: 'n1', status: 'written' }]);
+  });
+
+  it('EXE-8 reverse of a written delete sends the identifier with every stored field and ends written once it is back', async () => {
+    const { reader, direct, batch, writer } = directSetup('reverse', deleteOperation);
+    reader.pages = [page(), page({ sku: 'A', brand: 'acme', name: 'N', price: 1 })];
+    const outcomes = await writer.writeBatch({ changeset: deleteChangeset, items: [{ ...deleted, status: 'written' }], batch });
+    expect(direct.written).toEqual([[{ sku: 'A', name: 'N', price: 1 }]]);
+    expect(outcomes).toEqual([{ targetId: 'A', status: 'written' }]);
+  });
+
+  it('EXE-8 reverse of a create already removed reads already_restored and writes nothing', async () => {
+    const { reader, direct, batch, writer } = directSetup('reverse', createOperation);
+    reader.pages = [page()];
+    const outcomes = await writer.writeBatch({
+      changeset: createChangeset({ sku: 'n1', name: 'N' }),
+      items: [{ ...created('n1', 'N'), status: 'written' }],
+      batch,
+    });
+    expect(direct.written).toEqual([]);
+    expect(outcomes).toEqual([{ targetId: 'n1', status: 'written', error: 'already_restored' }]);
   });
 });

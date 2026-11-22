@@ -57,6 +57,11 @@ describe('MCP-4 SEC-5 prepared result', () => {
     expect(r.text).toContain('3 excluded (no_change 1, requester 2).');
   });
 
+  it('OPS-2 the prepared text counts and lists already_exists exclusions of a create', () => {
+    const r = preparedResult({ ...record, stats: { ...record.stats, excluded: { already_exists: 2, requester: 1 } } }, []);
+    expect(r.text).toContain('3 excluded (already_exists 2, requester 1).');
+  });
+
   it('MCP-4 structured content carries the change-set summary, at most 20 items and the cursor; dataText repeats it', () => {
     const r = preparedResult(record, items, 'cursor-1');
     const s = r.structured as { changeset: Record<string, unknown>; items: unknown[]; nextCursor?: string };

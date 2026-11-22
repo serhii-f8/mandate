@@ -5,7 +5,14 @@ import { READ_RESULT_TEXT, readErrorResult } from '../read-result.js';
 import type { ChangeItemRecord, ChangeSetRecord, ExclusionReason } from './model.js';
 import type { ChangeSetKind } from './opaque.js';
 
-const EXCLUSION_ORDER: readonly ExclusionReason[] = ['not_found', 'out_of_scope', 'missing_data', 'no_change', 'requester'];
+const EXCLUSION_ORDER: readonly ExclusionReason[] = [
+  'not_found',
+  'out_of_scope',
+  'missing_data',
+  'no_change',
+  'already_exists',
+  'requester',
+];
 
 /** Fixed change-set result wording (design §6.1), kept in one place so tests compare the same strings. */
 export const CHANGESET_TEXT = {

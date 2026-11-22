@@ -477,6 +477,76 @@ describe('CS-2 per-record values', () => {
   });
 });
 
+describe('OPS-2 CS-4 create and delete', () => {
+  it('OPS-2 CS-4 a create over three records of which one exists prepares two pending and one already_exists, sealed v2 create', async () => {
+    const createManifest: ManifestDefinition = {
+      action: 'create',
+      idField: 'sku',
+      recordsArg: 'records',
+      fields: ['brand', 'name'],
+      requiredFields: [],
+      scopeArgs: { brand: 'brand' },
+      readBefore: baseManifest.readBefore,
+      batchSize: 10,
+      maxTargets: 10_000,
+      rollback: { strategy: 'none' },
+    };
+    const reader = new ScriptedReader({ n2: { sku: 'n2', brand: 'acme', name: 'Old' } });
+    const { deps, repository } = setup(reader);
+    const req = request({
+      brand: 'acme',
+      records: [
+        { sku: 'n3', brand: 'acme', name: 'N3' },
+        { sku: 'n1', brand: 'acme', name: 'N1' },
+        { sku: 'n2', brand: 'acme', name: 'N2' },
+      ],
+    });
+    const out = await prepareChangeSet(deps, { ...req, operation: { ...req.operation, fieldsArg: 'records', manifest: createManifest } });
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(reader.calls[0]?.args.fields).toEqual(['sku', 'brand', 'name']);
+    expect(out.firstItems).toEqual([
+      { targetId: 'n1', status: 'pending', before: null, after: { brand: 'acme', name: 'N1' } },
+      {
+        targetId: 'n2',
+        status: 'excluded',
+        reason: 'already_exists',
+        before: { brand: 'acme', name: 'Old' },
+        after: { brand: 'acme', name: 'N2' },
+      },
+      { targetId: 'n3', status: 'pending', before: null, after: { brand: 'acme', name: 'N3' } },
+    ]);
+    expect(out.changeset.stats).toMatchObject({ total: 3, included: 2, excluded: { already_exists: 1 } });
+    expect(out.changeset.hashVersion).toBe(2);
+    expect(out.changeset.action).toBe('create');
+    expect(out.changeset.hash).toBe(await hashStoredItems(repository, out.changeset));
+  });
+
+  it('OPS-2 a delete by ids reads every manifest field in read_before', async () => {
+    const deleteManifest: ManifestDefinition = {
+      action: 'delete',
+      idField: 'sku',
+      idsArg: 'skus',
+      fields: ['name', 'description'],
+      requiredFields: [],
+      scopeArgs: { brand: 'brand' },
+      readBefore: baseManifest.readBefore,
+      batchSize: 10,
+      maxTargets: 10_000,
+      rollback: { strategy: 'none' },
+    };
+    const reader = new ScriptedReader({ A: product('A') });
+    const { deps } = setup(reader);
+    const req = request({ brand: 'acme', skus: ['A'] });
+    const out = await prepareChangeSet(deps, { ...req, operation: { ...req.operation, manifest: deleteManifest } });
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(reader.calls[0]?.args.fields).toEqual(['sku', 'brand', 'name', 'description']);
+    expect(out.firstItems).toEqual([
+      { targetId: 'A', status: 'pending', before: { name: null, description: 'old' }, after: null },
+    ]);
+    expect(out.changeset.action).toBe('delete');
+  });
+});
+
 describe('OPS-4 selector targets', () => {
   const selectorArgs = { brand: 'acme', changes: { description: 'new' } };
   const page = (ids: string[], total?: number): ReadPage => ({

@@ -129,3 +129,58 @@ describe('CS-7 EXE-8 rollback classification', () => {
     expect(back({ ...base, brand: 'globex', description: 'new' })).toEqual(outcome('skipped', 'gone'));
   });
 });
+
+describe('CS-7 create and delete', () => {
+  // The brief's values over a manifest whose fields hold `price` and whose scope is `brand`: every
+  // record carries `brand: 'acme'` so that it is in scope, except `outOfScopeRecord`.
+  const m: ManifestDefinition = {
+    idField: 'sku',
+    recordsArg: 'records',
+    fields: ['name', 'price'],
+    requiredFields: [],
+    scopeArgs: { brand: 'brand' },
+    readBefore: { operation: 'read', args: {}, idsArg: 'ids' },
+    batchSize: 50,
+    maxTargets: 100,
+    rollback: { strategy: 'none' },
+  };
+  const a = { brand: 'acme' };
+  const classifyItem = (i: { before: unknown; after: unknown }, current: Record<string, unknown> | undefined) =>
+    classifyForWrite({ manifest: m, args: a, item: i, current });
+  const createItem = { before: null, after: { name: 'N' } };
+  const deleteItem = { before: { name: 'N', price: 1 }, after: null };
+  const outOfScopeRecord = { sku: 'x', brand: 'globex', name: 'N', price: 1 };
+
+  it('CS-7 OPS-2 a create writes an absent record, is already applied when present and equal, drift when present and different', () => {
+    expect(classifyItem(createItem, undefined)).toEqual(WRITE);
+    expect(classifyItem(createItem, { sku: 'x', brand: 'acme', name: 'N' })).toMatchObject({
+      status: 'written',
+      error: 'already_applied',
+    });
+    // Review Focus 3: a record that appeared with other values is not overwritten.
+    expect(classifyItem(createItem, { sku: 'x', brand: 'acme', name: 'other' })).toMatchObject({
+      status: 'skipped',
+      error: 'drift',
+    });
+    expect(classifyItem(createItem, outOfScopeRecord)).toMatchObject({ status: 'skipped', error: 'drift' });
+  });
+
+  it('CS-7 OPS-2 a delete is already applied when absent, writes a record still at before, drift otherwise', () => {
+    expect(classifyItem(deleteItem, undefined)).toMatchObject({ status: 'written', error: 'already_applied' });
+    expect(classifyItem(deleteItem, { sku: 'x', brand: 'acme', name: 'N', price: 1 })).toEqual(WRITE);
+    // Review Focus 4: a record changed since approval is not deleted.
+    expect(classifyItem(deleteItem, { sku: 'x', brand: 'acme', name: 'N', price: 2 })).toMatchObject({
+      status: 'skipped',
+      error: 'drift',
+    });
+    expect(classifyItem(deleteItem, outOfScopeRecord)).toMatchObject({ status: 'skipped', error: 'drift' });
+  });
+
+  it('EXE-8 CS-7 rolling back a written create: present and equal is a write, absent is already_restored', () => {
+    const back = (current: Record<string, unknown> | undefined) =>
+      classifyForRollback({ manifest: m, args: a, item: createItem, current });
+    expect(back({ sku: 'x', brand: 'acme', name: 'N' })).toEqual(WRITE);
+    expect(back(undefined)).toEqual(outcome('written', 'already_restored'));
+    expect(back({ sku: 'x', brand: 'acme', name: 'other' })).toEqual(outcome('skipped', 'drift'));
+  });
+});

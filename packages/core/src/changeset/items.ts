@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import type { ManifestDefinition } from '../policy-model.js';
-import { callRecords } from './fields.js';
+import { callRecords, manifestAction } from './fields.js';
 import type { ChangeItemRecord, ExclusionReason } from './model.js';
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -69,6 +69,37 @@ function excluded(
   return { targetId, status: 'excluded', reason, before, after };
 }
 
+function missingRequired(manifest: ManifestDefinition, values: Readonly<Record<string, unknown>>): boolean {
+  return manifest.requiredFields.some((f) => values[f] === undefined || values[f] === null);
+}
+
+/**
+ * The item of one create target (OPS-2, ADR 0071), whose values are its own record of the call. A
+ * record already upstream is `already_exists`, holding the current values of the record's fields
+ * only when that record is inside the call's scope (an out-of-scope record shows nothing, as for
+ * `out_of_scope`). Scope and `required_fields` are checked against the new record's own values.
+ */
+function createItem(
+  manifest: ManifestDefinition,
+  args: Readonly<Record<string, unknown>>,
+  targetId: string,
+  existing: Readonly<Record<string, unknown>> | undefined,
+  perRecord: ReadonlyMap<string, Readonly<Record<string, unknown>>> | undefined,
+): ChangeItemRecord {
+  const values = perRecord?.get(targetId) ?? {};
+  if (existing !== undefined) {
+    let before: Record<string, unknown> | null = null;
+    if (inScope(manifest, args, existing)) {
+      before = {};
+      for (const f of valuesFields(manifest, values)) before[f] = existing[f] ?? null;
+    }
+    return excluded(targetId, 'already_exists', before, { ...values });
+  }
+  if (!inScope(manifest, args, values)) return excluded(targetId, 'out_of_scope');
+  if (missingRequired(manifest, values)) return excluded(targetId, 'missing_data');
+  return { targetId, status: 'pending', before: null, after: { ...values } };
+}
+
 export function buildItems(input: {
   manifest: ManifestDefinition;
   args: Readonly<Record<string, unknown>>;
@@ -85,6 +116,8 @@ export function buildItems(input: {
   }
   // One values object for every target, or each target's own record (CS-2).
   const perRecord = callRecords(manifest, args);
+  const action = manifestAction(manifest);
+  if (action === 'create') return targetIds.map((targetId) => createItem(manifest, args, targetId, byId.get(targetId), perRecord));
   const shared = valuesOf(manifest, args);
   const sharedFields = valuesFields(manifest, shared);
 
@@ -92,8 +125,12 @@ export function buildItems(input: {
     const record = byId.get(targetId);
     if (record === undefined) return excluded(targetId, 'not_found');
     if (!inScope(manifest, args, record)) return excluded(targetId, 'out_of_scope');
-    if (manifest.requiredFields.some((f) => record[f] === undefined || record[f] === null)) {
-      return excluded(targetId, 'missing_data');
+    if (missingRequired(manifest, record)) return excluded(targetId, 'missing_data');
+    if (action === 'delete') {
+      // What the approver sees and what drift compares: every manifest field, missing as null (OPS-2).
+      const before: Record<string, unknown> = {};
+      for (const f of manifest.fields) before[f] = record[f] ?? null;
+      return { targetId, status: 'pending', before, after: null };
     }
     const values = perRecord === undefined ? shared : (perRecord.get(targetId) ?? {});
     const fields = perRecord === undefined ? sharedFields : valuesFields(manifest, values);

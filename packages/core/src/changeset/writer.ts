@@ -2,7 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import type { ManifestDefinition, OperationDefinition } from '../policy-model.js';
 import { CanonicalJsonError, canonicalJson } from './canonical.js';
-import { itemFields } from './fields.js';
+import { itemFields, manifestAction } from './fields.js';
 import { inScope, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord } from './model.js';
 import type { BatchContext, ChangeWriter, ItemOutcome, PlanEntry, ReadPage, UpstreamReader } from './ports.js';
@@ -22,7 +22,9 @@ export type WriteOutcomeCode =
   | 'upstream_unavailable'
   | 'egress_denied'
   | 'credential_missing'
-  | 'credential_unusable';
+  | 'credential_unusable'
+  /** The upstream answered `ok`, but a create is still absent or a delete still present (CS-7). */
+  | 'not_applied';
 
 export type WriteClassification =
   | { readonly action: 'write' }
@@ -37,11 +39,14 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * Decide, from a fresh read, whether an item may be written (CS-7, NFR-2).
- * Rules in order: missing or out of scope is gone; every field the item touches
- * (`itemFields`) already equals `after` is already applied; every one still
- * equals `before` is a write; anything else is drift. Absent and null are the
- * same value; comparison is canonical JSON, so object key order is irrelevant.
+ * Decide, from a fresh read, whether an item may be written (CS-7, NFR-2). A side that is `null`
+ * stands for "no record" (a create's `before`, a delete's `after`, ADR 0071); the record is present
+ * when it was read and is in scope. A side matches when it is `null` and nothing was read, or the
+ * record is present and every field the item touches (`itemFields`) equals that side.
+ * Rules in order: matches `after` is already applied; matches `before` is a write; neither side
+ * `null` and the record not present is gone; anything else is drift (so a create never overwrites a
+ * record that appeared, and a delete never removes one changed since approval). Absent and null are
+ * the same value; comparison is canonical JSON, so object key order is irrelevant.
  */
 export function classifyForWrite(input: {
   readonly manifest: ManifestDefinition;
@@ -50,16 +55,17 @@ export function classifyForWrite(input: {
   readonly current: Readonly<Record<string, unknown>> | undefined;
 }): WriteClassification {
   const { manifest, args, item, current } = input;
-  if (current === undefined || !inScope(manifest, args, current)) {
-    return { action: 'outcome', status: 'skipped', error: 'gone' };
-  }
+  const present = current !== undefined && inScope(manifest, args, current);
   const fields = itemFields(manifest, item);
-  const before = isRecord(item.before) ? item.before : {};
-  const after = isRecord(item.after) ? item.after : {};
-  const equals = (expected: Readonly<Record<string, unknown>>): boolean =>
-    fields.every((f) => canonicalJson(current[f] ?? null) === canonicalJson(expected[f] ?? null));
-  if (equals(after)) return { action: 'outcome', status: 'written', error: 'already_applied' };
-  if (equals(before)) return { action: 'write' };
+  const matches = (side: unknown): boolean => {
+    if (side === null) return current === undefined;
+    if (!present) return false;
+    const expected = isRecord(side) ? side : {};
+    return fields.every((f) => canonicalJson(current[f] ?? null) === canonicalJson(expected[f] ?? null));
+  };
+  if (matches(item.after)) return { action: 'outcome', status: 'written', error: 'already_applied' };
+  if (matches(item.before)) return { action: 'write' };
+  if (item.before !== null && item.after !== null && !present) return { action: 'outcome', status: 'skipped', error: 'gone' };
   return { action: 'outcome', status: 'skipped', error: 'drift' };
 }
 
@@ -211,8 +217,10 @@ export class ManifestBatchWriter implements ChangeWriter {
 
   /**
    * With no field to compare an item would look already applied, so it fails `write_mode_unsupported`
-   * instead: every item when the call touches no field, else each item that touches none (CS-7). The
-   * other items are written; outcomes keep the input order.
+   * instead: every item when an update call touches no field, else each item that touches none (CS-7).
+   * The call-wide rule is for `update` only: a delete call has no values (and the rollback of a create
+   * or delete runs with the arguments of the other action), so there each item's own fields decide.
+   * The other items are written; outcomes keep the input order.
    */
   private async writeForward(input: WriteInput): Promise<readonly ItemOutcome[]> {
     const { changeset, items, batch } = input;
@@ -222,8 +230,9 @@ export class ManifestBatchWriter implements ChangeWriter {
       error: 'write_mode_unsupported',
     });
     const supported = items.filter((i) => itemFields(this.manifest, i).length > 0);
+    const callTouchesNothing = manifestAction(this.manifest) === 'update' && touchedFields(this.manifest, changeset.args).length === 0;
     // Resume (EXE-4) keeps its order: a recorded submission is polled before anything else is decided.
-    if (batch.submission === undefined && (touchedFields(this.manifest, changeset.args).length === 0 || supported.length === 0)) {
+    if (batch.submission === undefined && (callTouchesNothing || supported.length === 0)) {
       return items.map(unsupported);
     }
     if (supported.length === items.length) return this.writeSupported(input);
@@ -309,17 +318,14 @@ export class ManifestBatchWriter implements ChangeWriter {
     for (const item of items) {
       const cur = current.get(item.targetId);
       const c = safeClassify(m, changeset.args, item, cur);
-      // `write` is only answered for a found record, so `cur` is defined on that path.
-      if (c.action === 'outcome' || cur === undefined) {
+      const record = c.action === 'write' ? writeRecord(m, carry, item, cur) : undefined;
+      if (c.action === 'outcome' || record === undefined) {
+        // `writeRecord` answers for every `write` classification; the fallback only fails closed.
         const o = c.action === 'outcome' ? c : ({ status: 'skipped', error: 'gone' } as const);
         plan.push({ targetId: item.targetId, action: 'outcome', status: o.status, error: o.error });
         continue;
       }
       plan.push({ targetId: item.targetId, action: 'write' });
-      const after = isRecord(item.after) ? item.after : {};
-      const record: Record<string, unknown> = { [m.idField]: cur[m.idField] };
-      for (const f of carry) if (Object.hasOwn(cur, f)) record[f] = cur[f];
-      for (const f of itemFields(m, item)) record[f] = after[f] ?? null;
       records.push(record);
     }
     return { plan, records };
@@ -406,17 +412,7 @@ export class ManifestBatchWriter implements ChangeWriter {
       const byId = new Map(items.map((i) => [i.targetId, i]));
       const toVerify = candidates.flatMap((targetId) => byId.get(targetId) ?? []);
       const current = await this.read(changeset, reader, candidates, [...new Set([m.idField, ...unionFields(m, toVerify)])]);
-      for (const targetId of candidates) {
-        const cur = current.get(targetId);
-        if (cur === undefined) {
-          decided.set(targetId, { targetId, status: 'skipped', error: 'gone' });
-          continue;
-        }
-        const item = byId.get(targetId);
-        const after = item !== undefined && isRecord(item.after) ? item.after : {};
-        const written = item !== undefined && safeEquals(itemFields(m, item), cur, after);
-        decided.set(targetId, written ? { targetId, status: 'written' } : { targetId, status: 'skipped', error: 'drift' });
-      }
+      for (const targetId of candidates) decided.set(targetId, verified(m, targetId, byId.get(targetId), current.get(targetId)));
     }
     return outcomesOf(plan, decided);
   }
@@ -443,6 +439,57 @@ export class ManifestBatchWriter implements ChangeWriter {
     }
     return byId;
   }
+}
+
+/**
+ * The record sent for an item classified `write` (OPS-2, ADR 0071). A create (`before` null):
+ * `{ id_field: targetId, ...after }`. A delete (`after` null): `{ id_field }` plus the carry fields of
+ * the current record. An update: `{ id_field }`, the carry fields, then the item's fields from `after`.
+ * In reverse the swapped item takes the other shape, so a rollback needs nothing more. `undefined`
+ * when a delete or an update has no current record (never so for a `write` classification).
+ */
+function writeRecord(
+  m: ManifestDefinition,
+  carry: readonly string[],
+  item: ChangeItemRecord,
+  cur: Readonly<Record<string, unknown>> | undefined,
+): Record<string, unknown> | undefined {
+  if (item.before === null) {
+    const after = isRecord(item.after) ? item.after : {};
+    const record: Record<string, unknown> = { [m.idField]: item.targetId };
+    for (const f of itemFields(m, item)) record[f] = after[f] ?? null;
+    return record;
+  }
+  if (cur === undefined) return undefined;
+  const record: Record<string, unknown> = { [m.idField]: cur[m.idField] };
+  for (const f of carry) if (Object.hasOwn(cur, f)) record[f] = cur[f];
+  if (item.after === null) return record;
+  const after = isRecord(item.after) ? item.after : {};
+  for (const f of itemFields(m, item)) record[f] = after[f] ?? null;
+  return record;
+}
+
+/**
+ * The outcome of an item the upstream answered `ok`, from the verify read (CS-7). A delete (`after`
+ * null): absent is written, still present `failed/not_applied`. A create (`before` null): absent is
+ * `failed/not_applied`. Otherwise absent is gone, and a present record is written when it equals
+ * `after` over the item's fields, else drift (also for an `ok` index with no item).
+ */
+function verified(
+  m: ManifestDefinition,
+  targetId: string,
+  item: ChangeItemRecord | undefined,
+  cur: Readonly<Record<string, unknown>> | undefined,
+): ItemOutcome {
+  if (item?.after === null) {
+    return cur === undefined ? { targetId, status: 'written' } : { targetId, status: 'failed', error: 'not_applied' };
+  }
+  if (cur === undefined) {
+    return item?.before === null ? { targetId, status: 'failed', error: 'not_applied' } : { targetId, status: 'skipped', error: 'gone' };
+  }
+  const after = item !== undefined && isRecord(item.after) ? item.after : {};
+  const written = item !== undefined && safeEquals(itemFields(m, item), cur, after);
+  return written ? { targetId, status: 'written' } : { targetId, status: 'skipped', error: 'drift' };
 }
 
 /** The fields any of `items` touches, in manifest `fields` order (the read field list of a batch). */
