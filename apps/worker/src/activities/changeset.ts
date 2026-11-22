@@ -74,6 +74,8 @@ export interface ActivityDeps {
 /** The repository's page limit: a verification chunk is the manifest's batch size, at most this. */
 const VERIFY_PAGE_MAX = 500;
 const SECOND_MS = 1000;
+/** EXE-12: the wait between looks of a begun verification whose operation lost `verify_after` (the manifest default). */
+const FALLBACK_VERIFY_EVERY_MS = 30_000;
 
 const notFound = (): ApplicationFailure => ApplicationFailure.nonRetryable('changeset_not_found');
 const superseded = (): ApplicationFailure => ApplicationFailure.nonRetryable('batch_superseded');
@@ -379,15 +381,20 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
       const changeset = await load(changesetId);
       markActivitySpan(changeset, 'execute');
       const manifest = verificationManifest(deps.configuration(), changeset.operation);
-      if (manifest === undefined) return { ok: false };
+      const stored = changeset.verificationUntil;
+      // A verification that already began is always finished, even when the operation has lost
+      // its manifest or verify_after since: verifyBatch then records verify_read_failed and the
+      // stored deadline closes the items as unconfirmed.
+      if (manifest === undefined && stored === undefined) return { ok: false };
       // Write-once (NFR-2): a retry or a continued run gets the stored schedule, not this one.
-      const begun = await repository.beginVerification(changesetId, verificationSchedule(manifest.verifyAfter, deps.now()));
+      const schedule = manifest === undefined ? { firstAt: deps.now(), until: deps.now() } : verificationSchedule(manifest.verifyAfter, deps.now());
+      const begun = await repository.beginVerification(changesetId, schedule);
       if (begun === undefined) return { ok: false };
       return {
         ok: true,
         firstAtMs: begun.firstAt.getTime(),
         untilMs: begun.until.getTime(),
-        everyMs: manifest.verifyAfter.everySeconds * SECOND_MS,
+        everyMs: manifest === undefined ? FALLBACK_VERIFY_EVERY_MS : manifest.verifyAfter.everySeconds * SECOND_MS,
         round: begun.round,
         pending: begun.pending,
       };

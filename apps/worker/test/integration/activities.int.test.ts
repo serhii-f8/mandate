@@ -571,6 +571,22 @@ describe('change-set activities', () => {
       expect((await repository.get(cs.id))?.verificationUntil).toBeUndefined();
     });
 
+    it('EXE-12 NFR-2 a verification that began is finished: beginVerification answers the stored schedule after verify_after is gone', async () => {
+      const cs = await written();
+      const first = await attempt(1, () => activities({ configuration: verifying(), now: () => new Date(T0) }).beginVerification(cs.id));
+      expect(first).toMatchObject({ ok: true, untilMs: T0 + 60_000 });
+      // The operation lost verify_after since: the stored schedule still holds, the wait falls back to 30 s.
+      const later = activities({ now: () => new Date(T0 + 3_600_000) });
+      await expect(attempt(1, () => later.beginVerification(cs.id))).resolves.toEqual({
+        ok: true,
+        firstAtMs: T0 + 5_000,
+        untilMs: T0 + 60_000,
+        everyMs: 30_000,
+        round: 0,
+        pending: 2,
+      });
+    });
+
     it('EXE-12 SEC-3 verifyBatch confirms what holds and keeps the rest pending with the code only', async () => {
       const cs = await written();
       const reader = new LiveReader(['t-0001']);

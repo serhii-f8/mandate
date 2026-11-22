@@ -113,7 +113,9 @@ export interface RollbackBatchResult extends RollbackCounts {
 /**
  * EXE-12: the stored verification schedule in epoch milliseconds, the wait between looks, the last
  * round in which an item missed (0 when none) and the pending count; `ok: false` when there is
- * nothing to verify (the change-set is no longer executing, or the operation lost `verify_after`).
+ * nothing to verify (the change-set is no longer executing, or no schedule is stored and the
+ * operation has no `verify_after`). A verification that began keeps its stored schedule even when
+ * the operation lost `verify_after` since; `everyMs` is then 30000.
  */
 export type BeginVerificationResult =
   | {
@@ -130,7 +132,7 @@ export type BeginVerificationResult =
 export interface VerifyBatchResult {
   /** Items this chunk confirmed. */
   readonly confirmed: number;
-  /** Pending items this round has not looked at yet. */
+  /** Pending items this round has not looked at yet; 0 when `cancelRequested`. */
   readonly left: number;
   /** Pending items in total. */
   readonly pending: number;
