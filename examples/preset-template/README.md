@@ -29,7 +29,7 @@ pnpm mandate validate <config-dir> --preset-dir examples
 ```
 
 The configuration binds the preset to a connection, for example
-`presets: [{ id: notes, package: '@mandate-examples/preset-template', version: '1.1.0' }]` and a
+`presets: [{ id: notes, package: '@mandate-examples/preset-template', version: '1.2.0' }]` and a
 connection with `preset: notes`, `adapter: openapi` and a `base_url`. The parameter `search_fields` (the fields
 `notes.search` may return) can be narrowed with `preset_params: { search_fields: [id, title] }`; see
 [Parameters](../../docs/guide/presets.md#parameters).

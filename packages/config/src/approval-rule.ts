@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
-import { allowingRole, resolveApprovalRule, touchedCallFields, type OperationDefinition, type RoleApprovalRule } from '@mandate/core';
+import { allowingRole, recordsIdField, resolveApprovalRule, touchedCallFields, type OperationDefinition, type RoleApprovalRule } from '@mandate/core';
 import type { LoadedConfiguration } from './load.js';
 
 /** The reference of the grant behind an allow decision's rule, without a trailing `/scope:...`-style suffix. */
@@ -32,6 +32,6 @@ export function approvalRuleFor(
   return resolveApprovalRule({
     ...(roleRule === undefined ? {} : { role: roleRule }),
     ...(grant === undefined ? {} : { grant }),
-    fields: operation === undefined ? 'unreadable' : touchedCallFields(operation.fieldsArg, args),
+    fields: operation === undefined ? 'unreadable' : touchedCallFields(operation.fieldsArg, args, recordsIdField(operation)),
   });
 }

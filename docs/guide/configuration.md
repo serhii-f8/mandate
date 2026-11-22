@@ -102,7 +102,7 @@ connections:
 | `description` | string | required | 1-2000 characters |
 | `upstream` | object | required | See below |
 | `input_schema` | JSON Schema object | derived from the spec | Open object; required when `upstream` uses templates |
-| `fields_arg` | string | none | 1-128 characters; the argument that selects returned fields; for a write it must equal `manifest.values_arg` |
+| `fields_arg` | string | none | 1-128 characters; the argument that selects returned fields; for a write it defaults to, and must equal, `manifest.values_arg` or `manifest.records_arg` |
 | `manifest` | object | none | Required for `write`; allowed on `destructive`; not allowed on `read` or `write_opaque` |
 
 `upstream` takes one of three forms, chosen by its keys:
@@ -124,8 +124,9 @@ connections:
 | Key | Type | Default | Bounds / notes |
 | --- | --- | --- | --- |
 | `id_field` | string | required | |
-| `ids_arg` | string | none | Give `ids_arg`, `selector` or both |
-| `values_arg` | string | required | A required object property of `input_schema` with `additionalProperties: false` |
+| `ids_arg` | string | none | With `values_arg`: give `ids_arg`, `selector` or both |
+| `values_arg` | string | one of two | Since 1.2.0 optional: declare exactly one of `values_arg` and `records_arg`. A required object property of `input_schema` with `additionalProperties: false`; one set of values for every target |
+| `records_arg` | string | one of two | Since 1.2.0. A required array property of `input_schema` whose items are closed objects (`additionalProperties: false`) with `id_field` (required, `string` or `integer`) and properties from `fields`; each record carries its own values. `ids_arg` and `selector` are not allowed with it. `fields_arg` defaults to it |
 | `fields` | list | required | At least 1 |
 | `required_fields` | list | `[]` | |
 | `sensitive_fields` | list | `[]` | Each must be in `fields`; the audit trail redacts their values |

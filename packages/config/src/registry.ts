@@ -161,8 +161,8 @@ export function buildRegistry(input: RegistryInput): Registry {
   const definitionOf = (located: OperationSource, schema: Readonly<Record<string, unknown>>): { definition: OperationDefinition; enabled: boolean } => {
     const op = located.value;
     const override = overrideByOp.get(op.id)?.value;
-    // OPS-2: `fields_arg` of a manifest operation defaults to `values_arg`.
-    const fieldsArg = op.fields_arg ?? op.manifest?.values_arg;
+    // OPS-2: `fields_arg` of a manifest operation defaults to `values_arg`, or `records_arg`.
+    const fieldsArg = op.fields_arg ?? op.manifest?.values_arg ?? op.manifest?.records_arg;
     const definition: OperationDefinition = {
       id: op.id,
       toolName: override?.tool_name ?? op.id,
@@ -560,7 +560,11 @@ export function propertiesOf(schema: Readonly<Record<string, unknown>>): Set<str
  * object with `additionalProperties: false`, or the `items.enum` of an array. Undefined when the
  * operation has no fields argument or its schema is open, so any name may be touched.
  */
-export function closedFieldNames(definition: { readonly inputSchema: Readonly<Record<string, unknown>>; readonly fieldsArg?: string }): ReadonlySet<string> | undefined {
+export function closedFieldNames(definition: {
+  readonly inputSchema: Readonly<Record<string, unknown>>;
+  readonly fieldsArg?: string;
+  readonly manifest?: { readonly idField: string; readonly recordsArg?: string };
+}): ReadonlySet<string> | undefined {
   if (definition.fieldsArg === undefined) return undefined;
   const properties = definition.inputSchema.properties;
   if (typeof properties !== 'object' || properties === null) return undefined;
@@ -570,7 +574,12 @@ export function closedFieldNames(definition: { readonly inputSchema: Readonly<Re
   if (schema.additionalProperties === false) return propertiesOf(schema);
   const items = schema.items;
   if (schema.type === 'array' && typeof items === 'object' && items !== null) {
-    const values: unknown = (items as Record<string, unknown>).enum;
+    const item = items as Record<string, unknown>;
+    // Records (ADR 0070): the item properties, without the id field, which is never a touched field.
+    if (item.additionalProperties === false && definition.manifest?.recordsArg === definition.fieldsArg) {
+      return new Set([...propertiesOf(item)].filter((name) => name !== definition.manifest?.idField));
+    }
+    const values: unknown = item.enum;
     if (Array.isArray(values)) return new Set(values.filter((v): v is string => typeof v === 'string'));
   }
   return undefined;

@@ -75,6 +75,6 @@ describe('NFR-10 api readiness probes', () => {
 
 describe('NFR-10 api liveness', () => {
   it('NFR-10 /healthz reports the product version', () => {
-    expect(new HealthController(dbOk(), active, null).live()).toEqual({ ok: true, version: '1.1.0' });
+    expect(new HealthController(dbOk(), active, null).live()).toEqual({ ok: true, version: '1.2.0' });
   });
 });

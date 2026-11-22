@@ -146,7 +146,7 @@ connections:
   `test`. A list value replaces the node as a whole (here the whole `enum`); it is not spliced into a
   surrounding list. Any other mapping, including one with `$param` and other keys, stays as it is.
 - The nodes that name an operation or its field list cannot be parameters: `operations[*].id`,
-  `operations[*].fields_arg`, `operations[*].manifest.values_arg` and `test.operation`. A
+  `operations[*].fields_arg`, `operations[*].manifest.values_arg`, `operations[*].manifest.records_arg` and `test.operation`. A
   `{ $param }` there is refused in the preset file (`must not be a parameter`), so a connection
   cannot rename an operation, retarget the test, or move the fields that grants and approval rules
   read.
@@ -192,6 +192,10 @@ manifest:
 optional array of ids, so the platform can capture the current state of exactly the records the
 change touches. `replay_previous_state` rolls back by writing the captured values again. The full
 key list is in the [Configuration reference](configuration.md).
+
+Instead of `values_arg` a manifest can declare `records_arg` (since 1.2.0): an array of records, each
+with its `id_field` and its own values, so one change-set changes different targets differently.
+The argument's items must be closed objects; `ids_arg` and `selector` are not used with it.
 
 ### Code operations
 
@@ -277,7 +281,7 @@ Extract it into a directory that is on `MANDATE_PRESET_DIRS`, one subdirectory p
 
 ```bash
 mkdir -p /srv/mandate-presets/notes
-tar -xzf mandate-examples-preset-template-1.1.0.tgz --strip-components=1 -C /srv/mandate-presets/notes
+tar -xzf mandate-examples-preset-template-1.2.0.tgz --strip-components=1 -C /srv/mandate-presets/notes
 ```
 
 Reference it by its package name and apply the configuration. The running api and worker pick up an

@@ -96,7 +96,7 @@ describe('CONN-8 preset lookup in preset directories', () => {
         {
           file: '@mandate/fake-preset/package.json',
           path: 'mandate.sdk',
-          message: 'preset_sdk_incompatible: the preset requires connector SDK ^2.0.0; this platform provides 1.1.0',
+          message: 'preset_sdk_incompatible: the preset requires connector SDK ^2.0.0; this platform provides 1.2.0',
         },
       ],
     });

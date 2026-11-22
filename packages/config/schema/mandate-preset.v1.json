@@ -305,6 +305,11 @@
                     ],
                     "type": "object"
                   },
+                  "records_arg": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "required_fields": {
                     "default": [],
                     "items": {
@@ -499,7 +504,6 @@
                 },
                 "required": [
                   "id_field",
-                  "values_arg",
                   "fields",
                   "read_before",
                   "rollback"
@@ -677,5 +681,5 @@
   },
   "$id": "https://mandate.invalid/schema/mandate-preset.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "x-mandate-sdk-version": "1.1.0"
+  "x-mandate-sdk-version": "1.2.0"
 }

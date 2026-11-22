@@ -2,8 +2,8 @@
 // Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import type { Caller } from './caller.js';
-import { createPolicyEngine, grantReference, type EvaluationRequest } from './policy-engine.js';
-import type { PolicyConfiguration } from './policy-model.js';
+import { createPolicyEngine, grantReference, touchedFields, type EvaluationRequest } from './policy-engine.js';
+import type { ManifestDefinition, PolicyConfiguration } from './policy-model.js';
 
 const objectSchema = { type: 'object' } as const;
 
@@ -210,5 +210,55 @@ describe('POL-5 grant reference', () => {
     // The second grant of content_manager has no ID; the first has one.
     expect(search({ brand: 'initech', fields: ['name'] }).rule).toBe(grantReference('content_manager', undefined, 1));
     expect(search({ brand: 'acme', fields: ['name'] }).rule).toBe(grantReference('content_manager', 'own-brands', 0));
+  });
+});
+
+describe('POL-3 per-record fields', () => {
+  const manifest: ManifestDefinition = {
+    idField: 'sku',
+    recordsArg: 'records',
+    fields: ['name', 'price'],
+    requiredFields: [],
+    scopeArgs: {},
+    readBefore: { operation: 'catalog.get', idsArg: 'skus', args: {} },
+    batchSize: 100,
+    maxTargets: 10_000,
+    rollback: { strategy: 'none' },
+  };
+  const operation = { id: 'catalog.update_many', toolName: 'catalog.update_many', source: 'config', connection: 'magento', risk: 'write', description: 'Update', inputSchema: objectSchema, fieldsArg: 'records', manifest } as const;
+  const engineWith = (grant: { denyFields: string[]; allowFields?: string[] }): ReturnType<typeof createPolicyEngine> =>
+    createPolicyEngine({
+      operations: [operation],
+      roles: [{ id: 'content_manager', grants: [{ operation: 'catalog.update_many', scope: {}, ...grant }] }],
+      roleMapping: [{ group: 'content', roles: ['content_manager'] }],
+    });
+  const records = (extra: Record<string, unknown>): Record<string, unknown>[] => [
+    ...Array.from({ length: 499 }, (_, i) => ({ sku: `s${String(i)}`, name: 'n' })),
+    { sku: 'last', name: 'n', ...extra },
+  ];
+
+  it('POL-3 one record carrying a denied field denies the call', () => {
+    expect(engineWith({ denyFields: ['price'] }).evaluate({ caller: content, operationId: 'catalog.update_many', args: { records: records({ price: 1 }) } })).toMatchObject({
+      effect: 'deny',
+      reason: 'denied_field',
+      detail: 'price',
+    });
+  });
+
+  it('POL-3 without the denied field the call is allowed, and the id_field key is never a touched field', () => {
+    expect(engineWith({ denyFields: ['price'] }).evaluate({ caller: content, operationId: 'catalog.update_many', args: { records: records({}) } }).effect).toBe('allow');
+    expect(engineWith({ denyFields: ['sku'] }).evaluate({ caller: content, operationId: 'catalog.update_many', args: { records: records({}) } }).effect).toBe('allow');
+  });
+
+  it('POL-3 allowFields passes records that carry only allowed fields besides the id_field', () => {
+    expect(engineWith({ denyFields: [], allowFields: ['name'] }).evaluate({ caller: content, operationId: 'catalog.update_many', args: { records: records({}) } }).effect).toBe('allow');
+    expect(engineWith({ denyFields: [], allowFields: ['name'] }).evaluate({ caller: content, operationId: 'catalog.update_many', args: { records: records({ price: 1 }) } })).toMatchObject({ reason: 'field_not_allowed', detail: 'price' });
+  });
+
+  it('POL-3 the union of keys keeps first-seen order; a mixed array is unreadable', () => {
+    expect(touchedFields('records', { records: [{ sku: 'a', name: 1 }, { sku: 'b', price: 2, name: 3 }] }, 'sku')).toEqual(['name', 'price']);
+    expect(touchedFields('records', { records: [{ sku: 'a', name: 1 }, 'x'] }, 'sku')).toBe('unreadable');
+    expect(touchedFields('records', { records: [{ sku: 'a' }, null] }, 'sku')).toBe('unreadable');
+    expect(touchedFields('records', { records: [{ sku: 'a' }, ['name']] }, 'sku')).toBe('unreadable');
   });
 });

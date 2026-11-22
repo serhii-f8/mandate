@@ -46,6 +46,7 @@ export { callerKind, resolveRoles, rolesOf, SERVICE_SUBJECT_PREFIX, serviceClien
 export {
   createPolicyEngine,
   grantReference,
+  recordsIdField,
   type DenyReason,
   type EvaluationRequest,
   type PolicyDecision,

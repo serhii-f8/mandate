@@ -69,14 +69,37 @@ function checkScope(grant: GrantDefinition, args: Readonly<Record<string, unknow
   return PASS;
 }
 
-/** Fields the call touches, or `unreadable` when the argument is neither an object nor an array of strings. */
-export function touchedFields(fieldsArg: string | undefined, args: Readonly<Record<string, unknown>>): readonly string[] | 'unreadable' {
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * Fields the call touches, or `unreadable` when the argument is neither an object nor an array of
+ * strings. With `idField` (the fields argument is the manifest's records argument) an array of
+ * plain objects answers the union of their keys without `idField`, in first-seen order (POL-3,
+ * ADR 0070); an array that mixes in anything else is unreadable.
+ */
+export function touchedFields(
+  fieldsArg: string | undefined,
+  args: Readonly<Record<string, unknown>>,
+  idField?: string,
+): readonly string[] | 'unreadable' {
   if (fieldsArg === undefined) return [];
   const value = args[fieldsArg];
   if (value === undefined || value === null) return [];
-  if (Array.isArray(value)) return value.every((v) => typeof v === 'string') ? value : 'unreadable';
+  if (Array.isArray(value)) {
+    if (value.every((v) => typeof v === 'string')) return value;
+    if (idField === undefined || !value.every(isPlainObject)) return 'unreadable';
+    const seen = new Set<string>();
+    for (const record of value) for (const key of Object.keys(record)) if (key !== idField) seen.add(key);
+    return [...seen];
+  }
   if (typeof value === 'object') return Object.keys(value);
   return 'unreadable';
+}
+
+/** The id field to leave out of the touched fields: set when the fields argument is the records argument. */
+export function recordsIdField(operation: { readonly fieldsArg?: string; readonly manifest?: { readonly recordsArg?: string; readonly idField: string } }): string | undefined {
+  const manifest = operation.manifest;
+  return manifest?.recordsArg !== undefined && operation.fieldsArg === manifest.recordsArg ? manifest.idField : undefined;
 }
 
 function checkFields(grant: GrantDefinition, fields: readonly string[] | 'unreadable', fieldsArg: string | undefined): Check {
@@ -134,7 +157,7 @@ export function createPolicyEngine(config: PolicyConfiguration): PolicyEngine {
       if (operation === undefined || matching.length === 0) {
         return { effect: 'deny', rule: 'default-deny', reason: 'no_grant', roles };
       }
-      const fields = touchedFields(operation.fieldsArg, args);
+      const fields = touchedFields(operation.fieldsArg, args, recordsIdField(operation));
       let firstFailure: { ref: string; check: Extract<Check, { ok: false }> } | undefined;
       for (const { ref, grant } of matching) {
         const scope = checkScope(grant, args);

@@ -307,6 +307,74 @@ describe('OPS-2 manifest configuration', () => {
   });
 });
 
+describe('OPS-2 records_arg', () => {
+  const ITEM = '{ type: object, properties: { sku: { type: string }, name: { type: string }, description: { type: string } }, required: [sku], additionalProperties: false }';
+  const RECORDS_PROP = `records: { type: array, items: ${ITEM} }`;
+  const CHANGES_PROP = 'changes: { type: object, properties: { name: { type: string }, description: { type: string } }, additionalProperties: false }';
+  const RECORDS = WRITE.replace(CHANGES_PROP, RECORDS_PROP)
+    .replace('required: [brand, changes]', 'required: [brand, records]')
+    .replace('      ids_arg: skus\n      values_arg: changes\n', '      records_arg: records\n')
+    .replace(/ {6}selector:\n(?: {8}.*\n)+/, '');
+  const item = (t: string, replacement: string): string => t.replace(ITEM, replacement);
+  const edit = (from: string, to: string) => (): string => RECORDS.replace(from, to);
+
+  it('OPS-2 a records_arg manifest loads to recordsArg without valuesArg, and fields_arg defaults to it', async () => {
+    const config = ok(await load({ 'write.yaml': RECORDS }));
+    const op = config.policy.operations.find((o) => o.id === 'catalog.update_content');
+    expect(op?.fieldsArg).toBe('records');
+    expect(op?.manifest).toMatchObject({ idField: 'sku', recordsArg: 'records', fields: ['name', 'description'] });
+    expect(op?.manifest).not.toHaveProperty('valuesArg');
+    expect(op?.manifest).not.toHaveProperty('idsArg');
+    ok(await load({ 'write.yaml': RECORDS.replace('    manifest:\n', '    fields_arg: records\n    manifest:\n') }));
+  });
+
+  it('OPS-2 exactly one of values_arg and records_arg', async () => {
+    await expectIssue(edit('      records_arg: records\n', '      records_arg: records\n      values_arg: changes\n'), M, 'sku');
+    await expectIssue(edit('      records_arg: records\n', ''), M, 'changes');
+  });
+
+  it('OPS-2 ids_arg and selector are not allowed beside records_arg', async () => {
+    const withIds = await expectIssue(edit('      records_arg: records\n', '      records_arg: records\n      ids_arg: skus\n'), `${M}.ids_arg`, 'skus');
+    expect(withIds.message).toBe('is not allowed with records_arg');
+    const sel = '      selector:\n        operation: catalog.search_products\n        args: { brand: { arg: brand } }\n        page_arg: current_page\n        page_size_arg: page_size\n';
+    const withSelector = await expectIssue(edit('      rollback:', `${sel}      rollback:`), `${M}.selector`, 'catalog');
+    expect(withSelector.message).toBe('is not allowed with records_arg');
+  });
+
+  it('OPS-2 records_arg names a required top-level array property', async () => {
+    await expectIssue(edit('records_arg: records', 'records_arg: brand'), `${M}.records_arg`, 'brand');
+    await expectIssue(edit('records_arg: records', 'records_arg: missing_arg'), `${M}.records_arg`, 'missing_arg');
+    await expectIssue(edit('required: [brand, records]', 'required: [brand]'), `${M}.records_arg`, 'records');
+  });
+
+  it('OPS-2 the items are a closed object schema', async () => {
+    await expectIssue(() => item(RECORDS, '{ type: string }'), `${M}.records_arg`, 'records');
+    await expectIssue(() => RECORDS.replace(RECORDS_PROP, 'records: { type: array }'), `${M}.records_arg`, 'records');
+    await expectIssue(() => item(RECORDS, '{ type: object, properties: { sku: { type: string }, name: { type: string } }, required: [sku] }'), `${M}.records_arg`, 'records');
+    await expectIssue(() => item(RECORDS, '{ type: object, additionalProperties: false, required: [sku] }'), `${M}.records_arg`, 'records');
+  });
+
+  it('OPS-2 an item property outside id_field and fields is refused', async () => {
+    await expectIssue(
+      () => item(RECORDS, '{ type: object, properties: { sku: { type: string }, name: { type: string }, price: { type: string } }, required: [sku], additionalProperties: false }'),
+      `${M}.records_arg`,
+      'price',
+    );
+  });
+
+  it('OPS-2 id_field is a required item property of type string or integer', async () => {
+    await expectIssue(() => item(RECORDS, '{ type: object, properties: { sku: { type: string }, name: { type: string } }, required: [name], additionalProperties: false }'), `${M}.records_arg`, 'sku');
+    await expectIssue(() => item(RECORDS, '{ type: object, properties: { sku: { type: number }, name: { type: string } }, required: [sku], additionalProperties: false }'), `${M}.records_arg`, 'sku');
+    await expectIssue(() => item(RECORDS, '{ type: object, properties: { name: { type: string } }, required: [sku], additionalProperties: false }'), `${M}.records_arg`, 'sku');
+    ok(await load({ 'write.yaml': item(RECORDS, '{ type: object, properties: { sku: { type: integer }, name: { type: string } }, required: [sku], additionalProperties: false }') }));
+  });
+
+  it('OPS-2 fields_arg other than records_arg is refused', async () => {
+    const issue = await expectIssue(edit("    manifest:\n", "    fields_arg: brand\n    manifest:\n"), 'operations[0].fields_arg', 'brand');
+    expect(issue.message).toBe('must equal manifest.records_arg');
+  });
+});
+
 describe('OPS-3 rollback strategy', () => {
   it('OPS-3 requires a rollback strategy', async () => {
     const issue = await expectIssue((t) => t.replace('      rollback: { strategy: replay_previous_state }\n', ''), `${M}.rollback`, 'replay');

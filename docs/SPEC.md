@@ -177,7 +177,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 
 - **POL-1** Deny by default. A call is allowed only when a grant in the caller's role matches the operation.
 - **POL-2** Evaluate scope constraints against call arguments, for example allowed brands or categories.
-- **POL-3** Reject calls that touch fields listed in `deny_fields` or outside an allow-list when one is set.
+- **POL-3** Reject calls that touch fields listed in `deny_fields` or outside an allow-list when one is set. For an operation whose manifest takes `records_arg`, the touched fields are the union of the records' keys without `id_field`, so one denied field in one record denies the call (ADR 0070).
 - **POL-4** Enforce limits per role: records per operation, records per day, calls per minute, concurrent executions.
 - **POL-5** Determine whether approval is required from operation risk class, record count thresholds and role rules. A grant may carry its own rule, which replaces the role's for the calls it allows, and a rule may list field rules: the first one naming a field the call touches replaces it. The same resolution applies at submission, at execution start and in `config explain`; when the touched fields cannot be read and the rule has field rules, the change is unroutable and is not approved or executed (ADR 0066).
 - **POL-6** Re-evaluate policy at execution start, so a role change after preparation is honoured.
@@ -198,7 +198,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 ### 5.5 Operations and manifests
 
 - **OPS-1** An operation is enabled only when declared in configuration or in an applied preset.
-- **OPS-2** A manifest declares: identifier argument, scope arguments, the read operation that returns current state, the fields subject to diff, batch size, and the rollback strategy.
+- **OPS-2** A manifest declares: identifier argument, scope arguments, the read operation that returns current state, the fields subject to diff, batch size, and the rollback strategy. The values come either as one object for every target (`values_arg`) or as an array of records, each with its own values (`records_arg`, which names the targets itself); exactly one of the two (ADR 0070).
 - **OPS-3** Supported rollback strategies: `replay_previous_state`, `inverse_operation`, `none`.
 - **OPS-4** Support a selector form of input, for example brand plus filter, that the platform resolves to a concrete list of target IDs during preparation.
 - **OPS-5** Allow an operation to be implemented in code through the connector SDK when a manifest is insufficient.
@@ -207,7 +207,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 ### 5.6 Change-sets
 
 - **CS-1** Preparation performs no writes upstream.
-- **CS-2** Store one ChangeItem per target with `before` and `after` values for the manifest's fields that the call changes (ADR 0024).
+- **CS-2** Store one ChangeItem per target with `before` and `after` values for the manifest's fields that the call changes (ADR 0024). With `records_arg` an item's `after` holds exactly the fields its record gave (ADR 0070).
 - **CS-3** Exclude targets that fail validation or lack required data, and record the reason per item.
 - **CS-4** Compute a SHA-256 hash over operation ID, normalized arguments and ordered items. The hash is shown on approval and verified before execution. Each change-set stores the version of the hash format it was sealed with and, from version 2, its manifest action, which version 2 binds into the hash. Both are fixed with the hash. Every verification recomputes with the stored version; an unknown version is a hash mismatch. New preparations use the current version; a derived change-set keeps its source's version and action (ADR 0069).
 - **CS-5** Allow the requester to exclude items before submission. Exclusion produces a new hash.

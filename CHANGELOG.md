@@ -12,6 +12,10 @@ Upgrade every `api` and `worker` before preparing new change-sets. See
 - Change-sets record the version of their hash format and their manifest action (`hash_version`,
   `action`, migration `0015`); new change-sets use version 2, which binds the action into the hash,
   and change-sets prepared before the upgrade keep verifying under version 1 (CS-4, ADR 0069).
+- `manifest.records_arg` is the alternative to `values_arg`: an array of closed records, each with its
+  own values. `values_arg` becomes optional (exactly one of the two); the touched fields of a records
+  call, for deny and allow fields and approval field rules, are the union of the records' keys without
+  `id_field` (OPS-2, CS-2, POL-3, POL-5, ADR 0070). Configuration schema and connector SDK 1.2.0.
 
 ## 1.1.0
 

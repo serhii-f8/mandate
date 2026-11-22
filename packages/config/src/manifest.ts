@@ -27,7 +27,10 @@ const rollback = z.discriminatedUnion('strategy', [
 export const manifestSchema = z.strictObject({
   id_field: name,
   ids_arg: name.optional(),
-  values_arg: name,
+  /** The alternative to `records_arg`: one values object for every target (CS-2). */
+  values_arg: name.optional(),
+  /** The alternative to `values_arg`: an array of records, each with its own values (CS-2, ADR 0070). */
+  records_arg: name.optional(),
   fields: z.array(name).min(1),
   required_fields: z.array(name).default([]),
   /** AUD-4: fields whose values the audit trail redacts; each must be one of fields. */
@@ -86,7 +89,8 @@ export function toManifestDefinition(m: ManifestConfig): ManifestDefinition {
   return {
     idField: m.id_field,
     ...(m.ids_arg === undefined ? {} : { idsArg: m.ids_arg }),
-    valuesArg: m.values_arg,
+    ...(m.values_arg === undefined ? {} : { valuesArg: m.values_arg }),
+    ...(m.records_arg === undefined ? {} : { recordsArg: m.records_arg }),
     fields: [...m.fields],
     requiredFields: [...m.required_fields],
     scopeArgs: { ...m.scope_args },
@@ -128,6 +132,32 @@ function fieldEnum(read: RegisteredOperation): ReadonlySet<unknown> | undefined 
   return Array.isArray(values) ? new Set(values) : undefined;
 }
 
+/**
+ * Check 3 for `records_arg` (ADR 0070): a required top-level array whose items are closed objects
+ * (`properties` within `id_field` and `fields`, `additionalProperties: false`) that require
+ * `id_field`, typed string or integer. Messages never quote configuration values.
+ */
+function checkRecordsSchema(schema: Readonly<Record<string, unknown>>, manifest: ManifestConfig): string | undefined {
+  const recordsArg = manifest.records_arg;
+  if (recordsArg === undefined) return undefined;
+  const records = propertySchema(schema, recordsArg);
+  if (records?.type !== 'array') return 'must name a top-level array property of input_schema';
+  if (!requiredOf(schema).has(recordsArg)) return 'must name a required property of input_schema';
+  const items = records.items;
+  const item = typeof items === 'object' && items !== null ? (items as Record<string, unknown>) : undefined;
+  const declared = item?.properties;
+  if (item?.type !== 'object' || typeof declared !== 'object' || declared === null || item.additionalProperties !== false) {
+    return 'must declare items as objects with properties and additionalProperties: false in input_schema';
+  }
+  const allowed = new Set([manifest.id_field, ...manifest.fields]);
+  if (Object.keys(declared).some((k) => !allowed.has(k))) return 'declares item properties that are not id_field or in fields';
+  if (!requiredOf(item).has(manifest.id_field)) return 'must require the id_field in the items of input_schema';
+  const idType = (declared as Record<string, unknown>)[manifest.id_field];
+  const type = typeof idType === 'object' && idType !== null ? (idType as Record<string, unknown>).type : undefined;
+  if (type !== 'string' && type !== 'integer') return 'must type the id_field of the items as string or integer in input_schema';
+  return undefined;
+}
+
 export interface ManifestCheckInput {
   readonly all: ReadonlyMap<string, RegisteredOperation>;
   /** A bound preset failed to load, so an unknown operation ID may be one of its operations. */
@@ -159,9 +189,18 @@ export function checkManifests(input: ManifestCheckInput): void {
       mAt([], `is not allowed on a ${value.risk} operation`);
       continue;
     }
-    if (manifest.ids_arg === undefined && manifest.selector === undefined) mAt([], 'must declare ids_arg, selector or both');
-    if (value.fields_arg !== undefined && value.fields_arg !== manifest.values_arg) {
-      at(source, [...path, 'fields_arg'], 'must equal manifest.values_arg');
+    // The one place that decides how the values arrive; an action that takes none (`delete`) will exempt itself here.
+    if ((manifest.values_arg === undefined) === (manifest.records_arg === undefined)) mAt([], 'must declare exactly one of values_arg and records_arg');
+    const valuesKey = manifest.records_arg === undefined ? 'values_arg' : 'records_arg';
+    if (manifest.records_arg !== undefined) {
+      // The records name the targets (CS-2, ADR 0070).
+      if (manifest.ids_arg !== undefined) mAt(['ids_arg'], 'is not allowed with records_arg');
+      if (manifest.selector !== undefined) mAt(['selector'], 'is not allowed with records_arg');
+    } else if (manifest.values_arg !== undefined && manifest.ids_arg === undefined && manifest.selector === undefined) {
+      mAt([], 'must declare ids_arg, selector or both');
+    }
+    if (value.fields_arg !== undefined && value.fields_arg !== (manifest.records_arg ?? manifest.values_arg)) {
+      at(source, [...path, 'fields_arg'], `must equal manifest.${valuesKey}`);
     }
     manifest.sensitive_fields.forEach((f, index) => {
       if (!manifest.fields.includes(f)) mAt(['sensitive_fields', index], 'must be one of fields');
@@ -182,9 +221,17 @@ export function checkManifests(input: ManifestCheckInput): void {
           mAt(['ids_arg'], 'must name a top-level array property of input_schema whose items are strings or integers');
         }
       }
-      const values = propertySchema(schema, manifest.values_arg);
-      if (values?.type !== 'object') mAt(['values_arg'], 'must name a top-level object property of input_schema');
-      else if (!requiredOf(schema).has(manifest.values_arg)) mAt(['values_arg'], 'must name a required property of input_schema');
+      // Declaring both or neither is reported once above; the schema checks follow what is declared.
+      if (manifest.records_arg !== undefined) {
+        const recordsIssue = checkRecordsSchema(schema, manifest);
+        if (recordsIssue !== undefined) mAt(['records_arg'], recordsIssue);
+      }
+      const valuesArg = manifest.values_arg;
+      const values = valuesArg === undefined ? undefined : propertySchema(schema, valuesArg);
+      if (valuesArg === undefined) {
+        // No values object to check.
+      } else if (values?.type !== 'object') mAt(['values_arg'], 'must name a top-level object property of input_schema');
+      else if (!requiredOf(schema).has(valuesArg)) mAt(['values_arg'], 'must name a required property of input_schema');
       else {
         const declared = values.properties;
         // Keys outside fields would be dropped silently; the schema must refuse them instead.

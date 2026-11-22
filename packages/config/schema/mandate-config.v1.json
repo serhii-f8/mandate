@@ -831,6 +831,11 @@
                 ],
                 "type": "object"
               },
+              "records_arg": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
               "required_fields": {
                 "default": [],
                 "items": {
@@ -1025,7 +1030,6 @@
             },
             "required": [
               "id_field",
-              "values_arg",
               "fields",
               "read_before",
               "rollback"
@@ -1568,5 +1572,5 @@
     "version"
   ],
   "type": "object",
-  "x-mandate-schema-version": "1.1.0"
+  "x-mandate-schema-version": "1.2.0"
 }

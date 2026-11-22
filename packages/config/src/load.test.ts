@@ -475,6 +475,37 @@ operations:
       expect(ok.ok, JSON.stringify(ok.ok ? [] : ok.issues)).toBe(true);
     });
 
+    it('OPS-2 POL-5 a records schema: names outside the item properties and the id_field are refused', async () => {
+      const MANY = `version: 1
+operations:
+  - id: catalog.update_many
+    connection: magento
+    risk: write
+    description: Update many.
+    upstream: { method: POST, path: /async/bulk/V1/products }
+    input_schema:
+      type: object
+      properties:
+        records: { type: array, items: { type: object, properties: { sku: { type: string }, name: { type: string }, price: { type: string } }, required: [sku], additionalProperties: false } }
+      required: [records]
+    manifest:
+      id_field: sku
+      records_arg: records
+      fields: [name, price]
+      scope_args: {}
+      read_before: { operation: catalog.get_products, ids_arg: skus }
+      rollback: { strategy: replay_previous_state }
+`;
+      const known = await loadRoles(rolesYaml('', grantRule('catalog.update_many', 'name, price')), { 'many.yaml': MANY });
+      expect(known.ok, JSON.stringify(known.ok ? [] : known.issues)).toBe(true);
+      const found = issues(await loadRoles(rolesYaml('', grantRule('catalog.update_many', 'cost, sku')), { 'many.yaml': MANY }));
+      const refused = found.filter((i) => i.path.includes('field_rules'));
+      expect(refused).toEqual([
+        expect.objectContaining({ path: 'roles[0].grants[0].approval.field_rules[0].fields[0]', message: 'is not a field of catalog.update_many' }),
+        expect.objectContaining({ path: 'roles[0].grants[0].approval.field_rules[0].fields[1]', message: 'is not a field of catalog.update_many' }),
+      ]);
+    });
+
     it('POL-5 a grant-level rule with known names loads', async () => {
       const ok = await loadWith(rolesYaml('', grantRule('catalog.update', 'name, price')));
       expect(ok.ok, JSON.stringify(ok.ok ? [] : ok.issues)).toBe(true);

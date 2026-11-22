@@ -240,7 +240,10 @@ function bindDefaults(raw: Record<string, unknown>, at: (path: readonly Property
       if (!isRecord(op)) return;
       fixed(op.id, ['operations', index, 'id']);
       fixed(op.fields_arg, ['operations', index, 'fields_arg']);
-      if (isRecord(op.manifest)) fixed(op.manifest.values_arg, ['operations', index, 'manifest', 'values_arg']);
+      if (isRecord(op.manifest)) {
+        fixed(op.manifest.values_arg, ['operations', index, 'manifest', 'values_arg']);
+        fixed(op.manifest.records_arg, ['operations', index, 'manifest', 'records_arg']);
+      }
     });
   }
   if (isRecord(raw.test)) fixed(raw.test.operation, ['test', 'operation']);

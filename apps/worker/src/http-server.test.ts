@@ -55,7 +55,7 @@ describe('NFR-10 NFR-12 worker HTTP server', () => {
     const port = await serve();
     const reply = await send(port, 'GET', '/healthz');
     expect(reply.status).toBe(200);
-    expect(JSON.parse(reply.body)).toEqual({ ok: true, version: '1.1.0' });
+    expect(JSON.parse(reply.body)).toEqual({ ok: true, version: '1.2.0' });
   });
 
   it('NFR-10 /readyz is 200 only with database, configuration and a running worker', async () => {

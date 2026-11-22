@@ -37,6 +37,20 @@ describe('POL-5 approvalRuleFor', () => {
   });
 });
 
+describe('POL-5 approvalRuleFor with records', () => {
+  const records = {
+    id: 'catalog.update_many',
+    fieldsArg: 'records',
+    manifest: { idField: 'sku', recordsArg: 'records' },
+  } as OperationDefinition;
+
+  it('POL-5 a field rule on price routes a records call in which one record carries price', () => {
+    const args = { records: [{ sku: 'a', name: 'x' }, { sku: 'b', price: '1' }] };
+    expect(approvalRuleFor(configuration, 'role:editor/grant:0', records, args)?.steps).toEqual(['pricing_owner']);
+    expect(approvalRuleFor(configuration, 'role:editor/grant:0', records, { records: [{ sku: 'a', name: 'x' }] })?.steps).toEqual(['content_lead']);
+  });
+});
+
 describe('POL-5 allApprovalRules', () => {
   it('POL-5 lists the rules of roles and grants and their field rules, so every step role is found', () => {
     const steps = allApprovalRules(configuration).flatMap((r) => r.steps);
