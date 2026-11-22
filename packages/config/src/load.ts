@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { CodeOperation, ConnectionSettings, CredentialScheme, SpecIssue, ToolListOutcome, UpstreamResolver } from '@mandate/connector-sdk';
-import type { DisabledOperation, FieldApprovalRule, GrantDefinition, PolicyConfiguration, RoleApprovalRule, RoleDefinition, RoleNotifyTargets } from '@mandate/core';
+import { grantReference, type DisabledOperation, type FieldApprovalRule, type GrantDefinition, type PolicyConfiguration, type RoleApprovalRule, type RoleDefinition, type RoleNotifyTargets } from '@mandate/core';
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN, DEFAULT_ROLLBACK_WINDOW_HOURS } from './manifest.js';
@@ -18,7 +18,7 @@ import { bindPresetParams, readSpecFile, resolvePreset, withPath, type LoadedPre
 import type { PresetParamValue } from './preset-params.js';
 import type { PresetOperationConfig } from './schema.js';
 import { isMcpUpstream, toMcpCatalog, type McpCatalogState } from './mcp.js';
-import { buildRegistry, propertiesOf, sentArguments, type CatalogState, type Located, type OperationBinding, type OperationSource } from './registry.js';
+import { buildRegistry, closedFieldNames, propertiesOf, sentArguments, type CatalogState, type Located, type OperationBinding, type OperationSource } from './registry.js';
 import {
   configDocumentSchema,
   PARSE_PARAMS,
@@ -602,6 +602,19 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     if (rule !== undefined && 'field_rules' in rule) rule.field_rules?.forEach((fieldRule, index) => { check(fieldRule, [...path, 'field_rules', index]); });
   };
 
+  // POL-5: a field rule naming a field that a closed fields-argument schema does not list never matches.
+  const checkFieldNames = (source: SourceDocument, path: readonly PropertyKey[], rule: RoleApproval, operationId: string): void => {
+    const op = registry.all.get(operationId);
+    if (op === undefined || !op.schemaKnown || !('field_rules' in rule)) return;
+    const allowed = closedFieldNames(op.definition);
+    if (allowed === undefined) return;
+    rule.field_rules?.forEach((fieldRule, i) => {
+      fieldRule.fields.forEach((field, j) => {
+        if (!allowed.has(field)) at(source, [...path, 'field_rules', i, 'fields', j], `is not a field of ${op.definition.id}`);
+      });
+    });
+  };
+
   for (const { value: role, source, path } of roles) {
     const grantIds = new Set<string>();
     role.grants.forEach((grant, index) => {
@@ -610,7 +623,10 @@ export async function loadConfigurationSources(sources: readonly { file: string;
         if (grantIds.has(grant.id)) at(source, [...gPath, 'id'], 'duplicate grant ID in this role');
         grantIds.add(grant.id);
       }
-      if (grant.approval !== undefined) checkApprovalRule(source, [...gPath, 'approval'], grant.approval);
+      if (grant.approval !== undefined) {
+        checkApprovalRule(source, [...gPath, 'approval'], grant.approval);
+        checkFieldNames(source, [...gPath, 'approval'], grant.approval, grant.operation);
+      }
       const op = registry.all.get(grant.operation);
       if (op === undefined) {
         if (!operationsIncomplete) at(source, [...gPath, 'operation'], 'names an operation that is not defined');
@@ -652,11 +668,16 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     });
     // POL-5: the role's field rules need fields_arg on every write the role's rule covers.
     if (approval?.field_rules !== undefined) {
+      const namesChecked = new Set<string>();
       role.grants.forEach((grant, index) => {
         if (grant.approval !== undefined) return;
         const definition = registry.all.get(grant.operation)?.definition;
         if (definition !== undefined && definition.risk !== 'read' && definition.fieldsArg === undefined) {
           at(source, [...path, 'grants', index, 'operation'], `operation ${definition.id} declares no fields_arg, which the approval field_rules of role ${role.id} need`);
+        }
+        if (definition !== undefined && definition.risk !== 'read' && !namesChecked.has(definition.id)) {
+          namesChecked.add(definition.id);
+          checkFieldNames(source, [...path, 'approval'], approval, grant.operation);
         }
       });
     }
@@ -755,7 +776,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       grantApproval: new Map(
         roles.flatMap(({ value: role }) =>
           role.grants.flatMap((grant, index) =>
-            grant.approval === undefined ? [] : [[`role:${role.id}/grant:${grant.id ?? String(index)}`, toApprovalRule(grant.approval)] as const],
+            grant.approval === undefined ? [] : [[grantReference(role.id, grant.id, index), toApprovalRule(grant.approval)] as const],
           ),
         ),
       ),

@@ -119,12 +119,12 @@ role_mapping:
     roles: [content_lead]
 ```
 
-## Route price changes to another approver
+## Route URL changes to another approver
 
 One role can send different changes to different approvers. `field_rules` lists fields and the
 rule that applies when a call touches one of them; the first matching entry replaces the role's
-rule. A content change goes to the content lead, a change that touches `price` to the pricing
-owner:
+rule. A content change goes to the content lead, a change that touches `url_key` (the product's
+URL, which search engines and links depend on) to an SEO owner:
 
 ```yaml
   - id: content_editor
@@ -135,17 +135,28 @@ owner:
       required: always
       steps: [{ role: content_lead }]
       field_rules:
-        - fields: [price]
+        - fields: [url_key]
           required: always
-          steps: [{ role: pricing_owner }]
+          steps: [{ role: seo_owner }]
 ```
 
-A change of `name` alone waits for `content_lead`; a change that includes `price` waits for
-`pricing_owner` only. A grant can carry its own `approval`, which replaces the role's for the calls
+A change of `name` alone waits for `content_lead`; a change that includes `url_key` waits for
+`seo_owner` only. A grant can carry its own `approval`, which replaces the role's for the calls
 that grant allows. The operation needs `fields_arg` (a manifest operation uses its `values_arg`).
-`config explain` with `--args` naming `price` in `changes` prints the approval line with the steps
-that apply. If the fields of a call cannot be read, a role or grant that has field rules cannot route it: the
-change is refused as unroutable instead of being routed to a possibly weaker rule.
+`config explain` with `--args` naming `url_key` in `changes` prints the approval line with the
+steps that apply. If the fields of a call cannot be read, a role or grant that has field rules
+cannot route it: the change is refused as unroutable instead of being routed to a possibly weaker
+rule.
+
+A field rule, and a grant's `approval`, starts from its own defaults: it does not inherit
+`allow_widget` or `step_up_max_age_seconds` from the rule it replaces. Set them on the field rule
+or the grant's rule when it needs them.
+
+A field name must be a field of the operation when its fields argument is closed: an object with
+`additionalProperties: false` lists its fields as `properties`, an array of names lists them as
+`items.enum`. The loader refuses any other name (`is not a field of <operation>`), because such a
+rule would never match. `catalog.update_content` is closed, so `price` there is refused; a
+role-level rule is checked against every write operation it covers.
 
 ## Review and apply
 

@@ -38,7 +38,8 @@ Option 3.
   reports as unroutable, so submission is refused (`approval_unroutable`), the guard denies and
   `config explain` prints unroutable. Picking the first field rule would be wrong: it can be weaker than
   the base rule. A chosen rule without field rules is returned unchanged.
-- The decision rule of an allow (`role:<role>/grant:<id|index>`) names the grant. The loaded
+- The decision rule of an allow (`role:<role>/grant:<id|index>`) names the grant; `grantReference` in
+  core builds it for the policy engine and the loader alike. The loaded
   configuration carries `grantApproval`, keyed by that reference, and `approvalRuleFor` in
   `@mandate/config` looks both maps up. A trailing suffix such as `/scope:brand` is ignored.
 - The same helper runs at submission (`api`), at the execution guard (`worker`, POL-6) and in
@@ -47,7 +48,10 @@ Option 3.
   marker is needed.
 - Loader checks: every step role exists; the threshold rules of role approval hold for every rule;
   `field_rules` on a grant needs `fields_arg` on its operation, on a role it needs it on every write
-  grant the role's rule covers; every rule that can require approval of a write has at least one step
+  grant the role's rule covers; a field name must be a field of every such operation whose fields
+  argument is closed (an object with `additionalProperties: false`: its `properties`; an array with
+  `items.enum`: that enum), since a rule naming another field never matches, and an open schema
+  is not checked; every rule that can require approval of a write has at least one step
   (a field rule included). The roles that appear in grant and field rules count as approver roles for
   the review and decide tools, and a grant's rule is part of its role in `config diff`.
 
@@ -64,5 +68,8 @@ Option 3.
 
 ## Verified
 
-Unit tests of the resolution in core, of the loader checks, and of the three call sites (submission
-plan, guard under configuration A and B, `config explain`).
+Unit tests of the resolution in core, of the loader checks (field names against closed object and
+enum schemas, an open schema, grant-level and role-level rules), and of the three call sites
+(submission plan, guard under configuration A and B, `config explain`), with submission and guard
+tests where a grant's own rule, keyed by index and by grant ID, decides the steps through a loaded
+configuration and the real policy engine.

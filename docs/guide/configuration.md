@@ -180,8 +180,8 @@ A grant
 | `approval.steps` | list of `{ role }` | none | 1-5 steps; each role must exist |
 | `approval.step_up_max_age_seconds` | integer | none | 30-3600 |
 | `approval.allow_widget` | boolean | `false` | Approve from the in-chat widget |
-| `approval.field_rules` | list | none | 1-20 entries, first match wins; each has `fields` (at least 1) and the keys above except `field_rules`. Needs `fields_arg` on the write operations the role's rule covers |
-| `grants[].approval` | map | none | Same keys as `approval`; replaces the role's rule for calls this grant allows |
+| `approval.field_rules` | list | none | 1-20 entries, first match wins; each has `fields` (at least 1) and the keys above except `field_rules`. Needs `fields_arg` on the write operations the role's rule covers; where an operation's fields argument is closed (`additionalProperties: false` or `items.enum`), each name must be one of its fields. A field rule starts from its own defaults: `allow_widget` and `step_up_max_age_seconds` are not inherited from the rule it replaces |
+| `grants[].approval` | map | none | Same keys as `approval`; replaces the role's rule for calls this grant allows, starting from its own defaults (`allow_widget` and `step_up_max_age_seconds` are not inherited from the role's rule) |
 | `manage_credentials` | list | none | Credential references, or `*` for all |
 | `view_audit` | boolean | `false` | Read the audit trail and export |
 | `notify.approval_requests` | list of notification IDs | `[]` | Told when an approval step of this role becomes current |

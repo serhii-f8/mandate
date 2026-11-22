@@ -96,6 +96,14 @@ function checkFields(grant: GrantDefinition, fields: readonly string[] | 'unread
   return PASS;
 }
 
+/**
+ * The reference of a grant in a decision rule, `role:<role>/grant:<id|index>` (POL-5). The loader
+ * keys a grant's approval rule by it, so both sides use this one function.
+ */
+export function grantReference(roleId: string, grantId: string | undefined, index: number): string {
+  return `role:${roleId}/grant:${grantId ?? String(index)}`;
+}
+
 /** Builds the in-memory index once per configuration; every call after that is pure lookup. */
 export function createPolicyEngine(config: PolicyConfiguration): PolicyEngine {
   const operations = new Map(config.operations.map((o) => [o.id, o] as const));
@@ -105,7 +113,7 @@ export function createPolicyEngine(config: PolicyConfiguration): PolicyEngine {
     const byOperation = new Map<string, IndexedGrant[]>();
     role.grants.forEach((grant, index) => {
       const list = byOperation.get(grant.operation) ?? [];
-      list.push({ ref: `role:${role.id}/grant:${grant.id ?? String(index)}`, grant });
+      list.push({ ref: grantReference(role.id, grant.id, index), grant });
       byOperation.set(grant.operation, list);
     });
     grants.set(role.id, byOperation);

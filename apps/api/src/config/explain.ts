@@ -50,7 +50,7 @@ export function explainCall(configuration: LoadedConfiguration, input: ExplainIn
   if (decision.effect !== 'allow') return { kind: 'decision', decision, ...pin };
   if (operation === undefined || operation.risk === 'read') return { kind: 'decision', decision, ...pin };
 
-  // The allowing rule's role decides approval, as on submission (ADR 0027).
+  // The allowing grant's rule, or its role's, then the field rule of a touched field, as on submission (POL-5, ADR 0066).
   const rule = approvalRuleFor(configuration, decision.rule, operation, args);
   const approval = approvalRequirement({
     risk: operation.risk,

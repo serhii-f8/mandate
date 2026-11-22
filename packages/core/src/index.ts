@@ -44,6 +44,7 @@ export type {
 export { callerKind, resolveRoles, rolesOf, SERVICE_SUBJECT_PREFIX, serviceClientOf, serviceSubject } from './roles.js';
 export {
   createPolicyEngine,
+  grantReference,
   type DenyReason,
   type EvaluationRequest,
   type PolicyDecision,

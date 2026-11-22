@@ -45,12 +45,12 @@ operations:
 `,
 };
 
-async function configuration(editorApproval: string): Promise<LoadedConfiguration> {
+async function configuration(editorApproval: string, grants = '      - { operation: catalog.update }'): Promise<LoadedConfiguration> {
   const roles = `version: 1
 roles:
   - id: editor
     grants:
-      - { operation: catalog.update }
+${grants}
     approval: ${editorApproval}
   - id: content_lead
     grants: []
@@ -66,6 +66,12 @@ role_mapping:
 
 const A = await configuration('{ required: always, steps: [{ role: content_lead }] }');
 const B = await configuration('{ required: always, steps: [{ role: content_lead }], field_rules: [{ fields: [price], required: always, steps: [{ role: pricing_owner }] }] }');
+
+const ROLE_RULE = '{ required: always, steps: [{ role: content_lead }] }';
+const GRANT_RULE = 'approval: { required: always, steps: [{ role: pricing_owner }] }';
+/** The update grant is the second one and has no ID: its rule reference is role:editor/grant:1. */
+const BY_INDEX = await configuration(ROLE_RULE, `      - { operation: catalog.get_products }\n      - { operation: catalog.update, ${GRANT_RULE} }`);
+const BY_ID = await configuration(ROLE_RULE, `      - { operation: catalog.update, id: prices, ${GRANT_RULE} }`);
 
 const NOW = new Date('2026-11-22T10:00:00.000Z');
 const noItems = { itemsPage: () => Promise.resolve([]) };
@@ -116,5 +122,18 @@ describe('POL-5 POL-6 execution guard routes approval per touched field', () => 
     const guardFor = createExecutionGuard({ repository, audit: new InMemoryAuditLog(), newId: () => 'id' });
     expect(await guardFor(B).check(changeset)).toEqual({ ok: false, outcome: 'approval_missing' });
     expect(await guardFor(A).check(changeset)).toEqual({ ok: true });
+  });
+});
+
+describe('POL-5 POL-6 execution guard routes approval per grant', () => {
+  it('POL-5 the grant approval decides the steps, keyed by grant index and by grant ID through the policy engine', async () => {
+    const changeset = await record({ skus: ['a'], changes: { name: 'N' } });
+    const hash = changeset.hash ?? '';
+    for (const configuration of [BY_INDEX, BY_ID]) {
+      const guardWith = (role: string) =>
+        createExecutionGuard({ repository: { ...noItems, approvals: () => Promise.resolve([approvedBy(role, hash)]) }, audit: new InMemoryAuditLog(), newId: () => 'id' })(configuration);
+      expect(await guardWith('content_lead').check(changeset)).toEqual({ ok: false, outcome: 'approval_missing' });
+      expect(await guardWith('pricing_owner').check(changeset)).toEqual({ ok: true });
+    }
   });
 });

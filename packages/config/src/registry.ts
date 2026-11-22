@@ -555,6 +555,27 @@ export function propertiesOf(schema: Readonly<Record<string, unknown>>): Set<str
   return new Set(typeof properties === 'object' && properties !== null ? Object.keys(properties) : []);
 }
 
+/**
+ * The field names a closed fields-argument schema allows (POL-5): the `properties` keys of an
+ * object with `additionalProperties: false`, or the `items.enum` of an array. Undefined when the
+ * operation has no fields argument or its schema is open, so any name may be touched.
+ */
+export function closedFieldNames(definition: { readonly inputSchema: Readonly<Record<string, unknown>>; readonly fieldsArg?: string }): ReadonlySet<string> | undefined {
+  if (definition.fieldsArg === undefined) return undefined;
+  const properties = definition.inputSchema.properties;
+  if (typeof properties !== 'object' || properties === null) return undefined;
+  const property: unknown = (properties as Record<string, unknown>)[definition.fieldsArg];
+  if (typeof property !== 'object' || property === null) return undefined;
+  const schema = property as Record<string, unknown>;
+  if (schema.additionalProperties === false) return propertiesOf(schema);
+  const items = schema.items;
+  if (schema.type === 'array' && typeof items === 'object' && items !== null) {
+    const values: unknown = (items as Record<string, unknown>).enum;
+    if (Array.isArray(values)) return new Set(values.filter((v): v is string => typeof v === 'string'));
+  }
+  return undefined;
+}
+
 export function requiredOf(schema: Readonly<Record<string, unknown>>): Set<string> {
   const required = schema.required;
   return new Set(Array.isArray(required) ? required.filter((r): r is string => typeof r === 'string') : []);

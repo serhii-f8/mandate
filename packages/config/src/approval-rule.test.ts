@@ -13,7 +13,7 @@ const configuration = {
   grantApproval: new Map([['role:editor/grant:prices', grantRule]]),
 };
 // Only the fields the helper reads.
-const operation = { id: 'catalog.update', fieldsArg: 'changes' } as OperationDefinition;  
+const operation = { id: 'catalog.update', fieldsArg: 'changes' } as OperationDefinition;
 
 describe('POL-5 approvalRuleFor', () => {
   it('POL-5 a call touching a field routes to the field rule, any other to the role rule', () => {

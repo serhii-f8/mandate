@@ -2,7 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import type { Caller } from './caller.js';
-import { createPolicyEngine, type EvaluationRequest } from './policy-engine.js';
+import { createPolicyEngine, grantReference, type EvaluationRequest } from './policy-engine.js';
 import type { PolicyConfiguration } from './policy-model.js';
 
 const objectSchema = { type: 'object' } as const;
@@ -200,5 +200,15 @@ describe('NFR-6 evaluation from in-memory configuration', () => {
     // 0.2 ms per evaluation: loose enough for a shared CI runner (391 ms was seen there for the
     // 10,000), far below what any I/O per evaluation would cost.
     expect(performance.now() - started).toBeLessThan(2000);
+  });
+});
+
+describe('POL-5 grant reference', () => {
+  it('POL-5 names a grant by its ID, else by its index, as the allow rule does', () => {
+    expect(grantReference('editor', 'prices', 3)).toBe('role:editor/grant:prices');
+    expect(grantReference('editor', undefined, 3)).toBe('role:editor/grant:3');
+    // The second grant of content_manager has no ID; the first has one.
+    expect(search({ brand: 'initech', fields: ['name'] }).rule).toBe(grantReference('content_manager', undefined, 1));
+    expect(search({ brand: 'acme', fields: ['name'] }).rule).toBe(grantReference('content_manager', 'own-brands', 0));
   });
 });

@@ -116,7 +116,7 @@ export class SubmitService {
       return { kind: 'started', changeset: record };
     }
 
-    // 6. Prepared: the allowing rule's role decides approval (POL-5), as it decides limits (ADR 0027).
+    // 6. Prepared: the allowing rule decides approval (POL-5, ADR 0066); its role decides limits (ADR 0027).
     const role = allowingRole(decision.rule);
     // An operation the engine allowed is in the snapshot; the strictest risk and opaque stand in otherwise.
     const operation = snapshot.configuration.policy.operations.find((op) => op.id === record.operation);

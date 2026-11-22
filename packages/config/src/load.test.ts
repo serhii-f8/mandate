@@ -428,6 +428,81 @@ operations:
     const field = issues(await loadRoles(rolesYaml('    approval: { required: never, field_rules: [{ fields: [price], required: always }] }')));
     expect(field).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.field_rules[0].steps', message }));
   });
+
+  describe('POL-5 field rule names must be fields of a closed fields-argument schema', () => {
+    const OTHERS = `version: 1
+operations:
+  - id: catalog.set_flags
+    connection: magento
+    risk: write_opaque
+    description: Flags.
+    upstream: { method: POST, path: /V1/flags, body: { arg: flags }, response: { fields_from_arg: flags } }
+    input_schema:
+      type: object
+      properties: { flags: { type: array, items: { type: string, enum: [visible, featured] } } }
+      required: [flags]
+    fields_arg: flags
+  - id: catalog.set_open
+    connection: magento
+    risk: write_opaque
+    description: Open.
+    upstream: { method: POST, path: /V1/open, body: { arg: changes }, response: { fields_from_arg: changes } }
+    input_schema:
+      type: object
+      properties: { changes: { type: object } }
+      required: [changes]
+    fields_arg: changes
+`;
+    const rule = (fields: string) => `{ fields: [${fields}], required: always, steps: [{ role: pricing_owner }] }`;
+    const grantRule = (operation: string, fields: string) => `{ operation: ${operation}, approval: { required: never, field_rules: [${rule(fields)}] } }`;
+    const loadWith = (roles: string) => loadRoles(roles, { 'others.yaml': OTHERS });
+
+    it('POL-5 a closed object schema: a name outside its properties is refused', async () => {
+      const found = issues(await loadWith(rolesYaml('', grantRule('catalog.update', 'name, cost'))));
+      expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].grants[0].approval.field_rules[0].fields[1]', message: 'is not a field of catalog.update' }));
+      expect(found.filter((i) => i.path.includes('field_rules'))).toHaveLength(1);
+    });
+
+    it('POL-5 an array schema with items.enum: a name outside the enum is refused', async () => {
+      const found = issues(await loadWith(rolesYaml('', grantRule('catalog.set_flags', 'hidden, featured'))));
+      expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].grants[0].approval.field_rules[0].fields[0]', message: 'is not a field of catalog.set_flags' }));
+      const ok = await loadWith(rolesYaml('', grantRule('catalog.set_flags', 'featured')));
+      expect(ok.ok, JSON.stringify(ok.ok ? [] : ok.issues)).toBe(true);
+    });
+
+    it('POL-5 an open fields-argument schema accepts any name', async () => {
+      const ok = await loadWith(rolesYaml('', grantRule('catalog.set_open', 'anything')));
+      expect(ok.ok, JSON.stringify(ok.ok ? [] : ok.issues)).toBe(true);
+    });
+
+    it('POL-5 a grant-level rule with known names loads', async () => {
+      const ok = await loadWith(rolesYaml('', grantRule('catalog.update', 'name, price')));
+      expect(ok.ok, JSON.stringify(ok.ok ? [] : ok.issues)).toBe(true);
+    });
+
+    it('POL-5 a role-level rule is checked against every write operation the role rule covers', async () => {
+      const roles = `version: 1
+roles:
+  - id: editor
+    grants:
+      - { operation: catalog.get_products }
+      - { operation: catalog.update }
+      - { operation: catalog.set_flags }
+      - { operation: catalog.set_flags, id: again }
+      - { operation: catalog.set_open }
+      - { operation: catalog.set_flags, approval: { required: never } }
+    approval: { required: never, field_rules: [${rule('price')}] }
+  - id: pricing_owner
+    grants: []
+role_mapping:
+  - { group: content, roles: [editor] }
+`;
+      const found = issues(await loadWith(roles)).filter((i) => i.path.includes('field_rules'));
+      // catalog.update lists price; catalog.set_flags (covered by the role rule, twice) does not and is
+      // reported once; the open schema and the grant with its own rule are not checked.
+      expect(found).toEqual([expect.objectContaining({ path: 'roles[0].approval.field_rules[0].fields[0]', message: 'is not a field of catalog.set_flags' })]);
+    });
+  });
 });
 
 describe('AUD-7 SEC-1 audit configuration in the loaded configuration', () => {

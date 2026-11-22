@@ -85,7 +85,18 @@ roles:
       required: always
       steps: [{ role: content_manager }]
       field_rules: [{ fields: [price], required: always, steps: [{ role: other_role }] }]
+  - id: grant_indexed
+    grants:
+      - { operation: notes.create, id: notes }
+      - { operation: catalog.update_content, approval: { required: always, steps: [{ role: other_role }] } }
+    approval: { required: always, steps: [{ role: content_manager }] }
+  - id: grant_named
+    grants:
+      - { operation: catalog.update_content, id: named, approval: { required: always, steps: [{ role: always_role }] } }
+    approval: { required: always, steps: [{ role: content_manager }] }
 role_mapping:
+  - { group: grant-indexed, roles: [grant_indexed] }
+  - { group: grant-named, roles: [grant_named] }
   - { group: pricing, roles: [pricing_editor] }
   - { group: content, roles: [content_manager] }
   - { group: other, roles: [other_role] }
@@ -280,6 +291,18 @@ describe('MCP-8 SubmitService', () => {
     expect(other.kind).toBe('pending_approval');
     if (other.kind !== 'pending_approval') return;
     expect(other.plan.steps).toEqual(['content_manager']);
+  });
+
+  it('POL-5 a grant approval decides the steps, keyed by grant index and by grant ID through the policy engine', async () => {
+    // The second grant of grant_indexed carries no ID, so its rule reference is role:grant_indexed/grant:1.
+    const indexed = await (await setup()).submit({ subject: 'alice', groups: ['grant-indexed'] });
+    expect(indexed.kind).toBe('pending_approval');
+    if (indexed.kind !== 'pending_approval') return;
+    expect(indexed.plan.steps).toEqual(['other_role']);
+    const named = await (await setup()).submit({ subject: 'alice', groups: ['grant-named'] });
+    expect(named.kind).toBe('pending_approval');
+    if (named.kind !== 'pending_approval') return;
+    expect(named.plan.steps).toEqual(['always_role']);
   });
 
   it('POL-5 unreadable touched fields under a rule with field rules are refused as unroutable', async () => {
