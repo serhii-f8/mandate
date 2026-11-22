@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { judge, versionOf } from '../versioning/semver-gate-lib.mjs';
+import { isAppendedLiteralList, judge, versionOf } from '../versioning/semver-gate-lib.mjs';
 
 const cli = fileURLToPath(new URL('../versioning/semver-gate.mjs', import.meta.url));
 const base = 'export type A = 1;\nexport type B = 2;\n';
@@ -57,6 +57,26 @@ describe('NFR-18 semver gate', () => {
     expect(versionOf('// @mandate/connector-sdk 1.2.3 public API report — generated, do not edit\n', 'sdk')).toBe('1.2.3');
     expect(versionOf('{\n  "x-mandate-schema-version": "2.0.0"\n}', 'config')).toBe('2.0.0');
     expect(() => versionOf('nothing', 'sdk')).toThrow();
+  });
+
+  describe('appended literals', () => {
+    const tuple = (items: string) => `export declare const S: readonly [${items}];\n`;
+    it('NFR-18 appended literal list is additive', () => {
+      expect(isAppendedLiteralList(
+        'export declare const S: readonly ["a", "b"];',
+        'export declare const S: readonly ["a", "b", "c"];')).toBe(true);
+      expect(isAppendedLiteralList("    kind?: 'openapi' | 'mcp';", "    kind?: 'openapi' | 'mcp' | 'x';")).toBe(true);
+      // not appended, reordered, removed, or anything else differing: breaking as before
+      expect(isAppendedLiteralList('readonly ["a", "b"];', 'readonly ["c", "a", "b"];')).toBe(false);
+      expect(isAppendedLiteralList('readonly ["a", "b"];', 'readonly ["a"];')).toBe(false);
+      expect(isAppendedLiteralList("x: 'a' | 'b';", "y: 'a' | 'b' | 'c';")).toBe(false);
+      expect(isAppendedLiteralList('x: string;', 'x: string | number;')).toBe(false);
+    });
+    it('NFR-18 appended literal list is additive: a report with only that change classifies additive', () => {
+      expect(judge(tuple('"a", "b"'), tuple('"a", "b", "c"'), '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
+      expect(judge(tuple('"a", "b"'), tuple('"a", "b", "c"'), '1.0.0', '1.0.1')).toMatchObject({ ok: false, kind: 'additive' });
+      expect(judge(tuple('"a", "b"'), tuple('"c", "a", "b"'), '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+    });
   });
 
   describe('context-keyed classification', () => {

@@ -59,7 +59,8 @@ the change as:
   schema object that already existed; a member without `?` added to an existing interface or type
   literal of the SDK;
 - **additive** for any other added line: a new optional key or member, a new value in an existing
-  `enum`, a new property schema, a member added to a class, a new export;
+  `enum`, a string literal appended to a one-line literal list (the last element of a `readonly [...]`
+  tuple or the last member of a `|` union, the rest of the line unchanged), a new property schema, a member added to a class, a new export;
 - **none** when the report did not move apart from its version.
 
 | Change to a report | Required version change |

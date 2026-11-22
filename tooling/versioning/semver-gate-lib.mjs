@@ -131,27 +131,60 @@ function narrowing(entry, oldFrames) {
   return undefined;
 }
 
+const STRING_LITERAL = String.raw`(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')`;
+const TUPLE_ELEMENT = new RegExp(`, ${STRING_LITERAL}$`);
+const UNION_MEMBER = new RegExp(` \\| ${STRING_LITERAL}$`);
+
+/**
+ * True when `newLine` is `oldLine` with string literals appended to one one-line literal list: elements
+ * after the last element of a `[ ... ]` tuple (`, "c"` before the `]`) or members after the last member of
+ * a `|` union (` | 'c'` before the `;`). Any other difference is false (NFR-18).
+ */
+export function isAppendedLiteralList(oldLine, newLine) {
+  for (const [close, element] of [[']', TUPLE_ELEMENT], [';', UNION_MEMBER]]) {
+    for (let at = newLine.indexOf(close); at !== -1; at = newLine.indexOf(close, at + 1)) {
+      let head = newLine.slice(0, at);
+      const tail = newLine.slice(at);
+      for (let m = element.exec(head); m; m = element.exec(head)) {
+        head = head.slice(0, m.index);
+        if (head + tail === oldLine) return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** Splits the change into removed entries and added entries, each added one with its narrowing reason. */
 function compare(oldText, newText) {
   const a = surface(oldText);
   const b = surface(newText);
   const ca = counts(a.entries);
   const cb = counts(b.entries);
-  const removed = [];
+  const removedEntries = [];
   for (const e of a.entries) {
     const left = cb.get(e.key) ?? 0;
     if (left > 0) cb.set(e.key, left - 1);
-    else removed.push(e.line);
+    else removedEntries.push(e);
+  }
+  const addedEntries = [];
+  for (const e of b.entries) {
+    const left = ca.get(e.key) ?? 0;
+    if (left > 0) ca.set(e.key, left - 1);
+    else addedEntries.push(e);
+  }
+  // A removed line and an added line of the same context that differ only by appended literals pair up
+  // as one additive change (NFR-18).
+  const removed = [];
+  for (const r of removedEntries) {
+    const i = addedEntries.findIndex((e) => e.frame.path === r.frame.path && isAppendedLiteralList(r.line, e.line));
+    if (i === -1) removed.push(r.line);
+    else addedEntries.splice(i, 1, { ...addedEntries[i], appended: true });
   }
   const added = [];
   const narrowed = [];
-  for (const e of b.entries) {
-    const left = ca.get(e.key) ?? 0;
-    if (left > 0) {
-      ca.set(e.key, left - 1);
-      continue;
-    }
+  for (const e of addedEntries) {
     added.push(e.line);
+    if (e.appended) continue;
     const why = narrowing(e, a.frames);
     if (why) narrowed.push(why);
   }
