@@ -2,6 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import type { ManifestDefinition, OperationDefinition } from '../policy-model.js';
 import { CanonicalJsonError, canonicalJson } from './canonical.js';
+import { itemFields } from './fields.js';
 import { inScope, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord } from './model.js';
 import type { BatchContext, ChangeWriter, ItemOutcome, PlanEntry, ReadPage, UpstreamReader } from './ports.js';
@@ -37,10 +38,10 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 /**
  * Decide, from a fresh read, whether an item may be written (CS-7, NFR-2).
- * Rules in order: missing or out of scope is gone; every touched field already
- * equals `after` is already applied; every touched field still equals `before`
- * is a write; anything else is drift. Absent and null are the same value;
- * comparison is canonical JSON, so object key order is irrelevant.
+ * Rules in order: missing or out of scope is gone; every field the item touches
+ * (`itemFields`) already equals `after` is already applied; every one still
+ * equals `before` is a write; anything else is drift. Absent and null are the
+ * same value; comparison is canonical JSON, so object key order is irrelevant.
  */
 export function classifyForWrite(input: {
   readonly manifest: ManifestDefinition;
@@ -52,7 +53,7 @@ export function classifyForWrite(input: {
   if (current === undefined || !inScope(manifest, args, current)) {
     return { action: 'outcome', status: 'skipped', error: 'gone' };
   }
-  const fields = touchedFields(manifest, args);
+  const fields = itemFields(manifest, item);
   const before = isRecord(item.before) ? item.before : {};
   const after = isRecord(item.after) ? item.after : {};
   const equals = (expected: Readonly<Record<string, unknown>>): boolean =>
@@ -208,7 +209,30 @@ export class ManifestBatchWriter implements ChangeWriter {
     return outcomes.map((o): ItemOutcome => (o.error === 'already_applied' ? { ...o, error: 'already_restored' } : o));
   }
 
+  /**
+   * With no field to compare an item would look already applied, so it fails `write_mode_unsupported`
+   * instead: every item when the call touches no field, else each item that touches none (CS-7). The
+   * other items are written; outcomes keep the input order.
+   */
   private async writeForward(input: WriteInput): Promise<readonly ItemOutcome[]> {
+    const { changeset, items, batch } = input;
+    const unsupported = (i: ChangeItemRecord): ItemOutcome => ({
+      targetId: i.targetId,
+      status: 'failed',
+      error: 'write_mode_unsupported',
+    });
+    const supported = items.filter((i) => itemFields(this.manifest, i).length > 0);
+    // Resume (EXE-4) keeps its order: a recorded submission is polled before anything else is decided.
+    if (batch.submission === undefined && (touchedFields(this.manifest, changeset.args).length === 0 || supported.length === 0)) {
+      return items.map(unsupported);
+    }
+    if (supported.length === items.length) return this.writeSupported(input);
+    const outcomes = new Map((await this.writeSupported({ ...input, items: supported })).map((o) => [o.targetId, o]));
+    return items.map((i) => outcomes.get(i.targetId) ?? unsupported(i));
+  }
+
+  /** Writes a batch whose items each touch at least one field (or resumes its recorded submission). */
+  private async writeSupported(input: WriteInput): Promise<readonly ItemOutcome[]> {
     const { changeset, items, batch } = input;
     // Resume (EXE-4): a recorded submission is never resubmitted and nothing is read before polling.
     if (batch.submission !== undefined) {
@@ -217,13 +241,8 @@ export class ManifestBatchWriter implements ChangeWriter {
       const polled = await this.poll(this.deps.bulkFor(changeset), upstreamBatchId, writeKeys(plan), batch);
       return this.finish(changeset, plan, polled, items, this.deps.readerFor(changeset));
     }
-    const touched = touchedFields(this.manifest, changeset.args);
-    // With nothing to compare every item would look already applied; fail them instead.
-    if (touched.length === 0) {
-      return items.map((i): ItemOutcome => ({ targetId: i.targetId, status: 'failed', error: 'write_mode_unsupported' }));
-    }
     const reader = this.deps.readerFor(changeset);
-    const { plan, records } = await this.classifyBatch(changeset, items, touched, reader);
+    const { plan, records } = await this.classifyBatch(changeset, items, reader);
     if (records.length === 0) return outcomesOf(plan, new Map());
 
     if (this.deps.directFor !== undefined) {
@@ -274,12 +293,11 @@ export class ManifestBatchWriter implements ChangeWriter {
   private async classifyBatch(
     changeset: ChangeSetRecord,
     items: readonly ChangeItemRecord[],
-    touched: readonly string[],
     reader: UpstreamReader,
   ): Promise<{ plan: PlanEntry[]; records: Record<string, unknown>[] }> {
     const m = this.manifest;
     const carry = m.write?.carryFields ?? [];
-    const fields = [...new Set([m.idField, ...touched, ...Object.values(m.scopeArgs), ...carry])];
+    const fields = [...new Set([m.idField, ...unionFields(m, items), ...Object.values(m.scopeArgs), ...carry])];
     const current = await this.read(
       changeset,
       reader,
@@ -301,7 +319,7 @@ export class ManifestBatchWriter implements ChangeWriter {
       const after = isRecord(item.after) ? item.after : {};
       const record: Record<string, unknown> = { [m.idField]: cur[m.idField] };
       for (const f of carry) if (Object.hasOwn(cur, f)) record[f] = cur[f];
-      for (const f of touched) record[f] = after[f] ?? null;
+      for (const f of itemFields(m, item)) record[f] = after[f] ?? null;
       records.push(record);
     }
     return { plan, records };
@@ -385,16 +403,18 @@ export class ManifestBatchWriter implements ChangeWriter {
     }
     if (candidates.length > 0) {
       const m = this.manifest;
-      const touched = touchedFields(m, changeset.args);
-      const current = await this.read(changeset, reader, candidates, [...new Set([m.idField, ...touched])]);
-      const afterOf = new Map(items.map((i) => [i.targetId, isRecord(i.after) ? i.after : {}]));
+      const byId = new Map(items.map((i) => [i.targetId, i]));
+      const toVerify = candidates.flatMap((targetId) => byId.get(targetId) ?? []);
+      const current = await this.read(changeset, reader, candidates, [...new Set([m.idField, ...unionFields(m, toVerify)])]);
       for (const targetId of candidates) {
         const cur = current.get(targetId);
         if (cur === undefined) {
           decided.set(targetId, { targetId, status: 'skipped', error: 'gone' });
           continue;
         }
-        const written = safeEquals(touched, cur, afterOf.get(targetId) ?? {});
+        const item = byId.get(targetId);
+        const after = item !== undefined && isRecord(item.after) ? item.after : {};
+        const written = item !== undefined && safeEquals(itemFields(m, item), cur, after);
         decided.set(targetId, written ? { targetId, status: 'written' } : { targetId, status: 'skipped', error: 'drift' });
       }
     }
@@ -423,6 +443,12 @@ export class ManifestBatchWriter implements ChangeWriter {
     }
     return byId;
   }
+}
+
+/** The fields any of `items` touches, in manifest `fields` order (the read field list of a batch). */
+function unionFields(m: ManifestDefinition, items: readonly Pick<ChangeItemRecord, 'before' | 'after'>[]): string[] {
+  const touched = new Set(items.flatMap((i) => itemFields(m, i)));
+  return m.fields.filter((f) => touched.has(f));
 }
 
 /**

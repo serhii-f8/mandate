@@ -54,6 +54,37 @@ describe('CS-2 before and after values', () => {
   });
 });
 
+describe('CS-2 per-record values', () => {
+  const m: ManifestDefinition = {
+    idField: 'sku',
+    recordsArg: 'records',
+    fields: ['name', 'price'],
+    requiredFields: [],
+    scopeArgs: {},
+    readBefore: { operation: 'read', args: {}, idsArg: 'ids' },
+    batchSize: 50,
+    maxTargets: 100,
+    rollback: { strategy: 'replay_previous_state' },
+  };
+  const recordArgs = { records: [{ sku: 'b', price: 2 }, { sku: 'a', name: 'A', price: 1 }] };
+
+  it('CS-2 each item compares and stores only the fields its own record gives', () => {
+    const items = build(
+      [
+        { sku: 'a', name: 'A', price: 1 },
+        { sku: 'b', price: 1 },
+      ],
+      ['a', 'b'],
+      m,
+      recordArgs,
+    );
+    expect(items).toEqual([
+      { targetId: 'a', status: 'excluded', reason: 'no_change', before: { name: 'A', price: 1 }, after: { name: 'A', price: 1 } },
+      { targetId: 'b', status: 'pending', before: { price: 1 }, after: { price: 2 } },
+    ]);
+  });
+});
+
 describe('CS-3 excluded targets', () => {
   it('CS-3 not_found', () => {
     expect(build([], ['B'])[0]).toEqual({ targetId: 'B', status: 'excluded', reason: 'not_found', before: null, after: null });

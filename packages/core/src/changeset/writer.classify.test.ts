@@ -82,6 +82,33 @@ describe('CS-7 NFR-2 classifyForWrite', () => {
   });
 });
 
+describe('CS-2 per-record values', () => {
+  const m: ManifestDefinition = {
+    idField: 'sku',
+    recordsArg: 'records',
+    fields: ['name', 'price'],
+    requiredFields: [],
+    scopeArgs: { brand: 'brand' },
+    readBefore: { operation: 'read', args: {}, idsArg: 'ids' },
+    batchSize: 50,
+    maxTargets: 100,
+    rollback: { strategy: 'replay_previous_state' },
+  };
+  const recordArgs = { brand: 'acme', records: [{ sku: 'a', name: 'A', price: 1 }, { sku: 'b', price: 2 }] };
+  const b = { before: { price: 1 }, after: { price: 2 } };
+
+  it('CS-2 CS-7 an item is compared over its own fields: a field another record touches is ignored', () => {
+    const current = { sku: 'b', brand: 'acme', name: 'anything', price: 1 };
+    expect(classifyForWrite({ manifest: m, args: recordArgs, item: b, current })).toEqual(WRITE);
+    expect(classifyForWrite({ manifest: m, args: recordArgs, item: b, current: { ...current, price: 2 } })).toEqual(
+      outcome('written', 'already_applied'),
+    );
+    expect(classifyForWrite({ manifest: m, args: recordArgs, item: b, current: { ...current, price: 3 } })).toEqual(
+      outcome('skipped', 'drift'),
+    );
+  });
+});
+
 describe('CS-7 EXE-8 rollback classification', () => {
   const back = (
     current: Record<string, unknown> | undefined,

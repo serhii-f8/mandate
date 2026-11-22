@@ -58,7 +58,8 @@ export type { InvocationRequest, InvocationResult, OperationInvoker } from './op
 export { readErrorResult, readToolResult, READ_RESULT_TEXT, type ReadToolResultInput } from './read-result.js';
 export type { CredentialHandle, CredentialStatus, CredentialVault } from './credential-vault.js';
 export { parseVersionedKeys, type VersionedKeys } from './keys.js';
-export { CanonicalJsonError, canonicalJson, compareTargetIds, normalizeArgs } from './changeset/canonical.js';
+export { CanonicalJsonError, canonicalJson, compareTargetIds, normalizeArgs, normalizeRecords } from './changeset/canonical.js';
+export { callRecords, itemFields, manifestAction } from './changeset/fields.js';
 export {
   ChangeSetHasher,
   CURRENT_HASH_VERSION,

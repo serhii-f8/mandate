@@ -3,7 +3,8 @@
 import type { Caller } from '../caller.js';
 import type { ManifestDefinition, ManifestTemplate, OperationDefinition } from '../policy-model.js';
 import { changesetTransitionEvent } from './audit.js';
-import { normalizeArgs } from './canonical.js';
+import { normalizeArgs, normalizeRecords } from './canonical.js';
+import { callRecords, manifestAction } from './fields.js';
 import { CURRENT_HASH_VERSION } from './hash.js';
 import { buildItems, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStatus } from './model.js';
@@ -105,13 +106,15 @@ function okPage(page: ReadPage): Extract<ReadPage, { ok: true }> {
 
 /**
  * The normalized arguments of a manifest operation, or the refusal: no manifest means the operation
- * cannot prepare a change-set; no ids and no selector means no targets.
+ * cannot prepare a change-set; no ids and no selector means no targets. With `recordsArg` the
+ * records name the targets: none is `targets_missing`, two with one identifier `duplicate_targets`.
  */
 function manifestArgs(
   manifest: ManifestDefinition | undefined,
   raw: Readonly<Record<string, unknown>>,
-): Record<string, unknown> | 'operation_unavailable' | 'targets_missing' {
+): Record<string, unknown> | 'operation_unavailable' | 'targets_missing' | 'duplicate_targets' {
   if (manifest === undefined) return 'operation_unavailable';
+  if (manifest.recordsArg !== undefined) return normalizeRecords(raw, manifest.recordsArg, manifest.idField);
   const args = normalizeArgs(raw, manifest.idsArg);
   const rawIds = manifest.idsArg === undefined ? undefined : args[manifest.idsArg];
   // normalizeArgs turned a present ids argument into a string array; an empty one names no targets (no selector fallback).
@@ -200,8 +203,10 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
   }
 
   const args = current.args;
+  const records = callRecords(manifest, args);
   const rawIds = manifest.idsArg === undefined ? undefined : args[manifest.idsArg];
-  const explicitIds = Array.isArray(rawIds) ? (rawIds as string[]) : undefined;
+  // The records name the targets in normalized (target) order; otherwise the normalized ids argument.
+  const explicitIds = records !== undefined ? [...records.keys()] : Array.isArray(rawIds) ? (rawIds as string[]) : undefined;
   const ref = { id, operation: operation.id };
   const event = (from: ChangeSetStatus | null, to: ChangeSetStatus, details?: Record<string, string | number>) =>
     changesetTransitionEvent({
@@ -265,6 +270,8 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
   let changeset: ChangeSetRecord | undefined;
   try {
     if (explicitIds !== undefined) {
+      // createChangeSet refused a call without records; a stored one without any fails closed.
+      if (records !== undefined && explicitIds.length === 0) throw new Failure('targets_missing');
       if (explicitIds.length > manifest.maxTargets) throw new Failure('too_many_targets');
       for (const chunk of chunks(explicitIds, manifest.batchSize)) await processChunk(chunk);
     } else if (manifest.selector !== undefined) {
@@ -309,7 +316,7 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
 
     const stats = await repository.stats(id);
     // CS-4: new preparations seal with the current version and the manifest's action (ADR 0069).
-    const seal = { hashVersion: CURRENT_HASH_VERSION, action: manifest.action ?? 'update' } as const;
+    const seal = { hashVersion: CURRENT_HASH_VERSION, action: manifestAction(manifest) } as const;
     const hash = await hashStoredItems(repository, { ...current, ...seal });
     const excluded = Object.values(stats.excluded).reduce((sum, n) => sum + n, 0);
     changeset = await repository.completePreparation(

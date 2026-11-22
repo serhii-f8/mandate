@@ -416,6 +416,67 @@ describe('CS-1 CS-2 CS-4 preparation', () => {
   });
 });
 
+describe('CS-2 per-record values', () => {
+  /** A records manifest: built without the `valuesArg`, `idsArg` and `selector` keys (exactOptionalPropertyTypes). */
+  const recordsManifest: ManifestDefinition = {
+    idField: 'sku',
+    recordsArg: 'records',
+    fields: ['name', 'price'],
+    requiredFields: [],
+    scopeArgs: { brand: 'brand' },
+    readBefore: baseManifest.readBefore,
+    batchSize: 1,
+    maxTargets: 10_000,
+    rollback: { strategy: 'replay_previous_state' },
+  };
+  const recordsRequest = (args: Record<string, unknown>, patch: Partial<ManifestDefinition> = {}): PrepareRequest => {
+    const req = request(args);
+    return { ...req, operation: { ...req.operation, fieldsArg: 'records', manifest: { ...recordsManifest, ...patch } } };
+  };
+  const recordArgs = { brand: 'acme', records: [{ sku: 'b', price: 2 }, { sku: 'a', name: 'A2', price: 1 }] };
+
+  it('CS-2 two records with one identifier refuse the call and create nothing', async () => {
+    const reader = new ScriptedReader({});
+    const { deps, repository } = setup(reader);
+    const args = { brand: 'acme', records: [{ sku: 1, price: 1 }, { sku: '1', price: 2 }] };
+    expect(await createChangeSet(deps, recordsRequest(args))).toEqual({ ok: false, code: 'duplicate_targets' });
+    expect(repository.sets.size).toBe(0);
+    expect(reader.calls).toHaveLength(0);
+  });
+
+  it('CS-2 a records call prepares one item per record and reads the union of touched fields', async () => {
+    const reader = new ScriptedReader({
+      a: { sku: 'a', brand: 'acme', name: 'A1', price: 1 },
+      b: { sku: 'b', brand: 'acme', name: 'B', price: 1 },
+    });
+    const { deps, repository } = setup(reader);
+    const out = await prepareChangeSet(deps, recordsRequest(recordArgs));
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    const reads = reader.readsOf('catalog.get_products_by_sku');
+    expect(reads.map((c) => c.args.skus)).toEqual([['a'], ['b']]);
+    expect(reads[0]?.args.fields).toEqual(['sku', 'brand', 'name', 'price']);
+    expect(repository.sets.get(out.changeset.id)?.args).toEqual({
+      brand: 'acme',
+      records: [
+        { sku: 'a', name: 'A2', price: 1 },
+        { sku: 'b', price: 2 },
+      ],
+    });
+    expect(out.firstItems).toEqual([
+      { targetId: 'a', status: 'pending', before: { name: 'A1', price: 1 }, after: { name: 'A2', price: 1 } },
+      { targetId: 'b', status: 'pending', before: { price: 1 }, after: { price: 2 } },
+    ]);
+  });
+
+  it('CS-1 more records than max_targets fail too_many_targets', async () => {
+    const reader = new ScriptedReader({});
+    const { deps } = setup(reader);
+    const out = await prepareChangeSet(deps, recordsRequest(recordArgs, { maxTargets: 1 }));
+    expect(out).toEqual({ ok: false, changesetId: 'id-1', code: 'too_many_targets' });
+    expect(reader.calls).toHaveLength(0);
+  });
+});
+
 describe('OPS-4 selector targets', () => {
   const selectorArgs = { brand: 'acme', changes: { description: 'new' } };
   const page = (ids: string[], total?: number): ReadPage => ({

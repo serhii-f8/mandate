@@ -72,3 +72,35 @@ export function normalizeArgs(
   }
   return copy;
 }
+
+/**
+ * Copy of args whose records argument carries each identifier as a string, ordered by target (CS-2,
+ * CS-4). No records names no targets; two records with one identifier refuse the call, never "last
+ * wins". The input schema was validated before, so a record that is not a plain object or has no
+ * string or number identifier is a bug and throws `TypeError`.
+ */
+export function normalizeRecords(
+  args: Readonly<Record<string, unknown>>,
+  recordsArg: string,
+  idField: string,
+): Record<string, unknown> | 'targets_missing' | 'duplicate_targets' {
+  const raw = args[recordsArg];
+  if (!Array.isArray(raw) || raw.length === 0) return 'targets_missing';
+  const seen = new Set<string>();
+  const records = (raw as unknown[]).map((record) => {
+    if (typeof record !== 'object' || record === null || Array.isArray(record)) {
+      throw new TypeError('normalizeRecords: a record must be a plain object');
+    }
+    const proto: unknown = Object.getPrototypeOf(record);
+    if (proto !== Object.prototype && proto !== null) throw new TypeError('normalizeRecords: a record must be a plain object');
+    const values = record as Record<string, unknown>;
+    const id = values[idField];
+    if (typeof id !== 'string' && typeof id !== 'number') throw new TypeError('normalizeRecords: id must be string or number');
+    const key = String(id);
+    seen.add(key);
+    return { key, record: { ...values, [idField]: key } };
+  });
+  if (seen.size !== records.length) return 'duplicate_targets';
+  records.sort((a, b) => compareTargetIds(a.key, b.key));
+  return { ...args, [recordsArg]: records.map((r) => r.record) };
+}

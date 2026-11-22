@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import { canonicalJson, compareTargetIds, normalizeArgs } from './canonical.js';
+import { canonicalJson, compareTargetIds, normalizeArgs, normalizeRecords } from './canonical.js';
 
 describe('CS-4 canonical JSON', () => {
   it('CS-4 sorts keys and emits no whitespace', () => {
@@ -65,5 +65,41 @@ describe('CS-4 target id order and argument normalization', () => {
     expect(normalizeArgs(args, undefined)).not.toBe(args);
     normalizeArgs(args, 'skus');
     expect(args.skus).toEqual(['b', 'a']);
+  });
+});
+
+describe('CS-2 per-record values', () => {
+  const args = { records: [{ sku: 'b', price: 2 }, { sku: 'a', name: 'A', price: 1 }] };
+
+  it('CS-2 normalizeRecords orders the records by target and leaves the input untouched', () => {
+    expect(normalizeRecords(args, 'records', 'sku')).toEqual({
+      records: [
+        { sku: 'a', name: 'A', price: 1 },
+        { sku: 'b', price: 2 },
+      ],
+    });
+    expect(args.records[0]?.sku).toBe('b');
+  });
+  it('CS-2 normalizeRecords turns identifiers into strings and keeps the other arguments', () => {
+    expect(normalizeRecords({ brand: 'acme', records: [{ sku: 10, price: 1 }, { sku: 9, price: 2 }] }, 'records', 'sku')).toEqual({
+      brand: 'acme',
+      records: [
+        { sku: '10', price: 1 },
+        { sku: '9', price: 2 },
+      ],
+    });
+  });
+  it('CS-2 two records with one identifier refuse the call', () => {
+    expect(normalizeRecords({ records: [{ sku: 1 }, { sku: '1' }] }, 'records', 'sku')).toBe('duplicate_targets');
+  });
+  it('CS-2 an absent, non-array or empty records argument names no targets', () => {
+    expect(normalizeRecords({ records: [] }, 'records', 'sku')).toBe('targets_missing');
+    expect(normalizeRecords({}, 'records', 'sku')).toBe('targets_missing');
+    expect(normalizeRecords({ records: { sku: 'a' } }, 'records', 'sku')).toBe('targets_missing');
+  });
+  it('CS-2 a record that is not a plain object or has no usable identifier is a bug and throws', () => {
+    for (const bad of [null, 'a', ['a'], { price: 1 }, { sku: null }, { sku: true }, new Date(0)]) {
+      expect(() => normalizeRecords({ records: [{ sku: 'a' }, bad] }, 'records', 'sku')).toThrow(TypeError);
+    }
   });
 });

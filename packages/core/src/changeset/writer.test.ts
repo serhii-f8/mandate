@@ -497,6 +497,81 @@ describe('EXE-4 CS-7 NFR-2 manifest batch writer', () => {
     expect(outcomes).toEqual([{ targetId: 'A', status: 'failed', error: 'write_mode_unsupported' }]);
   });
 
+  describe('CS-2 per-record values', () => {
+    const recordsManifest: ManifestDefinition = {
+      idField: 'sku',
+      recordsArg: 'records',
+      fields: ['name', 'price'],
+      requiredFields: [],
+      scopeArgs: { brand: 'brand' },
+      readBefore: { operation: 'catalog.get_products_by_sku', args: { brand: { arg: 'brand' } }, idsArg: 'skus' },
+      write: { carryFields: ['status'] },
+      batchSize: 100,
+      maxTargets: 1000,
+      rollback: { strategy: 'replay_previous_state' },
+    };
+    const recordsOperation = { ...operation, fieldsArg: 'records', manifest: recordsManifest };
+    const recordsChangeset: ChangeSetRecord = {
+      ...changesetFor([]),
+      args: {
+        brand: 'acme',
+        records: [
+          { sku: 'a2', name: 'A2' },
+          { sku: 'b', price: 2 },
+        ],
+      },
+    };
+    const a2: ChangeItemRecord = { targetId: 'a2', status: 'pending', before: { name: 'A1' }, after: { name: 'A2' } };
+    const b: ChangeItemRecord = { targetId: 'b', status: 'pending', before: { price: 1 }, after: { price: 2 } };
+
+    it('CS-2 CS-7 each record carries only its own fields and is verified over them', async () => {
+      const { reader, bulk, batch, writer } = setup(recordsOperation);
+      reader.pages = [
+        page({ sku: 'a2', brand: 'acme', name: 'A1', price: 9 }, { sku: 'b', brand: 'acme', name: 'other', price: 1 }),
+        page({ sku: 'a2', brand: 'acme', name: 'A2', price: 9 }, { sku: 'b', brand: 'acme', name: 'changed', price: 2 }),
+      ];
+      bulk.statuses = [states('ok', 'ok')];
+      const outcomes = await writer.writeBatch({ changeset: recordsChangeset, items: [a2, b], batch });
+      expect(bulk.submitted).toEqual([
+        [
+          { sku: 'a2', name: 'A2' },
+          { sku: 'b', price: 2 },
+        ],
+      ]);
+      expect(reader.calls[0]?.args).toMatchObject({ skus: ['a2', 'b'], fields: ['sku', 'name', 'price', 'brand', 'status'] });
+      expect(reader.calls[1]?.args).toMatchObject({ skus: ['a2', 'b'], fields: ['sku', 'name', 'price'] });
+      expect(outcomes).toEqual([
+        { targetId: 'a2', status: 'written' },
+        { targetId: 'b', status: 'written' },
+      ]);
+    });
+
+    it('CS-7 an item whose sides hold no manifest field fails write_mode_unsupported; the others are written', async () => {
+      const { reader, bulk, batch, writer } = setup(recordsOperation);
+      const none: ChangeItemRecord = { targetId: 'c', status: 'pending', before: { other: 1 }, after: { other: 2 } };
+      reader.pages = [
+        page({ sku: 'b', brand: 'acme', price: 1 }, { sku: 'c', brand: 'acme', other: 1 }),
+        page({ sku: 'b', brand: 'acme', price: 2 }),
+      ];
+      bulk.statuses = [states('ok')];
+      const outcomes = await writer.writeBatch({ changeset: recordsChangeset, items: [none, b], batch });
+      expect(bulk.submitted).toEqual([[{ sku: 'b', price: 2 }]]);
+      expect(reader.calls[0]?.args).toMatchObject({ skus: ['b'] });
+      expect(outcomes).toEqual([
+        { targetId: 'c', status: 'failed', error: 'write_mode_unsupported' },
+        { targetId: 'b', status: 'written' },
+      ]);
+    });
+
+    it('CS-7 a batch of items that all hold no manifest field reads nothing', async () => {
+      const { events, batch, writer } = setup(recordsOperation);
+      const none: ChangeItemRecord = { targetId: 'c', status: 'pending', before: { other: 1 }, after: { other: 2 } };
+      const outcomes = await writer.writeBatch({ changeset: recordsChangeset, items: [none], batch });
+      expect(events).toEqual([]);
+      expect(outcomes).toEqual([{ targetId: 'c', status: 'failed', error: 'write_mode_unsupported' }]);
+    });
+  });
+
   it('SEC-3 SEC-5 outcomes and plan contain only fixed codes', async () => {
     const { reader, bulk, batch, writer } = setup();
     const ids = ['A', 'B', 'C', 'D', 'E', 'F'];

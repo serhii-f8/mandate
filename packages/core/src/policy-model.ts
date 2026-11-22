@@ -48,7 +48,13 @@ export interface ManifestDefinition {
   readonly action?: ManifestAction;
   readonly idField: string;
   readonly idsArg?: string;
-  readonly valuesArg: string;
+  /** Argument holding one values object for every target (CS-2). The alternative to `recordsArg`. */
+  readonly valuesArg?: string;
+  /**
+   * Argument holding an array of records, each with `idField` and its own values (CS-2, ADR 0070).
+   * The records name the targets: no `idsArg` and no `selector` with it.
+   */
+  readonly recordsArg?: string;
   readonly fields: readonly string[];
   readonly requiredFields: readonly string[];
   /** Call argument name to record field. */

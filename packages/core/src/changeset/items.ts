@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import type { ManifestDefinition } from '../policy-model.js';
+import { callRecords } from './fields.js';
 import type { ChangeItemRecord, ExclusionReason } from './model.js';
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -21,10 +22,26 @@ function deepEqual(a: unknown, b: unknown): boolean {
   return false;
 }
 
-/** Keys of the values argument, in manifest `fields` order. */
+/**
+ * Keys of the values argument, in manifest `fields` order. For a `records_arg` call: the union of the
+ * records' fields, in manifest `fields` order (CS-2).
+ */
 export function touchedFields(manifest: ManifestDefinition, args: Readonly<Record<string, unknown>>): string[] {
-  const values = args[manifest.valuesArg];
-  if (!isRecord(values)) return [];
+  const records = callRecords(manifest, args);
+  if (records !== undefined) {
+    const all = [...records.values()];
+    return manifest.fields.filter((f) => all.some((values) => Object.hasOwn(values, f)));
+  }
+  return valuesFields(manifest, valuesOf(manifest, args));
+}
+
+/** The values object of a `values_arg` call; empty when there is none. */
+function valuesOf(manifest: ManifestDefinition, args: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  const values = manifest.valuesArg === undefined ? undefined : args[manifest.valuesArg];
+  return isRecord(values) ? values : {};
+}
+
+function valuesFields(manifest: ManifestDefinition, values: Readonly<Record<string, unknown>>): string[] {
   return manifest.fields.filter((f) => Object.hasOwn(values, f));
 }
 
@@ -66,9 +83,10 @@ export function buildItems(input: {
     const key = String(id);
     if (!byId.has(key)) byId.set(key, record);
   }
-  const fields = touchedFields(manifest, args);
-  const rawValues = args[manifest.valuesArg];
-  const values: Record<string, unknown> = isRecord(rawValues) ? rawValues : {};
+  // One values object for every target, or each target's own record (CS-2).
+  const perRecord = callRecords(manifest, args);
+  const shared = valuesOf(manifest, args);
+  const sharedFields = valuesFields(manifest, shared);
 
   return targetIds.map((targetId): ChangeItemRecord => {
     const record = byId.get(targetId);
@@ -77,6 +95,8 @@ export function buildItems(input: {
     if (manifest.requiredFields.some((f) => record[f] === undefined || record[f] === null)) {
       return excluded(targetId, 'missing_data');
     }
+    const values = perRecord === undefined ? shared : (perRecord.get(targetId) ?? {});
+    const fields = perRecord === undefined ? sharedFields : valuesFields(manifest, values);
     const before: Record<string, unknown> = {};
     const after: Record<string, unknown> = {};
     for (const f of fields) {

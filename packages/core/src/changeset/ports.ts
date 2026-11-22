@@ -18,7 +18,17 @@ import type {
   RollbackRequest,
 } from './model.js';
 
-export type PrepareFailure = 'targets_missing' | 'too_many_targets' | 'incomplete_read' | 'cancelled' | (string & {});
+/**
+ * A fixed preparation failure code. `duplicate_targets`: two records of a `records_arg` call name one
+ * target (CS-2); the call is refused and nothing is created.
+ */
+export type PrepareFailure =
+  | 'targets_missing'
+  | 'too_many_targets'
+  | 'incomplete_read'
+  | 'cancelled'
+  | 'duplicate_targets'
+  | (string & {});
 
 export interface NewChangeSet {
   readonly id: string;
