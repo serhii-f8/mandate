@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { auditRows, connectClient, startApi, startDatabase, text, tokenFor, vaultOf, type RunningApi } from './helpers.js';
@@ -108,6 +109,21 @@ async function waitForStatus(token: string, id: string, want: string): Promise<s
   return status;
 }
 
+/** The stored execution request's identity (POL-6): whose request the execution is. */
+async function executionRequestOf(id: string): Promise<{ actor: string | null; groups: string[] | null }> {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const rows = (await client.query<{ actor: string | null; groups: string[] | null }>(
+      'select execution_actor as actor, execution_groups as groups from change_set where id = $1',
+      [id],
+    )).rows;
+    return rows[0] ?? { actor: null, groups: null };
+  } finally {
+    await client.end();
+  }
+}
+
 const approve = (c: Prepared) => call(dave, 'decide_changeset', { changeset_id: c.id, decision: 'approve', hash: c.hash, count: 2 });
 
 describe('CS-9 EXE-13 a plan over the real MCP transport', () => {
@@ -124,7 +140,7 @@ describe('CS-9 EXE-13 a plan over the real MCP transport', () => {
     }
   });
 
-  it('CS-9 EXE-13 step 2 approved first stays approved and is refused plan_blocked until step 1 completed', async () => {
+  it('CS-9 EXE-13 step 2 approved first is refused plan_blocked until step 1 completed, then started by the platform', async () => {
     const first = await prepare(alice, ['acme-1', 'acme-2']);
     const second = await prepare(alice, ['acme-3', 'acme-4']);
     const created = await call(alice, 'create_plan', { title: 'Spring launch', changesets: [first.id, second.id] });
@@ -174,12 +190,18 @@ describe('CS-9 EXE-13 a plan over the real MCP transport', () => {
       ],
     });
 
-    // Step 1 approved and completed: step 2 can now be started by its requester.
-    expect(text((await approve(first)).result)).toBe(`Decision recorded for change-set ${first.id}: approved. Execution started.`);
+    // Step 1 approved and completed: the platform starts the approved step 2 by itself, with no further call.
+    const approvedFirst = await approve(first);
+    expect(text(approvedFirst.result)).toBe(`Decision recorded for change-set ${first.id}: approved. Execution started.`);
     expect(await waitForStatus(alice, first.id, 'completed')).toBe('completed');
-    const started = await call(alice, 'submit_for_approval', { changeset_id: second.id, hash: second.hash });
-    expect(started.result.isError).toBeUndefined();
     expect(await waitForStatus(alice, second.id, 'completed')).toBe('completed');
+    // EXE-13: the start's `executing` transition is the system's, under step 1's execution correlation ID ...
+    const startedRows = await auditRows(databaseUrl, "action = 'changeset.transition' and changeset_id = $1 and details->>'to' = 'executing'", [second.id]);
+    expect(startedRows.map((r) => ({ actor: r.actor, correlationId: r.correlation_id, from: r.details.from }))).toEqual([
+      { actor: 'system', correlationId: approvedFirst.correlationId, from: 'approved' },
+    ]);
+    // ... and the execution request is the requester's stored submission identity (POL-6).
+    expect(await executionRequestOf(second.id)).toEqual({ actor: 'alice-id', groups: ['content'] });
   });
 
   it('MCP-10 SEC-1 another user\'s change-set in create_plan reads as not found and nothing is written', async () => {
