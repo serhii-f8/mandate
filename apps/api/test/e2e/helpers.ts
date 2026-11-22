@@ -55,6 +55,26 @@ export function freePort(): Promise<number> {
   });
 }
 
+function isAddressInUse(error: unknown): boolean {
+  const code = (value: unknown): unknown => (typeof value === 'object' && value !== null ? (value as { code?: unknown }).code : undefined);
+  return code(error) === 'EADDRINUSE' || code((error as { cause?: unknown } | null)?.cause) === 'EADDRINUSE';
+}
+
+/**
+ * Runs `start` with a free port. Another process can take the port between the probe and the listen,
+ * so an `EADDRINUSE` (directly or as `cause`) runs `start` again with a new port, up to `attempts` times;
+ * any other error propagates. `start` closes whatever a failed attempt created before it throws.
+ */
+export async function withFreePort<T>(start: (port: number) => Promise<T>, attempts = 5): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await start(await freePort());
+    } catch (error) {
+      if (!isAddressInUse(error) || attempt >= attempts) throw error;
+    }
+  }
+}
+
 export interface StartApiOptions {
   readonly issuer: { readonly issuer: string; readonly jwksUrl: string };
   readonly configDir?: string;
@@ -147,8 +167,12 @@ export function testAdapters(logger?: Logger): OpenApiAdapter {
   );
 }
 
-export async function startApi(databaseUrl: string, options: StartApiOptions): Promise<RunningApi> {
-  const port = options.port ?? (await freePort());
+export function startApi(databaseUrl: string, options: StartApiOptions): Promise<RunningApi> {
+  // A caller-supplied port is never retried.
+  return options.port === undefined ? withFreePort((port) => startApiOn(databaseUrl, options, port)) : startApiOn(databaseUrl, options, options.port);
+}
+
+async function startApiOn(databaseUrl: string, options: StartApiOptions, port: number): Promise<RunningApi> {
   const env = testApiEnv(databaseUrl, port, options);
   // As given: the token audience must match it character for character.
   const resource = options.resource ?? `http://127.0.0.1:${String(port)}/mcp`;
@@ -186,7 +210,13 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
         })
       : options.starter;
   const executor = options.executor ?? new InMemoryExecutor({ repository, writer: new ScriptedWriter(), batchSizeOf: () => 100 });
-  const app = await createApp({
+  const closeStack = async (): Promise<void> => {
+    if (starter instanceof InProcessStarter) await starter.settled().catch(() => undefined);
+    await database.close();
+  };
+  let app: INestApplication;
+  try {
+    app = await createApp({
     env,
     configuration,
     overrides: {
@@ -198,8 +228,18 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
       ...(options.rateCounter === undefined ? {} : { rateCounter: options.rateCounter }),
     },
     ...(options.logger === undefined ? {} : { logger: options.logger }),
-  });
-  await app.listen(port, '127.0.0.1');
+    });
+  } catch (error) {
+    await closeStack();
+    throw error;
+  }
+  try {
+    await app.listen(port, '127.0.0.1');
+  } catch (error) {
+    await app.close().catch(() => undefined);
+    await closeStack();
+    throw error;
+  }
   return {
     app,
     url: `http://127.0.0.1:${String(port)}`,
@@ -209,8 +249,7 @@ export async function startApi(databaseUrl: string, options: StartApiOptions): P
     async close() {
       await app.close();
       // Preparations still running would otherwise hit a closed pool; their failures were reported by `onError`.
-      if (starter instanceof InProcessStarter) await starter.settled().catch(() => undefined);
-      await database.close();
+      await closeStack();
     },
   };
 }

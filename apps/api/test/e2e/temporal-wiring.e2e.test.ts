@@ -18,7 +18,7 @@ import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@mandate
 import { configurationLoadOptions } from '@mandate/upstream';
 import { createApp } from '../../src/app.js';
 import { startApiTelemetry } from '../../src/telemetry.js';
-import { auditRows, connectClient, freePort, startDatabase, testApiEnv, text } from './helpers.js';
+import { auditRows, connectClient, freePort, startDatabase, withFreePort, testApiEnv, text } from './helpers.js';
 
 const CHANGESET_CONFIG = fileURLToPath(new URL('./fixtures/changeset-config', import.meta.url));
 /** Nothing listens here: connection refused. */
@@ -52,7 +52,7 @@ async function load(env: ApiEnv) {
 
 describe('MCP-7 EXE-11 production Temporal wiring while Temporal is down', () => {
   it('MCP-7 the api starts and is ready with Temporal unreachable, a write call answers executor_unavailable, and it shuts down', async () => {
-    const port = await freePort();
+    await withFreePort(async (port) => {
     const env: ApiEnv = { ...testApiEnv(databaseUrl, port, { issuer, configDir }), temporalAddress: UNREACHABLE };
     const { adapter, configuration } = await load(env);
     const app = await createApp({ env, configuration, overrides: { adapter } });
@@ -94,10 +94,11 @@ describe('MCP-7 EXE-11 production Temporal wiring while Temporal is down', () =>
     } finally {
       if (!closed) await app.close();
     }
+    });
   }, 120_000);
 
   it('NFR-11 a tool call is one mcp.request span with a child mcp.tool_call span, both carrying the response correlation ID', async () => {
-    const port = await freePort();
+    await withFreePort(async (port) => {
     const env: ApiEnv = { ...testApiEnv(databaseUrl, port, { issuer, configDir }), temporalAddress: UNREACHABLE };
     const { adapter, configuration } = await load(env);
     const exporter = new InMemorySpanExporter();
@@ -155,6 +156,7 @@ describe('MCP-7 EXE-11 production Temporal wiring while Temporal is down', () =>
     } finally {
       if (!closed) await app.close();
     }
+    });
   }, 120_000);
 
   it('SEC-4 a malformed MANDATE_TEMPORAL_KEYS stops the start, named without the value', async () => {

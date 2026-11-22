@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CookieJar, loginWithPkce, pageLogin, registerClient, startKeycloak, type LoginResult, type StartedKeycloak, type StartedPostgres } from '@mandate/testing';
-import { auditRows, connectClient, FIXTURE_CONFIG, freePort, modernRequest, rawPost, startApi, startDatabase, type RunningApi } from './helpers.js';
+import { auditRows, connectClient, FIXTURE_CONFIG, modernRequest, rawPost, startApi, startDatabase, withFreePort, type RunningApi } from './helpers.js';
 
 /** Built-in tools every authenticated user sees (MCP-8). */
 const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset', 'submit_for_approval', 'exclude_changeset_items', 'rollback_changeset'];
@@ -49,9 +49,6 @@ beforeAll(async () => {
   configDir = await mkdtemp(join(tmpdir(), 'mandate-keycloak-e2e-'));
   await cp(FIXTURE_CONFIG, configDir, { recursive: true });
   await writeFile(join(configDir, 'service-accounts.yaml'), SERVICE_ACCOUNTS_YAML);
-  const port = await freePort();
-  resource = `http://127.0.0.1:${String(port)}/mcp`;
-
   // A CIMD document served from the test process; Keycloak fetches it over plain
   // HTTP because the test sets MANDATE_CIMD_ALLOW_HTTP (the shipped default is false).
   cimdServer = createServer((_req, res) => {
@@ -70,9 +67,21 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => cimdServer.listen(0, '0.0.0.0', resolve));
   cimdClientId = `http://host.docker.internal:${String((cimdServer.address() as AddressInfo).port)}/client.json`;
 
-  keycloak = await startKeycloak({ mcpResource: resource, publicUrl: `http://127.0.0.1:${String(port)}` });
-  await keycloak.bootstrap({ MANDATE_CIMD_ALLOW_HTTP: 'true', MANDATE_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
-  api = await startApi(databaseUrl, { issuer: keycloak, port, resource, configDir });
+  // The port is part of what Keycloak is told (resource, public URL), so a port taken before the api
+  // listens restarts Keycloak too; the failed attempt's Keycloak is stopped first.
+  await withFreePort(async (port) => {
+    const candidate = `http://127.0.0.1:${String(port)}/mcp`;
+    const started = await startKeycloak({ mcpResource: candidate, publicUrl: `http://127.0.0.1:${String(port)}` });
+    try {
+      await started.bootstrap({ MANDATE_CIMD_ALLOW_HTTP: 'true', MANDATE_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
+      api = await startApi(databaseUrl, { issuer: started, port, resource: candidate, configDir });
+    } catch (error) {
+      await started.stop();
+      throw error;
+    }
+    keycloak = started;
+    resource = candidate;
+  });
 }, 300_000);
 
 afterAll(async () => {

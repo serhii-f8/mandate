@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mcpToolHash, type McpToolDefinition } from '@mandate/connector-sdk';
 import { READ_RESULT_TEXT } from '@mandate/core';
 import { startFakeMcpServer, startTestIssuer, type FakeMcpServer, type FakeMcpTool, type StartedPostgres, type TestIssuer } from '@mandate/testing';
-import { auditRows, connectClient, freePort, reloadConfiguration, startApi, startDatabase, tokenFor, type RunningApi } from './helpers.js';
+import { auditRows, connectClient, reloadConfiguration, startApi, startDatabase, tokenFor, withFreePort, type RunningApi } from './helpers.js';
 
 const MCP_CONFIG = fileURLToPath(new URL('./fixtures/mcp-config', import.meta.url));
 /** Upstream prose that must never reach the client (SEC-6). */
@@ -244,7 +244,7 @@ describe('CONN-1 CONN-4 SEC-5 SEC-6 MCP-backed operations', () => {
   });
 
   it('CONN-4 an upstream that comes up after start is offered without a restart', async () => {
-    const port = await freePort();
+    await withFreePort(async (port) => {
     const lateDir = await configFor(`http://127.0.0.1:${String(port)}/mcp`);
     const late = await startApi(databaseUrl, { issuer, configDir: lateDir });
     let lateFake: FakeMcpServer | undefined;
@@ -258,5 +258,6 @@ describe('CONN-1 CONN-4 SEC-5 SEC-6 MCP-backed operations', () => {
       await lateFake?.close();
       await rm(lateDir, { recursive: true });
     }
+    });
   });
 });
