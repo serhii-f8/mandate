@@ -17,7 +17,7 @@ For a real installation read [production.md](production.md) as well.
 Clone the repository and start the stack from its root. The first run builds the images.
 
 ```bash
-git clone <repository-url> ai-operations-layer
+git clone https://github.com/serhii-f8/fde.git ai-operations-layer
 cd ai-operations-layer
 ```
 
