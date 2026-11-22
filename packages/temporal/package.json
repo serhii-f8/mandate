@@ -1,5 +1,5 @@
 {
-  "name": "@aiops/temporal",
+  "name": "@mandate/temporal",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,12 +7,12 @@
   "license": "Apache-2.0",
   "exports": {
     ".": {
-      "@aiops/source": "./src/index.ts",
+      "@mandate/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./contract": {
-      "@aiops/source": "./src/contract.ts",
+      "@mandate/source": "./src/contract.ts",
       "types": "./dist/contract.d.ts",
       "default": "./dist/contract.js"
     }
@@ -27,7 +27,7 @@
     "test": "vitest run --project unit --passWithNoTests"
   },
   "dependencies": {
-    "@aiops/core": "workspace:*",
+    "@mandate/core": "workspace:*",
     "@temporalio/client": "1.25.0",
     "@temporalio/common": "1.25.0",
     "@temporalio/proto": "1.25.0"

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { lookup as dnsLookup } from 'node:dns/promises';
 import type { LookupAddress } from 'node:dns';
 import { isIP, type LookupFunction } from 'node:net';
-import type { ConnectionSettings } from '@aiops/connector-sdk';
+import type { ConnectionSettings } from '@mandate/connector-sdk';
 
 /** Outbound connection refused by the egress guard (CONN-5). The message names the host only. */
 export class EgressDeniedError extends Error {

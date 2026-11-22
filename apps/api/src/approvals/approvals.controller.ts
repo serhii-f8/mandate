@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { Controller, Get, Inject, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import type { ConfigurationHolder } from '@aiops/config';
-import { currentStep, type ChangeSetRepository } from '@aiops/core';
+import type { ConfigurationHolder } from '@mandate/config';
+import { currentStep, type ChangeSetRepository } from '@mandate/core';
 import { CHANGESET_REPOSITORY, CONFIGURATION, PAGE_CHECKS } from '../tokens.js';
 import { PageAccess, pageOf, type PageChecks, type PageRequest } from '../web/access.js';
 import { pageAnswer, pageViewer } from './changeset-pages.controller.js';

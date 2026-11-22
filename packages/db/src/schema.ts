@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
@@ -34,7 +34,7 @@ import type {
   PlanEntry,
   RollbackItemStatus,
   TaskKind,
-} from '@aiops/core';
+} from '@mandate/core';
 
 /** `Submission` as stored: `at` is an ISO 8601 string in JSON, revived to a `Date` on read. */
 export interface StoredSubmission {
@@ -55,8 +55,8 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
  * Audit base table (AUD-1). Append-only: a trigger added by migration
  * `0001_audit_event_append_only` rejects UPDATE, DELETE and TRUNCATE (AUD-3), except the two
  * sanctioned paths migration `0013_audit_chain` adds, each behind a transaction-local setting:
- * the sealer (`aiops.audit_seal = on`) may fill `chain_pos`, `prev_hash` and `hash` of an
- * unsealed row once, and retention (`aiops.audit_retention = on`, AUD-7) may delete sealed rows
+ * the sealer (`mandate.audit_seal = on`) may fill `chain_pos`, `prev_hash` and `hash` of an
+ * unsealed row once, and retention (`mandate.audit_retention = on`, AUD-7) may delete sealed rows
  * at or below the newest `audit_anchor`. TRUNCATE is always refused.
  */
 export const auditEvent = pgTable(

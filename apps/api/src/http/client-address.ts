@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Client address keys for the unauthenticated rate limit (SEC-10). An IPv4 address (also when
  * IPv4-mapped in dotted form) is its own key; an IPv6 address is keyed by its /64, the smallest

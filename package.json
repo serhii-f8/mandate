@@ -1,9 +1,9 @@
 {
-  "name": "aiops",
+  "name": "mandate",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "AI Operations Layer: self-hosted MCP server with policy, change-sets, approvals and audit",
+  "description": "Mandate: self-hosted MCP server with policy, change-sets, approvals and audit",
   "license": "Apache-2.0",
   "packageManager": "pnpm@11.28.12",
   "engines": {
@@ -17,8 +17,8 @@
     "test:int": "turbo run test:int --concurrency=1",
     "test:e2e": "turbo run test:e2e --concurrency=1",
     "ci": "bash scripts/ci.sh",
-    "aiops-config": "node packages/config/dist/cli.js",
-    "aiops": "node apps/api/dist/cli.js"
+    "mandate-config": "node packages/config/dist/cli.js",
+    "mandate": "node apps/api/dist/cli.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

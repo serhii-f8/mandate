@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The widget's actions as ordinary platform tool calls through the MCP Apps host. Widgets hold no
  * authority: the server authorizes every call (SEC-1), and the widget calls only `WidgetTool`s.

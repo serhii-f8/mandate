@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * `rollback_changeset` (MCP-8, EXE-8): tells the requester whether their executed change-set can be
  * rolled back now, and how many items it would restore until when. It never changes state: the
@@ -8,8 +8,8 @@
  * counts and codes only (SEC-3).
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
-import { createSchemaCompiler } from '@aiops/config';
-import { rollbackEligibility, type ChangeSetRepository, type RollbackReason, type RollbackRefusal } from '@aiops/core';
+import { createSchemaCompiler } from '@mandate/config';
+import { rollbackEligibility, type ChangeSetRepository, type RollbackReason, type RollbackRefusal } from '@mandate/core';
 import { pageLink } from '../changesets/links.js';
 import { eligibilityDeps } from '../changesets/rollback.js';
 import { notFound } from './changeset-tools.js';
@@ -30,7 +30,7 @@ const ROLLBACK_SCHEMA = {
 export interface RollbackToolDeps {
   readonly repository: ChangeSetRepository;
   readonly now: () => Date;
-  /** `AIOPS_PUBLIC_URL`: base of the page link where the rollback is confirmed. */
+  /** `MANDATE_PUBLIC_URL`: base of the page link where the rollback is confirmed. */
   readonly publicUrl: URL;
 }
 

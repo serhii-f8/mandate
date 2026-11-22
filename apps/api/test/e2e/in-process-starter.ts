@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { LoadedConfiguration } from '@aiops/config';
+// Copyright 2026 The Mandate Authors
+import type { LoadedConfiguration } from '@mandate/config';
 import {
   changesetTransitionEvent,
   isOpaque,
@@ -10,7 +10,7 @@ import {
   type ChangeSetRepository,
   type UpstreamReader,
   type WorkflowStarter,
-} from '@aiops/core';
+} from '@mandate/core';
 
 export interface InProcessStarterDeps {
   readonly configuration: () => LoadedConfiguration;

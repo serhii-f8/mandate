@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * OpenAPI adapter facade (CONN-2, CONN-7, SEC-7): the spec resolver the configuration loader uses,
  * the read path the api uses, scope detection for the connection test, and the bulk and opaque write
@@ -28,7 +28,7 @@ import {
   type WriteAdapter,
   type WriteFailure,
   type WriteRecord,
-} from '@aiops/connector-sdk';
+} from '@mandate/connector-sdk';
 import { createCodeRunner, type CodeRunnerDeps } from '../code/runner.js';
 import { createConnectionClient, createTransport, type ConnectionClient, type SendResult, type Transport } from '../http/client.js';
 import { createGuardedLookup } from '../http/egress.js';

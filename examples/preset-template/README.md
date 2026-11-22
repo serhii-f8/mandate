@@ -6,7 +6,7 @@ manifest write sent as one `PATCH /notes/{id}` per record with `replay_previous_
 
 | File | Purpose |
 | --- | --- |
-| `package.json` | the package; the `aiops` field names the preset file and the connector SDK range |
+| `package.json` | the package; the `mandate` field names the preset file and the connector SDK range |
 | `preset.yaml` | operations, input schemas, upstream mappings, the connection test and the manifest |
 | `spec/notes.openapi.json` | the vendored OpenAPI 3 spec the preset's paths are checked against |
 | `test/contract.unit.test.ts` | loads the preset like the api does and replays the recordings |
@@ -24,10 +24,10 @@ manifest write sent as one `PATCH /notes/{id}` per record with `replay_previous_
 ## Try it
 
 ```bash
-pnpm --filter @aiops-examples/preset-template test
-pnpm aiops validate <config-dir> --preset-dir examples
+pnpm --filter @mandate-examples/preset-template test
+pnpm mandate validate <config-dir> --preset-dir examples
 ```
 
 The configuration binds the preset to a connection, for example
-`presets: [{ id: notes, package: '@aiops-examples/preset-template', version: '1.0.0' }]` and a
+`presets: [{ id: notes, package: '@mandate-examples/preset-template', version: '1.0.0' }]` and a
 connection with `preset: notes`, `adapter: openapi` and a `base_url`.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { ConnectionSettings } from './connection.js';
 import type { HttpMethod, UpstreamMapping } from './mapping.js';
 import type { ToolListOutcome } from './mcp.js';

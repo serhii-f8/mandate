@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Tracing through Temporal with the OpenTelemetry plugin and the encrypting codec on (NFR-11,
  * SEC-4, ADR 0047): one trace runs from the caller through the workflow start, the workflow's
  * activity schedules and the activity runs, and the only plaintext the trace adds to history is
  * the W3C context in the `_tracer-data` header.
  */
-import type { ReadPage, UpstreamReader } from '@aiops/core';
+import type { ReadPage, UpstreamReader } from '@mandate/core';
 import { trace, type Span } from '@opentelemetry/api';
 import { InMemorySpanExporter, SimpleSpanProcessor, type ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import { ScriptedWriter } from '@aiops/testing';
+import { ScriptedWriter } from '@mandate/testing';
 import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors-opentelemetry';
 import { historyToJSON } from '@temporalio/common/lib/proto-utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -58,7 +58,7 @@ async function withTracedWorker(run: (worker: TestWorker) => Promise<void>): Pro
   const worker = await startTestWorker(infra, {
     reader: catalogReader,
     writer: new ScriptedWriter(),
-    plugins: [createTracingPlugin({ spanProcessor: new SimpleSpanProcessor(exporter), serviceName: 'aiops-worker' })],
+    plugins: [createTracingPlugin({ spanProcessor: new SimpleSpanProcessor(exporter), serviceName: 'mandate-worker' })],
   });
   try {
     await run(worker);
@@ -171,13 +171,13 @@ describe('NFR-11 tracing through Temporal', () => {
       );
 
       const prepare = spanNamed('RunActivity:prepare');
-      expect(prepare.attributes['aiops.changeset_id']).toBe(prepared.id);
-      expect(prepare.attributes['aiops.correlation_id']).toBe('corr-prepare');
+      expect(prepare.attributes['mandate.changeset_id']).toBe(prepared.id);
+      expect(prepare.attributes['mandate.correlation_id']).toBe('corr-prepare');
       const batches = finished().filter((s) => s.name === 'RunActivity:executeBatch');
       expect(batches.length).toBeGreaterThan(0);
       for (const batch of batches) {
-        expect(batch.attributes['aiops.changeset_id']).toBe(prepared.id);
-        expect(batch.attributes['aiops.correlation_id']).toBe('corr-execute');
+        expect(batch.attributes['mandate.changeset_id']).toBe(prepared.id);
+        expect(batch.attributes['mandate.correlation_id']).toBe('corr-execute');
       }
     });
   }, 60_000);
@@ -221,7 +221,7 @@ describe('NFR-11 tracing through Temporal', () => {
       expect(schedule.parentSpanContext).toEqual(expect.objectContaining({ traceId, spanId: workflow.spanContext().spanId }));
       for (const span of [workflow, schedule]) {
         expect(span.instrumentationScope.name, span.name).toEqual(expect.any(String));
-        expect(span.resource.attributes['service.name'], span.name).toBe('aiops-worker');
+        expect(span.resource.attributes['service.name'], span.name).toBe('mandate-worker');
         expect(span, span.name).not.toHaveProperty('parentSpanId');
       }
     });

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import type { Response } from 'express';
-import type { LoadedConfiguration } from '@aiops/config';
-import { rolesOf, type AuditAction, type AuditLog, type Caller } from '@aiops/core';
+import type { LoadedConfiguration } from '@mandate/config';
+import { rolesOf, type AuditAction, type AuditLog, type Caller } from '@mandate/core';
 import { deny, pageDenial, pageOf, type PageChecks, type PageContext, type PageDenial, type PageRequest, type RequiredChecks } from './access.js';
 import { pageCorrelation } from './correlation.js';
 

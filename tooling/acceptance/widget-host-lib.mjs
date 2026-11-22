@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Pure helpers of the reference host (widget-host.mjs and the host page).
 export const MCP_APPS_DEFAULT_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'";
 export const HOST_THEME = { '--color-background-primary': 'rgb(1, 2, 3)', '--color-text-primary': 'rgb(250, 251, 252)' };

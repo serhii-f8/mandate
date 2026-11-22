@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Preset resolution (CONN-8; design part 1 §3.4, ADR 0017; Phase 9 packages): a preset is a
  * package directory in one of the preset directories, chosen by its `package.json` name and
- * a semver range, holding a preset file (`aiops.preset`, default `preset.yaml`) and, for an
+ * a semver range, holding a preset file (`mandate.preset`, default `preset.yaml`) and, for an
  * openapi preset, a vendored spec. Issues inside the preset are reported with the file
- * `<package>/<preset file>` (CFG-2), issues about `aiops` with `<package>/package.json`.
+ * `<package>/<preset file>` (CFG-2), issues about `mandate` with `<package>/package.json`.
  */
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { CONNECTOR_SDK_VERSION } from '@aiops/connector-sdk';
+import { CONNECTOR_SDK_VERSION } from '@mandate/connector-sdk';
 import semver from 'semver';
 import { z } from 'zod';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { loadPresetCode, type ImportModule, type LoadedPresetCode } from './preset-code.js';
-import { parseAiopsField, selectPackage } from './preset-package.js';
+import { parseMandateField, selectPackage } from './preset-package.js';
 import { PARSE_PARAMS, presetOperationSchema, schemaIssues, type PresetConfig, type PresetOperationConfig } from './schema.js';
 import { findSecretKeys, SECRET_MESSAGE } from './secrets.js';
 import { authSchema, connectionTestSchema, isSpecUrl, type AuthConfig, type ConnectionTestConfig } from './upstream-schema.js';
@@ -40,18 +40,18 @@ export interface LoadedPreset {
   readonly adapter: 'openapi' | 'mcp';
   /** Absolute directory of the preset package. */
   readonly dir: string;
-  /** The preset file (`aiops.preset`, default `preset.yaml`), named `<package>/<path>` in issues. */
+  /** The preset file (`mandate.preset`, default `preset.yaml`), named `<package>/<path>` in issues. */
   readonly source: SourceDocument;
   /** Absolute path of the vendored spec; an mcp preset has none. */
   readonly specFile?: string;
-  /** `aiops.sdk` of the package; absent for a package without `aiops`. */
+  /** `mandate.sdk` of the package; absent for a package without `mandate`. */
   readonly sdk?: string;
   readonly auth?: AuthConfig;
   readonly test?: ConnectionTestConfig;
   readonly operations: readonly PresetOperationConfig[];
   /** `package.json`, the preset file and the spec (openapi only), in this order; covered by the configuration hash. */
   readonly files: readonly { readonly file: string; readonly text: string }[];
-  /** The code module of `aiops.code` (OPS-5); its tree digest is covered by the configuration hash (CFG-4). */
+  /** The code module of `mandate.code` (OPS-5); its tree digest is covered by the configuration hash (CFG-4). */
   readonly code?: LoadedPresetCode;
 }
 
@@ -104,18 +104,18 @@ export async function resolvePreset(
     return { ok: false, issues: [installed ? entryIssue('version', 'does not match the installed package version') : entryIssue('package', 'is not installed in the preset directories')] };
   }
 
-  // The `aiops` field (CONN-8, NFR-18); issues name `<package>/package.json`.
+  // The `mandate` field (CONN-8, NFR-18); issues name `<package>/package.json`.
   const packageFile = `${entry.package}/package.json`;
-  const packageIssue = (key: string, message: string): PresetResult => ({ ok: false, issues: [{ file: packageFile, path: `aiops.${key}`, message }] });
-  const aiopsField = parseAiopsField(JSON.parse(found.packageJson));
-  if (!aiopsField.ok) return { ok: false, issues: aiopsField.issues.map((issue) => ({ file: packageFile, path: pathToString(issue.path), message: issue.message })) };
-  const aiops = aiopsField.aiops;
-  if (aiops !== undefined && !semver.satisfies(CONNECTOR_SDK_VERSION, aiops.sdk)) {
-    return packageIssue('sdk', `preset_sdk_incompatible: the preset requires connector SDK ${aiops.sdk}; this platform provides ${CONNECTOR_SDK_VERSION}`);
+  const packageIssue = (key: string, message: string): PresetResult => ({ ok: false, issues: [{ file: packageFile, path: `mandate.${key}`, message }] });
+  const mandateField = parseMandateField(JSON.parse(found.packageJson));
+  if (!mandateField.ok) return { ok: false, issues: mandateField.issues.map((issue) => ({ file: packageFile, path: pathToString(issue.path), message: issue.message })) };
+  const mandate = mandateField.mandate;
+  if (mandate !== undefined && !semver.satisfies(CONNECTOR_SDK_VERSION, mandate.sdk)) {
+    return packageIssue('sdk', `preset_sdk_incompatible: the preset requires connector SDK ${mandate.sdk}; this platform provides ${CONNECTOR_SDK_VERSION}`);
   }
 
   const realDir = await realpath(found.dir);
-  const presetPath = aiops?.preset ?? 'preset.yaml';
+  const presetPath = mandate?.preset ?? 'preset.yaml';
   const presetFile = resolve(found.dir, presetPath);
   if (isAbsolute(presetPath) || !isInside(found.dir, presetFile)) return packageIssue('preset', 'must be a path inside the preset');
   const file = `${entry.package}/${relative(found.dir, presetFile).split(sep).join('/')}`;
@@ -160,11 +160,11 @@ export async function resolvePreset(
   if (issues.length > 0) return { ok: false, issues };
 
   let code: LoadedPresetCode | undefined;
-  if (aiops?.code !== undefined) {
+  if (mandate?.code !== undefined) {
     const loaded = await loadPresetCode({
       packageName: entry.package,
       dir: found.dir,
-      code: aiops.code,
+      code: mandate.code,
       ...(options.importModule === undefined ? {} : { importModule: options.importModule }),
     });
     if (!loaded.ok) return loaded;
@@ -181,7 +181,7 @@ export async function resolvePreset(
       dir: found.dir,
       source,
       ...(specFile === undefined ? {} : { specFile }),
-      ...(aiops === undefined ? {} : { sdk: aiops.sdk }),
+      ...(mandate === undefined ? {} : { sdk: mandate.sdk }),
       ...(doc.auth === undefined ? {} : { auth: doc.auth }),
       ...(doc.test === undefined ? {} : { test: doc.test }),
       operations: doc.operations,

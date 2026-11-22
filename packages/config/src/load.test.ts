@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -78,7 +78,7 @@ describe('CFG-1 load a configuration directory', () => {
   });
 
   it('rejects a directory without configuration files', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'aiops-config-'));
+    const dir = await mkdtemp(join(tmpdir(), 'mandate-config-'));
     try {
       expect(issues(await loadConfigurationDirectory(dir))[0]?.message).toMatch(/no configuration files/);
     } finally {
@@ -87,7 +87,7 @@ describe('CFG-1 load a configuration directory', () => {
   });
 
   it('reports an unreadable file as an issue instead of failing', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'aiops-config-'));
+    const dir = await mkdtemp(join(tmpdir(), 'mandate-config-'));
     try {
       await cp(VALID_DIR, dir, { recursive: true });
       await symlink(join(dir, 'does-not-exist.yaml'), join(dir, 'dangling.yaml'));
@@ -99,7 +99,7 @@ describe('CFG-1 load a configuration directory', () => {
   });
 
   it('skips hidden files and directories, such as editor lock files', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'aiops-config-'));
+    const dir = await mkdtemp(join(tmpdir(), 'mandate-config-'));
     try {
       await cp(VALID_DIR, dir, { recursive: true });
       await symlink('nobody@host.123', join(dir, '.#roles.yaml'));
@@ -112,7 +112,7 @@ describe('CFG-1 load a configuration directory', () => {
   });
 
   it('reports a missing directory as an issue', async () => {
-    expect(issues(await loadConfigurationDirectory('/nonexistent/aiops-config'))[0]?.message).toMatch(/cannot be read/);
+    expect(issues(await loadConfigurationDirectory('/nonexistent/mandate-config'))[0]?.message).toMatch(/cannot be read/);
   });
 });
 
@@ -342,7 +342,7 @@ describe('CONN-8 preset packages in the loaded configuration', () => {
   const PRESET_DIRS = [join(FIXTURES, 'preset-dir')];
 
   async function withConfig(config: string): Promise<string> {
-    const dir = await mkdtemp(join(tmpdir(), 'aiops-load-preset-'));
+    const dir = await mkdtemp(join(tmpdir(), 'mandate-load-preset-'));
     await writeFile(join(dir, 'config.yaml'), config);
     return dir;
   }
@@ -350,7 +350,7 @@ describe('CONN-8 preset packages in the loaded configuration', () => {
   it('CONN-8 a preset bound to a connection of another adapter is refused', async () => {
     const dir = await withConfig(`version: 1
 presets:
-  - { id: fake, package: "@aiops/fake-preset" }
+  - { id: fake, package: "@mandate/fake-preset" }
 connections:
   - { id: shop, adapter: mcp, mcp_url: https://shop.example.test/mcp, preset: fake }
 `);
@@ -362,7 +362,7 @@ connections:
       await rm(dir, { recursive: true });
     }
 
-    const presets = await mkdtemp(join(tmpdir(), 'aiops-load-mcp-preset-'));
+    const presets = await mkdtemp(join(tmpdir(), 'mandate-load-mcp-preset-'));
     const openapiDir = await withConfig(`version: 1
 presets:
   - { id: tools, package: "@acme/mcp-preset" }
@@ -371,7 +371,7 @@ connections:
 `);
     try {
       await mkdir(join(presets, 'mcp-preset'));
-      await writeFile(join(presets, 'mcp-preset', 'package.json'), JSON.stringify({ name: '@acme/mcp-preset', version: '1.0.0', aiops: { sdk: '^1.0.0' } }));
+      await writeFile(join(presets, 'mcp-preset', 'package.json'), JSON.stringify({ name: '@acme/mcp-preset', version: '1.0.0', mandate: { sdk: '^1.0.0' } }));
       await writeFile(join(presets, 'mcp-preset', 'preset.yaml'), 'version: 1\nadapter: mcp\n');
       expect(issues(await loadConfigurationDirectory(openapiDir, { presetDirs: [presets] }))).toEqual([
         expect.objectContaining({ file: 'config.yaml', path: 'connections[0].preset', message: 'the preset is for mcp connections' }),
@@ -429,7 +429,7 @@ connections:
         'fixture.boom': 'code',
       });
       expect(configuration.codeOperations.size).toBe(4);
-      expect(configuration.loadedPresets.get('fixture')).toMatchObject({ package: '@aiops/code-fixture-preset', version: '1.1.0' });
+      expect(configuration.loadedPresets.get('fixture')).toMatchObject({ package: '@mandate/code-fixture-preset', version: '1.1.0' });
     } finally {
       await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
     }
@@ -438,12 +438,12 @@ connections:
   it('CONN-8 loadedPresets reports the chosen version', async () => {
     const result = await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { presetDirs: PRESET_DIRS });
     if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
-    const resolved = await resolvePreset({ id: 'fake', package: '@aiops/fake-preset' }, PRESET_DIRS);
+    const resolved = await resolvePreset({ id: 'fake', package: '@mandate/fake-preset' }, PRESET_DIRS);
     if (!resolved.ok) throw new Error('fixture preset must resolve');
     const digest = createHash('sha256');
     for (const { file, text } of resolved.preset.files) digest.update(`preset:${file}`).update('\0').update(text).update('\0');
     expect([...result.configuration.loadedPresets]).toEqual([
-      ['fake', { package: '@aiops/fake-preset', version: '0.1.0', adapter: 'openapi', filesDigest: digest.digest('hex') }],
+      ['fake', { package: '@mandate/fake-preset', version: '0.1.0', adapter: 'openapi', filesDigest: digest.digest('hex') }],
     ]);
     expect(resolved.preset.files[0]?.text).toBe(await readFile(join(FIXTURES, 'preset-dir', 'fake-preset', 'package.json'), 'utf8'));
     const skipped = await loadConfigurationDirectory(join(FIXTURES, 'with-preset'));
@@ -455,7 +455,7 @@ connections:
 describe('CONN-8 preset aliases', () => {
   const twoShops = (a: string, b: string, grants = '      - { operation: shop_a.search }\n'): string => `version: 1
 presets:
-  - { id: fixture, package: "@aiops/code-fixture-preset" }
+  - { id: fixture, package: "@mandate/code-fixture-preset" }
 connections:
   - { id: a, adapter: openapi, base_url: https://a.example.test/api, credential_ref: items-token, preset: fixture${a} }
   - { id: b, adapter: openapi, base_url: https://b.example.test/api, credential_ref: items-token, preset: fixture${b} }
@@ -551,13 +551,13 @@ role_mapping:
 describe('AUTH-4 service_accounts', () => {
   const SUPPORT_ROLE = 'version: 1\nroles:\n  - { id: support_agent, grants: [] }\n';
   const accounts = (entries: string): string => `version: 1\nservice_accounts:\n${entries}`;
-  const CI = '  - { client_id: aiops-sa-ci, role: support_agent, description: CI }\n';
+  const CI = '  - { client_id: mandate-sa-ci, role: support_agent, description: CI }\n';
 
   it('AUTH-4 a service account maps its client to one role', async () => {
     const result = await load({ 'support.yaml': SUPPORT_ROLE, 'sa.yaml': accounts(CI) });
     if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
-    expect(result.configuration.serviceAccounts.get('aiops-sa-ci')).toEqual({ role: 'support_agent', description: 'CI' });
-    expect(result.configuration.policy.serviceAccounts).toEqual([{ clientId: 'aiops-sa-ci', role: 'support_agent' }]);
+    expect(result.configuration.serviceAccounts.get('mandate-sa-ci')).toEqual({ role: 'support_agent', description: 'CI' });
+    expect(result.configuration.policy.serviceAccounts).toEqual([{ clientId: 'mandate-sa-ci', role: 'support_agent' }]);
   });
 
   it('AUTH-4 without service_accounts the maps are empty', async () => {
@@ -568,10 +568,10 @@ describe('AUTH-4 service_accounts', () => {
   });
 
   it.each([
-    ['an unknown role', { 'sa.yaml': accounts('  - { client_id: aiops-sa-ci, role: ghost }\n') }, 'sa.yaml', 'service_accounts[0].role', 'names a role that is not defined'],
+    ['an unknown role', { 'sa.yaml': accounts('  - { client_id: mandate-sa-ci, role: ghost }\n') }, 'sa.yaml', 'service_accounts[0].role', 'names a role that is not defined'],
     [
       'a duplicate client_id across two files',
-      { 'sa-a.yaml': accounts(CI), 'sa-b.yaml': accounts('  - { client_id: aiops-sa-ci, role: support_agent }\n') },
+      { 'sa-a.yaml': accounts(CI), 'sa-b.yaml': accounts('  - { client_id: mandate-sa-ci, role: support_agent }\n') },
       'sa-b.yaml',
       'service_accounts[0].client_id',
       'duplicate client_id; first defined in sa-a.yaml at service_accounts[0]',
@@ -585,9 +585,9 @@ describe('AUTH-4 service_accounts', () => {
     ['an empty client_id', '{ client_id: "", role: support_agent }', 'service_accounts[0].client_id'],
     ['a control character in client_id', '{ client_id: "a\\u0007b", role: support_agent }', 'service_accounts[0].client_id'],
     ['a 256-character client_id', `{ client_id: ${'a'.repeat(256)}, role: support_agent }`, 'service_accounts[0].client_id'],
-    ['an extra key', '{ client_id: aiops-sa-ci, role: support_agent, roles: [x] }', 'service_accounts[0]'],
-    ['role given as a list', '{ client_id: aiops-sa-ci, role: [support_agent] }', 'service_accounts[0].role'],
-    ['a description over 500 characters', `{ client_id: aiops-sa-ci, role: support_agent, description: ${'d'.repeat(501)} }`, 'service_accounts[0].description'],
+    ['an extra key', '{ client_id: mandate-sa-ci, role: support_agent, roles: [x] }', 'service_accounts[0]'],
+    ['role given as a list', '{ client_id: mandate-sa-ci, role: [support_agent] }', 'service_accounts[0].role'],
+    ['a description over 500 characters', `{ client_id: mandate-sa-ci, role: support_agent, description: ${'d'.repeat(501)} }`, 'service_accounts[0].description'],
   ])('AUTH-4 rejects %s as a schema error', async (_name, entry, path) => {
     const found = issues(await load({ 'support.yaml': SUPPORT_ROLE, 'sa.yaml': accounts(`  - ${entry}\n`) }));
     // An empty client_id fails both the length and the format check: every issue is on that path.

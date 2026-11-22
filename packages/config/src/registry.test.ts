@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { FakeResolver, fakeCatalogEntry } from '@aiops/testing';
+import { FakeResolver, fakeCatalogEntry } from '@mandate/testing';
 import { formatIssue, type ConfigIssue } from './issues.js';
-import type { CatalogEntry } from '@aiops/connector-sdk';
+import type { CatalogEntry } from '@mandate/connector-sdk';
 import type { HttpOperationBinding } from './registry.js';
 import { loadConfigurationDirectory, loadConfigurationSources, type LoadedConfiguration, type LoadOptions, type LoadResult } from './load.js';
 import { FIXTURE_CONFIG, FIXTURE_PRESET_FILE, loadCodeFixture, presetWithoutUpdate } from '../test/code-fixture.js';
@@ -32,7 +32,7 @@ afterEach(async () => {
 
 /** Copies a fixture directory to a temporary one, then writes (or with `null` deletes) files. */
 async function fixture(name: string, files: Record<string, string | null> = {}): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'aiops-registry-'));
+  const dir = await mkdtemp(join(tmpdir(), 'mandate-registry-'));
   dirs.push(dir);
   await cp(join(FIXTURES, name), dir, { recursive: true });
   for (const [file, text] of Object.entries(files)) {
@@ -44,7 +44,7 @@ async function fixture(name: string, files: Record<string, string | null> = {}):
 
 /** A copy of the preset directory, so a test can change the preset. */
 async function presetDir(files: Record<string, string | null> = {}): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'aiops-presets-'));
+  const dir = await mkdtemp(join(tmpdir(), 'mandate-presets-'));
   dirs.push(dir);
   await cp(join(FIXTURES, 'preset-dir'), dir, { recursive: true });
   for (const [file, text] of Object.entries(files)) {
@@ -144,7 +144,7 @@ describe('OPS-1 operations are enabled only by configuration or an applied prese
     const dir = await fixture('with-preset', {
       'config.yaml': `version: 1
 presets:
-  - { id: fake, package: "@aiops/fake-preset" }
+  - { id: fake, package: "@mandate/fake-preset" }
 connections:
   - { id: shop, adapter: openapi, base_url: https://shop.example.test/api }
 `,
@@ -404,7 +404,7 @@ operations:
     const text = (await readFile(join(FIXTURES, 'preset-dir', 'fake-preset', 'preset.yaml'), 'utf8')).replace('version: 1', 'version: 2');
     const presets = await presetDir({ 'preset.yaml': text });
     const found = issues(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: [presets] }));
-    expect(found).toEqual([expect.objectContaining({ file: '@aiops/fake-preset/preset.yaml', path: 'version', line: 1, column: 1 })]);
+    expect(found).toEqual([expect.objectContaining({ file: '@mandate/fake-preset/preset.yaml', path: 'version', line: 1, column: 1 })]);
   });
 
   it('reports a package version mismatch, a missing package and a missing preset spec', async () => {
@@ -421,7 +421,7 @@ operations:
     ]);
     const noSpec = await presetDir({ 'spec.json': null });
     expect(issues(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: [noSpec] }))).toEqual([
-      expect.objectContaining({ file: '@aiops/fake-preset/preset.yaml', path: 'spec', line: 2, message: 'spec file cannot be read' }),
+      expect.objectContaining({ file: '@mandate/fake-preset/preset.yaml', path: 'spec', line: 2, message: 'spec file cannot be read' }),
     ]);
   });
 
@@ -429,14 +429,14 @@ operations:
     const text = (await readFile(join(FIXTURES, 'preset-dir', 'fake-preset', 'preset.yaml'), 'utf8')).replace('spec: spec.json', 'spec: ../../etc/passwd.json');
     const presets = await presetDir({ 'preset.yaml': text });
     const found = issues(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: [presets] }));
-    expect(found).toEqual([expect.objectContaining({ file: '@aiops/fake-preset/preset.yaml', path: 'spec', message: 'must be a path inside the preset' })]);
+    expect(found).toEqual([expect.objectContaining({ file: '@mandate/fake-preset/preset.yaml', path: 'spec', message: 'must be a path inside the preset' })]);
   });
 
   it('CONN-8 refuses an openapi preset bound to a connection that is not openapi', async () => {
     const dir = await fixture('with-preset', {
       'config.yaml': `version: 1
 presets:
-  - { id: fake, package: "@aiops/fake-preset" }
+  - { id: fake, package: "@mandate/fake-preset" }
 connections:
   - { id: shop, adapter: mcp, mcp_url: https://shop.example.test/mcp, preset: fake }
 `,
@@ -449,7 +449,7 @@ connections:
     const presets = await presetDir({ 'spec.json': null });
     await symlink(join(FIXTURES, 'derived', 'specs', 'shop.json'), join(presets, 'fake-preset', 'spec.json'));
     const found = issues(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: [presets] }));
-    expect(found).toEqual([expect.objectContaining({ file: '@aiops/fake-preset/preset.yaml', path: 'spec', message: 'must be a path inside the preset' })]);
+    expect(found).toEqual([expect.objectContaining({ file: '@mandate/fake-preset/preset.yaml', path: 'spec', message: 'must be a path inside the preset' })]);
   });
 
   it('accepts a preset spec whose name starts with two dots', async () => {
@@ -667,7 +667,7 @@ describe('MCP-4 read operations use GET; writes need change-sets', () => {
     const text = (await readFile(join(FIXTURES, 'preset-dir', 'fake-preset', 'preset.yaml'), 'utf8')).replace('operation: getItem', 'operation: deleteItem');
     const presets = await presetDir({ 'preset.yaml': text });
     const found = issues(await loadConfigurationDirectory(join(FIXTURES, 'with-preset'), { resolver: resolver(), presetDirs: [presets] }));
-    expect(found).toEqual([expect.objectContaining({ file: '@aiops/fake-preset/preset.yaml', path: 'operations[1].risk', message: MESSAGE })]);
+    expect(found).toEqual([expect.objectContaining({ file: '@mandate/fake-preset/preset.yaml', path: 'operations[1].risk', message: MESSAGE })]);
   });
 });
 
@@ -834,10 +834,10 @@ operations:
   it('OPS-5 upstream.code without a code module, or naming an unknown operation, is refused', async () => {
     const noModule = await loadCodeFixture(dirs, {
       preset: await presetWithoutUpdate(),
-      packageJson: (json) => ({ ...json, aiops: { preset: 'preset.yaml', sdk: '^1.0.0' } }),
+      packageJson: (json) => ({ ...json, mandate: { preset: 'preset.yaml', sdk: '^1.0.0' } }),
     });
     for (const index of [1, 2, 3, 4]) {
-      expect(presetIssuesAt(noModule, `operations[${index}].upstream.code`)).toEqual(['the preset has no code module (package.json aiops.code)']);
+      expect(presetIssuesAt(noModule, `operations[${index}].upstream.code`)).toEqual(['the preset has no code module (package.json mandate.code)']);
     }
 
     const base = await presetWithoutUpdate();

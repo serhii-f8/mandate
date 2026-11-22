@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Reference MCP Apps host for the acceptance run (MCP-5, UI-6). Node holds the user's token,
 // so widget tool calls are forwarded from here; the browser needs no token and no CORS.
 //
-//   AIOPS_MCP_TOKEN=T widget-host.mjs <mcp-url> list
-//   AIOPS_MCP_TOKEN=T widget-host.mjs <mcp-url> render --tool NAME [--args JSON] [--exclude N]
+//   MANDATE_MCP_TOKEN=T widget-host.mjs <mcp-url> list
+//   MANDATE_MCP_TOKEN=T widget-host.mjs <mcp-url> render --tool NAME [--args JSON] [--exclude N]
 //       [--submit] [--decide approve] [--open-page] [--wait-terminal S]
 // Prints one JSON line; exit 0 whenever it is printed, 2 on usage errors.
 import { readFile } from 'node:fs/promises';
@@ -21,9 +21,9 @@ try {
   console.error(e.message);
   process.exit(2);
 }
-const token = process.env.AIOPS_MCP_TOKEN;
+const token = process.env.MANDATE_MCP_TOKEN;
 if (!token) {
-  console.error('AIOPS_MCP_TOKEN is required');
+  console.error('MANDATE_MCP_TOKEN is required');
   process.exit(2);
 }
 
@@ -32,7 +32,7 @@ const authFetch = (input, init) => {
   headers.set('authorization', `Bearer ${token}`);
   return fetch(input, { ...init, headers });
 };
-const client = new Client({ name: 'aiops-reference-host', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+const client = new Client({ name: 'mandate-reference-host', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
 await client.connect(new StreamableHTTPClientTransport(new URL(opts.url), { fetch: authFetch }));
 
 if (opts.command === 'list') {
@@ -93,8 +93,8 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   page.on('pageerror', (e) => out.errors.push(String(e.message)));
-  await page.exposeFunction('aiopsTrigger', () => ({ arguments: opts.args, result: JSON.parse(JSON.stringify(trigger)) }));
-  await page.exposeFunction('aiopsCallTool', async (params) => {
+  await page.exposeFunction('mandateTrigger', () => ({ arguments: opts.args, result: JSON.parse(JSON.stringify(trigger)) }));
+  await page.exposeFunction('mandateCallTool', async (params) => {
     const rec = { name: params.name, args: params.arguments ?? {}, isError: false, structuredContent: undefined };
     out.calls.push(rec);
     try {
@@ -108,8 +108,8 @@ try {
       throw e;
     }
   });
-  await page.exposeFunction('aiopsOpenLink', (url) => void out.links.push(url));
-  await page.exposeFunction('aiopsModelContext', (p) => void out.modelContext.push(p));
+  await page.exposeFunction('mandateOpenLink', (url) => void out.links.push(url));
+  await page.exposeFunction('mandateModelContext', (p) => void out.modelContext.push(p));
   await page.goto(hostUrl);
   await page.waitForFunction(() => ['initialized', 'error'].includes(window.__host?.state), null, { timeout: 20000 });
   out.state = await page.evaluate(() => window.__host.state);

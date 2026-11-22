@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * `changesetWorkflow` across the approval statuses (design §7): the workflow's command sequence is
  * unchanged from Phase 5; it waits in `pending_approval` and `approved` as in `prepared`, ends on the
  * terminal statuses a decision stores, and executes once started. The replay fixtures of these paths
  * are recorded by `scripts/record-history.ts` (EXE-10).
  */
-import type { ReadPage, UpstreamReader } from '@aiops/core';
-import { PROGRESS_QUERY, type WorkflowProgress } from '@aiops/temporal';
-import { recordApproval, ScriptedWriter } from '@aiops/testing';
+import type { ReadPage, UpstreamReader } from '@mandate/core';
+import { PROGRESS_QUERY, type WorkflowProgress } from '@mandate/temporal';
+import { recordApproval, ScriptedWriter } from '@mandate/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { changesetWorkflow } from '../../src/workflows/changeset.js';
 import { APPROVING_GROUP, REVIEWER_GROUP } from '../support/configuration.js';

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const CORE = fileURLToPath(new URL('../../packages/core', import.meta.url));
-const INFRASTRUCTURE = /from\s+['"](testcontainers|@testcontainers\/[^'"]+|pg|@temporalio\/[^'"]+|@aiops\/(testing|db))['"]/;
+const INFRASTRUCTURE = /from\s+['"](testcontainers|@testcontainers\/[^'"]+|pg|@temporalio\/[^'"]+|@mandate\/(testing|db))['"]/;
 
 function testFiles(dir: string): string[] {
   return readdirSync(dir, { recursive: true, encoding: 'utf8' })
@@ -30,7 +30,7 @@ describe('NFR-14 packages/core is covered by unit tests without infrastructure',
   });
 
   it('the scan recognises an infrastructure import (negative control)', () => {
-    expect(INFRASTRUCTURE.test("import { startPostgres } from '@aiops/testing';")).toBe(true);
+    expect(INFRASTRUCTURE.test("import { startPostgres } from '@mandate/testing';")).toBe(true);
     expect(INFRASTRUCTURE.test("import pg from 'pg';")).toBe(true);
     expect(INFRASTRUCTURE.test("import { describe } from 'vitest';")).toBe(false);
   });

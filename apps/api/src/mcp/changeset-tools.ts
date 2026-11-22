@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { CallToolResult } from '@modelcontextprotocol/server';
-import { createSchemaCompiler } from '@aiops/config';
+import { createSchemaCompiler } from '@mandate/config';
 import {
   ExecutorUnavailable,
   READ_RESULT_TEXT,
@@ -16,7 +16,7 @@ import {
   type ChangeSetRepository,
   type ExecutionProgress,
   type ItemStatus,
-} from '@aiops/core';
+} from '@mandate/core';
 import { decodeCursor } from '../approvals/page-query.js';
 import { executionSummaryText } from '../changesets/results.js';
 import { rollbackBlock } from '../changesets/rollback.js';

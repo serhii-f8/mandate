@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { LookupFunction } from 'node:net';
@@ -10,7 +10,7 @@ import {
   type RequestAttemptEnd,
   type RequestInstrumentation,
   type RequestSpan,
-} from '@aiops/connector-sdk';
+} from '@mandate/connector-sdk';
 import type { HttpRequestSpec } from '../openapi/request.js';
 import { assertEgressAllowed, createGuardedLookup, EgressDeniedError } from './egress.js';
 import { prepareAuth } from './auth.js';

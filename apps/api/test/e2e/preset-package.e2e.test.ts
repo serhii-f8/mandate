@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * A code preset installed the way an operator installs one (CONN-8, OPS-5): `npm pack` of the
  * code fixture, extracted into a preset directory, served behind MCP tools by a revision-backed
@@ -14,9 +14,9 @@ import { Writable } from 'node:stream';
 import { promisify } from 'node:util';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { READ_RESULT_TEXT } from '@aiops/core';
-import { ConfigurationHolder, type ConfigurationLogger } from '@aiops/config';
-import { createDb, DrizzleAuditLog, PostgresConfigRevisionStore, type Database } from '@aiops/db';
+import { READ_RESULT_TEXT } from '@mandate/core';
+import { ConfigurationHolder, type ConfigurationLogger } from '@mandate/config';
+import { createDb, DrizzleAuditLog, PostgresConfigRevisionStore, type Database } from '@mandate/db';
 import {
   CODE_FIXTURE_PRESET_DIR,
   installFakeItems,
@@ -25,14 +25,14 @@ import {
   type FakeUpstream,
   type StartedPostgres,
   type TestIssuer,
-} from '@aiops/testing';
-import { configurationLoadOptions } from '@aiops/upstream';
+} from '@mandate/testing';
+import { configurationLoadOptions } from '@mandate/upstream';
 import { runApiCli } from '../../src/cli.js';
 import { createLogger } from '../../src/logger.js';
 import { auditRows, connectClient, startApi, startDatabase, testAdapters, tokenFor, vaultOf, type RunningApi } from './helpers.js';
 
 const run = promisify(execFile);
-const PACKAGE = '@aiops/code-fixture-preset';
+const PACKAGE = '@mandate/code-fixture-preset';
 /** Obviously fake; the fake upstream accepts any bearer token. */
 const UPSTREAM_TOKEN = 'e2e-only-items-token-0123456789';
 /** Part of the text the fixture's `boom` throws (OPS-5). */
@@ -107,7 +107,7 @@ beforeAll(async () => {
     { id: 'a1', title: 'Anvil', state: 'open', tags: ['heavy'] },
     { id: 'b2', title: 'Rocket', state: 'closed', tags: [] },
   ]);
-  work = await mkdtemp(join(tmpdir(), 'aiops-preset-package-e2e-'));
+  work = await mkdtemp(join(tmpdir(), 'mandate-preset-package-e2e-'));
   // The version the fixture has (1.1.0), and a newer one in a second directory: the newer wins.
   const first = join(work, 'presets-a');
   const second = join(work, 'presets-b');
@@ -118,11 +118,11 @@ beforeAll(async () => {
   // A package that requires a connector SDK this platform does not provide (NFR-18).
   incompatibleDir = join(work, 'presets-incompatible');
   await installTarball(incompatibleDir, (pkg) => {
-    pkg.aiops = { ...(pkg.aiops as Record<string, unknown>), sdk: '^9.0.0' };
+    pkg.mandate = { ...(pkg.mandate as Record<string, unknown>), sdk: '^9.0.0' };
   });
   configDir = join(work, 'config');
   await mkdir(configDir);
-  await writeFile(join(configDir, 'aiops.yaml'), CONFIG(upstream.url));
+  await writeFile(join(configDir, 'mandate.yaml'), CONFIG(upstream.url));
 
   const stream = new Writable({
     write(chunk: Buffer, _encoding, done) {

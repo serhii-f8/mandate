@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { Body, Controller, Get, Inject, Param, Put, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { parseSecret, secretFieldNames } from '@aiops/connector-sdk';
-import type { ConfigurationHolder } from '@aiops/config';
-import type { AuditLog, CredentialVault } from '@aiops/core';
+import { parseSecret, secretFieldNames } from '@mandate/connector-sdk';
+import type { ConfigurationHolder } from '@mandate/config';
+import type { AuditLog, CredentialVault } from '@mandate/core';
 import { AUDIT_LOG, CONFIGURATION, CREDENTIAL_VAULT, PAGE_CHECKS } from '../tokens.js';
 import { deny, PageAccess, type PageChecks, type PageRequest } from './access.js';
 import { auditDenied, auditedId, credentialRequest, enforce } from './credential-access.js';

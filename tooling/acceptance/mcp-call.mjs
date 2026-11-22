@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // MCP client for the acceptance scripts: the v2 client pinned to protocol 2026-07-28.
 // Prints one JSON line and records the correlation ID of the last response.
 //
@@ -10,7 +10,7 @@
 //   mcp-call.mjs <mcp-url> --token T --tool NAME --args JSON     → {"correlationId","text","isError","content","contentTypes","structuredContent"}
 //       `text` joins every text part; `content` lists them one by one (MCP-4: summary first);
 //       `contentTypes` lists the type of every part (an image part has no text).
-// The token comes from AIOPS_MCP_TOKEN (preferred: argv shows in `ps`, SEC-3) or from --token.
+// The token comes from MANDATE_MCP_TOKEN (preferred: argv shows in `ps`, SEC-3) or from --token.
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
 const positional = [];
@@ -23,9 +23,9 @@ for (let i = 0; i < argv.length; i++) {
   else positional.push(arg);
 }
 const [url, message = 'acceptance'] = positional;
-const token = flags.token ?? (process.env.AIOPS_MCP_TOKEN || undefined);
+const token = flags.token ?? (process.env.MANDATE_MCP_TOKEN || undefined);
 if (url === undefined) {
-  console.error('usage: [AIOPS_MCP_TOKEN=T] mcp-call.mjs <mcp-url> [message] [--token T] [--list | --describe NAME | --tool NAME --args JSON]');
+  console.error('usage: [MANDATE_MCP_TOKEN=T] mcp-call.mjs <mcp-url> [message] [--token T] [--list | --describe NAME | --tool NAME --args JSON]');
   process.exit(2);
 }
 
@@ -39,7 +39,7 @@ const recordingFetch = async (input, init) => {
   return response;
 };
 
-const client = new Client({ name: 'aiops-acceptance', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+const client = new Client({ name: 'mandate-acceptance', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
 await client.connect(new StreamableHTTPClientTransport(new URL(url), { fetch: recordingFetch }));
 const textOf = (result) => (result.content ?? []).map((c) => c.text ?? '').join('');
 

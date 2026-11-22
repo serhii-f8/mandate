@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { AuditEventInput, AuditRecord } from '@aiops/core';
-import { createDb, DrizzleAuditLog, sealAuditChain, type Database } from '@aiops/db';
-import { pageLogin, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@aiops/testing';
+import type { AuditEventInput, AuditRecord } from '@mandate/core';
+import { createDb, DrizzleAuditLog, sealAuditChain, type Database } from '@mandate/db';
+import { pageLogin, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@mandate/testing';
 import { encodeItemCursor } from '../../src/approvals/page-query.js';
 import { auditRows, startApi, startDatabase, type RunningApi } from './helpers.js';
 
@@ -231,7 +231,7 @@ describe('AUD-6 NFR-8 audit search', () => {
     ] as const) {
       const rows = await rowsOf('audit.search', a.correlationId);
       expect(rows.map((r) => ({ actor: r.actor, client_id: r.client_id, outcome: r.outcome, subject: r.subject, details: r.details }))).toEqual([
-        { actor: EVE.sub, client_id: 'aiops-web', outcome: 'ok', subject: null, details: { filters, count, channel: 'page' } },
+        { actor: EVE.sub, client_id: 'mandate-web', outcome: 'ok', subject: null, details: { filters, count, channel: 'page' } },
       ]);
       const text = JSON.stringify(rows);
       expect(text).not.toContain(ALICE.sub);

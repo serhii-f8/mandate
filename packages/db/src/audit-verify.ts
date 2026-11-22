@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import { CanonicalJsonError, checkLink, GENESIS_HASH, type ChainBreak, type ChainHead } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import { CanonicalJsonError, checkLink, GENESIS_HASH, type ChainBreak, type ChainHead } from '@mandate/core';
 import type pg from 'pg';
 import { CHAIN_COLUMNS, safeInteger, toSealedChainRow } from './audit-chain.js';
 import { guarded } from './errors.js';
@@ -92,7 +92,7 @@ async function walk(client: pg.PoolClient, pageSize: number): Promise<VerifyRepo
   };
 }
 
-/** The one output line of `aiops audit verify` (Global Constraints); positions and hashes only. */
+/** The one output line of `mandate audit verify` (Global Constraints); positions and hashes only. */
 export function formatVerifyReport(report: VerifyReport): string {
   if (report.ok) {
     return `ok sealed=${report.sealed} unsealed=${report.unsealed} from=${report.from} head=${report.head.pos}:${report.head.hash}`;

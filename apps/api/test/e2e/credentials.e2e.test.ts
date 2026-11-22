@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -8,7 +8,7 @@ import { Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { pageLogin, startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@aiops/testing';
+import { pageLogin, startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@mandate/testing';
 import { createLogger } from '../../src/logger.js';
 import { auditRows, startApi, startDatabase, vaultOf, type RunningApi } from './helpers.js';
 
@@ -47,12 +47,12 @@ beforeAll(async () => {
   issuer = await startTestIssuer();
   upstream = await startFakeUpstream();
   upstream.route('GET', '/rest/V1/products', () => ({ status: 200, body: { items: [{ sku: 'acme-1' }, { sku: 'acme-2' }], total_count: 2 } }));
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-credentials-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-credentials-e2e-'));
   await cp(CREDENTIALS_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));
   // A stand-in bundle: the e2e does not depend on the web build.
-  webDir = await mkdtemp(join(tmpdir(), 'aiops-web-e2e-'));
+  webDir = await mkdtemp(join(tmpdir(), 'mandate-web-e2e-'));
   await mkdir(join(webDir, 'assets'));
   await writeFile(join(webDir, 'index.html'), '<!doctype html><title>Credentials</title><div id="root"></div>');
   await writeFile(join(webDir, 'assets', 'app-abc123.js'), 'console.log("app");');
@@ -129,7 +129,7 @@ describe('UI-5 credentials are entered only on the trusted page', () => {
     const answer = await putSecret(carol, 'shop-token', { token: SHOP_SECRET });
     expect(answer.status).toBe(204);
     expect(await rowsOf('credential.set', answer.correlationId)).toEqual([
-      expect.objectContaining({ actor: 'carol-id', client_id: 'aiops-web', outcome: 'ok', details: { ref: 'shop-token', scheme: 'bearer', keyVersion: 1 } }),
+      expect.objectContaining({ actor: 'carol-id', client_id: 'mandate-web', outcome: 'ok', details: { ref: 'shop-token', scheme: 'bearer', keyVersion: 1 } }),
     ]);
     const entry = (await list(carol)).find((r) => r.ref === 'shop-token');
     expect(entry).toEqual({
@@ -256,7 +256,7 @@ describe('CONN-7 connection test from the page', () => {
     expect(upstream.requests[0]?.query.get('brand')).toBe('acme');
     expect(upstream.requests[0]?.headers.authorization).toBe(`Bearer ${SHOP_SECRET}`);
     expect(await rowsOf('connection.test', answer.correlationId)).toEqual([
-      expect.objectContaining({ actor: 'carol-id', client_id: 'aiops-web', outcome: 'ok', details: { connection: 'shop', ok: true, status: 200, scopesDetectable: false } }),
+      expect.objectContaining({ actor: 'carol-id', client_id: 'mandate-web', outcome: 'ok', details: { connection: 'shop', ok: true, status: 200, scopesDetectable: false } }),
     ]);
   });
 

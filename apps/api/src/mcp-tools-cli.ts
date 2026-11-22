@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
- * `aiops mcp tools <connection> [--show <tool>]`: lists an `mcp` connection's tools live, with
+ * `mandate mcp tools <connection> [--show <tool>]`: lists an `mcp` connection's tools live, with
  * their hashes, the operation bound to each and its pin state, so an operator can review a
  * tool and record its pin (CONN-1, CONN-4). `--show` prints the upstream definition for the
  * operator only (SEC-6): it never reaches a client, and the credential is never printed (SEC-3).
  * Environment, stores and exit codes are handled by `cli.ts`; this module takes loaded values.
  */
-import { createSchemaCompiler, MCP_TOOL_NAME, pinStateOf, toMcpCatalog, type LoadedConfiguration, type McpOperationBinding } from '@aiops/config';
-import type { ConnectionSettings, McpToolAdapter, McpToolDefinition } from '@aiops/connector-sdk';
-import type { CredentialVault } from '@aiops/core';
-import { connectionCredential } from '@aiops/upstream';
+import { createSchemaCompiler, MCP_TOOL_NAME, pinStateOf, toMcpCatalog, type LoadedConfiguration, type McpOperationBinding } from '@mandate/config';
+import type { ConnectionSettings, McpToolAdapter, McpToolDefinition } from '@mandate/connector-sdk';
+import type { CredentialVault } from '@mandate/core';
+import { connectionCredential } from '@mandate/upstream';
 
-export const MCP_TOOLS_USAGE = '       aiops mcp tools <connection> [--show <tool>]';
+export const MCP_TOOLS_USAGE = '       mandate mcp tools <connection> [--show <tool>]';
 export const REVIEW_LINE = '# Upstream definition, for operator review only (SEC-6); not shown to clients';
 
 /** The shape of a connection ID (`upstream-schema.ts`); anything else cannot name one. */

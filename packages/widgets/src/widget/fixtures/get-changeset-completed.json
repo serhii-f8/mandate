@@ -6,7 +6,7 @@
     },
     {
       "type": "text",
-      "text": "{\"changeset\":{\"id\":\"0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e\",\"operation\":\"catalog.update_names\",\"status\":\"completed_with_errors\",\"hash\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stats\":{\"total\":3,\"included\":2,\"excluded\":{\"no_change\":1},\"written\":1,\"failed\":1,\"skipped\":0},\"createdAt\":\"2030-01-01T09:00:00.000Z\",\"expiresAt\":\"2030-01-08T09:00:00.000Z\",\"preparedAt\":\"2030-01-01T09:01:00.000Z\"},\"progress\":{\"total\":2,\"done\":2,\"failed\":1,\"skipped\":0},\"items\":[{\"targetId\":\"UMBRELLA-0001\",\"status\":\"written\",\"before\":{\"name\":\"Old text\"},\"after\":{\"name\":\"New text\"}},{\"targetId\":\"UMBRELLA-0002\",\"status\":\"failed\",\"before\":{\"name\":\"Old text\"},\"after\":{\"name\":\"New text\"},\"error\":\"drift\"},{\"targetId\":\"UMBRELLA-0003\",\"status\":\"excluded\",\"before\":{\"name\":\"Old text\"},\"after\":{\"name\":\"Old text\"},\"reason\":\"no_change\"}],\"rollback\":{\"available\":false},\"execution\":{\"drift\":1},\"pageUrl\":\"https://aiops.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e\"}"
+      "text": "{\"changeset\":{\"id\":\"0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e\",\"operation\":\"catalog.update_names\",\"status\":\"completed_with_errors\",\"hash\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stats\":{\"total\":3,\"included\":2,\"excluded\":{\"no_change\":1},\"written\":1,\"failed\":1,\"skipped\":0},\"createdAt\":\"2030-01-01T09:00:00.000Z\",\"expiresAt\":\"2030-01-08T09:00:00.000Z\",\"preparedAt\":\"2030-01-01T09:01:00.000Z\"},\"progress\":{\"total\":2,\"done\":2,\"failed\":1,\"skipped\":0},\"items\":[{\"targetId\":\"UMBRELLA-0001\",\"status\":\"written\",\"before\":{\"name\":\"Old text\"},\"after\":{\"name\":\"New text\"}},{\"targetId\":\"UMBRELLA-0002\",\"status\":\"failed\",\"before\":{\"name\":\"Old text\"},\"after\":{\"name\":\"New text\"},\"error\":\"drift\"},{\"targetId\":\"UMBRELLA-0003\",\"status\":\"excluded\",\"before\":{\"name\":\"Old text\"},\"after\":{\"name\":\"Old text\"},\"reason\":\"no_change\"}],\"rollback\":{\"available\":false},\"execution\":{\"drift\":1},\"pageUrl\":\"https://mandate.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e\"}"
     }
   ],
   "structuredContent": {
@@ -75,6 +75,6 @@
     "execution": {
       "drift": 1
     },
-    "pageUrl": "https://aiops.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e"
+    "pageUrl": "https://mandate.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e"
   }
 }

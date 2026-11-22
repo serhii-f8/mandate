@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { FakeResolver, fakeCatalogEntry } from '@aiops/testing';
+import { FakeResolver, fakeCatalogEntry } from '@mandate/testing';
 import { ConfigurationError, ConfigurationHolder } from './holder.js';
 
 const VALID_DIR = fileURLToPath(new URL('../test/fixtures/valid', import.meta.url));
@@ -13,7 +13,7 @@ const DERIVED_DIR = fileURLToPath(new URL('../test/fixtures/derived', import.met
 let dir: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'aiops-holder-'));
+  dir = await mkdtemp(join(tmpdir(), 'mandate-holder-'));
   await cp(VALID_DIR, dir, { recursive: true });
 });
 
@@ -54,7 +54,7 @@ describe('CFG-2 the previous configuration stays active', () => {
   });
 
   it('keeps the previous configuration when a spec file vanished, and passes the load options to every reload', async () => {
-    const derived = await mkdtemp(join(tmpdir(), 'aiops-holder-derived-'));
+    const derived = await mkdtemp(join(tmpdir(), 'mandate-holder-derived-'));
     try {
       await cp(DERIVED_DIR, derived, { recursive: true });
       const resolver = new FakeResolver({

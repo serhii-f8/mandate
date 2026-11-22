@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** A value canonical JSON cannot encode. A `TypeError`, so callers that catch that keep working. */
 export class CanonicalJsonError extends TypeError {
   constructor(reason: string) {

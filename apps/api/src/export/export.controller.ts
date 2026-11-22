@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Change-set export on the trusted page (CS-8): the items as CSV or XLSX, streamed page by page
  * (NFR-7, NFR-8). Visibility is the detail page's (`canView`, UI-7); every answer is audited
@@ -10,7 +10,7 @@ import type { Writable } from 'node:stream';
 import { Controller, Get, Inject, Param, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { Logger } from 'pino';
-import { canView, type AuditLog, type ChangeSetRepository } from '@aiops/core';
+import { canView, type AuditLog, type ChangeSetRepository } from '@mandate/core';
 import { pageAnswer, pageViewer } from '../approvals/changeset-pages.controller.js';
 import { CHANGESET_ID } from '../approvals/page-query.js';
 import { pageRefuser } from '../approvals/refusals.js';

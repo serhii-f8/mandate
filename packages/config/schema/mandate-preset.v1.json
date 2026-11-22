@@ -1,6 +1,6 @@
 {
   "$defs": {
-    "packageJsonAiops": {
+    "packageJsonMandate": {
       "additionalProperties": false,
       "properties": {
         "code": {
@@ -513,7 +513,7 @@
       "type": "object"
     }
   },
-  "$id": "https://aiops.invalid/schema/aiops-preset.v1.json",
+  "$id": "https://mandate.invalid/schema/mandate-preset.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "x-aiops-sdk-version": "1.0.0"
+  "x-mandate-sdk-version": "1.0.0"
 }

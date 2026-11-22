@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { FakeInvoker, startTestIssuer, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { FakeInvoker, startTestIssuer, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import {
   auditRows,
   connectClient,
@@ -33,7 +33,7 @@ let bob: string;
 beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-policy-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-policy-e2e-'));
   await cp(FIXTURE_CONFIG, configDir, { recursive: true });
   api = await startApi(databaseUrl, { issuer, configDir, invoker });
   alice = await tokenFor(issuer, api, 'alice-id', ['content']);
@@ -117,7 +117,7 @@ describe('POL-2 an out-of-scope call is denied and audited with the matching rul
       decision: 'deny',
       outcome: 'denied',
       actor: 'alice-id',
-      client_id: 'aiops-mcp',
+      client_id: 'mandate-mcp',
       subject: 'catalog.search_products',
       details: { rule: 'role:content_manager/grant:own-brands/scope:brand', reason: 'out_of_scope', detail: 'brand', roles: ['content_manager'] },
     });

@@ -1,19 +1,19 @@
 # Compose override of the Phase 4 acceptance (scripts/acceptance/phase-4.sh).
 # The api and the worker join the Magento sandbox's external network (deploy/sandbox/magento, alias
 # `magento-sandbox`) and read the generated acceptance configuration instead of deploy/config.
-#   AIOPS_ACCEPT_CONFIG_DIR   absolute path of the generated configuration directory
+#   MANDATE_ACCEPT_CONFIG_DIR   absolute path of the generated configuration directory
 services:
   api:
     networks: [default, sandbox]
     volumes:
-      - ${AIOPS_ACCEPT_CONFIG_DIR:?set AIOPS_ACCEPT_CONFIG_DIR}:/etc/aiops/config:ro
+      - ${MANDATE_ACCEPT_CONFIG_DIR:?set MANDATE_ACCEPT_CONFIG_DIR}:/etc/mandate/config:ro
   # Preparation and execution run in the worker (ADR 0027): it reads and writes the sandbox.
   worker:
     networks: [default, sandbox]
     volumes:
-      - ${AIOPS_ACCEPT_CONFIG_DIR:?set AIOPS_ACCEPT_CONFIG_DIR}:/etc/aiops/config:ro
+      - ${MANDATE_ACCEPT_CONFIG_DIR:?set MANDATE_ACCEPT_CONFIG_DIR}:/etc/mandate/config:ro
 
 networks:
   sandbox:
     external: true
-    name: aiops-sandbox
+    name: mandate-sandbox

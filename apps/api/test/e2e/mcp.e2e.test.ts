@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@aiops/testing';
-import type { ConfigurationHolder } from '@aiops/config';
+import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@mandate/testing';
+import type { ConfigurationHolder } from '@mandate/config';
 import {
   auditRows,
   connectClient,
@@ -73,8 +73,8 @@ describe('MCP-1 stateless Streamable HTTP endpoint at protocol 2026-07-28', () =
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       actor: 'alice-id',
-      client_id: 'aiops-mcp',
-      details: { declaredClientName: 'aiops-e2e' },
+      client_id: 'mandate-mcp',
+      details: { declaredClientName: 'mandate-e2e' },
       subject: 'ping',
       outcome: 'ok',
     });

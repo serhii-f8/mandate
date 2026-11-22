@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import type { LoadedConfiguration } from '@aiops/config';
+import type { LoadedConfiguration } from '@mandate/config';
 import {
   CANCELLABLE,
   READ_RESULT_TEXT,
@@ -15,8 +15,8 @@ import {
   type OperationDefinition,
   type PolicyDecision,
   type PolicyEngine,
-} from '@aiops/core';
-import { InMemoryChangeSetRepository } from '@aiops/testing';
+} from '@mandate/core';
+import { InMemoryChangeSetRepository } from '@mandate/testing';
 import { createChangesetTools } from './changeset-tools.js';
 import { isTaskAnswer, type ToolAnswer } from './tasks/task-result.js';
 import type { Snapshot } from './tool-pipeline.js';

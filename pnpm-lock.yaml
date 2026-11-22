@@ -38,25 +38,25 @@ importers:
 
   apps/api:
     dependencies:
-      '@aiops/adapters':
+      '@mandate/adapters':
         specifier: workspace:*
         version: link:../../packages/adapters
-      '@aiops/config':
+      '@mandate/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@aiops/connector-sdk':
+      '@mandate/connector-sdk':
         specifier: workspace:*
         version: link:../../packages/connector-sdk
-      '@aiops/core':
+      '@mandate/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aiops/db':
+      '@mandate/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@aiops/temporal':
+      '@mandate/temporal':
         specifier: workspace:*
         version: link:../../packages/temporal
-      '@aiops/upstream':
+      '@mandate/upstream':
         specifier: workspace:*
         version: link:../../packages/upstream
       '@modelcontextprotocol/node':
@@ -123,13 +123,13 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@aiops/gitea-issues':
+      '@mandate/gitea-issues':
         specifier: workspace:*
         version: link:../../presets/gitea-issues
-      '@aiops/magento2-catalog':
+      '@mandate/magento2-catalog':
         specifier: workspace:*
         version: link:../../presets/magento2-catalog
-      '@aiops/testing':
+      '@mandate/testing':
         specifier: workspace:*
         version: link:../../packages/testing
       '@modelcontextprotocol/client':
@@ -162,7 +162,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@aiops/widgets':
+      '@mandate/widgets':
         specifier: workspace:*
         version: link:../../packages/widgets
       '@fontsource-variable/public-sans':
@@ -199,25 +199,25 @@ importers:
 
   apps/worker:
     dependencies:
-      '@aiops/adapters':
+      '@mandate/adapters':
         specifier: workspace:*
         version: link:../../packages/adapters
-      '@aiops/config':
+      '@mandate/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@aiops/connector-sdk':
+      '@mandate/connector-sdk':
         specifier: workspace:*
         version: link:../../packages/connector-sdk
-      '@aiops/core':
+      '@mandate/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@aiops/db':
+      '@mandate/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@aiops/temporal':
+      '@mandate/temporal':
         specifier: workspace:*
         version: link:../../packages/temporal
-      '@aiops/upstream':
+      '@mandate/upstream':
         specifier: workspace:*
         version: link:../../packages/upstream
       '@opentelemetry/api':
@@ -269,10 +269,10 @@ importers:
         specifier: 10.4.0
         version: 10.4.0
     devDependencies:
-      '@aiops/magento2-catalog':
+      '@mandate/magento2-catalog':
         specifier: workspace:*
         version: link:../../presets/magento2-catalog
-      '@aiops/testing':
+      '@mandate/testing':
         specifier: workspace:*
         version: link:../../packages/testing
       '@opentelemetry/otlp-transformer':
@@ -287,22 +287,22 @@ importers:
 
   examples/preset-template:
     devDependencies:
-      '@aiops/adapters':
+      '@mandate/adapters':
         specifier: workspace:*
         version: link:../../packages/adapters
-      '@aiops/config':
+      '@mandate/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@aiops/connector-sdk':
+      '@mandate/connector-sdk':
         specifier: workspace:*
         version: link:../../packages/connector-sdk
-      '@aiops/testing':
+      '@mandate/testing':
         specifier: workspace:*
         version: link:../../packages/testing
 
   packages/adapters:
     dependencies:
-      '@aiops/connector-sdk':
+      '@mandate/connector-sdk':
         specifier: workspace:*
         version: link:../connector-sdk
       '@modelcontextprotocol/client':
@@ -324,16 +324,16 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@aiops/testing':
+      '@mandate/testing':
         specifier: workspace:*
         version: link:../testing
 
   packages/config:
     dependencies:
-      '@aiops/connector-sdk':
+      '@mandate/connector-sdk':
         specifier: workspace:*
         version: link:../connector-sdk
-      '@aiops/core':
+      '@mandate/core':
         specifier: workspace:*
         version: link:../core
       ajv:
@@ -352,7 +352,7 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
-      '@aiops/testing':
+      '@mandate/testing':
         specifier: workspace:*
         version: link:../testing
       '@types/semver':
@@ -369,7 +369,7 @@ importers:
 
   packages/db:
     dependencies:
-      '@aiops/core':
+      '@mandate/core':
         specifier: workspace:*
         version: link:../core
       drizzle-orm:
@@ -379,7 +379,7 @@ importers:
         specifier: 8.23.1
         version: 8.23.1
     devDependencies:
-      '@aiops/testing':
+      '@mandate/testing':
         specifier: workspace:*
         version: link:../testing
       '@types/pg':
@@ -391,7 +391,7 @@ importers:
 
   packages/temporal:
     dependencies:
-      '@aiops/core':
+      '@mandate/core':
         specifier: workspace:*
         version: link:../core
       '@temporalio/client':
@@ -406,10 +406,10 @@ importers:
 
   packages/testing:
     dependencies:
-      '@aiops/connector-sdk':
+      '@mandate/connector-sdk':
         specifier: workspace:*
         version: link:../connector-sdk
-      '@aiops/core':
+      '@mandate/core':
         specifier: workspace:*
         version: link:../core
       '@modelcontextprotocol/node':
@@ -434,13 +434,13 @@ importers:
 
   packages/upstream:
     dependencies:
-      '@aiops/config':
+      '@mandate/config':
         specifier: workspace:*
         version: link:../config
-      '@aiops/connector-sdk':
+      '@mandate/connector-sdk':
         specifier: workspace:*
         version: link:../connector-sdk
-      '@aiops/core':
+      '@mandate/core':
         specifier: workspace:*
         version: link:../core
       '@opentelemetry/api':
@@ -450,7 +450,7 @@ importers:
         specifier: 2.12.0
         version: 2.12.0(@opentelemetry/api@1.9.1)
     devDependencies:
-      '@aiops/testing':
+      '@mandate/testing':
         specifier: workspace:*
         version: link:../testing
       '@opentelemetry/context-async-hooks':
@@ -511,31 +511,31 @@ importers:
 
   presets/gitea-issues:
     devDependencies:
-      '@aiops/adapters':
+      '@mandate/adapters':
         specifier: workspace:*
         version: link:../../packages/adapters
-      '@aiops/config':
+      '@mandate/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@aiops/connector-sdk':
+      '@mandate/connector-sdk':
         specifier: workspace:*
         version: link:../../packages/connector-sdk
-      '@aiops/testing':
+      '@mandate/testing':
         specifier: workspace:*
         version: link:../../packages/testing
 
   presets/magento2-catalog:
     devDependencies:
-      '@aiops/adapters':
+      '@mandate/adapters':
         specifier: workspace:*
         version: link:../../packages/adapters
-      '@aiops/config':
+      '@mandate/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@aiops/connector-sdk':
+      '@mandate/connector-sdk':
         specifier: workspace:*
         version: link:../../packages/connector-sdk
-      '@aiops/testing':
+      '@mandate/testing':
         specifier: workspace:*
         version: link:../../packages/testing
 

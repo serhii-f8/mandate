@@ -1,4 +1,4 @@
-# @aiops/magento2-catalog
+# @mandate/magento2-catalog
 
 Magento 2 catalog preset 1.0.0 (CONN-8, OPS-2, OPS-4). Three read operations on `GET /V1/products`, one write
 operation with a change-set manifest, a vendored filtered spec, a default connection test and bearer auth.
@@ -7,7 +7,7 @@ operation with a change-set manifest, a vendored filtered spec, a default connec
 
 ```yaml
 presets:
-  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '1.0.0' }
+  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '1.0.0' }
 connections:
   - id: magento
     adapter: openapi
@@ -16,7 +16,7 @@ connections:
     preset: magento-catalog
 ```
 
-The api finds the package through `AIOPS_PRESET_DIRS`; `aiops validate <dir> --preset-dir presets`
+The api finds the package through `MANDATE_PRESET_DIRS`; `mandate validate <dir> --preset-dir presets`
 checks it from the repository.
 
 | Operation | Arguments | Upstream filter |
@@ -64,7 +64,7 @@ change-set at 10000 targets and uses rollback `replay_previous_state`.
 ## Contract tests (NFR-17)
 
 `test/cases.json` holds the hand-written Magento request of each case; `test/recordings/` holds
-the sandbox's answers. `pnpm --filter @aiops/magento2-catalog test` checks that the preset builds
+the sandbox's answers. `pnpm --filter @mandate/magento2-catalog test` checks that the preset builds
 exactly the recorded requests and maps the recorded responses, directly and through the adapter
 against a fake upstream. With `MAGENTO_SANDBOX_URL` and `MAGENTO_SANDBOX_TOKEN` set, the cases
 also run live.
@@ -80,7 +80,7 @@ Re-record (sandbox from `deploy/sandbox/magento/`):
 bash deploy/sandbox/magento/up.sh
 node deploy/sandbox/magento/seed.mjs http://127.0.0.1:4390
 MAGENTO_SANDBOX_URL=http://127.0.0.1:4390 MAGENTO_SANDBOX_TOKEN=$(bash deploy/sandbox/magento/token.sh) \
-  pnpm --filter @aiops/magento2-catalog record
+  pnpm --filter @mandate/magento2-catalog record
 ```
 
 The recorder writes the spec (`/rest/all/schema?services=catalogProductRepositoryV1`) and one

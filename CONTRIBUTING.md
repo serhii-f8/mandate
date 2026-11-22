@@ -23,7 +23,7 @@ pnpm test
 | --- | --- |
 | Integration tests (need Docker) | `pnpm test:int` |
 | End-to-end tests (need Docker) | `pnpm test:e2e` |
-| One package | `pnpm --filter @aiops/<pkg> test` (or `test:int`, `test:e2e`) |
+| One package | `pnpm --filter @mandate/<pkg> test` (or `test:int`, `test:e2e`) |
 | One file | `cd <pkg> && pnpm exec vitest run --project <unit\|integration\|e2e> <path>` |
 | Everything CI runs | `bash scripts/ci.sh` |
 
@@ -81,7 +81,7 @@ in `.env.example` with obviously fake values.
 ## Database migrations
 
 - Drizzle ORM with SQL migration files committed to the repository. Edit `packages/db/src/schema.ts`,
-  then `pnpm --filter @aiops/db db:generate --name <name>` (add `--custom` for hand-written SQL).
+  then `pnpm --filter @mandate/db db:generate --name <name>` (add `--custom` for hand-written SQL).
 - Forward-only; they run on start. Never edit or delete a migration that is on `main`; add a new one.
 - A migration must be safe for running workflows and for several `api` and `worker` instances at once.
 - The audit table is append-only: no update or delete path in code or migrations, except the retention
@@ -118,7 +118,7 @@ activity signatures and `apps/worker/test/workflow-histories/`. The source of th
   `test/workflow-histories/<workflowType>/*.json`. Required fixtures per type: one parked at each wait
   after at least one activity, one completed per code path, one per live patch marker, one failed or
   compensated. A change that adds a command adds a fixture recorded with the new code (`pnpm --filter
-  @aiops/worker record-history <scenario>`); old fixtures are never regenerated to make a replay pass. The
+  @mandate/worker record-history <scenario>`); old fixtures are never regenerated to make a replay pass. The
   one exception: when a patch is removed, fixtures containing its marker are deleted or regenerated in the
   same change.
 - **Activity results the workflow reads are part of its contract.** `changesetWorkflow` builds its activity
@@ -135,13 +135,13 @@ activity signatures and `apps/worker/test/workflow-histories/`. The source of th
 
 ## Public interfaces and versioning
 
-Two interfaces are public and versioned (NFR-18): the `@aiops/connector-sdk` API, with the preset
+Two interfaces are public and versioned (NFR-18): the `@mandate/connector-sdk` API, with the preset
 format that is versioned with it, and the configuration schema. Their committed reports are the
 contract:
 
 - `packages/connector-sdk/api-report.d.ts` (SDK API report);
-- `packages/config/schema/aiops-config.v1.json` (configuration JSON Schema);
-- `packages/config/schema/aiops-preset.v1.json` (preset file and package.json `aiops` block, carries the
+- `packages/config/schema/mandate-config.v1.json` (configuration JSON Schema);
+- `packages/config/schema/mandate-preset.v1.json` (preset file and package.json `mandate` block, carries the
   SDK version).
 
 Regenerate after a change (the config report needs `pnpm build` first), and verify without writing with
@@ -170,7 +170,7 @@ read) and backs up review; it does not judge meaning. See
 
 The SDK version lives in `packages/connector-sdk/package.json` and equals `CONNECTOR_SDK_VERSION`; the
 configuration schema version is `CONFIG_SCHEMA_VERSION`. Presets declare the SDK range they need in
-`aiops.sdk`.
+`mandate.sdk`.
 
 ## Security issues
 
@@ -184,7 +184,7 @@ header (after a shebang, if any):
 
 ```
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 ```
 
 Shell scripts and Dockerfiles use the same two lines with `# `. Run `node tooling/license-headers.mjs`

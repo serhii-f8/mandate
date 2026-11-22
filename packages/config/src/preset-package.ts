@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Preset packages (CONN-8): finding every installed copy of a package in the preset
- * directories, choosing a version by semver range, and reading the `aiops` field of its
+ * directories, choosing a version by semver range, and reading the `mandate` field of its
  * `package.json`.
  */
 import { readdir, readFile } from 'node:fs/promises';
@@ -11,7 +11,7 @@ import semver from 'semver';
 import { z } from 'zod';
 import { PARSE_PARAMS, schemaIssues } from './schema.js';
 
-export interface AiopsField {
+export interface MandateField {
   readonly preset: string;
   readonly sdk: string;
   readonly code?: string;
@@ -22,13 +22,13 @@ export interface PackageCandidate {
   readonly version: string;
   /** The `package.json` text, covered by the configuration hash. */
   readonly packageJson: string;
-  readonly aiops?: AiopsField;
+  readonly mandate?: MandateField;
 }
 
 const relativePath = z.string().min(1).max(1024);
 
-/** The `aiops` block of a preset's package.json; exported for the public preset report (NFR-18). */
-export const presetAiopsSchema = z.strictObject({
+/** The `mandate` block of a preset's package.json; exported for the public preset report (NFR-18). */
+export const presetMandateSchema = z.strictObject({
   preset: relativePath.default('preset.yaml'),
   sdk: z
     .string()
@@ -40,15 +40,15 @@ export const presetAiopsSchema = z.strictObject({
 
 const packageJsonSchema = z.object({ name: z.string(), version: z.string() });
 
-/** `aiops` of a parsed package.json, or the issues (paths under `aiops`). */
-export function parseAiopsField(
+/** `mandate` of a parsed package.json, or the issues (paths under `mandate`). */
+export function parseMandateField(
   json: unknown,
-): { ok: true; aiops?: AiopsField } | { ok: false; issues: readonly { path: readonly PropertyKey[]; message: string }[] } {
-  if (typeof json !== 'object' || json === null || !('aiops' in json)) return { ok: true };
-  const result = presetAiopsSchema.safeParse(json.aiops, PARSE_PARAMS);
-  if (!result.success) return { ok: false, issues: schemaIssues(result).map((issue) => ({ path: ['aiops', ...issue.path], message: issue.message })) };
+): { ok: true; mandate?: MandateField } | { ok: false; issues: readonly { path: readonly PropertyKey[]; message: string }[] } {
+  if (typeof json !== 'object' || json === null || !('mandate' in json)) return { ok: true };
+  const result = presetMandateSchema.safeParse(json.mandate, PARSE_PARAMS);
+  if (!result.success) return { ok: false, issues: schemaIssues(result).map((issue) => ({ path: ['mandate', ...issue.path], message: issue.message })) };
   const { preset, sdk, code } = result.data;
-  return { ok: true, aiops: { preset, sdk, ...(code === undefined ? {} : { code }) } };
+  return { ok: true, mandate: { preset, sdk, ...(code === undefined ? {} : { code }) } };
 }
 
 /** Highest candidate satisfying `range` (undefined: any); first directory wins on equal versions. */
@@ -83,9 +83,9 @@ async function candidatesNamed(name: string, root: string): Promise<PackageCandi
     }
     const pkg = packageJsonSchema.safeParse(json);
     if (!pkg.success || pkg.data.name !== name) continue;
-    // An invalid `aiops` field stays a candidate: the loader reports its issues.
-    const aiops = parseAiopsField(json);
-    out.push({ dir, version: pkg.data.version, packageJson: text, ...(aiops.ok && aiops.aiops !== undefined ? { aiops: aiops.aiops } : {}) });
+    // An invalid `mandate` field stays a candidate: the loader reports its issues.
+    const mandate = parseMandateField(json);
+    out.push({ dir, version: pkg.data.version, packageJson: text, ...(mandate.ok && mandate.mandate !== undefined ? { mandate: mandate.mandate } : {}) });
   }
   return out;
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 # Phase 8 acceptance (SPEC section 7, designs phase-8-rollback-audit*) against the Magento sandbox:
 #   sandbox-ready, stack-healthy, credential-entered;
 #   group 1, rollback on the trusted page (EXE-8, UI-4, SEC-8, MCP-8): rb-prepare,
@@ -14,9 +14,9 @@
 #   group 4, observability (NFR-10, NFR-11, NFR-12): obs-jaeger-up, obs-trace-prepared,
 #   obs-trace-workflow-run, obs-no-secrets, worker-readyz, api-readyz, metrics-names; it needs groups
 #   1 to 3 on the same stack (the rollback histogram bucket exists only after group 1's rollback on
-#   this worker process), so with AIOPS_ACCEPT8_GROUPS=4 alone metrics-names may FAIL. The stack runs
+#   this worker process), so with MANDATE_ACCEPT8_GROUPS=4 alone metrics-names may FAIL. The stack runs
 #   with the Compose profile `observability` (Jaeger) and exports traces to it.
-# AIOPS_ACCEPT8_GROUPS selects the groups (default "1 2 3 4"); a selected group that is not
+# MANDATE_ACCEPT8_GROUPS selects the groups (default "1 2 3 4"); a selected group that is not
 # defined is a FAIL (ADR 0043).
 # Tests the committed HEAD (a fresh clone sees only commits), with a Compose override that joins
 # the api and the worker to the sandbox network and mounts a generated configuration.
@@ -31,29 +31,29 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SHA="$(git -C "$REPO" rev-parse HEAD)"
 WORK="$(mktemp -d)"
-PROJECT="aiops-accept8-$$"
+PROJECT="mandate-accept8-$$"
 FAILED=0
-SANDBOX="http://127.0.0.1:${AIOPS_MAGENTO_PORT:-4390}"
+SANDBOX="http://127.0.0.1:${MANDATE_MAGENTO_PORT:-4390}"
 
 free_port() { node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})"; }
-export AIOPS_API_PORT="$(free_port)" AIOPS_KEYCLOAK_PORT="$(free_port)" AIOPS_TEMPORAL_PORT="$(free_port)" AIOPS_POSTGRES_PORT="$(free_port)"
-export AIOPS_MAILPIT_PORT="$(free_port)"
+export MANDATE_API_PORT="$(free_port)" MANDATE_KEYCLOAK_PORT="$(free_port)" MANDATE_TEMPORAL_PORT="$(free_port)" MANDATE_POSTGRES_PORT="$(free_port)"
+export MANDATE_MAILPIT_PORT="$(free_port)"
 # Group 4: the optional trace backend runs on this stack, and api and worker export to it (NFR-11).
 # Exported before the trap, so `compose down -v` removes jaeger too.
 export COMPOSE_PROFILES=observability OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
-export AIOPS_JAEGER_PORT="$(free_port)"
-export AIOPS_KEYCLOAK_PUBLIC_URL="http://localhost:${AIOPS_KEYCLOAK_PORT}"
-export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
+export MANDATE_JAEGER_PORT="$(free_port)"
+export MANDATE_KEYCLOAK_PUBLIC_URL="http://localhost:${MANDATE_KEYCLOAK_PORT}"
+export MANDATE_MCP_RESOURCE="http://localhost:${MANDATE_API_PORT}/mcp"
 # Origin of the trusted pages and the base of the page links in tool results (MCP-6).
-export AIOPS_PUBLIC_URL="http://localhost:${AIOPS_API_PORT}"
-export AIOPS_ACCEPT_CONFIG_DIR="$WORK/config"
-MCP="http://127.0.0.1:${AIOPS_API_PORT}/mcp"
-API="$AIOPS_PUBLIC_URL"
+export MANDATE_PUBLIC_URL="http://localhost:${MANDATE_API_PORT}"
+export MANDATE_ACCEPT_CONFIG_DIR="$WORK/config"
+MCP="http://127.0.0.1:${MANDATE_API_PORT}/mcp"
+API="$MANDATE_PUBLIC_URL"
 
 compose() { docker compose -p "$PROJECT" -f compose.yaml -f scripts/acceptance/phase-8.compose.yaml "$@"; }
 
 cleanup() {
-  (cd "$WORK/aiops" 2>/dev/null && compose down -v --remove-orphans >/dev/null 2>&1) || true
+  (cd "$WORK/mandate" 2>/dev/null && compose down -v --remove-orphans >/dev/null 2>&1) || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -61,14 +61,14 @@ trap cleanup EXIT
 pass() { echo "PASS $1${2:+ — $2}"; }
 fail() { echo "FAIL $1${2:+ — $2}"; FAILED=1; }
 json() { node -e "try{const v=JSON.parse(process.argv[1])$2;console.log(v===undefined?'':typeof v==='string'?v:JSON.stringify(v))}catch{console.log('')}" "$1"; }
-login() { node "$REPO/tooling/acceptance/login.mjs" "$AIOPS_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$AIOPS_MCP_RESOURCE"; }
+login() { node "$REPO/tooling/acceptance/login.mjs" "$MANDATE_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$MANDATE_MCP_RESOURCE"; }
 page_login() { node "$REPO/tooling/acceptance/page-login.mjs" "$API" "$1" dev-only-password "${2:-/app/approvals}"; }
-page_api() { AIOPS_PAGE_COOKIE="$1" node "$REPO/tooling/acceptance/page-api.mjs" "$API" "${@:2}"; }
+page_api() { MANDATE_PAGE_COOKIE="$1" node "$REPO/tooling/acceptance/page-api.mjs" "$API" "${@:2}"; }
 # A user calls a tool; the user logs in again before every call, so no token expires during the run.
 user_mcp() {
   local token
   token="$(login "$1" 2>&1)" || { echo "{\"loginError\":$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$token")}"; return 0; }
-  AIOPS_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --tool "$2" --args "$3" 2>&1 || true
+  MANDATE_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --tool "$2" --args "$3" 2>&1 || true
 }
 alice_mcp() { user_mcp alice "$@"; }
 dave_mcp() { user_mcp dave "$@"; }
@@ -77,9 +77,9 @@ host() {
   local user="$1" token
   shift
   token="$(login "$user" 2>&1)" || { echo "{\"errors\":[\"login $user failed\"]}"; return 0; }
-  AIOPS_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/widget-host.mjs" "$MCP" "$@" 2>&1 || true
+  MANDATE_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/widget-host.mjs" "$MCP" "$@" 2>&1 || true
 }
-psql_q() { compose exec -T postgres psql -U aiops -d aiops -tAc "$1"; }
+psql_q() { compose exec -T postgres psql -U mandate -d mandate -tAc "$1"; }
 # get_changeset every 2 s until the status matches the regex or the timeout (s) passes; the last
 # answer is left in POLL and its status in POLL_STATUS. Returns 1 on timeout.
 poll_cs() {
@@ -104,9 +104,9 @@ none_has() { node -e 'try{const o=JSON.parse(process.argv[1]);console.log(Object
 # yes when every SKU in the list has exactly the value.
 all_have() { node -e 'try{const o=JSON.parse(process.argv[1]);console.log(process.argv[2].split(",").every((s)=>o[s]===process.argv[3])?"yes":"no")}catch{console.log("no")}' "$1" "$2" "$3"; }
 # yes when the text contains the page link of the change-set (MCP-6).
-has_link() { [[ -n "$2" && "$1" == *"$AIOPS_PUBLIC_URL/app/changesets/$2"* ]] && echo yes || echo no; }
+has_link() { [[ -n "$2" && "$1" == *"$MANDATE_PUBLIC_URL/app/changesets/$2"* ]] && echo yes || echo no; }
 # How often the text contains the page link of the change-set.
-link_count() { node -e 'console.log(process.argv[1].split(process.argv[2]).length - 1)' "$1" "$AIOPS_PUBLIC_URL/app/changesets/$2"; }
+link_count() { node -e 'console.log(process.argv[1].split(process.argv[2]).length - 1)' "$1" "$MANDATE_PUBLIC_URL/app/changesets/$2"; }
 # The first text block of an mcp-call.mjs answer (the summary; content[1] is the JSON block).
 text0() { json "$1" '.content[0]'; }
 
@@ -146,29 +146,29 @@ role_mapping:
 YAML
 }
 
-echo "# Phase 8 acceptance of ${SHA:0:12} (project $PROJECT, api port $AIOPS_API_PORT)"
+echo "# Phase 8 acceptance of ${SHA:0:12} (project $PROJECT, api port $MANDATE_API_PORT)"
 
 # 1. The sandbox is up (idempotent) and seeded (idempotent); its token is the credential.
 if bash "$REPO/deploy/sandbox/magento/up.sh" >"$WORK/sandbox.log" 2>&1 &&
   node "$REPO/deploy/sandbox/magento/seed.mjs" "$SANDBOX" >>"$WORK/sandbox.log" 2>&1 &&
   TOKEN="$(bash "$REPO/deploy/sandbox/magento/token.sh" "$SANDBOX" 2>>"$WORK/sandbox.log")" && [[ -n "$TOKEN" ]]; then
-  if docker network inspect aiops-sandbox >/dev/null 2>&1; then
-    pass sandbox-ready "$(grep -o 'SANDBOX UP.*' "$WORK/sandbox.log" | tail -1); $(grep -o 'SEEDED umbrella.*' "$WORK/sandbox.log" | tail -1); token present; network aiops-sandbox present"
+  if docker network inspect mandate-sandbox >/dev/null 2>&1; then
+    pass sandbox-ready "$(grep -o 'SANDBOX UP.*' "$WORK/sandbox.log" | tail -1); $(grep -o 'SEEDED umbrella.*' "$WORK/sandbox.log" | tail -1); token present; network mandate-sandbox present"
   else
-    fail sandbox-ready "network aiops-sandbox missing"; exit 1
+    fail sandbox-ready "network mandate-sandbox missing"; exit 1
   fi
 else
   fail sandbox-ready "see sandbox output below"; tail -30 "$WORK/sandbox.log"; exit 1
 fi
 
-git clone --quiet --no-local --no-checkout "$REPO" "$WORK/aiops"
-git -C "$WORK/aiops" checkout --quiet --detach "$SHA"
-cd "$WORK/aiops"
+git clone --quiet --no-local --no-checkout "$REPO" "$WORK/mandate"
+git -C "$WORK/mandate" checkout --quiet --detach "$SHA"
+cd "$WORK/mandate"
 
-write_config "$AIOPS_ACCEPT_CONFIG_DIR" deploy/config
+write_config "$MANDATE_ACCEPT_CONFIG_DIR" deploy/config
 
 # 2. One command from a fresh clone; one worker; Mailpit up.
-MAILPIT="http://127.0.0.1:${AIOPS_MAILPIT_PORT}"
+MAILPIT="http://127.0.0.1:${MANDATE_MAILPIT_PORT}"
 if compose up -d --build --wait >"$WORK/up.log" 2>&1; then
   WORKERS="$(running_workers)"
   MAILPIT_UP="$(compose ps mailpit --status running -q | wc -l | tr -d ' ')"
@@ -339,7 +339,7 @@ audit_verify() { compose exec -T api node dist/cli.js audit verify 2>&1; }
 # Runs one statement as the superuser with triggers off (session_replication_role = replica): the
 # only way to alter an audit row, which the append-only trigger otherwise refuses (AUD-3).
 # Its output is joined into one line, as are the refusals, so each check stays one PASS/FAIL line.
-psql_replica() { compose exec -T postgres psql -U postgres -d aiops -v ON_ERROR_STOP=1 -c "SET session_replication_role = replica; $1" 2>&1 | tr '\n' ' '; }
+psql_replica() { compose exec -T postgres psql -U postgres -d mandate -v ON_ERROR_STOP=1 -c "SET session_replication_role = replica; $1" 2>&1 | tr '\n' ' '; }
 
 group_2() {
   local deadline sealed out code p orig denied tampered restored
@@ -363,7 +363,7 @@ group_2() {
   code=0
   out="$(audit_verify)" || code=$?
   if [[ "$code" == 0 && "$out" =~ ^ok\ sealed=[0-9]+\ unsealed=[0-9]+\ from=[0-9]+\ head=[0-9]+:sha256:[0-9a-f]{64}$ ]]; then
-    pass audit-verify-ok "aiops audit verify → exit $code: $out"
+    pass audit-verify-ok "mandate audit verify → exit $code: $out"
   else
     fail audit-verify-ok "exit $code: $out"
     return 0
@@ -381,11 +381,11 @@ group_2() {
   tampered="$(psql_replica "UPDATE audit_event SET actor = actor || '-tampered' WHERE chain_pos = $p" || true)"
   if [[ "$denied" == *append-only* && "$tampered" == *"UPDATE 1"* &&
     "$(psql_q "SELECT actor FROM audit_event WHERE chain_pos = $p" 2>&1 || true)" == "$orig-tampered" ]]; then
-    pass audit-tamper "chain_pos=$p actor '$orig' → '$orig-tampered'; as aiops: $denied; as superuser with replica: $tampered"
+    pass audit-tamper "chain_pos=$p actor '$orig' → '$orig-tampered'; as mandate: $denied; as superuser with replica: $tampered"
   else
     # The superuser UPDATE may have landed even though a check failed: put the row back first.
     psql_replica "UPDATE audit_event SET actor = '${orig//\'/\'\'}' WHERE chain_pos = $p" >/dev/null 2>&1 || true
-    fail audit-tamper "chain_pos=$p as aiops: $denied; as superuser: $tampered"
+    fail audit-tamper "chain_pos=$p as mandate: $denied; as superuser: $tampered"
     return 0
   fi
 
@@ -393,7 +393,7 @@ group_2() {
   code=0
   out="$(audit_verify)" || code=$?
   if [[ "$code" == 1 && "$out" == "failed chain_pos=$p reason=hash_mismatch" ]]; then
-    pass audit-verify-fails "aiops audit verify → exit $code: $out"
+    pass audit-verify-fails "mandate audit verify → exit $code: $out"
   else
     fail audit-verify-fails "exit $code: $out (expected: failed chain_pos=$p reason=hash_mismatch)"
   fi
@@ -403,7 +403,7 @@ group_2() {
   code=0
   out="$(audit_verify)" || code=$?
   if [[ "$restored" == *"UPDATE 1"* && "$code" == 0 && "$out" == ok\ * ]]; then
-    pass audit-restore "actor of chain_pos=$p back to '$orig'; aiops audit verify → exit $code: $out"
+    pass audit-restore "actor of chain_pos=$p back to '$orig'; mandate audit verify → exit $code: $out"
   else
     fail audit-restore "restore: $restored; verify exit $code: $out"
   fi
@@ -417,7 +417,7 @@ group_2() {
 dave_lists() {
   local token list
   token="$(login dave 2>/dev/null || true)"
-  list="$(AIOPS_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --list 2>&1 || true)"
+  list="$(MANDATE_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --list 2>&1 || true)"
   [[ "$(json "$list" ".tools.includes(\"$1\")")" == true ]] && echo yes || echo no
 }
 started_at() { docker inspect -f '{{.State.StartedAt}}' "$(compose ps -q "$1")"; }
@@ -428,9 +428,9 @@ group_3() {
 
   # 1. Dave's role lacks X; the grant is appended on disk; the CLI diff names exactly that change.
   before_list="$(dave_lists "$op")"
-  sed -i '/^  - id: content_lead$/{n;s/grants: \[\]/grants: [{ operation: catalog.search_products, id: lead-search }]/}' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml"
-  grep -q 'id: lead-search' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml" || { fail config-diff "grant not appended to roles.yaml"; return 0; }
-  diff="$(compose exec -T api node dist/cli.js config diff /etc/aiops/config 2>&1)" || code=$?
+  sed -i '/^  - id: content_lead$/{n;s/grants: \[\]/grants: [{ operation: catalog.search_products, id: lead-search }]/}' "$MANDATE_ACCEPT_CONFIG_DIR/roles.yaml"
+  grep -q 'id: lead-search' "$MANDATE_ACCEPT_CONFIG_DIR/roles.yaml" || { fail config-diff "grant not appended to roles.yaml"; return 0; }
+  diff="$(compose exec -T api node dist/cli.js config diff /etc/mandate/config 2>&1)" || code=$?
   h1="$(sed -n 's/^hash \(.*\) -> .*$/\1/p' <<<"$diff")"
   h2="$(sed -n 's/^hash .* -> \(.*\)$/\1/p' <<<"$diff")"
   if [[ "$before_list" == no && "$code" == 0 && "$(grep -c '^[+~-] ' <<<"$diff")" == 1 && "$(grep -cx '~ role content_lead: grants' <<<"$diff")" == 1 &&
@@ -444,7 +444,7 @@ group_3() {
   # 2. Apply it; the running api and worker follow without a restart (bounded).
   started_api="$(started_at api)"
   started_worker="$(started_at worker)"
-  apply="$(compose exec -T api node dist/cli.js config apply /etc/aiops/config --actor acceptance 2>&1)" || apply_code=$?
+  apply="$(compose exec -T api node dist/cli.js config apply /etc/mandate/config --actor acceptance 2>&1)" || apply_code=$?
   listed=no
   deadline=$((SECONDS + 60))
   while :; do
@@ -481,13 +481,13 @@ group_3() {
 # ---- Group 4: observability (NFR-10, NFR-11, NFR-12) ---------------------------------------------
 # Runs last, on the same stack as groups 1 to 3 (ruling F16).
 
-JAEGER="http://127.0.0.1:${AIOPS_JAEGER_PORT}"
+JAEGER="http://127.0.0.1:${MANDATE_JAEGER_PORT}"
 # GET on a port inside a service's container (not published); prints the status, a space, the body.
 in_container() { compose exec -T "$1" node -e "fetch('http://127.0.0.1:$2$3').then(async (r) => console.log(r.status, await r.text()), (e) => { console.log('000', String(e)); process.exit(1); })" 2>&1; }
 # Jaeger 2.23.0 serves only its api_v3 query API (/api/v3/...; the legacy /api/services and
 # /api/traces answer 404), with OTLP JSON answers: {result: {resourceSpans: [...]}}.
 # Summarises such an answer (file) against the correlation ID as JSON: the trace count and ID, the
-# span names, whether RunActivity:prepare carries the ID, the http.request spans of aiops-worker.
+# span names, whether RunActivity:prepare carries the ID, the http.request spans of mandate-worker.
 trace_summary() {
   node -e '
     const fs = require("fs");
@@ -507,8 +507,8 @@ trace_summary() {
         traces: ids.length,
         traceID: ids[0] ?? "",
         names: [...new Set(spans.map((s) => s.name))].sort(),
-        prepareTagged: spans.some((s) => s.name === "RunActivity:prepare" && attr(s.attributes, "aiops.correlation_id") === process.argv[2]),
-        workerHttp: spans.filter((s) => s.name === "http.request" && s.service === "aiops-worker").length,
+        prepareTagged: spans.some((s) => s.name === "RunActivity:prepare" && attr(s.attributes, "mandate.correlation_id") === process.argv[2]),
+        workerHttp: spans.filter((s) => s.name === "http.request" && s.service === "mandate-worker").length,
       }));
     } catch { console.log("{}"); }' "$1" "$2"
 }
@@ -541,7 +541,7 @@ group_4() {
   local skus="UMBRELLA-0801,UMBRELLA-0802,UMBRELLA-0803,UMBRELLA-0804" stamp_4 args denied deadline services
   local call cid cs status tags window summary trace_id expected cancel leaks readyz body api_text worker_text missing
 
-  # 0. One call dave is not granted (no_grant), so aiops_policy_denials_total has a sample (F16).
+  # 0. One call dave is not granted (no_grant), so mandate_policy_denials_total has a sample (F16).
   stamp_4="$(stamp observability)"
   args="$(cs_args "$skus" "$stamp_4")"
   denied="$(dave_mcp catalog.update_content "$args")"
@@ -577,13 +577,13 @@ group_4() {
     fail obs-trace-prepared "correlation=$cid changeset=$cs status=$status answer=${call:0:800}"
     return 0
   fi
-  tags="$(node -e 'console.log(encodeURIComponent(JSON.stringify({ "aiops.correlation_id": process.argv[1] })))' "$cid")"
+  tags="$(node -e 'console.log(encodeURIComponent(JSON.stringify({ "mandate.correlation_id": process.argv[1] })))' "$cid")"
   # The last hour up to a minute ahead (RFC 3339, as api_v3 requires both bounds).
   window="query.start_time_min=$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)&query.start_time_max=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)"
   expected="mcp.request mcp.tool_call StartWorkflow:changesetWorkflow StartActivity:prepare RunActivity:prepare http.request"
   deadline=$((SECONDS + 30))
   while :; do
-    curl -sf --max-time 5 "$JAEGER/api/v3/traces?query.service_name=aiops-api&$window&query.num_traces=5&query.attributes=$tags" >"$WORK/trace.json" 2>/dev/null || echo '{}' >"$WORK/trace.json"
+    curl -sf --max-time 5 "$JAEGER/api/v3/traces?query.service_name=mandate-api&$window&query.num_traces=5&query.attributes=$tags" >"$WORK/trace.json" 2>/dev/null || echo '{}' >"$WORK/trace.json"
     summary="$(trace_summary "$WORK/trace.json" "$cid")"
     [[ "$(json "$summary" '.traces')" == 1 && "$(has_spans "$summary" "$expected")" == yes && "$(json "$summary" '.prepareTagged')" == true &&
       "$(json "$summary" '.workerHttp')" =~ ^[1-9] ]] && break
@@ -593,7 +593,7 @@ group_4() {
   trace_id="$(json "$summary" '.traceID')"
   if [[ "$(json "$summary" '.traces')" == 1 && "$(has_spans "$summary" "$expected")" == yes && "$(json "$summary" '.prepareTagged')" == true &&
     "$(json "$summary" '.workerHttp')" =~ ^[1-9] ]]; then
-    pass obs-trace-prepared "change-set $cs prepared; correlation $cid → trace $trace_id: $(json "$summary" '.names'); RunActivity:prepare tagged; http.request spans of aiops-worker: $(json "$summary" '.workerHttp')"
+    pass obs-trace-prepared "change-set $cs prepared; correlation $cid → trace $trace_id: $(json "$summary" '.names'); RunActivity:prepare tagged; http.request spans of mandate-worker: $(json "$summary" '.workerHttp')"
   else
     fail obs-trace-prepared "change-set $cs $status; correlation $cid; after 30 s: $summary"
     return 0
@@ -655,22 +655,22 @@ group_4() {
   in_container api 9464 /metrics >"$api_text" || true
   in_container worker 8081 /metrics >"$worker_text" || true
   missing=""
-  [[ "$(has_sample "$api_text" 'aiops_tool_calls_total{' 'tool="catalog.update_content"')" == yes ]] || missing+=" aiops_tool_calls_total{tool=catalog.update_content}"
-  [[ "$(has_sample "$api_text" 'aiops_policy_denials_total{' 'reason="no_grant"')" == yes ]] || missing+=" aiops_policy_denials_total{reason=no_grant}"
-  [[ "$(has_sample "$worker_text" 'aiops_changesets{')" == yes ]] || missing+=" aiops_changesets"
-  [[ "$(has_sample "$worker_text" 'aiops_batch_duration_seconds_bucket{' 'phase="execute"')" == yes ]] || missing+=" aiops_batch_duration_seconds_bucket{phase=execute}"
-  [[ "$(has_sample "$worker_text" 'aiops_batch_duration_seconds_bucket{' 'phase="rollback"')" == yes ]] || missing+=" aiops_batch_duration_seconds_bucket{phase=rollback}"
-  [[ "$(has_sample "$worker_text" 'aiops_upstream_requests_total{')" == yes ]] || missing+=" aiops_upstream_requests_total"
-  [[ "$(has_sample "$worker_text" 'aiops_upstream_request_duration_seconds_bucket{')" == yes ]] || missing+=" aiops_upstream_request_duration_seconds_bucket"
+  [[ "$(has_sample "$api_text" 'mandate_tool_calls_total{' 'tool="catalog.update_content"')" == yes ]] || missing+=" mandate_tool_calls_total{tool=catalog.update_content}"
+  [[ "$(has_sample "$api_text" 'mandate_policy_denials_total{' 'reason="no_grant"')" == yes ]] || missing+=" mandate_policy_denials_total{reason=no_grant}"
+  [[ "$(has_sample "$worker_text" 'mandate_changesets{')" == yes ]] || missing+=" mandate_changesets"
+  [[ "$(has_sample "$worker_text" 'mandate_batch_duration_seconds_bucket{' 'phase="execute"')" == yes ]] || missing+=" mandate_batch_duration_seconds_bucket{phase=execute}"
+  [[ "$(has_sample "$worker_text" 'mandate_batch_duration_seconds_bucket{' 'phase="rollback"')" == yes ]] || missing+=" mandate_batch_duration_seconds_bucket{phase=rollback}"
+  [[ "$(has_sample "$worker_text" 'mandate_upstream_requests_total{')" == yes ]] || missing+=" mandate_upstream_requests_total"
+  [[ "$(has_sample "$worker_text" 'mandate_upstream_request_duration_seconds_bucket{')" == yes ]] || missing+=" mandate_upstream_request_duration_seconds_bucket"
   if [[ -z "$missing" ]]; then
-    pass metrics-names "dave catalog.update_content → $(denial_of "$denied"); api: $(grep -cE '^aiops_(tool_calls|policy_denials)_total\{' "$api_text") samples of aiops_tool_calls_total and aiops_policy_denials_total; worker: $(grep -cE '^aiops_(changesets|batch_duration_seconds_bucket|upstream_requests_total|upstream_request_duration_seconds_bucket)\{' "$worker_text") samples of the other four names"
+    pass metrics-names "dave catalog.update_content → $(denial_of "$denied"); api: $(grep -cE '^mandate_(tool_calls|policy_denials)_total\{' "$api_text") samples of mandate_tool_calls_total and mandate_policy_denials_total; worker: $(grep -cE '^mandate_(changesets|batch_duration_seconds_bucket|upstream_requests_total|upstream_request_duration_seconds_bucket)\{' "$worker_text") samples of the other four names"
   else
     fail metrics-names "missing:$missing; dave answer ${denied:0:400}; api $(head -c 300 "$api_text" | tr '\n' ' '); worker $(head -c 300 "$worker_text" | tr '\n' ' ')"
   fi
 }
 
 # Not GROUPS: bash ignores assignments to its own GROUPS array (the user's group IDs).
-RUN_GROUPS="${AIOPS_ACCEPT8_GROUPS:-1 2 3 4}"
+RUN_GROUPS="${MANDATE_ACCEPT8_GROUPS:-1 2 3 4}"
 for g in $RUN_GROUPS; do
   if declare -F "group_$g" >/dev/null; then
     "group_$g"

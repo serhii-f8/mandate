@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import { mcpToolHash, type CodeAdapter, type CodeOperation, type McpToolAdapter, type McpToolDefinition, type ReadAdapter, type ReadOutcome, type ScopeReport, type ToolListOutcome } from '@aiops/connector-sdk';
-import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
-import { InMemoryAuditLog } from '@aiops/testing';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
+import { mcpToolHash, type CodeAdapter, type CodeOperation, type McpToolAdapter, type McpToolDefinition, type ReadAdapter, type ReadOutcome, type ScopeReport, type ToolListOutcome } from '@mandate/connector-sdk';
+import type { CredentialHandle, CredentialStatus, CredentialVault } from '@mandate/core';
+import { InMemoryAuditLog } from '@mandate/testing';
 import { ConnectionTestService } from './connection-test.js';
 
 const SOURCES = {
@@ -102,7 +102,7 @@ async function setup(outcome: ReadOutcome = OK, { stored = true }: { stored?: bo
 describe('CONN-7 connection test service', () => {
   it('CONN-7 SEC-7 runs the declared test read with the stored credential and reports items and scopes', async () => {
     const { adapter, service, audit } = await setup();
-    const report = await service.run('magento', 'carol-id', 'aiops-web', 'corr-1');
+    const report = await service.run('magento', 'carol-id', 'mandate-web', 'corr-1');
     expect(report).toEqual({ ok: true, operation: 'catalog.search_products', status: 200, durationMs: 12, itemCount: 2, scopes: JWT_SCOPES });
     expect(adapter.reads).toHaveLength(1);
     expect(adapter.reads[0]?.args).toEqual({ brand: 'acme', fields: ['sku'] });
@@ -114,7 +114,7 @@ describe('CONN-7 connection test service', () => {
       {
         id: 'id-1',
         actor: 'carol-id',
-        clientId: 'aiops-web',
+        clientId: 'mandate-web',
         action: 'connection.test',
         subject: 'magento',
         outcome: 'ok',
@@ -141,7 +141,7 @@ describe('CONN-7 connection test service', () => {
 
   it('CONN-7 a connection without a declared test reports mapping without calling the upstream', async () => {
     const { adapter, service, audit } = await setup();
-    const report = await service.run('erp', 'carol-id', 'aiops-web', 'corr-3');
+    const report = await service.run('erp', 'carol-id', 'mandate-web', 'corr-3');
     expect(report).toEqual({
       ok: false,
       operation: '',
@@ -261,7 +261,7 @@ describe('CONN-7 connection test service', () => {
   ])('CONN-7 AUD-1 when %s the report is ok:false with a fixed message, and it is audited', async (_name, breakIt, code) => {
     const s = await setup();
     breakIt(s);
-    const report = await s.service.run('magento', 'carol-id', 'aiops-web', 'corr-9');
+    const report = await s.service.run('magento', 'carol-id', 'mandate-web', 'corr-9');
     expect(report).toMatchObject({ ok: false, operation: 'catalog.search_products', code, scopes: { detectable: false } });
     expect(JSON.stringify(report)).not.toContain(TOKEN);
     expect(s.audit.events).toEqual([expect.objectContaining({ outcome: 'error', details: { connection: 'magento', ok: false, code, scopesDetectable: false } })]);
@@ -270,7 +270,7 @@ describe('CONN-7 connection test service', () => {
 
   it('SEC-3 the report and the audit never contain the secret', async () => {
     const { service, audit } = await setup();
-    const report = await service.run('magento', 'carol-id', 'aiops-web', 'corr-7');
+    const report = await service.run('magento', 'carol-id', 'mandate-web', 'corr-7');
     expect(JSON.stringify(report)).not.toContain(TOKEN);
     expect(JSON.stringify(audit.events)).not.toContain(TOKEN);
   });
@@ -338,7 +338,7 @@ async function setupMcp(list: ToolListOutcome, called: ReadOutcome = CALLED) {
 describe('CONN-7 connection test of an mcp connection', () => {
   it('CONN-7 lists the tools and calls the test operation with the stored credential, reporting the listed tool count', async () => {
     const { adapter, service, audit } = await setupMcp(listed(LOOKUP, OTHER));
-    const report = await service.run('tools', 'carol-id', 'aiops-web', 'corr-m1');
+    const report = await service.run('tools', 'carol-id', 'mandate-web', 'corr-m1');
     expect(report).toEqual({ ok: true, operation: 'tools.lookup', status: 200, durationMs: 10, itemCount: 2, scopes: NOT_DETECTABLE_REPORT });
     expect(adapter.lists).toHaveLength(1);
     expect(adapter.lists[0]?.connection.id).toBe('tools');
@@ -351,7 +351,7 @@ describe('CONN-7 connection test of an mcp connection', () => {
       {
         id: 'id-1',
         actor: 'carol-id',
-        clientId: 'aiops-web',
+        clientId: 'mandate-web',
         action: 'connection.test',
         subject: 'tools',
         outcome: 'ok',

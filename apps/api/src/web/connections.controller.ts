@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { Controller, Inject, Param, Post, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import type { ConfigurationHolder } from '@aiops/config';
-import type { AuditLog } from '@aiops/core';
+import type { ConfigurationHolder } from '@mandate/config';
+import type { AuditLog } from '@mandate/core';
 import { AUDIT_LOG, CONFIGURATION, CONNECTION_TEST, PAGE_CHECKS } from '../tokens.js';
 import type { ConnectionTestService } from '../upstream/connection-test.js';
 import { PageAccess, type PageChecks, type PageRequest } from './access.js';

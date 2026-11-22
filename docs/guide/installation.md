@@ -17,8 +17,8 @@ For a real installation read [production.md](production.md) as well.
 Clone the repository and start the stack from its root. The first run builds the images.
 
 ```bash
-git clone https://github.com/serhii-f8/fde.git ai-operations-layer
-cd ai-operations-layer
+git clone https://github.com/serhii-f8/mandate.git mandate
+cd mandate
 ```
 
 <!-- doc-test: install -->
@@ -35,14 +35,14 @@ The host ports are 8400 (api), 8480 (Keycloak), 17233 (Temporal), 15432 (Postgre
 after it, for example with `ss -ltn` on Linux or `lsof -nP -iTCP -sTCP:LISTEN` on macOS. If one is
 taken by another program, `up` fails with `port is already allocated`: pick a free port as described
 in [Change the defaults](#change-the-defaults) and run `up` again. The
-Compose project is always called `aiops`, so a second clone on the same machine shares its
+Compose project is always called `mandate`, so a second clone on the same machine shares its
 containers and volumes; run one copy at a time.
 
 ## Check health
 
 <!-- doc-test: install -->
 ```bash
-curl -fsS "http://localhost:${AIOPS_API_PORT:-8400}/readyz"
+curl -fsS "http://localhost:${MANDATE_API_PORT:-8400}/readyz"
 ```
 
 `/readyz` answers 200 once the database is reachable and a configuration is active.
@@ -78,12 +78,12 @@ The Keycloak administrator is `admin` with the password from `KEYCLOAK_ADMIN_PAS
 ## Change the defaults
 
 Copy `.env.example` to `.env` and edit it; Compose reads `.env` from the repository root. You can
-change the host ports (`AIOPS_API_PORT`, `AIOPS_KEYCLOAK_PORT`, `AIOPS_TEMPORAL_PORT`,
-`AIOPS_POSTGRES_PORT`, `AIOPS_MAILPIT_PORT`) and the public URLs that must follow them
-(`AIOPS_KEYCLOAK_PUBLIC_URL`, `AIOPS_MCP_RESOURCE`, `AIOPS_PUBLIC_URL`). Every secret in the file
+change the host ports (`MANDATE_API_PORT`, `MANDATE_KEYCLOAK_PORT`, `MANDATE_TEMPORAL_PORT`,
+`MANDATE_POSTGRES_PORT`, `MANDATE_MAILPIT_PORT`) and the public URLs that must follow them
+(`MANDATE_KEYCLOAK_PUBLIC_URL`, `MANDATE_MCP_RESOURCE`, `MANDATE_PUBLIC_URL`). Every secret in the file
 is a development fake. If you change the api or Keycloak port, change its URLs too
-(`AIOPS_PUBLIC_URL` and `AIOPS_MCP_RESOURCE` follow `AIOPS_API_PORT`, `AIOPS_KEYCLOAK_PUBLIC_URL`
-follows `AIOPS_KEYCLOAK_PORT`); the other ports have no URL setting. The URLs on these pages show
+(`MANDATE_PUBLIC_URL` and `MANDATE_MCP_RESOURCE` follow `MANDATE_API_PORT`, `MANDATE_KEYCLOAK_PUBLIC_URL`
+follows `MANDATE_KEYCLOAK_PORT`); the other ports have no URL setting. The URLs on these pages show
 the default ports: use yours instead.
 
 ## Stop

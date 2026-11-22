@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DataConverter, Duration } from '@temporalio/common';
@@ -13,8 +13,8 @@ export const workflowsPath = fileURLToPath(new URL(`./workflows/index${sourceExt
 
 /**
  * Bundler options for the workflow sandbox. Running from `.ts` (tests, scripts), webpack must
- * resolve workspace packages through the `@aiops/source` export condition, as Vitest does
- * (ADR 0010); otherwise `@aiops/temporal/contract` would come from a possibly stale `dist`.
+ * resolve workspace packages through the `@mandate/source` export condition, as Vitest does
+ * (ADR 0010); otherwise `@mandate/temporal/contract` would come from a possibly stale `dist`.
  * `'...'` keeps webpack's default condition names (webpack 5 `resolve.conditionNames`). The
  * built image bundles from `dist` and keeps the defaults.
  */
@@ -23,7 +23,7 @@ export function workflowBundlerOptions(): NonNullable<WorkerOptions['bundlerOpti
   return {
     webpackConfigHook: (config) => ({
       ...config,
-      resolve: { ...config.resolve, conditionNames: ['@aiops/source', '...'] },
+      resolve: { ...config.resolve, conditionNames: ['@mandate/source', '...'] },
     }),
   };
 }

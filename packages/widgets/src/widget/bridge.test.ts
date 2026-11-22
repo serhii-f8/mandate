@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { App } from '@modelcontextprotocol/ext-apps';
 import { isCallToolResult, type CallToolResult } from '@modelcontextprotocol/client';
 import { describe, expect, it, vi } from 'vitest';
@@ -15,7 +15,7 @@ import submitPending from './fixtures/submit-pending.json' with { type: 'json' }
 
 const A = '0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e';
 const B = '7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f';
-const PAGE_A = `https://aiops.example.test/app/changesets/${A}`;
+const PAGE_A = `https://mandate.example.test/app/changesets/${A}`;
 const HASH_A = `sha256:${'a'.repeat(64)}`;
 const TOOLS: readonly WidgetTool[] = ['get_changeset', 'exclude_changeset_items', 'submit_for_approval', 'cancel_changeset', 'review_changeset', 'decide_changeset'];
 
@@ -164,7 +164,7 @@ describe('widget bridge', () => {
     shown = derived;
     await actions.openPage?.();
     await actions.export?.('xlsx');
-    const pageB = `https://aiops.example.test/app/changesets/${B}`;
+    const pageB = `https://mandate.example.test/app/changesets/${B}`;
     expect(openLink.mock.calls).toEqual([[{ url: pageB }], [{ url: pageB }]]);
   });
 

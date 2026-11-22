@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Public API report generator (NFR-18).
 // Usage: node tooling/versioning/api-report.mjs <subject> [--check]
-// Subjects: connector-sdk, config, preset (preset document and package.json `aiops`, versioned with the SDK).
+// Subjects: connector-sdk, config, preset (preset document and package.json `mandate`, versioned with the SDK).
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -17,13 +17,13 @@ function readVersion(pkgDir) {
 
 async function loadConfigDist() {
   const dist = join(root, 'packages/config/dist/index.js');
-  if (!existsSync(dist)) throw new Error('packages/config/dist is missing: run `pnpm --filter @aiops/config build`');
+  if (!existsSync(dist)) throw new Error('packages/config/dist is missing: run `pnpm --filter @mandate/config build`');
   return import(pathToFileURL(dist).href);
 }
 
 async function loadSdkDist() {
   const dist = join(root, 'packages/connector-sdk/dist/index.js');
-  if (!existsSync(dist)) throw new Error('packages/connector-sdk/dist is missing: run `pnpm --filter @aiops/connector-sdk build`');
+  if (!existsSync(dist)) throw new Error('packages/connector-sdk/dist is missing: run `pnpm --filter @mandate/connector-sdk build`');
   return import(pathToFileURL(dist).href);
 }
 
@@ -35,24 +35,24 @@ const SUBJECTS = {
     generate: (version) => {
       const dist = join(root, 'packages/connector-sdk/dist');
       if (!existsSync(join(dist, 'index.d.ts'))) {
-        throw new Error('packages/connector-sdk/dist is missing: run `pnpm --filter @aiops/connector-sdk build`');
+        throw new Error('packages/connector-sdk/dist is missing: run `pnpm --filter @mandate/connector-sdk build`');
       }
       return sdkReport(dist, version);
     },
   },
   config: {
-    file: join(root, 'packages/config/schema/aiops-config.v1.json'),
-    // tooling has no @aiops/config dependency: the built package is imported by path.
+    file: join(root, 'packages/config/schema/mandate-config.v1.json'),
+    // tooling has no @mandate/config dependency: the built package is imported by path.
     version: async () => (await loadConfigDist()).CONFIG_SCHEMA_VERSION,
     generate: async (version) => configReport((await loadConfigDist()).configDocumentSchema, version),
   },
   preset: {
-    file: join(root, 'packages/config/schema/aiops-preset.v1.json'),
-    // The preset format is versioned with the connector SDK (presets declare `aiops.sdk`).
+    file: join(root, 'packages/config/schema/mandate-preset.v1.json'),
+    // The preset format is versioned with the connector SDK (presets declare `mandate.sdk`).
     version: async () => (await loadSdkDist()).CONNECTOR_SDK_VERSION,
     generate: async (version) => {
       const config = await loadConfigDist();
-      return presetReport(config.presetDocumentSchema, config.presetAiopsSchema, version);
+      return presetReport(config.presetDocumentSchema, config.presetMandateSchema, version);
     },
   },
 };

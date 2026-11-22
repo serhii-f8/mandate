@@ -1,17 +1,17 @@
 {
-  "name": "@aiops/magento2-catalog",
+  "name": "@mandate/magento2-catalog",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Curated operations and manifests for Magento 2 catalog content.",
   "license": "Apache-2.0",
-  "aiops": {
+  "mandate": {
     "preset": "preset.yaml",
     "sdk": "^1.0.0"
   },
   "exports": {
     ".": {
-      "@aiops/source": "./src/index.ts",
+      "@mandate/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
@@ -30,9 +30,9 @@
     "record": "node scripts/record.mjs"
   },
   "devDependencies": {
-    "@aiops/adapters": "workspace:*",
-    "@aiops/config": "workspace:*",
-    "@aiops/connector-sdk": "workspace:*",
-    "@aiops/testing": "workspace:*"
+    "@mandate/adapters": "workspace:*",
+    "@mandate/config": "workspace:*",
+    "@mandate/connector-sdk": "workspace:*",
+    "@mandate/testing": "workspace:*"
   }
 }

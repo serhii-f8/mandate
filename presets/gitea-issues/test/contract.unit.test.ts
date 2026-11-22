@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Contract tests of the Gitea issues preset (NFR-17, CONN-8; design phase-9-mcp-upstream-gitea).
- * The preset is loaded the way the api loads it: `@aiops/config` with the OpenAPI adapter's
- * resolver over the vendored spec and the built code module (`aiops.code`, dist/index.js). The
+ * The preset is loaded the way the api loads it: `@mandate/config` with the OpenAPI adapter's
+ * resolver over the vendored spec and the built code module (`mandate.code`, dist/index.js). The
  * sandbox recordings are replayed on a fake upstream under `/api/v1` and the loaded bindings run
  * through the real adapter. With GITEA_SANDBOX_URL and GITEA_SANDBOX_TOKEN set, the read cases
  * also run against the sandbox.
@@ -11,10 +11,10 @@
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createOpenApiAdapter } from '@aiops/adapters';
-import { loadConfigurationSources, type LoadedConfiguration, type OperationBinding } from '@aiops/config';
-import type { ConnectionSettings, CredentialSource } from '@aiops/connector-sdk';
-import { contractRead, contractWrite, presetConnectionYaml, replayRecordings, startFakeUpstream, type FakeUpstream, type RecordedExchange } from '@aiops/testing';
+import { createOpenApiAdapter } from '@mandate/adapters';
+import { loadConfigurationSources, type LoadedConfiguration, type OperationBinding } from '@mandate/config';
+import type { ConnectionSettings, CredentialSource } from '@mandate/connector-sdk';
+import { contractRead, contractWrite, presetConnectionYaml, replayRecordings, startFakeUpstream, type FakeUpstream, type RecordedExchange } from '@mandate/testing';
 import { PRESET_DIR } from '../src/index.js';
 
 interface ReadCase {
@@ -41,7 +41,7 @@ async function writeRecording(name: string): Promise<RecordedExchange[]> {
 async function loadPreset(baseUrl: string, extra?: string): Promise<LoadedConfiguration> {
   const yaml = presetConnectionYaml({
     presetId: 'gitea-issues',
-    package: '@aiops/gitea-issues',
+    package: '@mandate/gitea-issues',
     version: '^1.0.0',
     connectionId: 'gitea',
     baseUrl,
@@ -114,10 +114,10 @@ describe('NFR-17 CONN-8 Gitea preset contract', () => {
     config = await loadPreset(`http://gitea-sandbox.invalid${BASE_PATH}`);
   });
 
-  it('CONN-8 loads from package.json aiops with SDK ^1.0.0 and registers five operations', async () => {
-    const pkg = JSON.parse(await readFile(join(PRESET_DIR, 'package.json'), 'utf8')) as { aiops: Record<string, string> };
-    expect(pkg.aiops).toEqual({ preset: 'preset.yaml', sdk: '^1.0.0', code: 'dist/index.js' });
-    expect(config.loadedPresets.get('gitea-issues')).toMatchObject({ package: '@aiops/gitea-issues', version: '1.0.0', adapter: 'openapi' });
+  it('CONN-8 loads from package.json mandate with SDK ^1.0.0 and registers five operations', async () => {
+    const pkg = JSON.parse(await readFile(join(PRESET_DIR, 'package.json'), 'utf8')) as { mandate: Record<string, string> };
+    expect(pkg.mandate).toEqual({ preset: 'preset.yaml', sdk: '^1.0.0', code: 'dist/index.js' });
+    expect(config.loadedPresets.get('gitea-issues')).toMatchObject({ package: '@mandate/gitea-issues', version: '1.0.0', adapter: 'openapi' });
     expect(config.loadedPresets.get('gitea-issues')?.codeDigest).toMatch(/^[0-9a-f]{64}$/);
     const risks = Object.fromEntries(config.policy.operations.map((o) => [o.id, o.risk]));
     expect(Object.keys(risks).sort()).toEqual(OPERATIONS);

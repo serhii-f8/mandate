@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * MCP-backed operations in configuration (CONN-1, CONN-4; design phase 9 §2, §3, §4): the
  * `upstream: { tool, pin }` variant, the tool catalog listed at load and the pin state of
@@ -7,7 +7,7 @@
  * operation runs only while the live definition hashes to it. The hash is computed over
  * the definition as the MCP SDK parsed it (ADR 0051 F14), never over raw upstream bytes.
  */
-import { mcpToolHash, type ReadErrorCode, type ToolListOutcome } from '@aiops/connector-sdk';
+import { mcpToolHash, type ReadErrorCode, type ToolListOutcome } from '@mandate/connector-sdk';
 import { z } from 'zod';
 import type { ArgumentValidator } from './argument-validators.js';
 import type { McpOperationBinding } from './registry.js';
@@ -15,7 +15,7 @@ import type { CodeUpstreamConfig, UpstreamConfig } from './upstream-schema.js';
 
 /** Upstream tool names the platform binds or lists; other listed names are dropped. Same set as the design's `[A-Za-z0-9_.\/-]`. */
 export const MCP_TOOL_NAME = /^[A-Za-z0-9_./-]{1,128}$/;
-/** A tool hash as `mcpToolHash` (`@aiops/connector-sdk`) returns it. */
+/** A tool hash as `mcpToolHash` (`@mandate/connector-sdk`) returns it. */
 export const PIN_PATTERN = /^sha256:[0-9a-f]{64}$/;
 /** More tools in one list make the list `invalid_response`. */
 export const MAX_MCP_TOOLS = 1000;

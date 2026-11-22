@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * `tools/list` and `tools/call` as `api` owns them (ADR 0016): every request,
  * including the ones rejected before anything runs, passes through code that
@@ -7,8 +7,8 @@
  * argument validation (MCP-3) → policy decision, audited (POL-8) → run (SEC-1).
  */
 import { ProtocolError, ProtocolErrorCode, type CallToolResult, type Tool } from '@modelcontextprotocol/server';
-import { createSchemaCompiler, type ArgumentValidator, type LoadedConfiguration, type PinEvaluation } from '@aiops/config';
-import type { UpstreamToolView } from '@aiops/upstream';
+import { createSchemaCompiler, type ArgumentValidator, type LoadedConfiguration, type PinEvaluation } from '@mandate/config';
+import type { UpstreamToolView } from '@mandate/upstream';
 import {
   allowingRole,
   createPolicyEngine,
@@ -22,7 +22,7 @@ import {
   type PolicyDecision,
   type PolicyEngine,
   type RateCounter,
-} from '@aiops/core';
+} from '@mandate/core';
 import { minuteWindow } from '../http/rate-window.js';
 import { preparesChangeSet } from '../changesets/changeset-invoker.js';
 import { withPageLink } from '../changesets/links.js';
@@ -59,7 +59,7 @@ export interface PipelineDeps {
   readonly wallClock: () => Date;
   /** The widget bundles served as UI resources and linked from tools (MCP-5, MCP-6). */
   readonly widgets: WidgetCatalog;
-  /** `AIOPS_PUBLIC_URL`, the base of the change-set page links (MCP-6). */
+  /** `MANDATE_PUBLIC_URL`, the base of the change-set page links (MCP-6). */
   readonly publicUrl: URL;
   /** Spans and counters of tool calls (NFR-11, NFR-12); default `NO_TELEMETRY`. */
   readonly telemetry?: PipelineTelemetry;

@@ -32,7 +32,7 @@ secrets.
   namespace job on `temporalio/admin-tools:1.32.2`. The upstream setup script is not
   copied as is: its `create` step fails on a database that already exists, so ours
   checks first (second `up` must work).
-- One `postgres:17` instance with databases `aiops`, `temporal`,
+- One `postgres:17` instance with databases `mandate`, `temporal`,
   `temporal_visibility`, `keycloak`, each with its own role, created by an init script.
 - Keycloak `26.8.2` in `start-dev` for Phase 1, on its PostgreSQL database, with the
   two experimental features and the realm import. Production mode (`start`, TLS or a

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // @ts-check
 /**
  * Bundled-realm settings that a realm import cannot toggle (AUTH-8, ADR 0014),
@@ -9,26 +9,26 @@
  *
  *   - PKCE S256 for every client, however it was registered (pkce-enforcer, any-client)
  *   - Client ID Metadata Documents from trusted domains (client-id-metadata-document)
- *   - anonymous Dynamic Client Registration off by default; AIOPS_DCR=on admits
- *     registrations whose redirect URIs are on AIOPS_DCR_REDIRECT_HOSTS
- *   - one confidential client-credentials client per AIOPS_KEYCLOAK_SERVICE_ACCOUNTS
+ *   - anonymous Dynamic Client Registration off by default; MANDATE_DCR=on admits
+ *     registrations whose redirect URIs are on MANDATE_DCR_REDIRECT_HOSTS
+ *   - one confidential client-credentials client per MANDATE_KEYCLOAK_SERVICE_ACCOUNTS
  *     name (AUTH-4); created once, updated in place, its secret left alone; a name of
- *     a bundled or built-in client (aiops-mcp, aiops-web, admin-cli, ...) is refused
+ *     a bundled or built-in client (mandate-mcp, mandate-web, admin-cli, ...) is refused
  *
  * Environment (defaults in brackets):
- *   KEYCLOAK_URL [http://localhost:8080], KEYCLOAK_REALM [aiops],
+ *   KEYCLOAK_URL [http://localhost:8080], KEYCLOAK_REALM [mandate],
  *   KEYCLOAK_ADMIN_USER [admin], KEYCLOAK_ADMIN_PASSWORD (required),
- *   AIOPS_MCP_RESOURCE (required), AIOPS_CIMD_CLIENT_DOMAINS [claude.ai],
- *   AIOPS_CIMD_EXTRA_DOMAINS [localhost,127.0.0.1], AIOPS_DCR [off],
- *   AIOPS_DCR_REDIRECT_HOSTS [claude.ai,chatgpt.com,localhost,127.0.0.1],
- *   AIOPS_CIMD_ALLOW_HTTP [false] (tests only), AIOPS_KEYCLOAK_SERVICE_ACCOUNTS [],
+ *   MANDATE_MCP_RESOURCE (required), MANDATE_CIMD_CLIENT_DOMAINS [claude.ai],
+ *   MANDATE_CIMD_EXTRA_DOMAINS [localhost,127.0.0.1], MANDATE_DCR [off],
+ *   MANDATE_DCR_REDIRECT_HOSTS [claude.ai,chatgpt.com,localhost,127.0.0.1],
+ *   MANDATE_CIMD_ALLOW_HTTP [false] (tests only), MANDATE_KEYCLOAK_SERVICE_ACCOUNTS [],
  *   BOOTSTRAP_WAIT_SECONDS [180].
  * Prints one summary line; exits non-zero on any failed call. Never prints secrets.
  */
 
 const env = process.env;
 const KEYCLOAK_URL = (env.KEYCLOAK_URL ?? 'http://localhost:8080').replace(/\/$/, '');
-const REALM = env.KEYCLOAK_REALM ?? 'aiops';
+const REALM = env.KEYCLOAK_REALM ?? 'mandate';
 const list = (/** @type {string | undefined} */ value, /** @type {string} */ fallback) =>
   (value ?? fallback)
     .split(',')
@@ -48,8 +48,8 @@ const sleep = (/** @type {number} */ ms) => new Promise((resolve) => setTimeout(
  * whose login flow the service-account update would switch off, and Keycloak's own clients.
  */
 const RESERVED_CLIENTS = new Set([
-  'aiops-mcp',
-  'aiops-web',
+  'mandate-mcp',
+  'mandate-web',
   'account',
   'account-console',
   'admin-cli',
@@ -128,19 +128,19 @@ async function ensureServiceClient(token, clientId) {
 }
 
 async function main() {
-  const resource = required('AIOPS_MCP_RESOURCE');
-  const clientDomains = list(env.AIOPS_CIMD_CLIENT_DOMAINS, 'claude.ai');
-  const extraDomains = list(env.AIOPS_CIMD_EXTRA_DOMAINS, 'localhost,127.0.0.1');
-  const allowHttp = env.AIOPS_CIMD_ALLOW_HTTP === 'true';
-  const dcr = (env.AIOPS_DCR ?? 'off').toLowerCase();
-  if (dcr !== 'on' && dcr !== 'off') throw new Error('AIOPS_DCR must be on or off');
-  const dcrHosts = list(env.AIOPS_DCR_REDIRECT_HOSTS, 'claude.ai,chatgpt.com,localhost,127.0.0.1');
-  const serviceAccounts = [...new Set(list(env.AIOPS_KEYCLOAK_SERVICE_ACCOUNTS, ''))];
+  const resource = required('MANDATE_MCP_RESOURCE');
+  const clientDomains = list(env.MANDATE_CIMD_CLIENT_DOMAINS, 'claude.ai');
+  const extraDomains = list(env.MANDATE_CIMD_EXTRA_DOMAINS, 'localhost,127.0.0.1');
+  const allowHttp = env.MANDATE_CIMD_ALLOW_HTTP === 'true';
+  const dcr = (env.MANDATE_DCR ?? 'off').toLowerCase();
+  if (dcr !== 'on' && dcr !== 'off') throw new Error('MANDATE_DCR must be on or off');
+  const dcrHosts = list(env.MANDATE_DCR_REDIRECT_HOSTS, 'claude.ai,chatgpt.com,localhost,127.0.0.1');
+  const serviceAccounts = [...new Set(list(env.MANDATE_KEYCLOAK_SERVICE_ACCOUNTS, ''))];
   // Refused before any call, so a misconfiguration changes nothing in the realm.
   const reserved = serviceAccounts.filter((clientId) => RESERVED_CLIENTS.has(clientId));
   if (reserved.length > 0) {
     throw new Error(
-      `AIOPS_KEYCLOAK_SERVICE_ACCOUNTS names a client the realm already uses (${reserved.join(', ')}); choose another service-account client id`,
+      `MANDATE_KEYCLOAK_SERVICE_ACCOUNTS names a client the realm already uses (${reserved.join(', ')}); choose another service-account client id`,
     );
   }
 
@@ -149,12 +149,12 @@ async function main() {
   await admin(token, 'PUT', '/client-policies/profiles', {
     profiles: [
       {
-        name: 'aiops-pkce',
+        name: 'mandate-pkce',
         description: 'PKCE with S256 for every client (AUTH-8)',
         executors: [{ executor: 'pkce-enforcer', configuration: { 'auto-configure': true } }],
       },
       {
-        name: 'aiops-cimd',
+        name: 'mandate-cimd',
         description: 'Accept Client ID Metadata Documents from trusted domains (ADR 0004)',
         executors: [
           {
@@ -177,14 +177,14 @@ async function main() {
   await admin(token, 'PUT', '/client-policies/policies', {
     policies: [
       {
-        name: 'aiops-pkce-all',
+        name: 'mandate-pkce-all',
         description: 'Every client must use PKCE S256',
         enabled: true,
         conditions: [{ condition: 'any-client', configuration: {} }],
-        profiles: ['aiops-pkce'],
+        profiles: ['mandate-pkce'],
       },
       {
-        name: 'aiops-cimd',
+        name: 'mandate-cimd',
         description: 'URL client IDs on a trusted domain are Client ID Metadata Documents',
         enabled: true,
         conditions: [
@@ -193,7 +193,7 @@ async function main() {
             configuration: { 'client-id-uri-scheme': allowHttp ? ['https', 'http'] : ['https'], 'client-id-uri-allow-permitted-domains': clientDomains },
           },
         ],
-        profiles: ['aiops-cimd'],
+        profiles: ['mandate-cimd'],
       },
     ],
   });

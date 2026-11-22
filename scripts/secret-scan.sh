@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 #
 # Scans the whole git history for secrets with gitleaks (configuration: .gitleaks.toml).
 # Needs Docker. Exit code 0: nothing found; 1: findings (printed redacted).

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** Replacement for a redacted key's value or a credential-shaped string (AUD-4). */
 export const REDACTED = '[redacted]';
 

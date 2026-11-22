@@ -1,11 +1,11 @@
 {
-  "name": "@aiops/code-fixture-preset",
+  "name": "@mandate/code-fixture-preset",
   "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Test preset with a code module (OPS-5, OPS-6, CONN-8).",
   "license": "Apache-2.0",
-  "aiops": {
+  "mandate": {
     "preset": "preset.yaml",
     "sdk": "^1.0.0",
     "code": "lib/index.js"

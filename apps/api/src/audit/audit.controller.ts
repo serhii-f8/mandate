@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Audit search and JSON Lines export on the trusted page (AUD-6, NFR-8). Denied by default
  * (`@PageAccess`, SEC-1); the `view_audit` role flag is checked before the query is parsed, and
@@ -10,8 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { Controller, Get, Inject, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { Logger } from 'pino';
-import type { ConfigurationHolder } from '@aiops/config';
-import type { AuditLog, AuditReader, AuditSearchFilter } from '@aiops/core';
+import type { ConfigurationHolder } from '@mandate/config';
+import type { AuditLog, AuditReader, AuditSearchFilter } from '@mandate/core';
 import { pageAnswer, pageViewer } from '../approvals/changeset-pages.controller.js';
 import { pageRefuser, type Refuser } from '../approvals/refusals.js';
 import type { PageViewer } from '../approvals/detail.js';

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash, randomBytes } from 'node:crypto';
-import { SERVICE_SUBJECT_PREFIX } from '@aiops/core';
+import { SERVICE_SUBJECT_PREFIX } from '@mandate/core';
 import { jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { z } from 'zod';
 
@@ -58,7 +58,7 @@ function basicAuth(id: string, secret: string): string {
 }
 
 /**
- * Authorization code flow with PKCE S256 for the confidential `aiops-web` client (AUTH-5,
+ * Authorization code flow with PKCE S256 for the confidential `mandate-web` client (AUTH-5,
  * ADR 0019). The ID token is verified against the issuer's JWKS: issuer, audience = this
  * client, `azp` (when present) = this client, nonce, expiry and `auth_time`.
  */

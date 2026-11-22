@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { HttpMethod } from './mapping.js';
 
 /** One upstream request attempt as instrumentation sees it: identifiers only (SEC-3). */

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import { createSchemaCompiler, loadConfigurationSources, type PinEvaluation, type PinState } from '@aiops/config';
-import type { ReadAdapter } from '@aiops/connector-sdk';
-import { READ_RESULT_TEXT } from '@aiops/core';
+import { createSchemaCompiler, loadConfigurationSources, type PinEvaluation, type PinState } from '@mandate/config';
+import type { ReadAdapter } from '@mandate/connector-sdk';
+import { READ_RESULT_TEXT } from '@mandate/core';
 import type {
   Caller,
   CredentialVault,
@@ -13,9 +13,9 @@ import type {
   OperationDefinition,
   OperationInvoker,
   RiskClass,
-} from '@aiops/core';
-import { InMemoryChangeSetRepository, InMemoryTaskRepository } from '@aiops/testing';
-import type { UpstreamToolView } from '@aiops/upstream';
+} from '@mandate/core';
+import { InMemoryChangeSetRepository, InMemoryTaskRepository } from '@mandate/testing';
+import type { UpstreamToolView } from '@mandate/upstream';
 import { OperationRouter, operationInvokers, riskNotSupportedResult } from './operation-router.js';
 
 const caller: Caller = { subject: 'alice-id', groups: [] };

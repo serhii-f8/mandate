@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { FakeResolver, fakeCatalogEntry } from '@aiops/testing';
+import { FakeResolver, fakeCatalogEntry } from '@mandate/testing';
 import { loadConfigurationDirectory, type LoadedConfiguration, type LoadOptions, type LoadResult } from './load.js';
 import { isRevisionFilePath, loadConfigurationFiles, MAX_REVISION_PATH, revisionFilesOf, revisionSummary } from './revision-files.js';
 
@@ -46,7 +46,7 @@ function filesOf(configuration: LoadedConfiguration): Readonly<Record<string, st
 
 /** Runs `fn` with `os.tmpdir()` pointing at a private directory (F8), so parallel tests cannot interfere. */
 async function withPrivateTmpdir<T>(fn: (tmp: string) => Promise<T>): Promise<T> {
-  const tmp = await tempDir('aiops-revision-test-');
+  const tmp = await tempDir('mandate-revision-test-');
   const previous = process.env.TMPDIR;
   process.env.TMPDIR = tmp;
   try {
@@ -78,7 +78,7 @@ describe('CFG-4 revision files', () => {
   it('CFG-4 spec paths resolve inside the revision, not the working directory', async () => {
     const direct = loaded(await loadConfigurationDirectory(DERIVED_DIR, { resolver: resolver() }));
     const files = filesOf(direct);
-    const cwd = await tempDir('aiops-revision-cwd-');
+    const cwd = await tempDir('mandate-revision-cwd-');
     await mkdir(join(cwd, 'specs'));
     await writeFile(join(cwd, 'specs', 'shop.json'), '{"openapi":"3.0.3","info":{"title":"other","version":"9"},"paths":{}}');
     const previous = process.cwd();
@@ -120,7 +120,7 @@ describe('CFG-4 revision files', () => {
   });
 
   it('CFG-4 a connection spec outside the directory cannot become a revision', async () => {
-    const root = await tempDir('aiops-revision-outside-');
+    const root = await tempDir('mandate-revision-outside-');
     const dir = join(root, 'conf');
     await cp(DERIVED_DIR, dir, { recursive: true });
     await cp(join(DERIVED_DIR, 'specs', 'shop.json'), join(root, 'outside.json'));
@@ -136,7 +136,7 @@ describe('CFG-4 revision files', () => {
   });
 
   it('CFG-4 a file text holding a NUL character cannot become a revision', async () => {
-    const root = await tempDir('aiops-revision-nul-');
+    const root = await tempDir('mandate-revision-nul-');
     await writeFile(join(root, 'config.yaml'), 'version: 1\n# a\u0000b\n');
     const configuration = loaded(await loadConfigurationDirectory(root));
     expect(revisionFilesOf(configuration)).toEqual({ ok: false, issues: [{ file: 'config.yaml', path: '', message: 'revision file holds a NUL character' }] });

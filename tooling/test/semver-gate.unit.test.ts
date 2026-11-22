@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -44,9 +44,9 @@ describe('NFR-18 semver gate', () => {
     expect(judge(base, base + 'x\n', '1.0.0', 'latest').ok).toBe(false);
   });
   it('a version-only change with a patch bump passes', () => {
-    const sdk = (v: string) => `// @aiops/connector-sdk ${v} public API report — generated, do not edit\nexport declare const CONNECTOR_SDK_VERSION = "${v}";\nexport type A = 1;\n`;
+    const sdk = (v: string) => `// @mandate/connector-sdk ${v} public API report — generated, do not edit\nexport declare const CONNECTOR_SDK_VERSION = "${v}";\nexport type A = 1;\n`;
     expect(judge(sdk('1.0.0'), sdk('1.0.1'), '1.0.0', '1.0.1')).toMatchObject({ ok: true, kind: 'none' });
-    const cfg = (v: string) => `{\n  "a": 1,\n  "x-aiops-schema-version": "${v}"\n}\n`;
+    const cfg = (v: string) => `{\n  "a": 1,\n  "x-mandate-schema-version": "${v}"\n}\n`;
     expect(judge(cfg('1.0.0'), cfg('1.0.1'), '1.0.0', '1.0.1').kind).toBe('none');
   });
   it('an optional key appended to a JSON object is additive', () => {
@@ -54,13 +54,13 @@ describe('NFR-18 semver gate', () => {
     expect(r).toMatchObject({ ok: true, kind: 'additive' });
   });
   it('versionOf reads both header forms', () => {
-    expect(versionOf('// @aiops/connector-sdk 1.2.3 public API report — generated, do not edit\n', 'sdk')).toBe('1.2.3');
-    expect(versionOf('{\n  "x-aiops-schema-version": "2.0.0"\n}', 'config')).toBe('2.0.0');
+    expect(versionOf('// @mandate/connector-sdk 1.2.3 public API report — generated, do not edit\n', 'sdk')).toBe('1.2.3');
+    expect(versionOf('{\n  "x-mandate-schema-version": "2.0.0"\n}', 'config')).toBe('2.0.0');
     expect(() => versionOf('nothing', 'sdk')).toThrow();
   });
 
   describe('context-keyed classification', () => {
-    const sdk = (body: string) => `// @aiops/connector-sdk 1.0.0 public API report — generated, do not edit\n${body}`;
+    const sdk = (body: string) => `// @mandate/connector-sdk 1.0.0 public API report — generated, do not edit\n${body}`;
     const iface = 'export interface Ctx {\n    readonly id: string;\n    run(): void;\n}\nexport declare class Impl {\n    x: number;\n}\n';
     const cfg = (inner: string) =>
       `{\n  "properties": {\n    "name": {\n      "type": "string"${inner}\n    },\n    "mode": {\n      "enum": [\n        "a"\n      ],\n      "type": "string"\n    }\n  },\n  "required": [\n    "name"\n  ],\n  "type": "object"\n}\n`;
@@ -156,7 +156,7 @@ describe('NFR-18 semver gate', () => {
     const sdkFile = 'packages/connector-sdk/api-report.d.ts';
     const commitReport = (dir: string, body: string, msg: string) => {
       mkdirSync(join(dir, 'packages/connector-sdk'), { recursive: true });
-      writeFileSync(join(dir, sdkFile), `// @aiops/connector-sdk 1.0.0 public API report - generated, do not edit\n${body}`);
+      writeFileSync(join(dir, sdkFile), `// @mandate/connector-sdk 1.0.0 public API report - generated, do not edit\n${body}`);
       spawnSync('git', ['add', '.'], { cwd: dir });
       spawnSync('git', ['commit', '-qm', msg], { cwd: dir });
     };
@@ -170,7 +170,7 @@ describe('NFR-18 semver gate', () => {
       const dir = repo();
       const path = 'packages/connector-sdk/api-report.d.ts';
       mkdirSync(join(dir, 'packages/connector-sdk'), { recursive: true });
-      writeFileSync(join(dir, path), '// @aiops/connector-sdk 1.0.0 public API report - generated, do not edit\nexport type A = 1;\n');
+      writeFileSync(join(dir, path), '// @mandate/connector-sdk 1.0.0 public API report - generated, do not edit\nexport type A = 1;\n');
       spawnSync('git', ['add', '.'], { cwd: dir });
       spawnSync('git', ['commit', '-qm', 'report'], { cwd: dir });
       spawnSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: dir });
@@ -180,6 +180,18 @@ describe('NFR-18 semver gate', () => {
       const r = run(dir);
       expect(r.status).toBe(1);
       expect(r.stdout).toContain(`FAIL ${path}: report removed (breaking)`);
+    });
+    it('NFR-18 a base report without a version header (written before a rename of the report format) counts as a new report', () => {
+      const dir = repo();
+      mkdirSync(join(dir, 'packages/connector-sdk'), { recursive: true });
+      writeFileSync(join(dir, sdkFile), '// @former-name/connector-sdk 1.0.0 public API report - generated, do not edit\nexport type A = 1;\n');
+      spawnSync('git', ['add', '.'], { cwd: dir });
+      spawnSync('git', ['commit', '-qm', 'old format'], { cwd: dir });
+      spawnSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: dir });
+      commitReport(dir, 'export type B = 2;\n', 'renamed');
+      const r = run(dir);
+      expect(r.status, r.stdout + r.stderr).toBe(0);
+      expect(r.stdout).toContain(`ok ${sdkFile}: base report has no version header, compared as a new report (1.0.0)`);
     });
     it('NFR-18 an unresolvable --base exits 2', () => {
       const dir = repo();

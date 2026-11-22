@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
@@ -9,7 +9,7 @@ import type {
   NotificationError,
   NotificationOutbox,
   NotificationRow,
-} from '@aiops/core';
+} from '@mandate/core';
 import { DrizzleAuditLog } from './audit-log.js';
 import type { Db, DbExecutor } from './client.js';
 import { guarded } from './errors.js';

@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
- * Loads the code fixture preset of `@aiops/testing` through the real loader, without a resolver
+ * Loads the code fixture preset of `@mandate/testing` through the real loader, without a resolver
  * (HTTP `method`/`path` bindings bind). Each call copies the fixture into a new temporary preset
  * directory, so the process-wide code-import cache never sees a changed tree under one entry path.
  */
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfigurationDirectory, type LoadedConfiguration } from '@aiops/config';
-import { CODE_FIXTURE_PRESET_DIR } from '@aiops/testing';
+import { loadConfigurationDirectory, type LoadedConfiguration } from '@mandate/config';
+import { CODE_FIXTURE_PRESET_DIR } from '@mandate/testing';
 
 /** The connection's settings; `max_concurrency` is the per-record writer's in-flight limit. */
 export function fixtureConfig(maxConcurrency: number): string {
   return `version: 1
 presets:
-  - { id: fixture, package: "@aiops/code-fixture-preset" }
+  - { id: fixture, package: "@mandate/code-fixture-preset" }
 connections:
   - id: items
     adapter: openapi
@@ -34,8 +34,8 @@ role_mapping:
 
 /** The fixture loaded under a fresh copy; temporary directories are removed before it returns. */
 export async function loadCodeFixture(maxConcurrency = 2): Promise<LoadedConfiguration> {
-  const presets = await mkdtemp(join(tmpdir(), 'aiops-upstream-code-presets-'));
-  const config = await mkdtemp(join(tmpdir(), 'aiops-upstream-code-config-'));
+  const presets = await mkdtemp(join(tmpdir(), 'mandate-upstream-code-presets-'));
+  const config = await mkdtemp(join(tmpdir(), 'mandate-upstream-code-config-'));
   try {
     await cp(CODE_FIXTURE_PRESET_DIR, join(presets, 'code-fixture'), { recursive: true });
     await writeFile(join(config, 'config.yaml'), fixtureConfig(maxConcurrency));

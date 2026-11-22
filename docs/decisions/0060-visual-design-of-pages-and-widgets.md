@@ -6,7 +6,7 @@
 ## Context
 
 The trusted pages (`apps/web`) had a 7-line stylesheet and no page frame. The shared view stylesheet
-(`packages/widgets/src/styles.css`) was scoped to `.aiops`, but no element had that class, so neither
+(`packages/widgets/src/styles.css`) was scoped to `.mandate`, but no element had that class, so neither
 the pages nor the MCP Apps widgets applied any of it.
 
 Constraints: the pages are served with `default-src 'self'`, so fonts and styles must be bundled;
@@ -23,7 +23,7 @@ nothing (UI-6, `styles.test.ts`); widgets hold no authority, so the change is pr
 
 ## Decision
 
-- `#root` carries `class="aiops"` in `apps/web/index.html` and both widget entries. This turns the
+- `#root` carries `class="mandate"` in `apps/web/index.html` and both widget entries. This turns the
   shared stylesheet on.
 - Shared views: section rhythm, status pills coloured by state group (waiting, running, done,
   failed, inactive), segmented filters and tabs, tinted before/after cells (`td.before`, `td.after`),
@@ -55,7 +55,7 @@ nothing (UI-6, `styles.test.ts`); widgets hold no authority, so the change is pr
 
 - Verified: `@modelcontextprotocol/ext-apps` 2.1.0 `useHostStyleVariables` calls `applyDocumentTheme`,
   which sets `document.documentElement.style.colorScheme` to the host theme
-  (`dist/src/react/index.js`). `color-scheme` is now declared on `:root` only (it was on `.aiops`,
+  (`dist/src/react/index.js`). `color-scheme` is now declared on `:root` only (it was on `.mandate`,
   which overrode the host theme). Tints and secondary-background fallbacks are mixed from text
   colours with `color-mix(... transparent)`, so they stay legible on any host background. Seen in
   the reference host (`tooling/acceptance/widget-host`), whose fixture sends dark colours under

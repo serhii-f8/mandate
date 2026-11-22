@@ -39,7 +39,7 @@ Facts from the code that shaped the options:
   | `failed`.
 - About 30 audit call sites write through separate pools, some inside long repository
   transactions that also hold `change_set` row locks. `prev_hash`/`hash` exist and are empty.
-- Each process reads its own `AIOPS_CONFIG_DIR`; nothing is stored in PostgreSQL; the loader
+- Each process reads its own `MANDATE_CONFIG_DIR`; nothing is stored in PostgreSQL; the loader
   already computes a SHA-256 over configuration, preset and spec files.
 - No tracing or metrics code; the worker has no HTTP server; the correlation ID is stored on the
   change-set rows but not sent through Temporal or upstream.
@@ -60,20 +60,20 @@ Facts from the code that shaped the options:
 | Authority for rollback (SEC-8) | (a) `rollback_changeset` rolls back with the access token; (b) the tool checks eligibility and returns the page link; the rollback itself is `POST /api/v1/changesets/:id/rollback` with a fresh session and CSRF | **(b)**: SEC-8 names rollback; its only exception is a widget approval under APR-8. Same pattern as a submit that needs approval |
 | Who may roll back | (a) the requester, with the operation still allowed by policy for the stored arguments (POL-6-like); (b) also approvers; (c) a new role flag | **(a)**: smallest authority; approval of a rollback is not required because it restores values that existed before and is drift-checked; recorded as a known gap to revisit |
 | Hash chain under concurrent writers (AUD-3) | (a) `BEFORE INSERT` trigger chaining under an advisory transaction lock; (b) insert unchained, a single sealer assigns `chain_pos`, `prev_hash`, `hash` in insertion order; (c) per-writer chains | **(b)**: (a) serialises every transaction that audits and can deadlock with the `change_set` row locks repository transactions take before their audit insert; (b) keeps inserts as they are, and a late-committing row simply gets a later position. The unsealed tail is bounded (sealer every 2 s) and reported by `verify` |
-| Row hash | (a) SQL `sha256`; (b) TypeScript in `core`, canonical JSON with tag `aiops.audit.v1`, `ts` read as UTC text with microseconds | **(b)**: one pure function shared by sealer and verifier, unit-tested without infrastructure (NFR-14) |
-| Retention (AUD-7) | (a) CLI only; (b) worker job by `audit.retention_days`, plus the CLI to run it now | **(b)**: archive JSON Lines plus manifest into `AIOPS_AUDIT_ARCHIVE_DIR`, then one transaction inserts an `audit_anchor` and deletes the sealed prefix; the trigger permits that delete only with `SET LOCAL aiops.audit_retention = 'on'` and only up to the newest anchor |
+| Row hash | (a) SQL `sha256`; (b) TypeScript in `core`, canonical JSON with tag `mandate.audit.v1`, `ts` read as UTC text with microseconds | **(b)**: one pure function shared by sealer and verifier, unit-tested without infrastructure (NFR-14) |
+| Retention (AUD-7) | (a) CLI only; (b) worker job by `audit.retention_days`, plus the CLI to run it now | **(b)**: archive JSON Lines plus manifest into `MANDATE_AUDIT_ARCHIVE_DIR`, then one transaction inserts an `audit_anchor` and deletes the sealed prefix; the trigger permits that delete only with `SET LOCAL mandate.audit_retention = 'on'` and only up to the newest anchor |
 | Sensitive fields (AUD-4) | (a) `manifest.sensitive_fields`, redaction by key in one `redactAuditDetails` applied by every `AuditLog` implementation; (b) per-call-site care | **(a)**: defence in depth; details carry no values today and must stay so |
 | Audit page access (SEC-1) | (a) new role flag `view_audit: true`; (b) any logged-in user sees own events | **(a)**; default off, denial audited |
 | Audit search as a widget (UI-1) | (a) page only; (b) widget too | **(a)**: audit content must not flow through the model's connection; SPEC UI-5 is extended to name audit search next to credential entry |
 | Active configuration (CFG-3, CFG-4) | (a) files per process as today, `apply` writes files; (b) the active configuration is the newest row of `config_revision` (YAML texts plus hash), `apply` inserts it and every process loads it from PostgreSQL; files bootstrap an empty table; (c) files are the source, PostgreSQL only gates hashes | **(b)**: SPEC section 2 places the configuration snapshot in PostgreSQL; every instance runs the same configuration (NFR-3, NFR-4); apply is one transaction; diff is exact |
-| Propagation of an apply | (a) SIGHUP per process; (b) `LISTEN aiops_config` plus a 30 s poll, SIGHUP still re-reads | **(b)** |
+| Propagation of an apply | (a) SIGHUP per process; (b) `LISTEN mandate_config` plus a 30 s poll, SIGHUP still re-reads | **(b)** |
 | A revision a process cannot load identically (preset versions differ) | (a) run it anyway; (b) keep the previous configuration, audit `config.load` with outcome `error`, readiness reports it | **(b)**: CFG-2's "previous stays active"; a process with no configuration is not ready |
 | `diff` output | (a) text diff of files; (b) per entity (connections, operations, roles, notifications, settings) added / removed / changed with the changed keys, plus old and new hash | **(b)** |
 | `explain` input | (a) groups given on the command line (`--groups`); (b) IdP lookup | **(a)**: the platform never queries the IdP (AUTH, [ADR 0014](0014-token-verification-and-realm-bootstrap.md)) |
 | Tracing library | (a) own spans with `@opentelemetry/api`; (b) `@temporalio/interceptors-opentelemetry` 1.25.0 (client, activity, workflow interceptors, workflow span sink) with OTel SDK 1.30.1 and exporters 0.57.2 | **(b)**: parent-child spans from the MCP call through the workflow to activities; Verified below |
 | Trace export | (a) OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, no-op otherwise; Jaeger 2.23.0 as an optional Compose profile `observability` | **(a)** |
 | Metrics | (a) OTel metrics with the Prometheus exporter on `/metrics` of a separate, unpublished port per process; (b) OTLP push | **(a)**: scrape-able without a collector; the port is not published by Compose by default |
-| Worker health (NFR-10) | (a) worker HTTP server on `AIOPS_WORKER_HTTP_PORT` (8081) with `/healthz`, `/readyz` (database, configuration, Temporal worker running), `/metrics`; (b) none | **(a)**; Compose gains a worker healthcheck |
+| Worker health (NFR-10) | (a) worker HTTP server on `MANDATE_WORKER_HTTP_PORT` (8081) with `/healthz`, `/readyz` (database, configuration, Temporal worker running), `/metrics`; (b) none | **(a)**; Compose gains a worker healthcheck |
 
 ## Decision
 
@@ -92,7 +92,7 @@ As in the table. The specification changed with this decision:
   fixtures; workflows stay open for the rollback window.
 - New tables `change_rollback_batch`, `audit_anchor`, `config_revision`; new columns on
   `change_item`, `change_set` and `audit_event`; trigger bodies replaced by new migrations only.
-- `aiops config apply` becomes the way to change a running configuration; SIGHUP re-reads the
+- `mandate config apply` becomes the way to change a running configuration; SIGHUP re-reads the
   active revision, not the files. Acceptance scripts that edit files mid-run switch to `apply`.
 - The configuration schema (NFR-18) gains `changesets.rollback_window_hours`, `audit`
   (`retention_days`), `roles[].view_audit`, and `manifest.sensitive_fields`: a minor version.

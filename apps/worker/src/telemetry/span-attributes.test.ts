@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { ChangeSetRecord, ExecutionRequest, RollbackRequest } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import type { ChangeSetRecord, ExecutionRequest, RollbackRequest } from '@mandate/core';
 import { context, propagation, trace } from '@opentelemetry/api';
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
@@ -49,13 +49,13 @@ describe('NFR-11 activity span attributes', () => {
       propagation.disable();
     });
 
-    it('NFR-11 markActivitySpan sets exactly aiops.changeset_id and aiops.correlation_id on the active span', () => {
+    it('NFR-11 markActivitySpan sets exactly mandate.changeset_id and mandate.correlation_id on the active span', () => {
       const cs = record({ executionRequest: execution });
       provider.getTracer('test').startActiveSpan('activity', (span) => {
         markActivitySpan(cs, 'execute');
         span.end();
       });
-      expect(exporter.getFinishedSpans().map((s) => s.attributes)).toEqual([{ 'aiops.changeset_id': 'cs-1', 'aiops.correlation_id': 'corr-execute' }]);
+      expect(exporter.getFinishedSpans().map((s) => s.attributes)).toEqual([{ 'mandate.changeset_id': 'cs-1', 'mandate.correlation_id': 'corr-execute' }]);
     });
 
     it('NFR-11 markActivitySpan is a no-op without an active span', () => {

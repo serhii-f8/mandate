@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** Change-sets in a chosen state, written through the repository port as the api would. */
 import { randomUUID } from 'node:crypto';
 import {
@@ -10,7 +10,7 @@ import {
   type ChangeSetRecord,
   type ChangeSetRepository,
   type Submission,
-} from '@aiops/core';
+} from '@mandate/core';
 import { EDITOR_GROUP, WRITE_OPERATION } from './configuration.js';
 
 export interface ChangeSetOptions {

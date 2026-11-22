@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { DefaultFailureConverter, defaultPayloadConverter, type Payload } from '@temporalio/common';
 import { isLoadedDataConverter, loadDataConverter } from '@temporalio/common/internal/internal-non-workflow';
 import { describe, expect, it } from 'vitest';
@@ -86,14 +86,14 @@ describe('SEC-4 payload codec', () => {
     expect(defaultPayloadConverter.fromPayload(decoded)).toBe(PLAINTEXT);
   });
 
-  it('SEC-3 key parse errors name AIOPS_TEMPORAL_KEYS and the entry, never the value', () => {
+  it('SEC-3 key parse errors name MANDATE_TEMPORAL_KEYS and the entry, never the value', () => {
     let message = '';
     try {
       parseTemporalKeys(`1:${KEY_1},2:not-a-key`);
     } catch (error) {
       message = (error as Error).message;
     }
-    expect(message).toMatch(/^AIOPS_TEMPORAL_KEYS: entry 2 /);
+    expect(message).toMatch(/^MANDATE_TEMPORAL_KEYS: entry 2 /);
     expect(message).not.toContain('not-a-key');
     expect(message).not.toContain(KEY_1);
   });

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Answers about a change-set, shared by the write call, `get_changeset` and the Tasks
  * handlers so one state yields one answer (MCP-7, MCP-4). Counts and IDs only (SEC-5).
@@ -15,7 +15,7 @@ import {
   type ChangeSetStats,
   type ChangeSetStatus,
   type InvocationResult,
-} from '@aiops/core';
+} from '@mandate/core';
 
 const FIRST_ITEMS = 20;
 

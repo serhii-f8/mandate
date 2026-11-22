@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startPostgres, type StartedPostgres } from '@aiops/testing';
+import { startPostgres, type StartedPostgres } from '@mandate/testing';
 import { assertMigrated, migrationState, runMigrations } from '../../src/migrate.js';
 
 const migrationFiles = readdirSync(fileURLToPath(new URL('../../migrations/', import.meta.url))).filter((f) =>

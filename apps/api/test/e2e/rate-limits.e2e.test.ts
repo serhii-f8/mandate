@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Limits on the MCP endpoint (SEC-10, SEC-11, AUD-1), over the real HTTP transport.
  *
  * Limits (`fixtures/rate-limit-config`): 3 per minute per user, 4 per service account, 2 per
- * service account `aiops-sa-limited` (its override), 2 per anonymous address.
+ * service account `mandate-sa-limited` (its override), 2 per anonymous address.
  *
  * Every api instance runs on a fixed wall clock, 12:00:30Z, so all requests of the file fall in one
  * window and `Retry-After` is exactly 30. Each test has its own subject or address, so budgets do not
@@ -19,8 +19,8 @@ import { Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { RateCounter } from '@aiops/core';
-import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import type { RateCounter } from '@mandate/core';
+import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { createLogger } from '../../src/logger.js';
 import { auditRows, modernRequest, rawPost, startApi, startDatabase, tokenFor, vaultOf, type RunningApi } from './helpers.js';
 
@@ -34,9 +34,9 @@ let databaseUrl: string;
 let issuer: TestIssuer;
 let upstream: FakeUpstream;
 let configDir: string;
-/** Trusts one proxy hop (AIOPS_TRUST_PROXY=1). */
+/** Trusts one proxy hop (MANDATE_TRUST_PROXY=1). */
 let api: RunningApi;
-/** Trusts no proxy (AIOPS_TRUST_PROXY=0), as in production by default; serves as the same MCP resource as `api`. */
+/** Trusts no proxy (MANDATE_TRUST_PROXY=0), as in production by default; serves as the same MCP resource as `api`. */
 let direct: RunningApi;
 /** Every line the main instance logged. */
 const logLines: string[] = [];
@@ -45,7 +45,7 @@ beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
   upstream = await startFakeUpstream();
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-rate-limits-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-rate-limits-e2e-'));
   await cp(RATE_LIMIT_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));
@@ -179,21 +179,21 @@ describe('SEC-10 MCP endpoint rate limits', () => {
   });
 
   it('SEC-10 SEC-11 a service account uses its override', async () => {
-    const token = await serviceToken('aiops-sa-limited');
+    const token = await serviceToken('mandate-sa-limited');
     const statuses = [];
     for (let id = 1; id <= 3; id += 1) statuses.push((await send(api, 'tools/call', SEARCH, { token, id })).status);
     expect(statuses).toEqual([200, 200, 429]);
-    expect(await bucketCount('mcp:sa:aiops-sa-limited')).toBe(3);
-    const [row] = await auditRows(databaseUrl, "action = 'rate.limited' and actor = $1", ['service:aiops-sa-limited']);
-    expect(row).toMatchObject({ client_id: 'aiops-sa-limited', outcome: 'denied', details: { scope: 'mcp', limit: 2 } });
+    expect(await bucketCount('mcp:sa:mandate-sa-limited')).toBe(3);
+    const [row] = await auditRows(databaseUrl, "action = 'rate.limited' and actor = $1", ['service:mandate-sa-limited']);
+    expect(row).toMatchObject({ client_id: 'mandate-sa-limited', outcome: 'denied', details: { scope: 'mcp', limit: 2 } });
   });
 
   it('SEC-10 SEC-11 a service account without override uses mcp_service_account_per_minute', async () => {
-    const token = await serviceToken('aiops-sa-default');
+    const token = await serviceToken('mandate-sa-default');
     const statuses = [];
     for (let id = 1; id <= 5; id += 1) statuses.push((await send(api, 'tools/call', SEARCH, { token, id })).status);
     expect(statuses).toEqual([200, 200, 200, 200, 429]);
-    expect(await bucketCount('mcp:sa:aiops-sa-default')).toBe(5);
+    expect(await bucketCount('mcp:sa:mandate-sa-default')).toBe(5);
   });
 
   it('SEC-10 SEC-11 AUD-1 one rate.limited row per window', async () => {
@@ -208,7 +208,7 @@ describe('SEC-10 MCP endpoint rate limits', () => {
     expect(JSON.stringify(all)).not.toContain('127.0.0.1');
   });
 
-  it('SEC-10 SEC-11 X-Forwarded-For is ignored at AIOPS_TRUST_PROXY=0 and used at 1', async () => {
+  it('SEC-10 SEC-11 X-Forwarded-For is ignored at MANDATE_TRUST_PROXY=0 and used at 1', async () => {
     // A refused token: under the limit it is answered 401 and audited as auth.rejected.
     const badToken = { authorization: 'Bearer not-a-token' };
     const viaProxy = async (address: string) => send(api, 'tools/list', {}, { headers: { ...badToken, 'x-forwarded-for': address } });

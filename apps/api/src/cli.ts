@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
- * `aiops`: operator commands of the api image (CFG-3, CONN-7, SEC-2).
+ * `mandate`: operator commands of the api image (CFG-3, CONN-7, SEC-2).
  *
- *   aiops validate <dir> [--preset-dir <dir>]...   full check: specs resolved, presets loaded
- *   aiops test-connection <connection>             runs the connection's declared test read
- *   aiops credentials rotate                       re-wraps credential data keys under the newest master key
- *   aiops audit verify [--archive <file>]          checks the audit hash chain, or one retention archive (AUD-5)
- *   aiops audit retention --now                    runs the audit retention job once with the active revision (AUD-7, CFG-3)
- *   aiops config diff <dir> [--preset-dir <dir>]...                 compares <dir> with the active revision (CFG-3)
- *   aiops config apply <dir> [--preset-dir <dir>]... [--actor <n>]  stores <dir> as the new active revision (CFG-3, CFG-4)
- *   aiops config explain --operation <id> (--groups <g,...> | --service <client_id>) [--subject <s>] [--args <json>] [--records <n>]
+ *   mandate validate <dir> [--preset-dir <dir>]...   full check: specs resolved, presets loaded
+ *   mandate test-connection <connection>             runs the connection's declared test read
+ *   mandate credentials rotate                       re-wraps credential data keys under the newest master key
+ *   mandate audit verify [--archive <file>]          checks the audit hash chain, or one retention archive (AUD-5)
+ *   mandate audit retention --now                    runs the audit retention job once with the active revision (AUD-7, CFG-3)
+ *   mandate config diff <dir> [--preset-dir <dir>]...                 compares <dir> with the active revision (CFG-3)
+ *   mandate config apply <dir> [--preset-dir <dir>]... [--actor <n>]  stores <dir> as the new active revision (CFG-3, CFG-4)
+ *   mandate config explain --operation <id> (--groups <g,...> | --service <client_id>) [--subject <s>] [--args <json>] [--records <n>]
  *                                                  dry policy evaluation against the active revision (POL-7)
- *   aiops mcp tools <connection> [--show <tool>]   lists an mcp connection's tools live with hashes and pin states;
+ *   mandate mcp tools <connection> [--show <tool>]   lists an mcp connection's tools live with hashes and pin states;
  *                                                  --show prints one definition for review and a pinned skeleton (CONN-4, SEC-6)
  *
  * Exit codes: 0 success (explain: allow), 1 failed, invalid or denied, 2 usage or environment. Each command parses
@@ -23,8 +23,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { createAdapters, type OpenApiAdapter } from '@aiops/adapters';
-import type { McpToolAdapter } from '@aiops/connector-sdk';
+import { createAdapters, type OpenApiAdapter } from '@mandate/adapters';
+import type { McpToolAdapter } from '@mandate/connector-sdk';
 import {
   diffConfigurations,
   diffCounts,
@@ -37,9 +37,9 @@ import {
   type LoadedConfiguration,
   type LoadOptions,
   type LoadResult,
-} from '@aiops/config';
-import type { AuditLog, ConfigRevision, ConfigRevisionStore, CredentialVault } from '@aiops/core';
-import { SERVICE_SUBJECT_PREFIX } from '@aiops/core';
+} from '@mandate/config';
+import type { AuditLog, ConfigRevision, ConfigRevisionStore, CredentialVault } from '@mandate/core';
+import { SERVICE_SUBJECT_PREFIX } from '@mandate/core';
 import {
   createDb,
   type Db,
@@ -53,27 +53,27 @@ import {
   runAuditRetention,
   verifyAuditArchive,
   verifyAuditChain,
-} from '@aiops/db';
+} from '@mandate/db';
 import type pg from 'pg';
 import { explainCall, formatExplain, type ExplainInput } from './config/explain.js';
 import { MCP_TOOLS_USAGE, mcpConnectionOf, parseMcpToolsArgs, runMcpTools } from './mcp-tools-cli.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
 
 const USAGE = [
-  'usage: aiops validate <dir> [--preset-dir <dir>]...',
-  '       aiops test-connection <connection>',
-  '       aiops credentials rotate',
-  '       aiops audit verify [--archive <file>]',
-  '       aiops audit retention --now',
-  '       aiops config diff <dir> [--preset-dir <dir>]...',
-  '       aiops config apply <dir> [--preset-dir <dir>]... [--actor <name>]',
-  '       aiops config explain --operation <id> (--groups <g1,g2,...> | --service <client_id>) [--subject <s>] [--args <json>] [--records <n>]',
+  'usage: mandate validate <dir> [--preset-dir <dir>]...',
+  '       mandate test-connection <connection>',
+  '       mandate credentials rotate',
+  '       mandate audit verify [--archive <file>]',
+  '       mandate audit retention --now',
+  '       mandate config diff <dir> [--preset-dir <dir>]...',
+  '       mandate config apply <dir> [--preset-dir <dir>]... [--actor <name>]',
+  '       mandate config explain --operation <id> (--groups <g1,g2,...> | --service <client_id>) [--subject <s>] [--args <json>] [--records <n>]',
   MCP_TOOLS_USAGE,
 ].join('\n');
 
 /** The actor and client the CLI audits as. */
 const CLI_ACTOR = 'cli';
-const PRESETS_NOT_SET = 'preset directories not set: pass --preset-dir or set AIOPS_PRESET_DIRS';
+const PRESETS_NOT_SET = 'preset directories not set: pass --preset-dir or set MANDATE_PRESET_DIRS';
 
 /** What a database-backed command needs. `close` ends the connection pool. */
 export interface CliStore {
@@ -144,7 +144,7 @@ function defaultRepositoryPresets(): string | undefined {
 
 function presetDirsOf(flagged: readonly string[], env: Readonly<Record<string, string | undefined>>, deps: CliDeps): string[] | undefined {
   if (flagged.length > 0) return [...flagged];
-  const fromEnv = (env.AIOPS_PRESET_DIRS ?? '').split(':').map((d) => d.trim()).filter((d) => d.length > 0);
+  const fromEnv = (env.MANDATE_PRESET_DIRS ?? '').split(':').map((d) => d.trim()).filter((d) => d.length > 0);
   if (fromEnv.length > 0) return fromEnv;
   const fallback = deps.defaultPresetDir === undefined ? defaultRepositoryPresets() : (deps.defaultPresetDir ?? undefined);
   return fallback === undefined ? undefined : [fallback];
@@ -218,18 +218,18 @@ async function openStoreDefault(input: StoreInput): Promise<CliStore> {
 
 async function withStore<T>(
   deps: CliDeps,
-  env: { DATABASE_URL: string; AIOPS_MASTER_KEYS: string },
+  env: { DATABASE_URL: string; MANDATE_MASTER_KEYS: string },
   sensitiveKeys: ReadonlySet<string> | undefined,
   action: (store: CliStore) => Promise<T>,
 ): Promise<T> {
   let store: CliStore;
   try {
-    const input = { databaseUrl: env.DATABASE_URL, masterKeys: env.AIOPS_MASTER_KEYS };
+    const input = { databaseUrl: env.DATABASE_URL, masterKeys: env.MANDATE_MASTER_KEYS };
     store = await (deps.openStore ?? openStoreDefault)(sensitiveKeys === undefined ? input : { ...input, sensitiveKeys });
   } catch (error) {
     if (error instanceof CliError) throw error;
     // parseMasterKeys errors carry the variable and an entry index only; anything else is unexpected.
-    if (error instanceof Error && error.message.startsWith('AIOPS_MASTER_KEYS: ')) throw new CliError(error.message, 2);
+    if (error instanceof Error && error.message.startsWith('MANDATE_MASTER_KEYS: ')) throw new CliError(error.message, 2);
     throw new CliError('cannot open the database', 1);
   }
   try {
@@ -297,11 +297,11 @@ async function audit(args: readonly string[], out: (line: string) => void, deps:
   const env = parseEnv(
     {
       DATABASE_URL: postgresUrl,
-      AIOPS_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
+      MANDATE_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
     },
     deps.env,
   );
-  // The worker's job reads the active revision, so the one-off run does too: files in AIOPS_CONFIG_DIR may be stale (CFG-3).
+  // The worker's job reads the active revision, so the one-off run does too: files in MANDATE_CONFIG_DIR may be stale (CFG-3).
   const configuration = await withConfigStore(deps, env.DATABASE_URL, (store) => loadActiveChecked(store, activeLoadOptions(deps)));
   const sensitiveKeys = configuration.sensitiveFields;
   return withPool(deps, env.DATABASE_URL, async ({ pool, db }) => {
@@ -311,7 +311,7 @@ async function audit(args: readonly string[], out: (line: string) => void, deps:
       audit: new DrizzleAuditLog(db, { sensitiveKeys: () => sensitiveKeys }),
       rateCounter: new PostgresRateCounter(db),
       retentionDays: configuration.audit.retentionDays,
-      archiveDir: env.AIOPS_AUDIT_ARCHIVE_DIR,
+      archiveDir: env.MANDATE_AUDIT_ARCHIVE_DIR,
       actor: CLI_ACTOR,
       now: () => new Date(),
       newId,
@@ -343,9 +343,9 @@ async function testConnection(args: readonly string[], out: (line: string) => vo
     out(USAGE);
     return 2;
   }
-  const env = parseEnv({ AIOPS_CONFIG_DIR: nonEmpty, DATABASE_URL: postgresUrl, AIOPS_MASTER_KEYS: nonEmpty }, deps.env);
+  const env = parseEnv({ MANDATE_CONFIG_DIR: nonEmpty, DATABASE_URL: postgresUrl, MANDATE_MASTER_KEYS: nonEmpty }, deps.env);
   const adapter = deps.adapter ?? createAdapters();
-  const configuration = await loadChecked(env.AIOPS_CONFIG_DIR, presetDirsOf([], deps.env, deps), adapter, out);
+  const configuration = await loadChecked(env.MANDATE_CONFIG_DIR, presetDirsOf([], deps.env, deps), adapter, out);
   if (configuration === undefined) return 1;
   return withStore(deps, env, configuration.sensitiveFields, async (store) => {
     const newId = deps.newId ?? randomUUID;
@@ -366,7 +366,7 @@ async function rotate(args: readonly string[], out: (line: string) => void, deps
     out(USAGE);
     return 2;
   }
-  const env = parseEnv({ DATABASE_URL: postgresUrl, AIOPS_MASTER_KEYS: nonEmpty }, deps.env);
+  const env = parseEnv({ DATABASE_URL: postgresUrl, MANDATE_MASTER_KEYS: nonEmpty }, deps.env);
   return withStore(deps, env, undefined, async (store) => {
     const result = await store.rotate(CLI_ACTOR, (deps.newId ?? randomUUID)());
     out(`rewrapped=${String(result.rewrapped)} on_old_versions=${String(result.onOldVersions)}`);
@@ -460,7 +460,7 @@ async function loadActive(active: ConfigRevision | undefined, options: LoadOptio
   return undefined;
 }
 
-/** `aiops config diff` and `aiops config apply` (CFG-3, CFG-4). */
+/** `mandate config diff` and `mandate config apply` (CFG-3, CFG-4). */
 async function configChange(kind: 'diff' | 'apply', args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
   const parsed = parseConfigArgs(args, kind === 'apply');
   if (parsed === undefined) {
@@ -521,7 +521,7 @@ async function configChange(kind: 'diff' | 'apply', args: readonly string[], out
 
 const EXPLAIN_FLAGS = ['--operation', '--groups', '--service', '--subject', '--args', '--records'] as const;
 const MAX_RECORDS = 1_000_000;
-const NO_ACTIVE_CONFIGURATION = 'no active configuration: start the api once or run aiops config apply';
+const NO_ACTIVE_CONFIGURATION = 'no active configuration: start the api once or run mandate config apply';
 
 /** `--operation <id> (--groups <g1,...> | --service <client_id>) [--subject <s>] [--args <json>] [--records <n>]`; undefined is a usage error. */
 function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
@@ -557,7 +557,7 @@ function parseExplainArgs(args: readonly string[]): ExplainInput | undefined {
   return { operationId, groups, args: parsedArgs as Record<string, unknown>, records, ...(subject === undefined ? {} : { subject }), ...(service === undefined ? {} : { service }) };
 }
 
-/** The adapter's resolver and the preset directories of `AIOPS_PRESET_DIRS` or the default, for loading the active revision. */
+/** The adapter's resolver and the preset directories of `MANDATE_PRESET_DIRS` or the default, for loading the active revision. */
 function activeLoadOptions(deps: CliDeps): LoadOptions {
   const presetDirs = presetDirsOf([], deps.env, deps);
   return { resolver: (deps.adapter ?? createAdapters()).resolver, ...(presetDirs === undefined ? {} : { presetDirs }) };
@@ -581,7 +581,7 @@ async function loadActiveChecked(store: ConfigRevisionStore, options: LoadOption
   return result.configuration;
 }
 
-/** `aiops config explain`: evaluates one call against the active revision; writes nothing (POL-7). */
+/** `mandate config explain`: evaluates one call against the active revision; writes nothing (POL-7). */
 async function configExplain(args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
   const input = parseExplainArgs(args);
   if (input === undefined) {
@@ -598,7 +598,7 @@ async function configExplain(args: readonly string[], out: (line: string) => voi
 }
 
 /**
- * `aiops mcp tools`: the active revision names the connection; the list is live, with the
+ * `mandate mcp tools`: the active revision names the connection; the list is live, with the
  * stored credential, which only the adapter opens (CONN-4, SEC-2, SEC-3).
  */
 async function mcpTools(args: readonly string[], out: (line: string) => void, deps: CliDeps): Promise<number> {
@@ -607,7 +607,7 @@ async function mcpTools(args: readonly string[], out: (line: string) => void, de
     out(USAGE);
     return 2;
   }
-  const env = parseEnv({ DATABASE_URL: postgresUrl, AIOPS_MASTER_KEYS: nonEmpty }, deps.env);
+  const env = parseEnv({ DATABASE_URL: postgresUrl, MANDATE_MASTER_KEYS: nonEmpty }, deps.env);
   const adapter = deps.adapter ?? createAdapters();
   const configuration = await withConfigStore(deps, env.DATABASE_URL, (store) => loadActiveChecked(store, activeLoadOptions({ ...deps, adapter })));
   const connection = mcpConnectionOf(configuration, parsed.connection);

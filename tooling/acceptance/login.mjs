@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Logs a development user in through the real authorization-code + PKCE (S256) flow
 // of the bundled realm and prints the access token. The login form is posted like a
 // browser would; the final redirect to the loopback callback is read, never followed.
@@ -11,9 +11,9 @@ if (resource === undefined) {
   console.error('usage: login.mjs <keycloak-base-url> <username> <password> <mcp-resource>');
   process.exit(2);
 }
-const CLIENT = 'aiops-mcp';
+const CLIENT = 'mandate-mcp';
 const REDIRECT = 'http://localhost:33418/callback';
-const oidc = `${base}/realms/aiops/protocol/openid-connect`;
+const oidc = `${base}/realms/mandate/protocol/openid-connect`;
 const origin = new URL(base).origin;
 const cookies = new Map();
 const b64url = (b) => b.toString('base64url');

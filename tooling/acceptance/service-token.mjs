@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Client-credentials token of a service-account client of the bundled realm (AUTH-4), for the
 // acceptance scripts.
 //
@@ -50,10 +50,10 @@ async function call(step, url, init) {
 async function clientSecret() {
   const admin = await call('admin token', `${base}/realms/master/protocol/openid-connect/token`, form({ grant_type: 'password', client_id: 'admin-cli', username: process.env.KEYCLOAK_ADMIN_USER ?? 'admin', password }));
   const auth = { headers: { authorization: `Bearer ${admin.access_token}` } };
-  const clients = await call('client lookup', `${base}/admin/realms/aiops/clients?${new URLSearchParams({ clientId, search: 'false' })}`, auth);
+  const clients = await call('client lookup', `${base}/admin/realms/mandate/clients?${new URLSearchParams({ clientId, search: 'false' })}`, auth);
   const uuid = Array.isArray(clients) && clients.length === 1 ? clients[0].id : undefined;
   if (typeof uuid !== 'string') fail(`client lookup (${Array.isArray(clients) ? String(clients.length) : 'no'} matches)`);
-  const secret = (await call('client secret', `${base}/admin/realms/aiops/clients/${encodeURIComponent(uuid)}/client-secret`, auth)).value;
+  const secret = (await call('client secret', `${base}/admin/realms/mandate/clients/${encodeURIComponent(uuid)}/client-secret`, auth)).value;
   if (typeof secret !== 'string' || secret.length === 0) fail('client secret (empty)');
   return secret;
 }
@@ -67,7 +67,7 @@ if (countSecret) {
 } else {
   const tokens = await call(
     'token request',
-    `${base}/realms/aiops/protocol/openid-connect/token`,
+    `${base}/realms/mandate/protocol/openid-connect/token`,
     form({ grant_type: 'client_credentials', client_id: clientId, client_secret: secret, resource }),
   );
   if (typeof tokens.access_token !== 'string') fail('token request (no access_token)');

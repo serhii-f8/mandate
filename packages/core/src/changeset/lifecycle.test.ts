@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import { CANCELLABLE, canTransition, executionStarted, isExpiryDue, ROLLBACK_FROM, TRANSITIONS } from './lifecycle.js';
 import type { ChangeSetStatus } from './model.js';

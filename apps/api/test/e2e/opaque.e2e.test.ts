@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Opaque operations end to end over the real MCP transport (CS-1, MCP-1, MCP-6, POL-5).
  *
@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { pageLogin, startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { pageLogin, startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { connectClient, startApi, startDatabase, tokenFor, vaultOf, type RunningApi } from './helpers.js';
 
 const OPAQUE_CONFIG = fileURLToPath(new URL('./fixtures/opaque-config', import.meta.url));
@@ -43,11 +43,11 @@ beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
   upstream = await startFakeUpstream();
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-opaque-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-opaque-e2e-'));
   await cp(OPAQUE_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));
-  webDir = await mkdtemp(join(tmpdir(), 'aiops-opaque-web-'));
+  webDir = await mkdtemp(join(tmpdir(), 'mandate-opaque-web-'));
   await mkdir(join(webDir, 'assets'));
   await writeFile(join(webDir, 'index.html'), '<!doctype html><title>Approvals</title><div id="root"></div>');
   api = await startApi(databaseUrl, { issuer, configDir, webDir });

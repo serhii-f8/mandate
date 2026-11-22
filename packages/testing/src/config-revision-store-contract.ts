@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import type { AuditAction, AuditEventInput, ConfigRevisionStore, NewConfigRevision } from '@aiops/core';
+import type { AuditAction, AuditEventInput, ConfigRevisionStore, NewConfigRevision } from '@mandate/core';
 
 /** One fresh, empty store per call. `auditRows` reads the audit events the store appended. */
 export interface ConfigRevisionStoreHarness {

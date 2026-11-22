@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import type { LoadedConfiguration } from '@aiops/config';
+import type { LoadedConfiguration } from '@mandate/config';
 import type {
   Caller,
   ChangeSetRepository,
@@ -13,8 +13,8 @@ import type {
   PolicyEngine,
   RollbackRequest,
   RollbackStrategy,
-} from '@aiops/core';
-import { InMemoryChangeSetRepository } from '@aiops/testing';
+} from '@mandate/core';
+import { InMemoryChangeSetRepository } from '@mandate/testing';
 import { pageLink } from '../changesets/links.js';
 import type { AuditDetails } from './audited-tool.js';
 import { ROLLBACK_TOOL, rollbackChangesetTool } from './rollback-tool.js';
@@ -27,9 +27,9 @@ const HASH = `sha256:${'a'.repeat(64)}`;
 const OTHER_HASH = `sha256:${'b'.repeat(64)}`;
 const NOW = new Date('2026-11-19T10:00:00.000Z');
 const UNTIL = new Date('2026-11-26T10:00:00.000Z');
-const PUBLIC = new URL('https://aiops.example.test');
+const PUBLIC = new URL('https://mandate.example.test');
 const OPERATION = 'shop.update_content';
-const alice: Caller = { subject: 'alice', groups: ['content'], clientId: 'aiops-mcp' };
+const alice: Caller = { subject: 'alice', groups: ['content'], clientId: 'mandate-mcp' };
 const bob: Caller = { subject: 'bob', groups: ['content'] };
 
 function stubSnapshot(options: { strategy?: RollbackStrategy['strategy']; effect?: PolicyDecision['effect'] } = {}): Snapshot {

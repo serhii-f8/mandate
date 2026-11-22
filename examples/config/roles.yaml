@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../packages/config/schema/aiops-config.v1.json
+# yaml-language-server: $schema=../../packages/config/schema/mandate-config.v1.json
 # Roles: what each group of people may do (POL-1..). Operations are granted per role;
 # everything not granted is denied.
 version: 1

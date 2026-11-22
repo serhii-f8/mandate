@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
 import {
   ExecutorUnavailable,
   type Caller,
@@ -11,8 +11,8 @@ import {
   type StartOutcome,
   type StartRequest,
   type TaskRecord,
-} from '@aiops/core';
-import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryTaskRepository } from '@aiops/testing';
+} from '@mandate/core';
+import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryTaskRepository } from '@mandate/testing';
 import { ApprovalService } from '../approvals/approval-service.js';
 import { AUDIT_UNAVAILABLE, type AuditDetails } from './audited-tool.js';
 import { submitForApprovalTool } from './submit-tool.js';
@@ -132,7 +132,7 @@ const CURRENT = snapshotOf(await configuration('acme, globex'));
 /** The grant no longer covers the stored brand `acme` (POL-6). */
 const NARROWED = snapshotOf(await configuration('globex'));
 
-const alice: Caller = { subject: 'alice', clientId: 'aiops-mcp', groups: ['content'] };
+const alice: Caller = { subject: 'alice', clientId: 'mandate-mcp', groups: ['content'] };
 const bob: Caller = { subject: 'bob', groups: ['content'] };
 const carol: Caller = { subject: 'carol', groups: ['other'] };
 const ID = '11111111-1111-4111-8111-111111111111';
@@ -409,12 +409,12 @@ describe('MCP-8 POL-6 POL-5 POL-4 submit_for_approval', () => {
         actor: 'alice',
         correlationId: 'corr-8',
         groups: alice.groups,
-        clientId: 'aiops-mcp',
+        clientId: 'mandate-mcp',
         limits: { role: 'content_manager', recordsPerOperation: 50, recordsPerDay: 500, concurrentExecutions: 2 },
         submission: {
           actor: 'alice',
           groups: alice.groups,
-          clientId: 'aiops-mcp',
+          clientId: 'mandate-mcp',
           correlationId: 'corr-8',
           at: NOW,
           role: 'content_manager',
@@ -481,7 +481,7 @@ describe('MCP-8 POL-6 POL-5 POL-4 submit_for_approval', () => {
     expect(answer).toMatchObject({ resultType: 'task', status: 'working' });
     expect(tasks.created).toHaveLength(1);
     const task = tasks.created[0];
-    expect(task).toMatchObject({ kind: 'execute', tool: 'submit_for_approval', owner: 'alice', clientId: 'aiops-mcp', changesetId: ID });
+    expect(task).toMatchObject({ kind: 'execute', tool: 'submit_for_approval', owner: 'alice', clientId: 'mandate-mcp', changesetId: ID });
     expect(await tasks.findOwned(task?.taskId ?? '', 'alice')).toEqual(task);
     expect(isTaskAnswer(answer) ? answer.taskId : undefined).toBe(task?.taskId);
     expect(reportedAll().taskId).toBe(task?.taskId);
@@ -517,7 +517,7 @@ describe('MCP-8 POL-5 POL-6 submit_for_approval', () => {
 
   it('POL-5 MCP-8 a required approval moves to pending_approval and answers the fixed text and structuredContent', async () => {
     const { tool, ctx, executor, repository, tasks, audit } = await setup({ requester: 'always', items: ['a', 'b'] });
-    const caller: Caller = { subject: 'always', clientId: 'aiops-mcp', groups: ['always'] };
+    const caller: Caller = { subject: 'always', clientId: 'mandate-mcp', groups: ['always'] };
     const result = plain(await tool.handler(args(), ctx(caller, { tasks: true })));
     expect(result.isError).toBeUndefined();
     expect(text(result)).toBe(
@@ -540,7 +540,7 @@ describe('MCP-8 POL-5 POL-6 submit_for_approval', () => {
       submission: {
         actor: 'always',
         groups: ['always'],
-        clientId: 'aiops-mcp',
+        clientId: 'mandate-mcp',
         correlationId: 'corr-8',
         at: NOW,
         role: 'always_role',
@@ -549,8 +549,8 @@ describe('MCP-8 POL-5 POL-6 submit_for_approval', () => {
     });
     const rows = audit.events.filter((e) => e.changesetId === ID && e.correlationId === 'corr-8');
     expect(rows.map((e) => e.action)).toEqual(['policy.decision', 'changeset.transition', 'approval.requested']);
-    expect(rows[1]).toMatchObject({ actor: 'always', clientId: 'aiops-mcp', details: { from: 'prepared', to: 'pending_approval' } });
-    expect(rows[2]).toMatchObject({ actor: 'always', clientId: 'aiops-mcp', details: { round: 1, step: 1, role: 'content_manager' } });
+    expect(rows[1]).toMatchObject({ actor: 'always', clientId: 'mandate-mcp', details: { from: 'prepared', to: 'pending_approval' } });
+    expect(rows[2]).toMatchObject({ actor: 'always', clientId: 'mandate-mcp', details: { round: 1, step: 1, role: 'content_manager' } });
   });
 
   it('POL-5 above_threshold under the threshold starts and stores the submission', async () => {
@@ -596,7 +596,7 @@ describe('MCP-8 POL-5 POL-6 submit_for_approval', () => {
   it('POL-6 an approved change-set is started by the requester through startApproved', async () => {
     // The caller holds more groups now; the start carries the identity of the submission.
     const { tool, ctx, executor, tasks } = await setup({ stage: 'approved', requesterGroups: ['content'] });
-    const caller: Caller = { subject: 'alice', clientId: 'aiops-mcp', groups: ['content', 'always'] };
+    const caller: Caller = { subject: 'alice', clientId: 'mandate-mcp', groups: ['content', 'always'] };
     const answer = await tool.handler(args(), ctx(caller, { tasks: true }));
     expect(isTaskAnswer(answer)).toBe(true);
     expect(tasks.created).toHaveLength(1);
@@ -605,7 +605,7 @@ describe('MCP-8 POL-5 POL-6 submit_for_approval', () => {
         changesetId: ID,
         expectedHash: HASH,
         actor: 'alice',
-        clientId: 'aiops-mcp',
+        clientId: 'mandate-mcp',
         correlationId: 'corr-8',
         requester: { subject: 'alice', groups: ['content'] },
       },

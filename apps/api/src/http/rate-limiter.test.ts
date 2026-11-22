@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash } from 'node:crypto';
 import { Writable } from 'node:stream';
 import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_RATE_LIMITS } from '@aiops/config';
-import type { RateCounter } from '@aiops/core';
-import { InMemoryAuditLog, InMemoryRateCounter } from '@aiops/testing';
+import { DEFAULT_RATE_LIMITS } from '@mandate/config';
+import type { RateCounter } from '@mandate/core';
+import { InMemoryAuditLog, InMemoryRateCounter } from '@mandate/testing';
 import { EndpointRateLimiter, mcpLimitCheck, retryAfterSeconds, type LimitCheck } from './rate-limiter.js';
 
 function capture(): { lines: string[]; stream: Writable } {

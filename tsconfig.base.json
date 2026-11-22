@@ -7,7 +7,7 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "customConditions": [
-      "@aiops/source"
+      "@mandate/source"
     ],
     "strict": true,
     "noUncheckedIndexedAccess": true,

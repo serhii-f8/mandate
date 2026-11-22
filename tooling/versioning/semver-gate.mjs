@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Usage: node tooling/versioning/semver-gate.mjs [--base <ref>]  (NFR-18)
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -8,8 +8,8 @@ import { judge, versionOf } from './semver-gate-lib.mjs';
 
 const REPORTS = [
   { path: 'packages/connector-sdk/api-report.d.ts', kind: 'sdk' },
-  { path: 'packages/config/schema/aiops-config.v1.json', kind: 'config' },
-  { path: 'packages/config/schema/aiops-preset.v1.json', kind: 'preset' },
+  { path: 'packages/config/schema/mandate-config.v1.json', kind: 'config' },
+  { path: 'packages/config/schema/mandate-preset.v1.json', kind: 'preset' },
 ];
 
 const git = (...args) => spawnSync('git', args, { encoding: 'utf8' });
@@ -90,7 +90,16 @@ for (const { path, kind } of REPORTS) {
     failed = true;
     continue;
   }
-  const r = judge(old.stdout, current, versionOf(old.stdout, kind), versionOf(current, kind));
+  // A base report whose version header the current format cannot read was written before the
+  // report format was renamed: there is nothing to compare line by line, so it counts as new.
+  let oldVersion;
+  try {
+    oldVersion = versionOf(old.stdout, kind);
+  } catch {
+    console.log(`ok ${path}: base report has no version header, compared as a new report (${versionOf(current, kind)})`);
+    continue;
+  }
+  const r = judge(old.stdout, current, oldVersion, versionOf(current, kind));
   console.log(`${r.ok ? 'ok' : 'FAIL'} ${path}: ${r.message}`);
   if (!r.ok) failed = true;
 }

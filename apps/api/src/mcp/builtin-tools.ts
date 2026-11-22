@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import { createSchemaCompiler } from '@aiops/config';
-import type { AuditLog, ChangeSetExecutor, ChangeSetRepository, TaskRepository, WorkflowStarter } from '@aiops/core';
-import type { UpstreamToolView } from '@aiops/upstream';
+// Copyright 2026 The Mandate Authors
+import { createSchemaCompiler } from '@mandate/config';
+import type { AuditLog, ChangeSetExecutor, ChangeSetRepository, TaskRepository, WorkflowStarter } from '@mandate/core';
+import type { UpstreamToolView } from '@mandate/upstream';
 import type { ApprovalService } from '../approvals/approval-service.js';
 import { createChangesetTools } from './changeset-tools.js';
 import { decideChangesetTool } from './decide-tool.js';
@@ -21,10 +21,10 @@ const PING_SCHEMA = {
 
 const validatePing = createSchemaCompiler()(PING_SCHEMA);
 
-/** Checks that the AI Operations Layer is reachable (Phase 1, kept as a built-in; ADR 0016). */
+/** Checks that Mandate is reachable (Phase 1, kept as a built-in; ADR 0016). */
 export const pingTool: BuiltinTool = {
   name: 'ping',
-  description: 'Check that the AI Operations Layer is reachable.',
+  description: 'Check that Mandate is reachable.',
   inputSchema: PING_SCHEMA,
   validate: validatePing,
   handler(args) {
@@ -48,7 +48,7 @@ export interface BuiltinToolDeps {
   readonly audit: AuditLog;
   /** Records decisions (`decide_changeset`) and starts approved change-sets with the requester's submitted identity (POL-6, SEC-9). */
   readonly approvals: ApprovalService;
-  /** `AIOPS_PUBLIC_URL`: base of the approval page link in the submit answer (APR-7). */
+  /** `MANDATE_PUBLIC_URL`: base of the approval page link in the submit answer (APR-7). */
   readonly publicUrl: URL;
   /** Pin states for `list_my_operations` (CONN-4). */
   readonly upstreamTools?: UpstreamToolView;

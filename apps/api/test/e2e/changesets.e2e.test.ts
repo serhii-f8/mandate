@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,9 +8,9 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { ConfigurationHolder } from '@aiops/config';
-import { CHANGESET_TEXT, READ_RESULT_TEXT } from '@aiops/core';
-import { startFakeUpstream, startTestIssuer, type FakeUpstream, type RecordedRequest, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import type { ConfigurationHolder } from '@mandate/config';
+import { CHANGESET_TEXT, READ_RESULT_TEXT } from '@mandate/core';
+import { startFakeUpstream, startTestIssuer, type FakeUpstream, type RecordedRequest, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { createLogger } from '../../src/logger.js';
 import { CONFIGURATION } from '../../src/tokens.js';
 import { auditRows, connectClient, reloadConfiguration, startApi, startDatabase, tokenFor, vaultOf, type RunningApi } from './helpers.js';
@@ -77,7 +77,7 @@ beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
   upstream = await startFakeUpstream();
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-changeset-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-changeset-e2e-'));
   await cp(CHANGESET_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import { ExecutorUnavailable, type Caller, type ChangeSetExecutor, type ExecutionProgress, type StartOutcome, type StartRequest } from '@aiops/core';
-import { InMemoryAuditLog, InMemoryChangeSetRepository } from '@aiops/testing';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
+import { ExecutorUnavailable, type Caller, type ChangeSetExecutor, type ExecutionProgress, type StartOutcome, type StartRequest } from '@mandate/core';
+import { InMemoryAuditLog, InMemoryChangeSetRepository } from '@mandate/testing';
 import { ApprovalService } from '../approvals/approval-service.js';
 import { snapshotOf, type Snapshot } from '../mcp/tool-pipeline.js';
 import { SubmitService } from './submit-service.js';
@@ -97,7 +97,7 @@ const CURRENT = snapshotOf(await configuration('acme, globex'));
 /** The grant no longer covers the stored brand `acme` (POL-6). */
 const NARROWED = snapshotOf(await configuration('globex'));
 
-const alice: Caller = { subject: 'alice', clientId: 'aiops-mcp', groups: ['content'] };
+const alice: Caller = { subject: 'alice', clientId: 'mandate-mcp', groups: ['content'] };
 const aliceAlways: Caller = { subject: 'alice', groups: ['always'] };
 const aliceOpaque: Caller = { subject: 'alice', groups: ['opaque'] };
 const bob: Caller = { subject: 'bob', groups: ['content'] };
@@ -278,7 +278,7 @@ describe('MCP-8 SubmitService', () => {
     if (outcome.kind !== 'started') return;
     expect(outcome.changeset.id).toBe(ID);
     expect(executor.starts).toHaveLength(1);
-    expect(executor.starts[0]).toMatchObject({ changesetId: ID, expectedHash: HASH, actor: 'alice', clientId: 'aiops-mcp', correlationId: 'corr-5' });
+    expect(executor.starts[0]).toMatchObject({ changesetId: ID, expectedHash: HASH, actor: 'alice', clientId: 'mandate-mcp', correlationId: 'corr-5' });
     expect(executor.starts[0]?.submission).toMatchObject({ role: 'content_manager', at: NOW });
   });
 

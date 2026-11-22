@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createOpenApiAdapter } from '@aiops/adapters';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
+import { createOpenApiAdapter } from '@mandate/adapters';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
 import {
   mcpToolHash,
   type BulkStatusOutcome,
@@ -15,7 +15,7 @@ import {
   type ToolListOutcome,
   type UpstreamResolver,
   type WriteAdapter,
-} from '@aiops/connector-sdk';
+} from '@mandate/connector-sdk';
 import {
   EMPTY_STATS,
   ManifestBatchWriter,
@@ -27,9 +27,9 @@ import {
   type ChangeSetRecord,
   type Clock,
   type RollbackStrategy,
-} from '@aiops/core';
-import { installFakeMagentoCatalog, startFakeUpstream, type FakeMagentoCatalog, type FakeUpstream } from '@aiops/testing';
-import { createBulkWriter, createUpstreamReader, type ToolLister, type UpstreamCallLog } from '@aiops/upstream';
+} from '@mandate/core';
+import { installFakeMagentoCatalog, startFakeUpstream, type FakeMagentoCatalog, type FakeUpstream } from '@mandate/testing';
+import { createBulkWriter, createUpstreamReader, type ToolLister, type UpstreamCallLog } from '@mandate/upstream';
 import { loadMagentoPreset, MAGENTO_BASE_PATH, MemoryVault, vaultWithToken } from '../test/support/magento.js';
 import { createRollbackWriterFor, createWriterFor } from './writers.js';
 

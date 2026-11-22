@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash } from 'node:crypto';
 import { open, readFile, rename, rm, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
-import { CanonicalJsonError, checkLink, GENESIS_HASH, type ChainBreak, type ChainHead, type SealedChainRow } from '@aiops/core';
+import { CanonicalJsonError, checkLink, GENESIS_HASH, type ChainBreak, type ChainHead, type SealedChainRow } from '@mandate/core';
 import type pg from 'pg';
 import { CHAIN_COLUMNS, toSealedChainRow } from './audit-chain.js';
 import { guarded } from './errors.js';
@@ -276,7 +276,7 @@ function parseLine(line: string): (SealedChainRow & { readonly prevHash: string;
 }
 
 /**
- * `aiops audit verify --archive <file>` (design §3, AUD-5, AUD-7). Checks in order: the manifest
+ * `mandate audit verify --archive <file>` (design §3, AUD-5, AUD-7). Checks in order: the manifest
  * next to `file` parses; the archive opens (else `archive_unreadable`); the file's SHA-256 is the manifest's; the line count is the manifest's;
  * the first and last positions are the manifest's range; the chain inside links from the
  * manifest's `prevHash` and ends at its `lastHash`; and the database holds the anchors at both
@@ -388,7 +388,7 @@ async function anchored(pool: pg.Pool, manifest: ArchiveManifest): Promise<boole
   return start.rowCount === 1;
 }
 
-/** The one output line of `aiops audit verify --archive` (Global Constraints); positions only. */
+/** The one output line of `mandate audit verify --archive` (Global Constraints); positions only. */
 export function formatArchiveReport(report: ArchiveReport): string {
   if (report.ok) return `ok archive count=${report.count} first=${report.first} last=${report.last}`;
   return `failed archive reason=${report.reason}${report.chainPos === undefined ? '' : ` chain_pos=${report.chainPos}`}`;

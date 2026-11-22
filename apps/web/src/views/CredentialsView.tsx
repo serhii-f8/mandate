@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { useState, type SyntheticEvent, type ReactElement } from 'react';
 
 /** One credential ref the user manages, as `GET /api/v1/credentials` returns it (no secret value, ever). */

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * `changesetWorkflow` (design §4): one workflow per change-set, workflow ID = change-set ID
  * (EXE-1). State-driven: every turn re-reads the truth from PostgreSQL through `inspect`, so a
@@ -43,7 +43,7 @@ import {
   type RollbackOutcome,
   type RollbackWindow,
   type WorkflowProgress,
-} from '@aiops/temporal/contract';
+} from '@mandate/temporal/contract';
 
 /**
  * EXE-8 (ADR 0042): after a finished status the workflow keeps a rollback window open.

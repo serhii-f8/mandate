@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import {
   bearerAuthChallengeResponse,
   getOAuthProtectedResourceMetadataUrl,
   verifyBearerToken,
   type OAuthTokenVerifier,
 } from '@modelcontextprotocol/server';
-import type { Caller } from '@aiops/core';
+import type { Caller } from '@mandate/core';
 import { callerFromAuthInfo } from './caller-from-auth.js';
 import { rejectionReason, type RejectionReason } from './jwt-verifier.js';
 

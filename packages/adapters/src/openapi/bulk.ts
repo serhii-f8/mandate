@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { BulkItemState, BulkMapping } from '@aiops/connector-sdk';
+// Copyright 2026 The Mandate Authors
+import type { BulkItemState, BulkMapping } from '@mandate/connector-sdk';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);

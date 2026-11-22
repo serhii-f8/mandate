@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * `exclude_changeset_items` (CS-5, MCP-8): the requester removes items from a prepared change-set, or
  * puts back items they removed, before submitting it. The answer is a new change-set with its own ID
  * and hash; the source is never changed. Answers and audit details carry IDs and counts only (SEC-3).
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
-import { createSchemaCompiler } from '@aiops/config';
-import { CHANGESET_TEXT, READ_RESULT_TEXT, type DeriveRefusal } from '@aiops/core';
+import { createSchemaCompiler } from '@mandate/config';
+import { CHANGESET_TEXT, READ_RESULT_TEXT, type DeriveRefusal } from '@mandate/core';
 import { excludableIn, excludeItems, type ExclusionDeps } from '../changesets/exclusions.js';
 import { preparedAnswer, toCallToolResult } from '../changesets/results.js';
 import { notFound } from './changeset-tools.js';

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { RetentionReport, SealResult } from '@aiops/db';
+// Copyright 2026 The Mandate Authors
+import type { RetentionReport, SealResult } from '@mandate/db';
 import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AUDIT_SEAL_MAX_ROUNDS, createAuditJobs, type AuditJobsDeps } from './audit-jobs.js';

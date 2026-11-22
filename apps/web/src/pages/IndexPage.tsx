@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { createApi } from '../api.js';
 
@@ -21,7 +21,7 @@ export function IndexPage(): ReactElement {
   }, [api]);
   return (
     <main>
-      <h1>AI Operations</h1>
+      <h1>Mandate</h1>
       <ul className="destinations">
         <li>
           <a href="/app/approvals">Approvals</a>

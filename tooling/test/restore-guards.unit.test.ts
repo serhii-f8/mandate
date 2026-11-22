@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // restore.sh refusal guards against a fake `docker` on PATH (NFR-13): a guard whose probe fails must
 // stop the restore before anything is replaced, never read the failure as "empty".
 import { spawnSync } from 'node:child_process';
@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const FILES = ['aiops.dump', 'temporal.dump', 'temporal_visibility.dump', 'keycloak.dump', 'audit-archive.tar'];
+const FILES = ['mandate.dump', 'temporal.dump', 'temporal_visibility.dump', 'keycloak.dump', 'audit-archive.tar'];
 const VERIFY = `ok sealed=3 unsealed=0 from=1 head=3:sha256:${'a'.repeat(64)}`;
 
 // Answers by matching the docker arguments; every call is logged. FAKE_TABLE / FAKE_ROWS / FAKE_ARCHIVE
@@ -59,7 +59,7 @@ function restore(env: { table: string; rows: string; archive: string }): { statu
 const EMPTY_ARCHIVE = 'empty';
 
 describe('NFR-13 restore.sh refusal guards fail closed', () => {
-  it('NFR-13 a failing probe of the aiops tables stops the restore before pg_restore', () => {
+  it('NFR-13 a failing probe of the mandate tables stops the restore before pg_restore', () => {
     const r = restore({ table: 'fail', rows: 'f', archive: EMPTY_ARCHIVE });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/cannot inspect/);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
@@ -10,7 +10,7 @@ import {
   type ChangeSetRecord,
   type ChangeSetRepository,
   BatchFenced,
-} from '@aiops/core';
+} from '@mandate/core';
 import { describeExecutorContract, describeRollbackRun, EXECUTOR_CONTRACT_HASH } from './executor-contract.js';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
 import { InMemoryChangeSetRepository } from './in-memory-changeset-repository.js';

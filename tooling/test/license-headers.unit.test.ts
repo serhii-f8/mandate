@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { addHeader, hasHeader, needsHeader } from '../license-headers-lib.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
-const TS = '// SPDX-License-Identifier: Apache-2.0\n// Copyright 2026 The AI Operations Layer Authors\n';
-const SH = '# SPDX-License-Identifier: Apache-2.0\n# Copyright 2026 The AI Operations Layer Authors\n';
+const TS = '// SPDX-License-Identifier: Apache-2.0\n// Copyright 2026 The Mandate Authors\n';
+const SH = '# SPDX-License-Identifier: Apache-2.0\n# Copyright 2026 The Mandate Authors\n';
 
 describe('license headers: needsHeader, hasHeader and addHeader', () => {
   it('needsHeader selects source types and excludes generated and recorded paths', () => {
@@ -16,7 +16,7 @@ describe('license headers: needsHeader, hasHeader and addHeader', () => {
     }
     for (const p of [
       'package.json',
-      'packages/config/schema/aiops-config.v1.json',
+      'packages/config/schema/mandate-config.v1.json',
       'README.md',
       'packages/db/migrations/0001_x.ts',
       'spikes/s/a.ts',

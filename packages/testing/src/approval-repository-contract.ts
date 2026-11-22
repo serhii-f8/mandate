@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { startEventFactory } from '@aiops/core';
-import type { AuditEventInput, ChangeSetRecord, ChangeSetRepository } from '@aiops/core';
+import { startEventFactory } from '@mandate/core';
+import type { AuditEventInput, ChangeSetRecord, ChangeSetRepository } from '@mandate/core';
 import { recordApproval, submitChangeSet } from './approval-fixtures.js';
 import type { ChangeSetRepositoryHarness } from './changeset-repository-contract.js';
 

@@ -41,7 +41,7 @@ for settings a realm import cannot toggle, and the offline-session lifetimes
    jose has verified the audience, so the SDK's `expectedResource` comparison is a real
    second check rather than a constant. No introspection (one less call per
    request; revocation within the 5-minute token lifetime is accepted).
-2. `OIDC_ISSUER`, `OIDC_JWKS_URL` and `AIOPS_MCP_RESOURCE` are required environment
+2. `OIDC_ISSUER`, `OIDC_JWKS_URL` and `MANDATE_MCP_RESOURCE` are required environment
    variables. The issuer is a public URL that `api` may not reach inside Compose, and a
    discovery fetch at start would add a failure mode for no gain.
 3. Clock tolerance 0, as in the Phase 0 experiment; `api` and Keycloak share a host clock in
@@ -53,17 +53,17 @@ for settings a realm import cannot toggle, and the offline-session lifetimes
 6. One bootstrap, [`deploy/keycloak/bootstrap.mjs`](../../deploy/keycloak/bootstrap.mjs), run
    as Compose one-shot service `keycloak-setup` and by the tests. It owns the realm's client
    profiles and policies and replaces them on every run, and it switches anonymous DCR between
-   Keycloak's shipped Trusted Hosts config (`AIOPS_DCR=off`, default) and "redirect-URI hosts
-   must be in `AIOPS_DCR_REDIRECT_HOSTS`" (`on`).
-7. Policy `aiops-pkce-all`: condition `any-client`, profile with executor
+   Keycloak's shipped Trusted Hosts config (`MANDATE_DCR=off`, default) and "redirect-URI hosts
+   must be in `MANDATE_DCR_REDIRECT_HOSTS`" (`on`).
+7. Policy `mandate-pkce-all`: condition `any-client`, profile with executor
    `pkce-enforcer` (`auto-configure: true`).
 8. Offline sessions: idle 604800 s (7 days), maximum lifespan enabled at 2592000 s
    (30 days), set in the realm file.
 
-Also: the pre-registered client `aiops-mcp` gets the fixed Claude Code loopback
+Also: the pre-registered client `mandate-mcp` gets the fixed Claude Code loopback
 redirect `http://localhost:33418/callback` (and `127.0.0.1`), which ADR 0004 asked for;
 tests and the acceptance script log in through it. Tests that need a CIMD client serve
-the document over plain HTTP and set the test-only `AIOPS_CIMD_ALLOW_HTTP=true`; the
+the document over plain HTTP and set the test-only `MANDATE_CIMD_ALLOW_HTTP=true`; the
 shipped default stays `false`.
 
 ## Consequences
@@ -96,7 +96,7 @@ shipped default stays `false`.
     `code_challenge` is answered
     `302 …error=invalid_request&error_description=Missing+parameter:+code_challenge_method`
     and one with `plain` `…code+challenge+method+is+not+matching+the+configured+one`,
-    for the pre-registered client `aiops-mcp`, a client registered anonymously through
+    for the pre-registered client `mandate-mcp`, a client registered anonymously through
     DCR (201) and a CIMD client (document fetched over HTTP with
     `cimd-allow-http-scheme: true`); with S256 all three get the login form; the DCR
     client was stored with `pkce.code.challenge.method=S256`.

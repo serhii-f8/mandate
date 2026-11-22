@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The operation registry (design part 1 §3.2, §3.3, §5; OPS-1, MCP-9, CONN-2): turns
  * configured and preset operations into enabled operation definitions, input
  * validators and upstream bindings, applies overrides, checks tool names and lists
  * the catalog entries and listed MCP tools nothing binds as disabled operations.
  */
-import type { CatalogEntry, CodeOperation, HttpMethod, PresetModule, ResponseMapping, UpstreamMapping } from '@aiops/connector-sdk';
-import { isOpaque, type DisabledOperation, type OperationDefinition } from '@aiops/core';
+import type { CatalogEntry, CodeOperation, HttpMethod, PresetModule, ResponseMapping, UpstreamMapping } from '@mandate/connector-sdk';
+import { isOpaque, type DisabledOperation, type OperationDefinition } from '@mandate/core';
 import type { ArgumentValidator } from './argument-validators.js';
 import { pathToString } from './issues.js';
 import type { OverrideConfig, PresetOperationConfig } from './schema.js';
@@ -223,7 +223,7 @@ export function buildRegistry(input: RegistryInput): Registry {
     if (preset === undefined) codeAt('code operations are allowed in preset operations only');
     else {
       const module = input.codeModules.get(preset);
-      if (module === undefined) codeAt('the preset has no code module (package.json aiops.code)');
+      if (module === undefined) codeAt('the preset has no code module (package.json mandate.code)');
       // Own keys only: a name such as `constructor` must not reach the prototype.
       else if (!Object.hasOwn(module.operations, u.code)) codeAt('is not an operation of the preset code module');
       else operation = module.operations[u.code];

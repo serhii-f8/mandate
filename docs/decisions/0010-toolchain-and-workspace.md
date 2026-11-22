@@ -21,7 +21,7 @@ typescript-eslint, NestJS 12's module format, Vitest and decorator metadata.
    v2 and ext-apps are ESM-only; chosen ESM throughout (`"type": "module"`,
    `module`/`moduleResolution` `nodenext`).
 4. **Cross-package resolution:** build-first, project references, or a custom
-   export condition. Chosen: condition `@aiops/source` → `src/*.ts` for
+   export condition. Chosen: condition `@mandate/source` → `src/*.ts` for
    type-check and Vitest, `types`/`default` → `dist` for build and runtime.
 5. **Boundary enforcement:** `eslint-plugin-boundaries`, dependency-cruiser, or ESLint's
    built-in `no-restricted-imports` with per-directory overrides. Chosen the built-in
@@ -33,7 +33,7 @@ typescript-eslint, NestJS 12's module format, Vitest and decorator metadata.
 7. **Node:** 22 (maintenance LTS, verified by the Phase 0 experiments) or 24
    (active LTS). Chosen 22.12+ for Phase 1; moving to 24 is a one-line change in
    `.nvmrc`, `engines` and the Dockerfile and is left for Phase 10.
-8. **Package scope:** `@aiops/*`.
+8. **Package scope:** `@mandate/*`.
 
 ## Decision
 
@@ -42,7 +42,7 @@ pnpm 11.28.12 through `packageManager`; Turborepo 2.11; TypeScript 6.0.3 with
 `noImplicitOverride`; ESLint 10 flat config with typescript-eslint 8.73; Vitest 5 with
 one root config listing unit, integration and e2e projects by file suffix; pino for
 structured JSON logs; Zod 4 for environment and input parsing; ESM throughout;
-`@aiops/source` export condition; Node `^22.12`.
+`@mandate/source` export condition; Node `^22.12`.
 
 ## Consequences
 

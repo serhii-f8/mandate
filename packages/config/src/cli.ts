@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
- * `aiops-config` (CFG-3). Phase 2 ships `validate`; `diff`, `apply`,
+ * `mandate-config` (CFG-3). Phase 2 ships `validate`; `diff`, `apply`,
  * `test-connection` and `explain` follow in Phases 3 and 8.
  * Exit codes: 0 valid, 1 invalid, 2 usage.
  */
@@ -11,9 +11,9 @@ import { fileURLToPath } from 'node:url';
 import { formatIssue } from './issues.js';
 import { loadConfigurationDirectory } from './load.js';
 
-const USAGE = 'usage: aiops-config validate <dir> [--preset-dir <dir>]...';
+const USAGE = 'usage: mandate-config validate <dir> [--preset-dir <dir>]...';
 
-/** Preset directories from `--preset-dir` (repeatable), else `AIOPS_PRESET_DIRS`; undefined when neither is set. */
+/** Preset directories from `--preset-dir` (repeatable), else `MANDATE_PRESET_DIRS`; undefined when neither is set. */
 function parseArgs(argv: readonly string[], env: Readonly<Record<string, string | undefined>>): { dir: string; presetDirs?: string[] } | undefined {
   const [command, dir, ...rest] = argv;
   if (command !== 'validate' || dir === undefined || dir.startsWith('--')) return undefined;
@@ -24,7 +24,7 @@ function parseArgs(argv: readonly string[], env: Readonly<Record<string, string 
     flagged.push(value);
   }
   if (flagged.length > 0) return { dir, presetDirs: flagged };
-  const fromEnv = env.AIOPS_PRESET_DIRS?.split(':').map((d) => d.trim()).filter((d) => d.length > 0);
+  const fromEnv = env.MANDATE_PRESET_DIRS?.split(':').map((d) => d.trim()).filter((d) => d.length > 0);
   return fromEnv === undefined || fromEnv.length === 0 ? { dir } : { dir, presetDirs: fromEnv };
 }
 
@@ -49,9 +49,9 @@ export async function runCli(
   out(
     `Configuration valid: ${String(connections.length)} connections, ${String(policy.operations.length)} operations, ${String(policy.roles.length)} roles`,
   );
-  if (presetChecksSkipped) out('Preset checks skipped: set AIOPS_PRESET_DIRS or pass --preset-dir for the full check');
+  if (presetChecksSkipped) out('Preset checks skipped: set MANDATE_PRESET_DIRS or pass --preset-dir for the full check');
   // This CLI has no adapter (package boundaries); the api CLI resolves specs (ADR 0017).
-  if (specChecksSkipped) out('Spec checks skipped: run "aiops validate" in the api for the full check');
+  if (specChecksSkipped) out('Spec checks skipped: run "mandate validate" in the api for the full check');
   return 0;
 }
 

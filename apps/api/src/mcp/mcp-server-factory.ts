@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { CLIENT_INFO_META_KEY, Server, type AuthInfo, type CallToolResult, type McpServerFactory } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import type { Caller } from '@aiops/core';
+import type { Caller } from '@mandate/core';
 import { declaresTasks, TASKS_EXTENSION } from './tasks/extension.js';
 import { listResources, readResource } from './resources.js';
 import { createTaskHandlers, type TaskHandlerDeps, type TaskRequestContext } from './tasks/task-handlers.js';
 import { isTaskAnswer } from './tasks/task-result.js';
 import { callTool, listTools, type PipelineDeps, type PipelineRequest } from './tool-pipeline.js';
 
-export const SERVER_INFO = { name: 'aiops', version: '0.0.0' } as const;
+export const SERVER_INFO = { name: 'mandate', version: '0.0.0' } as const;
 
 /** What the controller hands to the per-request factory through `authInfo.extra`. */
 export interface RequestContext {
@@ -17,7 +17,7 @@ export interface RequestContext {
   readonly correlationId: string;
 }
 
-const CONTEXT_KEY = 'aiops/request';
+const CONTEXT_KEY = 'mandate/request';
 
 /** The SDK sees no token: the caller travels in `extra`, the token field stays empty (AUTH-7). */
 export function authInfoFor(context: RequestContext, expiresAt: number | undefined): AuthInfo {

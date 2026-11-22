@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * One problem in a configuration directory (CFG-2): which file, where, and why.
  * Messages never quote configuration values, since a value can be a pasted secret.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { startPostgres, type StartedPostgres } from '@aiops/testing';
+import { startPostgres, type StartedPostgres } from '@mandate/testing';
 import { createDb, type Database } from '../../src/client.js';
 import { runMigrations } from '../../src/migrate.js';
 import { PostgresSessionStore, type SessionRow } from '../../src/web-sessions.js';
@@ -43,7 +43,7 @@ const session = (expiresAt: Date): SessionRow => ({
   idHash: 'id-hash-1',
   subject: 'sub-1',
   username: 'alice',
-  clientId: 'aiops-web',
+  clientId: 'mandate-web',
   groups: ['admin', 'sales'],
   authTime: NOW,
   csrfToken: 'csrf',

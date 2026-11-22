@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { Response } from 'express';
 import type { Logger } from 'pino';
-import type { ApiEnv } from '@aiops/config';
+import type { ApiEnv } from '@mandate/config';
 import { resolveWebDir, WebAppController } from './static.js';
 
 describe('UI-5 the api finds the web bundle', () => {
-  it('UI-5 AIOPS_WEB_DIR wins and is made absolute', () => {
+  it('UI-5 MANDATE_WEB_DIR wins and is made absolute', () => {
     expect(resolveWebDir('some/dir')).toBe(resolve('some/dir'));
   });
 
-  it('UI-5 without AIOPS_WEB_DIR the development bundle apps/web/dist is used', () => {
+  it('UI-5 without MANDATE_WEB_DIR the development bundle apps/web/dist is used', () => {
     expect(resolveWebDir(undefined).endsWith(join('apps', 'web', 'dist'))).toBe(true);
   });
 
   it('UI-5 a missing bundle answers 404 and logs one line, with the security headers still set', async () => {
     const warn = vi.fn();
-    const controller = new WebAppController({ webDir: '/nonexistent-aiops-web-dir' } as ApiEnv, { warn } as unknown as Logger);
+    const controller = new WebAppController({ webDir: '/nonexistent-mandate-web-dir' } as ApiEnv, { warn } as unknown as Logger);
     const headers = new Map<string, string>();
     const status = vi.fn().mockReturnThis();
     const res = {

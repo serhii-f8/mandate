@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import type { LoadedConfiguration } from '@aiops/config';
+import type { LoadedConfiguration } from '@mandate/config';
 import type {
   CodeAdapter,
   CodeCallResult,
@@ -9,8 +9,8 @@ import type {
   ReadOutcome,
   RecordSendOutcome,
   RecordWriteAdapter,
-} from '@aiops/connector-sdk';
-import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
+} from '@mandate/connector-sdk';
+import type { CredentialHandle, CredentialStatus, CredentialVault } from '@mandate/core';
 import { loadCodeFixture } from '../test/code-fixture.js';
 import type { UpstreamCallLog } from './read.js';
 import { createCodeRecordWriter, createPerRecordWriter, type DirectWriterDeps } from './record-writers.js';

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * What `changesetWorkflow` leaves in Temporal history (SEC-3, SEC-4): every payload the platform
  * puts there is encrypted, and failure messages are encoded fixed codes.
  */
-import { CHANGESET_WORKFLOW, createPayloadCodec, parseTemporalKeys, WAKE_SIGNAL } from '@aiops/temporal';
-import type { ChangeItemRecord } from '@aiops/core';
-import { ScriptedWriter } from '@aiops/testing';
+import { CHANGESET_WORKFLOW, createPayloadCodec, parseTemporalKeys, WAKE_SIGNAL } from '@mandate/temporal';
+import type { ChangeItemRecord } from '@mandate/core';
+import { ScriptedWriter } from '@mandate/testing';
 import type { WorkflowHandle } from '@temporalio/client';
 import { defaultPayloadConverter } from '@temporalio/common';
 import { historyToJSON } from '@temporalio/common/lib/proto-utils';

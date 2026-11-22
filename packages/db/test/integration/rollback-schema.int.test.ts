@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,7 +9,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startPostgres, type StartedPostgres } from '@aiops/testing';
+import { startPostgres, type StartedPostgres } from '@mandate/testing';
 import { runMigrations } from '../../src/migrate.js';
 
 const MIGRATIONS = fileURLToPath(new URL('../../migrations', import.meta.url));
@@ -117,7 +117,7 @@ function migrationsAfter(idx: number): number {
 
 /** The committed migrations up to and including 0011, as the previous release shipped them. */
 function migrationsBefore0012(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'aiops-mig-'));
+  const dir = mkdtempSync(join(tmpdir(), 'mandate-mig-'));
   cpSync(MIGRATIONS, dir, { recursive: true });
   for (const file of readdirSync(dir)) {
     if (file.startsWith('0012_')) rmSync(join(dir, file));

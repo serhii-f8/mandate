@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { AuditReader, AuditRecord, AuditSearchFilter } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import type { AuditReader, AuditRecord, AuditSearchFilter } from '@mandate/core';
 import type pg from 'pg';
 import { CHAIN_COLUMNS, chainFields, safeInteger } from './audit-chain.js';
 import { guarded } from './errors.js';

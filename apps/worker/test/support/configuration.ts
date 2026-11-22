@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * A loaded configuration for worker tests: one connection, the read operation
  * `catalog.get_products`, the write operation `catalog.update_content` with a manifest
@@ -8,7 +8,7 @@
  * the role `reviewer` granted to `reviewers` (no grants). The opaque operation `catalog.notify_team`
  * (`write_opaque`, one `POST /V1/notes`) is granted to `editor` and `approving_editor`.
  */
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
 
 export const WRITE_OPERATION = 'catalog.update_content';
 export const READ_OPERATION = 'catalog.get_products';

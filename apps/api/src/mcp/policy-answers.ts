@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** How a policy decision is recorded (POL-8) and how a denial is answered, for the pipeline and the built-ins. */
 import type { CallToolResult } from '@modelcontextprotocol/server';
-import { policyDecisionAuditEvent, type AuditLog, type Caller, type DenyReason, type PolicyDecision } from '@aiops/core';
+import { policyDecisionAuditEvent, type AuditLog, type Caller, type DenyReason, type PolicyDecision } from '@mandate/core';
 
 const REASON_TEXT: Readonly<Record<DenyReason, (detail: string) => string>> = {
   no_grant: () => 'the operation is not granted to you',

@@ -53,8 +53,8 @@ and Ajv for operation input schemas. Nothing fixes the file layout or the error 
    rename fields before the first release.
 
 `packages/config` depends on `packages/core` for the policy model types, and produces
-core-typed values; `core` stays dependency-free. CLI: `aiops-config validate <dir>`
-(exit 0 / 1 / 2), root script `pnpm aiops-config`.
+core-typed values; `core` stays dependency-free. CLI: `mandate-config validate <dir>`
+(exit 0 / 1 / 2), root script `pnpm mandate-config`.
 
 Webhook URLs are credentials (chat webhooks embed a token), hence `url_credential_ref`.
 

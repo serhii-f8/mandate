@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { Fragment, type ReactElement } from 'react';
 import { ActionBar } from '../components/ActionBar.js';
 import { Notice } from '../components/Notice.js';

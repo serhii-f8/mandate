@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { NotificationError } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import type { NotificationError } from '@mandate/core';
 import nodemailer from 'nodemailer';
 import type { EmailSender, SendOutcome } from './senders.js';
 
@@ -19,7 +19,7 @@ function errorOf(err: unknown): NotificationError {
 }
 
 /**
- * Plain-text e-mail over SMTP (NTF-1). `url` is `AIOPS_SMTP_URL`, already validated by
+ * Plain-text e-mail over SMTP (NTF-1). `url` is `MANDATE_SMTP_URL`, already validated by
  * `parseWorkerEnv`; user info, when present, is the relay login. One connection per message.
  */
 export function createSmtpSender(opts: { url: string; from: string; timeoutMs?: number }): EmailSender {

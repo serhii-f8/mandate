@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * `rollback_changeset` and the rollback block of `get_changeset` end to end over the real MCP
  * transport, against PostgreSQL with the in-memory executor (MCP-8, UI-4, SEC-1, MCP-6, AUD-1).
@@ -7,8 +7,8 @@
  */
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
-import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { createDb, PostgresChangeSetRepository, type Database } from '@mandate/db';
+import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { seedExecuted } from './approval-seed.js';
 import { auditRows, connectClient, startApi, startDatabase, tokenFor, type RunningApi } from './helpers.js';
 

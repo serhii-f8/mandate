@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { Resolver } from '@aiops/adapters';
-import type { CredentialHandle } from '@aiops/core';
+import type { Resolver } from '@mandate/adapters';
+import type { CredentialHandle } from '@mandate/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SendOutcome, WebhookTarget } from './senders.js';
 import { createWebhookSender, slackEscape } from './webhook.js';

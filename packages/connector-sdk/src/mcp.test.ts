@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { canonicalJson, mcpToolHash, type McpToolDefinition } from './index.js';
@@ -53,7 +53,7 @@ describe('CONN-4 MCP tool hash', () => {
       'sha256:' +
       createHash('sha256')
         .update(
-          '{"annotations":null,"description":null,"format":"aiops.mcp-tool.v1","inputSchema":{"type":"object"},"name":"echo","outputSchema":null,"title":null}',
+          '{"annotations":null,"description":null,"format":"mandate.mcp-tool.v1","inputSchema":{"type":"object"},"name":"echo","outputSchema":null,"title":null}',
         )
         .digest('hex');
     expect(mcpToolHash({ name: 'echo', inputSchema: { type: 'object' } })).toBe(expected);

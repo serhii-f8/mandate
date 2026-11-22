@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The `rollback` block of the detail answers (UI-4, EXE-8): `get_changeset`, the page detail and
  * `review_changeset` all report it through `rollbackBlock`, which asks the one eligibility function
@@ -13,7 +13,7 @@ import {
   type RollbackCounts,
   type RollbackEligibilityDeps,
   type RollbackReason,
-} from '@aiops/core';
+} from '@mandate/core';
 import type { Snapshot } from '../mcp/tool-pipeline.js';
 
 export interface RollbackBlock {

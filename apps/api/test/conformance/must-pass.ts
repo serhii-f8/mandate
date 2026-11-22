@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Conformance scenarios the platform implements (NFR-16, MCP-1): each must run, report at least
  * one check and have no failing check. A baseline may never excuse one of them wholesale; it may

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import { BatchFenced, type ChangeWriter, type ExecutionGuard, type ItemOutcome } from '@aiops/core';
-import { CHANGESET_WORKFLOW, PROGRESS_QUERY, WAKE_SIGNAL, type WorkflowProgress } from '@aiops/temporal';
-import { ScriptedWriter } from '@aiops/testing';
+// Copyright 2026 The Mandate Authors
+import { BatchFenced, type ChangeWriter, type ExecutionGuard, type ItemOutcome } from '@mandate/core';
+import { CHANGESET_WORKFLOW, PROGRESS_QUERY, WAKE_SIGNAL, type WorkflowProgress } from '@mandate/temporal';
+import { ScriptedWriter } from '@mandate/testing';
 import type { WorkflowHandle } from '@temporalio/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { changesetWorkflow } from '../../src/workflows/changeset.js';

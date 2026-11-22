@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { VersionedKeys } from '@aiops/core';
+import type { VersionedKeys } from '@mandate/core';
 import { defaultPayloadConverter, type DataConverter, type LoadedDataConverter } from '@temporalio/common';
 import { createPayloadCodec } from './codec.js';
 import { failureConverter } from './failure-converter.js';

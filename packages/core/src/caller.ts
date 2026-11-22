@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** The identity on whose behalf a request runs. Built from a verified token from Phase 2 on. */
 export interface Caller {
   /** Stable user identifier (the token's `sub`, or `anonymous`). */

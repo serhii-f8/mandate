@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The rollback window and compensation of `changesetWorkflow` (EXE-8, ADR 0042) on a real Temporal
  * test server and PostgreSQL: after a finished status the workflow keeps a window open, a stored
@@ -7,12 +7,12 @@
  * Task 10 the executor's request is stood in for by `repository.requestRollback` plus `wake`.
  */
 import { randomUUID } from 'node:crypto';
-import { createOpenApiAdapter } from '@aiops/adapters';
-import type { LoadedConfiguration } from '@aiops/config';
-import { createChangeSet, ROLLBACK_REQUEST_MARGIN_MS, type BatchContext, type ChangeItemRecord, type ChangeSetRecord, type ItemOutcome } from '@aiops/core';
-import { CHANGESET_WORKFLOW, WAKE_SIGNAL } from '@aiops/temporal';
-import { installFakeMagentoCatalog, ScriptedWriter, startFakeUpstream, type FakeMagentoCatalog, type FakeUpstream } from '@aiops/testing';
-import { createUpstreamReader } from '@aiops/upstream';
+import { createOpenApiAdapter } from '@mandate/adapters';
+import type { LoadedConfiguration } from '@mandate/config';
+import { createChangeSet, ROLLBACK_REQUEST_MARGIN_MS, type BatchContext, type ChangeItemRecord, type ChangeSetRecord, type ItemOutcome } from '@mandate/core';
+import { CHANGESET_WORKFLOW, WAKE_SIGNAL } from '@mandate/temporal';
+import { installFakeMagentoCatalog, ScriptedWriter, startFakeUpstream, type FakeMagentoCatalog, type FakeUpstream } from '@mandate/testing';
+import { createUpstreamReader } from '@mandate/upstream';
 import type { WorkflowHandle } from '@temporalio/client';
 import { NativeConnection } from '@temporalio/worker';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';

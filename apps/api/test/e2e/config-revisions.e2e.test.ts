@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createOpenApiAdapter } from '@aiops/adapters';
+import { createOpenApiAdapter } from '@mandate/adapters';
 import {
   ConfigurationHolder,
   loadConfigurationDirectory,
@@ -16,10 +16,10 @@ import {
   type ConfigurationLogger,
   type ConfigurationSync,
   type LoadOptions,
-} from '@aiops/config';
-import { createDb, DrizzleAuditLog, PostgresConfigRevisionStore, runMigrations, type Database } from '@aiops/db';
-import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@aiops/testing';
-import { configurationLoadOptions } from '@aiops/upstream';
+} from '@mandate/config';
+import { createDb, DrizzleAuditLog, PostgresConfigRevisionStore, runMigrations, type Database } from '@mandate/db';
+import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@mandate/testing';
+import { configurationLoadOptions } from '@mandate/upstream';
 import { auditRows, connectClient, FIXTURE_CONFIG, rawPost, startApi, startDatabase, tokenFor, type RunningApi } from './helpers.js';
 
 const GRANTED = 'support.lookup_order';
@@ -42,7 +42,7 @@ let appliedRevision: { id: string; hash: string } | undefined;
 beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-revisions-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-revisions-e2e-'));
   await cp(FIXTURE_CONFIG, configDir, { recursive: true });
   const adapter = createOpenApiAdapter();
   load = configurationLoadOptions(adapter, { presetDirs: [] });
@@ -98,7 +98,7 @@ describe('CFG-3 CFG-4 the api follows applied revisions', () => {
     const editor = await tokenFor(issuer, api, 'editor-id', ['content']);
     expect(await toolNames(editor, api.url)).not.toContain(GRANTED);
 
-    editedDir = await mkdtemp(join(tmpdir(), 'aiops-revisions-edit-'));
+    editedDir = await mkdtemp(join(tmpdir(), 'mandate-revisions-edit-'));
     await cp(configDir, editedDir, { recursive: true });
     const roles = await readFile(join(editedDir, 'roles.yaml'), 'utf8');
     const granted = roles.replace('        deny_fields: [cost]\n', `        deny_fields: [cost]\n      - operation: ${GRANTED}\n`);
@@ -111,7 +111,7 @@ describe('CFG-3 CFG-4 the api follows applied revisions', () => {
     const before = holder.state();
     if (before.status !== 'active') throw new Error('no active configuration before the apply');
 
-    // Another connection: the store's own pool on a separate handle, as `aiops config apply` would use.
+    // Another connection: the store's own pool on a separate handle, as `mandate config apply` would use.
     const cli = createDb(databaseUrl, { onError: () => undefined });
     try {
       const id = randomUUID();

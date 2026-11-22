@@ -1,5 +1,5 @@
 {
-  "name": "@aiops/db",
+  "name": "@mandate/db",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
   "license": "Apache-2.0",
   "exports": {
     ".": {
-      "@aiops/source": "./src/index.ts",
+      "@mandate/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
@@ -25,12 +25,12 @@
     "db:generate": "drizzle-kit generate"
   },
   "devDependencies": {
-    "@aiops/testing": "workspace:*",
+    "@mandate/testing": "workspace:*",
     "@types/pg": "8.23.1",
     "drizzle-kit": "0.31.11"
   },
   "dependencies": {
-    "@aiops/core": "workspace:*",
+    "@mandate/core": "workspace:*",
     "drizzle-orm": "0.45.4",
     "pg": "8.23.1"
   }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { ConnectionSettings, CredentialSource, RequestAttempt, RequestAttemptEnd, RequestInstrumentation } from '@aiops/connector-sdk';
-import { startFakeUpstream, type FakeUpstream } from '@aiops/testing';
+// Copyright 2026 The Mandate Authors
+import type { ConnectionSettings, CredentialSource, RequestAttempt, RequestAttemptEnd, RequestInstrumentation } from '@mandate/connector-sdk';
+import { startFakeUpstream, type FakeUpstream } from '@mandate/testing';
 import { createServer, type Server } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { HttpRequestSpec } from '../openapi/request.js';

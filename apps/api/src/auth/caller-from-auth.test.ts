@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { AuthInfo } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
 import { callerFromAuthInfo } from './caller-from-auth.js';
 
 const TOKEN = 'eyJhbGciOiJSUzI1NiJ9.secret-token-body.signature';
 
-function info(extra: Record<string, unknown>, clientId = 'aiops-mcp'): AuthInfo {
+function info(extra: Record<string, unknown>, clientId = 'mandate-mcp'): AuthInfo {
   return { token: '', clientId, scopes: [], extra };
 }
 
@@ -14,7 +14,7 @@ describe('AUTH-3 groups claim', () => {
   it('takes subject, client and groups from the verified token', () => {
     expect(callerFromAuthInfo(info({ sub: 'alice-id', groups: ['content', 'leads'] }))).toEqual({
       subject: 'alice-id',
-      clientId: 'aiops-mcp',
+      clientId: 'mandate-mcp',
       groups: ['content', 'leads'],
     });
   });
@@ -59,15 +59,15 @@ describe('AUTH-7 the access token never leaves authentication', () => {
 
 describe('AUTH-4 service caller', () => {
   it('AUTH-4 extra.service builds the service subject and ignores groups', () => {
-    expect(callerFromAuthInfo(info({ sub: 'kc-id', groups: ['content'], service: 'aiops-sa-ci' }, 'aiops-sa-ci'))).toEqual({
-      subject: 'service:aiops-sa-ci',
-      clientId: 'aiops-sa-ci',
+    expect(callerFromAuthInfo(info({ sub: 'kc-id', groups: ['content'], service: 'mandate-sa-ci' }, 'mandate-sa-ci'))).toEqual({
+      subject: 'service:mandate-sa-ci',
+      clientId: 'mandate-sa-ci',
       groups: [],
     });
   });
 
   it('AUTH-6 AUTH-4 a service caller never carries authTime', () => {
-    const caller = callerFromAuthInfo(info({ sub: 'kc-id', service: 'aiops-sa-ci', auth_time: 1_794_909_570 }, 'aiops-sa-ci'));
+    const caller = callerFromAuthInfo(info({ sub: 'kc-id', service: 'mandate-sa-ci', auth_time: 1_794_909_570 }, 'mandate-sa-ci'));
     expect(Object.keys(caller)).not.toContain('authTime');
   });
 

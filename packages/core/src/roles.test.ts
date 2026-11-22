@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import type { RoleMappingEntry } from './policy-model.js';
 import { callerKind, resolveRoles, rolesOf, serviceClientOf } from './roles.js';
@@ -33,15 +33,15 @@ describe('AUTH-3 roles from group claims', () => {
 });
 
 describe('AUTH-4 rolesOf', () => {
-  const serviceAccounts = [{ clientId: 'aiops-sa-ci', role: 'integration' }];
+  const serviceAccounts = [{ clientId: 'mandate-sa-ci', role: 'integration' }];
 
   it('AUTH-4 a service subject gets exactly its configured role and its groups are ignored', () => {
-    expect(rolesOf({ subject: 'service:aiops-sa-ci', groups: ['content'] }, { roleMapping: mapping, serviceAccounts })).toEqual(['integration']);
+    expect(rolesOf({ subject: 'service:mandate-sa-ci', groups: ['content'] }, { roleMapping: mapping, serviceAccounts })).toEqual(['integration']);
   });
 
   it('AUTH-4 POL-1 an unconfigured service subject has no roles', () => {
     expect(rolesOf({ subject: 'service:other', groups: ['content'] }, { roleMapping: mapping, serviceAccounts })).toEqual([]);
-    expect(rolesOf({ subject: 'service:aiops-sa-ci', groups: ['content'] }, { roleMapping: mapping })).toEqual([]);
+    expect(rolesOf({ subject: 'service:mandate-sa-ci', groups: ['content'] }, { roleMapping: mapping })).toEqual([]);
   });
 
   it('AUTH-3 a user subject keeps group resolution', () => {

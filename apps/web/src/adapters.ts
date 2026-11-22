@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type {
   ApprovalStateModel,
   ApprovalViewModel,
@@ -7,7 +7,7 @@ import type {
   ItemFilter,
   ItemRowModel,
   ItemsPageModel,
-} from '@aiops/widgets';
+} from '@mandate/widgets';
 import type { ChangeSetDetail, ItemRow, ItemsPage, Sample } from './api.js';
 
 /** The page entry's mapping from the typed REST answers to the shared view models (UI-1). */

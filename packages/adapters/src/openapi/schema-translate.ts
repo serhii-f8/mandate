@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * OpenAPI schema objects (Swagger 2.0, OAS 3.0, OAS 3.1) to JSON Schema 2020-12 that Ajv
  * accepts in strict mode (CONN-2, ADR 0018 decision 3).
@@ -18,7 +18,7 @@
 // exports the `FormatName` type, not the names. schema-translate.test.ts fails if this path
 // breaks or drifts from the formats the plugin registers.
 import { formatNames } from 'ajv-formats/dist/formats.js';
-import type { SpecIssue } from '@aiops/connector-sdk';
+import type { SpecIssue } from '@mandate/connector-sdk';
 
 export const MAX_REF_DEPTH = 8;
 

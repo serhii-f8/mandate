@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { ConnectionSettings, CredentialSource, RequestAttempt, RequestInstrumentation, UpstreamMapping } from '@aiops/connector-sdk';
-import { startFakeUpstream, type FakeUpstream } from '@aiops/testing';
+// Copyright 2026 The Mandate Authors
+import type { ConnectionSettings, CredentialSource, RequestAttempt, RequestInstrumentation, UpstreamMapping } from '@mandate/connector-sdk';
+import { startFakeUpstream, type FakeUpstream } from '@mandate/testing';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -19,7 +19,7 @@ let seq = 0;
 
 beforeEach(async () => {
   up = await startFakeUpstream();
-  tmp = await mkdtemp(join(tmpdir(), 'aiops-adapter-'));
+  tmp = await mkdtemp(join(tmpdir(), 'mandate-adapter-'));
   clearTokenCache();
 });
 afterEach(async () => {

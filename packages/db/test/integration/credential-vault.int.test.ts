@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { startPostgres, type StartedPostgres } from '@aiops/testing';
+import { startPostgres, type StartedPostgres } from '@mandate/testing';
 import { createDb, type Database } from '../../src/client.js';
 import { PostgresCredentialVault } from '../../src/credential-vault.js';
 import { parseMasterKeys } from '../../src/keyring.js';

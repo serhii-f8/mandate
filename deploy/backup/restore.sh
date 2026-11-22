@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 # Restores a backup written by deploy/backup/backup.sh into this Compose installation (NFR-13).
 # Usage: bash deploy/backup/restore.sh <backup-dir> [--force]
-# Order: check the SHA-256 sums (before any docker call), start PostgreSQL, refuse a non-empty aiops
+# Order: check the SHA-256 sums (before any docker call), start PostgreSQL, refuse a non-empty mandate
 # database or audit archive unless --force, stop everything that uses the databases, pg_restore each
 # database as its owner, restore the audit archive volume, compare the audit verify line with the
 # manifest while api and worker are still stopped, then start the stack and verify the chain again.
@@ -12,9 +12,9 @@
 set -euo pipefail
 
 # Database and owner role, as created by deploy/postgres/init.sh.
-DATABASES=(aiops:aiops temporal:temporal temporal_visibility:temporal keycloak:keycloak)
-FILES=(aiops.dump temporal.dump temporal_visibility.dump keycloak.dump audit-archive.tar)
-ARCHIVE_DIR=/var/lib/aiops/audit-archive
+DATABASES=(mandate:mandate temporal:temporal temporal_visibility:temporal keycloak:keycloak)
+FILES=(mandate.dump temporal.dump temporal_visibility.dump keycloak.dump audit-archive.tar)
+ARCHIVE_DIR=/var/lib/mandate/audit-archive
 USERS_OF_DB=(api worker temporal temporal-namespace temporal-schema keycloak keycloak-setup)
 
 fail() {
@@ -64,17 +64,17 @@ echo "restore: checksums ok, backup audit head $HEAD" >&2
 docker compose up -d --wait postgres >&2
 
 # 3. Never overwrite an audit trail by mistake: neither audit rows nor archive files without --force.
-# A database without the aiops tables (fresh volume, init.sh only) counts as empty.
-psql_aiops() { docker compose exec -T postgres psql -U postgres -d aiops -v ON_ERROR_STOP=1 -tAc "$1"; }
+# A database without the mandate tables (fresh volume, init.sh only) counts as empty.
+psql_mandate() { docker compose exec -T postgres psql -U postgres -d mandate -v ON_ERROR_STOP=1 -tAc "$1"; }
 # Every probe fails closed: a probe that errors or answers anything but t/f (or empty/nonempty) stops
 # the restore; a failure is never read as "empty".
 yes_no() {
   local answer
-  answer="$(psql_aiops "$1")" || fail "cannot inspect the aiops database ($2); nothing was restored"
+  answer="$(psql_mandate "$1")" || fail "cannot inspect the mandate database ($2); nothing was restored"
   answer="$(printf '%s' "$answer" | tr -d ' \r\n')"
   case "$answer" in
     t | f) printf '%s' "$answer" ;;
-    *) fail "cannot inspect the aiops database ($2): unexpected answer '$answer'; nothing was restored" ;;
+    *) fail "cannot inspect the mandate database ($2): unexpected answer '$answer'; nothing was restored" ;;
   esac
 }
 HAS_TABLE="$(yes_no "SELECT to_regclass('public.audit_event') IS NOT NULL" "audit table")"
@@ -86,7 +86,7 @@ if [ "$HAS_ROWS" = t ]; then
   if [ "$FORCE" = 1 ]; then
     echo "restore: database not empty; --force given, its audit trail is discarded" >&2
   else
-    fail "refusing: database not empty (aiops.audit_event has rows); pass --force to replace it"
+    fail "refusing: database not empty (mandate.audit_event has rows); pass --force to replace it"
   fi
 fi
 ARCHIVE_STATE="$(docker compose run --rm --no-deps -T --entrypoint sh api -c \

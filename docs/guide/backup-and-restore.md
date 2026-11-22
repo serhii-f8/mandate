@@ -8,18 +8,18 @@ and wiped, and after the restore the change-set is approved and completes.
 
 | What | Where | Taken by |
 | --- | --- | --- |
-| `aiops` database: configuration revisions, change-sets, approvals, the audit trail, encrypted upstream credentials | PostgreSQL | `backup.sh` |
+| `mandate` database: configuration revisions, change-sets, approvals, the audit trail, encrypted upstream credentials | PostgreSQL | `backup.sh` |
 | `temporal` and `temporal_visibility` databases: the running workflows, for example a change-set waiting for approval | PostgreSQL | `backup.sh` |
 | `keycloak` database: realm, users, groups, clients and their secrets, signing keys | PostgreSQL | `backup.sh` |
 | Audit archive volume (`audit-archive`): the files audit retention writes before it deletes old rows | Docker volume | `backup.sh` |
-| `.env`: `AIOPS_MASTER_KEYS`, `AIOPS_TEMPORAL_KEYS`, `AIOPS_WEB_CLIENT_SECRET`, the database and Keycloak admin passwords | the repository root | you, in your secret store |
+| `.env`: `MANDATE_MASTER_KEYS`, `MANDATE_TEMPORAL_KEYS`, `MANDATE_WEB_CLIENT_SECRET`, the database and Keycloak admin passwords | the repository root | you, in your secret store |
 | Your configuration directory (for example `my-config/`) | the repository root | you, in version control |
 
 The scripts never copy `.env`. Keep its secrets in your secret store, apart from the backups: the
-credentials in the `aiops` database are encrypted with `AIOPS_MASTER_KEYS`, and the workflow data in
-Temporal with `AIOPS_TEMPORAL_KEYS`. A backup restored without the same keys starts, but cannot
+credentials in the `mandate` database are encrypted with `MANDATE_MASTER_KEYS`, and the workflow data in
+Temporal with `MANDATE_TEMPORAL_KEYS`. A backup restored without the same keys starts, but cannot
 decrypt either. The configuration files only seed an empty database; the active revision is in the
-`aiops` database and comes back with it.
+`mandate` database and comes back with it.
 
 The backup itself holds personal data, password hashes and encrypted credentials. The script
 creates its directory readable by your user only; store and transfer it like the database.
@@ -54,7 +54,7 @@ project name, export `COMPOSE_PROJECT_NAME` (or set it in `.env`) rather than pa
 
 ### Consistency
 
-While `api` and `worker` are stopped nothing writes to the `aiops` database: no MCP calls are
+While `api` and `worker` are stopped nothing writes to the `mandate` database: no MCP calls are
 served, no change-set moves and no audit row is written or sealed. That is what makes the audit head
 state in the manifest exact. The stop lasts as long as the dumps, seconds for a small installation. MCP
 clients get errors meanwhile; a batch the worker was writing is retried by Temporal after
@@ -62,7 +62,7 @@ the start, as after any worker restart.
 
 Temporal, Keycloak and PostgreSQL keep running. Each database is dumped as one consistent snapshot;
 with `api` and `worker` stopped, no new workflow starts and no running one makes progress, so the
-workflows in the `temporal` database match the `aiops` database. The databases are dumped one after
+workflows in the `temporal` database match the `mandate` database. The databases are dumped one after
 the other, and Temporal's own timers keep firing meanwhile, so `temporal_visibility` can lag
 `temporal` slightly; Temporal reconciles it, and only workflow search results are affected.
 
@@ -83,7 +83,7 @@ The script:
 
 1. checks the SHA-256 sum of every file against the manifest, before it touches anything;
 2. starts `postgres`;
-3. refuses with `refusing: database not empty` (exit 1) when the `aiops` database already has audit
+3. refuses with `refusing: database not empty` (exit 1) when the `mandate` database already has audit
    rows, and with `refusing: audit archive not empty` when the audit archive volume has files, so it
    never overwrites a live installation by mistake;
 4. stops `api`, `worker`, Temporal, Keycloak and their setup jobs;
@@ -117,9 +117,9 @@ exactly the sealed and unsealed audit rows counted at backup time, and the hash 
 retention anchor up to the recorded head is intact. Check
 the rest as you would after any start:
 
-- `curl -fsS "http://localhost:${AIOPS_API_PORT:-8400}/readyz"` answers 200;
+- `curl -fsS "http://localhost:${MANDATE_API_PORT:-8400}/readyz"` answers 200;
 - the connection test on the credential page reports `ok`: the restored credential decrypts with
-  your `AIOPS_MASTER_KEYS`;
+  your `MANDATE_MASTER_KEYS`;
 - the approval queue shows the change-sets that were waiting at backup time; approving one starts its
   writes.
 
@@ -131,8 +131,8 @@ database. Those files are then the only copy of the deleted rows, which is why t
 the volume. After a restore, check an archive against its manifest and its anchor:
 
 ```bash
-docker compose exec -T api ls /var/lib/aiops/audit-archive
-docker compose exec -T api node dist/cli.js audit verify --archive /var/lib/aiops/audit-archive/<file>.jsonl
+docker compose exec -T api ls /var/lib/mandate/audit-archive
+docker compose exec -T api node dist/cli.js audit verify --archive /var/lib/mandate/audit-archive/<file>.jsonl
 ```
 
 It answers `ok archive count=<n> first=<a> last=<b>`.
@@ -150,19 +150,19 @@ the first bulk update wrote.
 <!-- doc-test: backup -->
 ```bash
 export DEV_PASSWORD=dev-only-password
-ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${AIOPS_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${AIOPS_API_PORT:-8400}/mcp")"
+ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${MANDATE_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${MANDATE_API_PORT:-8400}/mcp")"
 export BACKUP_KEYWORD="guide backup $(date -u +%Y%m%dT%H%M%SZ)"
-PREPARED="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool catalog.update_content --args "{\"brand\":\"acme\",\"name_like\":\"%\",\"changes\":{\"meta_keyword\":\"$BACKUP_KEYWORD\"}}")"
+PREPARED="$(MANDATE_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${MANDATE_API_PORT:-8400}/mcp" --tool catalog.update_content --args "{\"brand\":\"acme\",\"name_like\":\"%\",\"changes\":{\"meta_keyword\":\"$BACKUP_KEYWORD\"}}")"
 export PENDING_ID="$(node -p 'const r = JSON.parse(process.argv[1]).structuredContent; r.changeset?.id ?? r.changesetId' "$PREPARED")"
 for i in $(seq 1 60); do
-  CHANGESET="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$PENDING_ID\"}")"
+  CHANGESET="$(MANDATE_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${MANDATE_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$PENDING_ID\"}")"
   STATUS="$(node -p 'JSON.parse(process.argv[1]).structuredContent.changeset.status' "$CHANGESET")"
   test "$STATUS" != preparing && break
   sleep 2
 done
 test "$STATUS" = prepared || { echo "change-set $PENDING_ID is $STATUS, not prepared" >&2; false; }
 export PENDING_HASH="$(node -p 'JSON.parse(process.argv[1]).structuredContent.changeset.hash' "$CHANGESET")"
-SUBMITTED="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool submit_for_approval --args "{\"changeset_id\":\"$PENDING_ID\",\"hash\":\"$PENDING_HASH\"}")"
+SUBMITTED="$(MANDATE_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${MANDATE_API_PORT:-8400}/mcp" --tool submit_for_approval --args "{\"changeset_id\":\"$PENDING_ID\",\"hash\":\"$PENDING_HASH\"}")"
 test "$(node -p 'JSON.parse(process.argv[1]).structuredContent.status' "$SUBMITTED")" = pending_approval
 ```
 
@@ -189,8 +189,8 @@ The first change-set is still `completed`:
 
 <!-- doc-test: backup -->
 ```bash
-ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${AIOPS_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${AIOPS_API_PORT:-8400}/mcp")"
-FIRST="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$CHANGESET_ID\"}")"
+ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${MANDATE_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${MANDATE_API_PORT:-8400}/mcp")"
+FIRST="$(MANDATE_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${MANDATE_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$CHANGESET_ID\"}")"
 node -p 'JSON.parse(process.argv[1]).structuredContent.changeset.status' "$FIRST"
 test "$(node -p 'JSON.parse(process.argv[1]).structuredContent.changeset.status' "$FIRST")" = completed
 ```
@@ -202,10 +202,10 @@ browser:
 
 <!-- doc-test: backup -->
 ```bash
-DAVE_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${AIOPS_API_PORT:-8400}" dave "$DEV_PASSWORD" "/app/changesets/$PENDING_ID")"
-VIEW="$(AIOPS_PAGE_COOKIE="$DAVE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" changeset "$PENDING_ID")"
+DAVE_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${MANDATE_API_PORT:-8400}" dave "$DEV_PASSWORD" "/app/changesets/$PENDING_ID")"
+VIEW="$(MANDATE_PAGE_COOKIE="$DAVE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${MANDATE_API_PORT:-8400}" changeset "$PENDING_ID")"
 test "$(node -p 'JSON.parse(process.argv[1]).body.hash' "$VIEW")" = "$PENDING_HASH"
-DECIDED="$(AIOPS_PAGE_COOKIE="$DAVE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" decide "$PENDING_ID" approve "$PENDING_HASH" "$(node -p 'JSON.parse(process.argv[1]).body.stats.included' "$VIEW")")"
+DECIDED="$(MANDATE_PAGE_COOKIE="$DAVE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${MANDATE_API_PORT:-8400}" decide "$PENDING_ID" approve "$PENDING_HASH" "$(node -p 'JSON.parse(process.argv[1]).body.stats.included' "$VIEW")")"
 echo "$DECIDED"
 test "$(node -p 'JSON.parse(process.argv[1]).status' "$DECIDED")" = 200
 ```
@@ -214,9 +214,9 @@ Follow it to the end:
 
 <!-- doc-test: backup -->
 ```bash
-ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${AIOPS_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${AIOPS_API_PORT:-8400}/mcp")"
+ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${MANDATE_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${MANDATE_API_PORT:-8400}/mcp")"
 for i in $(seq 1 120); do
-  CHANGESET="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$PENDING_ID\"}")"
+  CHANGESET="$(MANDATE_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${MANDATE_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$PENDING_ID\"}")"
   STATUS="$(node -p 'JSON.parse(process.argv[1]).structuredContent.changeset.status' "$CHANGESET")"
   case "$STATUS" in completed|completed_with_errors|failed|cancelled|expired|rolled_back) break ;; esac
   sleep 2
@@ -230,8 +230,8 @@ connection `magento`). It reports `ok`: the restored credential decrypts. Withou
 
 <!-- doc-test: backup -->
 ```bash
-CAROL_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${AIOPS_API_PORT:-8400}" carol "$DEV_PASSWORD" /app/credentials)"
-REPORT="$(AIOPS_PAGE_COOKIE="$CAROL_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" test magento)"
+CAROL_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${MANDATE_API_PORT:-8400}" carol "$DEV_PASSWORD" /app/credentials)"
+REPORT="$(MANDATE_PAGE_COOKIE="$CAROL_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${MANDATE_API_PORT:-8400}" test magento)"
 echo "$REPORT"
 test "$(node -p 'JSON.parse(process.argv[1]).body.ok' "$REPORT")" = true
 ```

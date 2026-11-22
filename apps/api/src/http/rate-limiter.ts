@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Per-endpoint request limits (SEC-10): a fixed one-minute window per key, counted in the shared
  * `RateCounter` so every api instance sees one budget (NFR-3). A failing counter fails closed.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
-import type { LoadedConfiguration } from '@aiops/config';
-import { serviceClientOf, type AuditLog, type RateCounter } from '@aiops/core';
+import type { LoadedConfiguration } from '@mandate/config';
+import { serviceClientOf, type AuditLog, type RateCounter } from '@mandate/core';
 import { minuteWindow } from './rate-window.js';
 
 export type LimitScope = 'mcp' | 'unauthenticated';

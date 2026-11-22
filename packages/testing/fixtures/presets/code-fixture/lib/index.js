@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Code module of the code fixture preset (OPS-5, OPS-6). Plain ESM with no imports: a preset's
 // code runs from a directory outside the app's node_modules, so it uses only its own files.
 // The JSDoc types name the connector SDK as types only.
 
-/** @typedef {import('@aiops/connector-sdk').CodeContext} CodeContext */
-/** @typedef {import('@aiops/connector-sdk').CodeWriteContext} CodeWriteContext */
-/** @typedef {import('@aiops/connector-sdk').CodeArgs} CodeArgs */
-/** @typedef {import('@aiops/connector-sdk').WriteRecord} WriteRecord */
-/** @typedef {import('@aiops/connector-sdk').RecordOutcome} RecordOutcome */
-/** @typedef {import('@aiops/connector-sdk').CodeHttpResponse} CodeHttpResponse */
-/** @typedef {import('@aiops/connector-sdk').PresetModule} PresetModule */
+/** @typedef {import('@mandate/connector-sdk').CodeContext} CodeContext */
+/** @typedef {import('@mandate/connector-sdk').CodeWriteContext} CodeWriteContext */
+/** @typedef {import('@mandate/connector-sdk').CodeArgs} CodeArgs */
+/** @typedef {import('@mandate/connector-sdk').WriteRecord} WriteRecord */
+/** @typedef {import('@mandate/connector-sdk').RecordOutcome} RecordOutcome */
+/** @typedef {import('@mandate/connector-sdk').CodeHttpResponse} CodeHttpResponse */
+/** @typedef {import('@mandate/connector-sdk').PresetModule} PresetModule */
 
 /** Failures worth another attempt: rate limits, server errors and transport trouble. */
 const RETRIABLE_CODES = new Set(['timeout', 'network', 'busy']);

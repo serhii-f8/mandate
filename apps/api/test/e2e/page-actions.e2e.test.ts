@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { changesetTransitionEvent } from '@aiops/core';
-import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
-import { InMemoryExecutor, pageLogin, ScriptedWriter, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@aiops/testing';
+import { changesetTransitionEvent } from '@mandate/core';
+import { createDb, PostgresChangeSetRepository, type Database } from '@mandate/db';
+import { InMemoryExecutor, pageLogin, ScriptedWriter, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@mandate/testing';
 import { seedPending, seedPrepared, type Seeded } from './approval-seed.js';
 import { auditRows, startApi, startDatabase, type RunningApi } from './helpers.js';
 import { RecordingStarter } from './recording-starter.js';
@@ -47,7 +47,7 @@ interface Answer {
 beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
-  webDir = await mkdtemp(join(tmpdir(), 'aiops-web-e2e-'));
+  webDir = await mkdtemp(join(tmpdir(), 'mandate-web-e2e-'));
   await mkdir(join(webDir, 'assets'));
   await writeFile(join(webDir, 'index.html'), '<!doctype html><title>Approvals</title><div id="root"></div>');
   seedDb = createDb(databaseUrl, { onError: () => undefined });
@@ -129,7 +129,7 @@ describe('UI-3 SEC-8 page submit', () => {
     expect(executor.started).toContain(seeded.id);
     const rows = await auditRows(databaseUrl, "action = 'changeset.submit' and correlation_id = $1", [answer.correlationId]);
     expect(rows.map((r) => ({ outcome: r.outcome, actor: r.actor, client: r.client_id, subject: r.subject, details: r.details }))).toEqual([
-      { outcome: 'ok', actor: ALICE.sub, client: 'aiops-web', subject: seeded.id, details: { channel: 'page', status: 'executing' } },
+      { outcome: 'ok', actor: ALICE.sub, client: 'mandate-web', subject: seeded.id, details: { channel: 'page', status: 'executing' } },
     ]);
   });
 
@@ -252,7 +252,7 @@ describe('CS-5 page exclusions', () => {
       {
         outcome: 'ok',
         actor: ALICE.sub,
-        client: 'aiops-web',
+        client: 'mandate-web',
         subject: seeded.id,
         details: { channel: 'page', changesetId: body.id, derivedFrom: seeded.id, excludeCount: 1, includeCount: 0 },
       },

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The worker's writers per operation (design part 2 §4, design phase 9 §4; OPS-5, OPS-6, EXE-8,
  * OPS-3). Forward: an `OpaqueCallWriter` for an opaque operation (one call sent at most once,
@@ -14,8 +14,8 @@
  * activity passes in and to the correlation ID of the request that runs them (EXE-4): the
  * execution request's going forward, the rollback request's going back.
  */
-import type { CodeAdapter, ReadAdapter, RecordWriteAdapter, WriteAdapter } from '@aiops/connector-sdk';
-import type { LoadedConfiguration } from '@aiops/config';
+import type { CodeAdapter, ReadAdapter, RecordWriteAdapter, WriteAdapter } from '@mandate/connector-sdk';
+import type { LoadedConfiguration } from '@mandate/config';
 import {
   isOpaque,
   ManifestBatchWriter,
@@ -29,7 +29,7 @@ import {
   type DirectWriter,
   type OpaqueCaller,
   type WriteDirection,
-} from '@aiops/core';
+} from '@mandate/core';
 import {
   createBulkWriter,
   createCodeRecordWriter,
@@ -39,7 +39,7 @@ import {
   verifyPinNow,
   type ToolLister,
   type UpstreamCallLog,
-} from '@aiops/upstream';
+} from '@mandate/upstream';
 
 export interface WriterForDeps {
   readonly vault: CredentialVault;

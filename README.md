@@ -1,12 +1,12 @@
-# AI Operations Layer
+# Mandate
 
 **Let people change business systems from an AI client, without trusting the model.**
 
-[![CI](https://github.com/serhii-f8/fde/actions/workflows/ci.yml/badge.svg)](https://github.com/serhii-f8/fde/actions/workflows/ci.yml)
+[![CI](https://github.com/serhii-f8/mandate/actions/workflows/ci.yml/badge.svg)](https://github.com/serhii-f8/mandate/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 ![Version 1.0.0](https://img.shields.io/badge/version-1.0.0-informational.svg)
 
-The AI Operations Layer is a self-hosted, open-source [MCP](https://modelcontextprotocol.io) server
+Mandate is a self-hosted, open-source [MCP](https://modelcontextprotocol.io) server
 that sits between AI clients such as Claude or ChatGPT and your company's systems. It decides who
 may run which operation, turns every write into a reviewable change-set, waits for a person to
 approve exactly that change-set, executes it durably, and records everything.
@@ -32,8 +32,8 @@ This server keeps the convenience and removes the hoping:
 ## How it works
 
 ```
- AI client                 AI Operations Layer                     Business system
- ─────────                 ───────────────────                     ───────────────
+ AI client                 Mandate                                 Business system
+ ─────────                 ───────                                 ───────────────
  "Update the meta    ──►   1. verify login and role
   titles of all            2. read current values        ◄──────   Magento, Gitea,
   Acme products"           3. store diff as change-set             any REST API,
@@ -102,8 +102,8 @@ Each is described in [Use cases](docs/guide/use-cases.md).
 You need Docker with Compose v2, 4 CPU cores and 8 GB of RAM.
 
 ```bash
-git clone https://github.com/serhii-f8/fde.git ai-operations-layer
-cd ai-operations-layer
+git clone https://github.com/serhii-f8/mandate.git mandate
+cd mandate
 cp .env.example .env   # optional: the defaults work when ports 8400, 8480, 17233, 15432, 8025 are free
 docker compose up -d --build --wait
 ```

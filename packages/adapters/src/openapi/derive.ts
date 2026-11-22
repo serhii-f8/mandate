@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Derived catalog (CONN-2, design §4.3): one entry per imported operation, keyed
  * `<connection>:<operationId or "METHOD /path">`, with an input schema built from the
@@ -7,7 +7,7 @@
  * parameter from the argument of the same name. Credential-bearing headers are never
  * exposed as arguments.
  */
-import type { CatalogEntry, SpecIssue, TemplateValue, UpstreamMapping } from '@aiops/connector-sdk';
+import type { CatalogEntry, SpecIssue, TemplateValue, UpstreamMapping } from '@mandate/connector-sdk';
 import { FORBIDDEN_HEADERS } from '../http/headers.js';
 import type { NormalisedOperation } from './normalise.js';
 

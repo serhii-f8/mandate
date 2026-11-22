@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Preparation and start through the Temporal adapters (EXE-1, EXE-11): `TemporalWorkflowStarter`
  * starts one workflow per change-set, which prepares it and waits; `TemporalExecutor.start`
  * wakes the waiting workflow, or marks the change-set failed when Temporal is unreachable.
  */
 import { randomUUID } from 'node:crypto';
-import { createChangeSet, ExecutorUnavailable, type ChangeSetRecord, type ReadPage, type UpstreamReader } from '@aiops/core';
-import { clientDataConverter, parseTemporalKeys, TemporalExecutor } from '@aiops/temporal';
-import { ScriptedWriter } from '@aiops/testing';
+import { createChangeSet, ExecutorUnavailable, type ChangeSetRecord, type ReadPage, type UpstreamReader } from '@mandate/core';
+import { clientDataConverter, parseTemporalKeys, TemporalExecutor } from '@mandate/temporal';
+import { ScriptedWriter } from '@mandate/testing';
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPrepared } from '../support/changesets.js';

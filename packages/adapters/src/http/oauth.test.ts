@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearTokenCache, clientCredentialsToken } from './oauth.js';
 

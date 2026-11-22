@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { CodeCallOutcome, CodeContext, ConnectionSettings, CredentialSource, RecordOutcome, UpstreamMapping } from '@aiops/connector-sdk';
-import { startFakeMcpServer, startFakeUpstream, type FakeMcpServer, type FakeUpstream } from '@aiops/testing';
+// Copyright 2026 The Mandate Authors
+import type { CodeCallOutcome, CodeContext, ConnectionSettings, CredentialSource, RecordOutcome, UpstreamMapping } from '@mandate/connector-sdk';
+import { startFakeMcpServer, startFakeUpstream, type FakeMcpServer, type FakeUpstream } from '@mandate/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAdapters } from './composite.js';
 

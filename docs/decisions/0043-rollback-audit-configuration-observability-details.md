@@ -33,15 +33,15 @@ As in the table. Shared names:
   real deployment date).
 - `ConfigurationStateSource.state()` → `ConfigurationState` (`active` with `revision: string |
   null` and `hash`, `none`, `configuration_mismatch`); `WorkerRuntime.configuration`.
-- Lock keys in `packages/db/src/locks.ts`: `AUDIT_SEAL_LOCK_KEY` "aiops-as",
-  `AUDIT_RETENTION_LOCK_KEY` "aiops-ar", `CONFIG_LOCK_KEY` "aiops-cf".
+- Lock keys in `packages/db/src/locks.ts`: `AUDIT_SEAL_LOCK_KEY` "mandate-as",
+  `AUDIT_RETENTION_LOCK_KEY` "mandate-ar", `CONFIG_LOCK_KEY` "mandate-cf".
 - `connector-sdk` goes one minor up with `RequestInstrumentation` (0.5.0 unless already moved).
-- `scripts/acceptance/phase-8.sh` runs `AIOPS_ACCEPT8_GROUPS` (default `1 2 3 4`); a missing
+- `scripts/acceptance/phase-8.sh` runs `MANDATE_ACCEPT8_GROUPS` (default `1 2 3 4`); a missing
   group is a FAIL.
 
 Audit ruling:
 
-- **R3.** `DrizzleAuditLog` instances built inside `@aiops/db` transactions (vault, outbox,
+- **R3.** `DrizzleAuditLog` instances built inside `@mandate/db` transactions (vault, outbox,
   change-set repository) apply the key pattern and value shapes but no manifest keys. Their
   details are fixed builders without field values. The api, worker and CLI logs pass the
   configuration's `sensitiveFields`.

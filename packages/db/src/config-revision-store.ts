@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { desc, sql } from 'drizzle-orm';
 import pg from 'pg';
 import type {
@@ -10,7 +10,7 @@ import type {
   ConfigRevision,
   ConfigRevisionStore,
   NewConfigRevision,
-} from '@aiops/core';
+} from '@mandate/core';
 import { DrizzleAuditLog } from './audit-log.js';
 import type { Db, DbExecutor } from './client.js';
 import { guarded } from './errors.js';
@@ -18,10 +18,10 @@ import { CONFIG_LOCK_KEY } from './locks.js';
 import { configRevision } from './schema.js';
 
 /** The LISTEN/NOTIFY channel of applied revisions (CFG-3); the payload is the new `seq` as text. */
-export const CONFIG_CHANNEL = 'aiops_config';
+export const CONFIG_CHANNEL = 'mandate_config';
 
 /** The listener's `application_name`, so operators and tests can find its backend. */
-export const CONFIG_LISTENER_APPLICATION_NAME = 'aiops-config-listener';
+export const CONFIG_LISTENER_APPLICATION_NAME = 'mandate-config-listener';
 
 /** The only text `onError` and a failed first `listen` carry: driver errors may quote the host or user (SEC-3). */
 const LISTENER_FAILED = 'configuration listener connection failed';
@@ -121,7 +121,7 @@ export class PostgresConfigRevisionStore implements ConfigRevisionStore {
 
   /**
    * CFG-3: one dedicated `pg.Client` on `options.databaseUrl` (not a pool connection) runs
-   * `LISTEN aiops_config`. Resolves once the first LISTEN succeeded and rejects when it fails.
+   * `LISTEN mandate_config`. Resolves once the first LISTEN succeeded and rejects when it fails.
    * On `error` or `end` it reports `onError` and reconnects after the back-off delay, doubling up
    * to the maximum; a successful LISTEN resets the delay and reports `onReconnect`.
    */

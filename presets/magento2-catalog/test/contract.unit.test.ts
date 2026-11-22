@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Contract tests of the Magento catalog preset (NFR-17 first cut, CONN-2; design part 1 §6).
- * The preset is loaded the way the api loads it: `@aiops/config` with the OpenAPI adapter's
+ * The preset is loaded the way the api loads it: `@mandate/config` with the OpenAPI adapter's
  * resolver over the vendored spec. Each recording (from `pnpm record` against the sandbox)
  * pins the exact request the preset must send and the response it must map. With
  * MAGENTO_SANDBOX_URL and MAGENTO_SANDBOX_TOKEN set, the same cases run against the sandbox.
@@ -10,10 +10,10 @@
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildBulkBody, buildRequest, createOpenApiAdapter, mapBulkStatus, mapResponse } from '@aiops/adapters';
-import { loadConfigurationSources, type HttpOperationBinding, type LoadedConfiguration } from '@aiops/config';
-import type { BulkItemState, BulkMapping, ConnectionSettings, CredentialSource } from '@aiops/connector-sdk';
-import { contractRead, presetConnectionYaml, recordingsFreeOf, replayRecordings, startFakeUpstream, type FakeUpstream } from '@aiops/testing';
+import { buildBulkBody, buildRequest, createOpenApiAdapter, mapBulkStatus, mapResponse } from '@mandate/adapters';
+import { loadConfigurationSources, type HttpOperationBinding, type LoadedConfiguration } from '@mandate/config';
+import type { BulkItemState, BulkMapping, ConnectionSettings, CredentialSource } from '@mandate/connector-sdk';
+import { contractRead, presetConnectionYaml, recordingsFreeOf, replayRecordings, startFakeUpstream, type FakeUpstream } from '@mandate/testing';
 import { PRESET_DIR } from '../src/index.js';
 
 interface RecordedRequest {
@@ -54,7 +54,7 @@ const recordingOf = (c: ContractCase): Recording => {
 async function loadPreset(baseUrl: string): Promise<LoadedConfiguration> {
   const config = presetConnectionYaml({
     presetId: 'magento-catalog',
-    package: '@aiops/magento2-catalog',
+    package: '@mandate/magento2-catalog',
     version: '1.0.0',
     connectionId: 'magento',
     baseUrl,

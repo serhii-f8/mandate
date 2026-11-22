@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * `review_changeset` end to end over the real MCP transport (APR-5, APR-8, APR-2, NFR-8, MCP-6, UI-6, SEC-1).
  *
@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { auditRows, connectClient, modernRequest, rawPost, startApi, startDatabase, tokenFor, vaultOf, type RunningApi } from './helpers.js';
 
 const APPROVAL_CONFIG = fileURLToPath(new URL('./fixtures/approval-config', import.meta.url));
@@ -53,7 +53,7 @@ beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
   upstream = await startFakeUpstream();
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-review-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-review-e2e-'));
   await cp(APPROVAL_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * OpenTelemetry for the worker (NFR-11, NFR-12): a tracer provider for the activity and client
  * interceptors (they use the global tracer), the span processor the Temporal plugin's workflow
@@ -17,7 +17,7 @@ import { MeterProvider } from '@opentelemetry/sdk-metrics';
 import { BatchSpanProcessor, NoopSpanProcessor, type ReadableSpan, type Span, type SpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 
-const SERVICE_NAME = 'aiops-worker';
+const SERVICE_NAME = 'mandate-worker';
 
 export interface WorkerTelemetry {
   readonly meter: Meter;

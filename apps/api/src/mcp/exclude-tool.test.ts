@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import { CHANGESET_TEXT, READ_RESULT_TEXT, type Caller, type ChangeSetStatus } from '@aiops/core';
-import { InMemoryAuditLog, InMemoryChangeSetRepository } from '@aiops/testing';
+import { CHANGESET_TEXT, READ_RESULT_TEXT, type Caller, type ChangeSetStatus } from '@mandate/core';
+import { InMemoryAuditLog, InMemoryChangeSetRepository } from '@mandate/testing';
 import { preparedAnswer } from '../changesets/results.js';
 import type { AuditDetails } from './audited-tool.js';
 import { EXCLUDE_TOOL, excludeChangesetItemsTool } from './exclude-tool.js';
@@ -24,7 +24,7 @@ const HASH = `sha256:${'a'.repeat(64)}`;
 const NOW = new Date('2026-11-17T10:00:00.000Z');
 const EXPIRES = new Date('2026-11-18T10:00:00.000Z');
 const TARGETS = ['SECRET-T1', 'SECRET-T2', 'SECRET-T3'];
-const alice: Caller = { subject: 'alice', clientId: 'aiops-mcp', groups: ['content'] };
+const alice: Caller = { subject: 'alice', clientId: 'mandate-mcp', groups: ['content'] };
 const bob: Caller = { subject: 'bob', groups: ['content'] };
 
 /** A source of three pending items and one `not_found` exclusion, owned by alice, in `stage`. */

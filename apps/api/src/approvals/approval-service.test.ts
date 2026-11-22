@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
 import {
   ExecutorUnavailable,
   type ApprovalChannel,
@@ -14,7 +14,7 @@ import {
   type NewNotification,
   type StartOutcome,
   type StartRequest,
-} from '@aiops/core';
+} from '@mandate/core';
 import {
   InMemoryAuditLog,
   InMemoryChangeSetRepository,
@@ -22,7 +22,7 @@ import {
   recordApproval,
   ScriptedWriter,
   submitChangeSet,
-} from '@aiops/testing';
+} from '@mandate/testing';
 import { ApprovalService } from './approval-service.js';
 import { DECISION_REFUSAL_TEXT } from './texts.js';
 
@@ -119,7 +119,7 @@ const NOTIFYING: LoadedConfiguration = {
 const SUBMIT_ROW: NewNotification = { kind: 'approval_requested', round: 1, step: 1, target: 'lead-mail' };
 const TWO_STEPS = { steps: ['lead', 'brand'], notifications: [SUBMIT_ROW] };
 
-const bob: Approver = { subject: 'bob', name: 'Bob', roles: ['lead'], clientId: 'aiops-web' };
+const bob: Approver = { subject: 'bob', name: 'Bob', roles: ['lead'], clientId: 'mandate-web' };
 const carol: Approver = { subject: 'carol', roles: ['brand'] };
 
 /** Records starts and wakes; delegates to the in-memory executor unless made unavailable. */
@@ -327,7 +327,7 @@ describe('APR-1 APR-2 SEC-1 approval service', () => {
         action: 'approval.decision',
         outcome: 'ok',
         actor: 'bob',
-        clientId: 'aiops-web',
+        clientId: 'mandate-web',
         details: { round: 1, step: 1, role: 'lead', decision: 'approve', channel: 'page', count: 2 },
       },
       { action: 'approval.requested', details: { round: 1, step: 2, role: 'brand' } },
@@ -344,7 +344,7 @@ describe('APR-1 APR-2 SEC-1 approval service', () => {
       hash: HASH,
       itemCount: 2,
       channel: 'page',
-      clientId: 'aiops-web',
+      clientId: 'mandate-web',
       correlationId: 'corr-d',
       ts: NOW,
     });
@@ -393,7 +393,7 @@ describe('APR-1 APR-2 SEC-1 approval service', () => {
         changesetId: ID,
         expectedHash: HASH,
         actor: 'bob',
-        clientId: 'aiops-web',
+        clientId: 'mandate-web',
         correlationId: 'corr-d',
         requester: { subject: 'alice', groups: ['content'] },
         limits: { role: 'writer', recordsPerOperation: 50 },

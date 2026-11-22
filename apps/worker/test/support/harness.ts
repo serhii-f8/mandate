@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Shared harness for worker integration tests (NFR-15): one Temporal test environment and one
  * migrated PostgreSQL database per test file, one worker and task queue per case. Payloads are
  * encrypted on both sides with the fixed test key (SEC-4).
  */
 import { randomUUID } from 'node:crypto';
-import type { LoadedConfiguration } from '@aiops/config';
-import type { ChangeWriter, ExecutionGuard, UpstreamReader } from '@aiops/core';
-import { DrizzleAuditLog, PostgresChangeSetRepository, type Database } from '@aiops/db';
+import type { LoadedConfiguration } from '@mandate/config';
+import type { ChangeWriter, ExecutionGuard, UpstreamReader } from '@mandate/core';
+import { DrizzleAuditLog, PostgresChangeSetRepository, type Database } from '@mandate/db';
 import {
   clientDataConverter,
   parseTemporalKeys,
@@ -17,8 +17,8 @@ import {
   workerDataConverter,
   type ActivityTuning,
   type ChangesetActivities,
-} from '@aiops/temporal';
-import { ScriptedWriter } from '@aiops/testing';
+} from '@mandate/temporal';
+import { ScriptedWriter } from '@mandate/testing';
 import { Client, type ClientInterceptors } from '@temporalio/client';
 import type { Duration } from '@temporalio/common';
 import { TestWorkflowEnvironment } from '@temporalio/testing';

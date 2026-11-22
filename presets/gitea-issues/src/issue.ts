@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The normalised Gitea issue both code reads answer (OPS-5). Upstream content is data (SEC-5):
  * only the keys below leave this module, and `owner`/`repo` come from the issue's own

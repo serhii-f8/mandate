@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The requester's actions on the trusted page (UI-3, CS-5, EXE-8): submit a prepared change-set,
  * derive a new one with exclusions, and roll an executed one back. Submit and exclusions use the
@@ -15,7 +15,7 @@ import { Body, Controller, Inject, Param, Post, Req, Res } from '@nestjs/common'
 import type { Response } from 'express';
 import type { Logger } from 'pino';
 import type { z } from 'zod';
-import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
+import type { ApiEnv, ConfigurationHolder } from '@mandate/config';
 import {
   ExecutorUnavailable,
   isExpiryDue,
@@ -30,7 +30,7 @@ import {
   type DeriveRefusal,
   type RollbackRequestOutcome,
   type WorkflowStarter,
-} from '@aiops/core';
+} from '@mandate/core';
 import { pageAnswer } from '../approvals/changeset-pages.controller.js';
 import { CHANGESET_ID, exclusionBodySchema, rollbackBodySchema, submitBodySchema } from '../approvals/page-query.js';
 import { pageRefuser, type Refuser } from '../approvals/refusals.js';

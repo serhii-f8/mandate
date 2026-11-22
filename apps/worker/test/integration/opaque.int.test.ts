@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Opaque change-sets end to end on Temporal and PostgreSQL (design phase 9 §3, §5; EXE-4, CS-1):
  * a real `changesetWorkflow` prepares the one `call` item without reading anything and executes it
@@ -9,13 +9,13 @@
  * the shared test configuration.
  */
 import { randomUUID } from 'node:crypto';
-import { createAdapters } from '@aiops/adapters';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import { mcpToolHash, type McpToolDefinition } from '@aiops/connector-sdk';
-import { BatchFenced, createChangeSet, OpaqueCallWriter, type BatchContext, type ChangeItemRecord } from '@aiops/core';
-import { CHANGESET_WORKFLOW, WAKE_SIGNAL } from '@aiops/temporal';
-import { recordApproval, startFakeMcpServer, startFakeUpstream, submitChangeSet, type FakeMcpServer, type FakeUpstream } from '@aiops/testing';
-import { vaultToolLister } from '@aiops/upstream';
+import { createAdapters } from '@mandate/adapters';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
+import { mcpToolHash, type McpToolDefinition } from '@mandate/connector-sdk';
+import { BatchFenced, createChangeSet, OpaqueCallWriter, type BatchContext, type ChangeItemRecord } from '@mandate/core';
+import { CHANGESET_WORKFLOW, WAKE_SIGNAL } from '@mandate/temporal';
+import { recordApproval, startFakeMcpServer, startFakeUpstream, submitChangeSet, type FakeMcpServer, type FakeUpstream } from '@mandate/testing';
+import { vaultToolLister } from '@mandate/upstream';
 import type { WorkflowHandle } from '@temporalio/client';
 import { NativeConnection } from '@temporalio/worker';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';

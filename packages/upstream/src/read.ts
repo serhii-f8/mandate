@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * One upstream read under a configuration snapshot (design §4.2), shared by the api read
  * path and the worker: binding lookup, the GET check, the credential and the adapter call.
@@ -12,9 +12,9 @@ import {
   type McpToolAdapter,
   type ReadAdapter,
   type ReadOutcome,
-} from '@aiops/connector-sdk';
-import type { LoadedConfiguration } from '@aiops/config';
-import type { CredentialHandle, CredentialVault } from '@aiops/core';
+} from '@mandate/connector-sdk';
+import type { LoadedConfiguration } from '@mandate/config';
+import type { CredentialHandle, CredentialVault } from '@mandate/core';
 
 /** One log record per upstream call: identifiers, status and timing only (SEC-3). */
 export interface UpstreamCallLog {

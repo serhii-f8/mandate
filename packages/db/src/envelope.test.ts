@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { openSealed, rewrap, seal, type SealedCredential } from './envelope.js';
@@ -76,7 +76,7 @@ describe('SEC-2 envelope encryption', () => {
       } catch (error) {
         message = (error as Error).message;
       }
-      expect(message).toMatch(/^AIOPS_MASTER_KEYS: entry 1 /);
+      expect(message).toMatch(/^MANDATE_MASTER_KEYS: entry 1 /);
       expect(message).not.toContain('short');
     });
 
@@ -89,7 +89,7 @@ describe('SEC-2 envelope encryption', () => {
       ['invalid base64', `1:${'!'.repeat(44)}`],
       ['33-byte key', `1:${randomBytes(33).toString('base64')}`],
     ])('rejects %s', (_name, value) => {
-      expect(() => parseMasterKeys(value)).toThrow(/^AIOPS_MASTER_KEYS: /);
+      expect(() => parseMasterKeys(value)).toThrow(/^MANDATE_MASTER_KEYS: /);
       try {
         parseMasterKeys(value);
       } catch (error) {

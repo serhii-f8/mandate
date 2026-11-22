@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { Request, Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
-import type { ConfigurationState, ConfigurationStateSource } from '@aiops/config';
+import type { ConfigurationState, ConfigurationStateSource } from '@mandate/config';
 import { configurationGate } from './configuration-gate.js';
 
 const ACTIVE: ConfigurationState = { status: 'active', revision: '00000000-0000-4000-8000-000000000001', hash: 'a'.repeat(64) };

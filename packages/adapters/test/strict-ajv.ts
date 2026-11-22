@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The compiler the configuration loader uses for operation input schemas (same options as
  * packages/config/src/argument-validators.ts): Ajv 2020-12 in strict mode plus ajv-formats.

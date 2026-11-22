@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * XLSX export of a change-set (CS-8): a minimal SpreadsheetML workbook with one sheet `Items`,
  * streamed into a ZIP with fflate. Every cell is an inline string, so nothing is a formula (SEC-5).
  */
 import { Zip, ZipDeflate, strToU8 } from 'fflate';
-import type { ChangeItemRecord } from '@aiops/core';
+import type { ChangeItemRecord } from '@mandate/core';
 import { formulaSafe, headerRow, itemRow, stripXmlIllegal, truncateCell } from './columns.js';
 
 const XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';

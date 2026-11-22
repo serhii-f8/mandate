@@ -1,4 +1,4 @@
-# AI Operations Layer guide
+# Mandate guide
 
 Start here to understand the product:
 

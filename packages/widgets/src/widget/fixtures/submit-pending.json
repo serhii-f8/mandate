@@ -2,7 +2,7 @@
   "content": [
     {
       "type": "text",
-      "text": "Change-set 0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e (2 changes) awaits approval by role content_lead (step 1 of 2). Approvers decide on https://aiops.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e."
+      "text": "Change-set 0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e (2 changes) awaits approval by role content_lead (step 1 of 2). Approvers decide on https://mandate.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e."
     }
   ],
   "structuredContent": {
@@ -15,8 +15,8 @@
         "content_lead",
         "finance"
       ],
-      "url": "https://aiops.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e"
+      "url": "https://mandate.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e"
     },
-    "pageUrl": "https://aiops.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e"
+    "pageUrl": "https://mandate.example.test/app/changesets/0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e"
   }
 }

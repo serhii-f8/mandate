@@ -17,14 +17,14 @@
           "issue_url": "http://127.0.0.1:4391/acme/website/issues/30",
           "user": {
             "id": 1,
-            "login": "aiops-admin",
+            "login": "mandate-admin",
             "type": "User",
             "login_name": "",
             "source_id": 0,
             "full_name": "",
-            "email": "1+aiops-admin@noreply.gitea-sandbox",
+            "email": "1+mandate-admin@noreply.gitea-sandbox",
             "avatar_url": "http://127.0.0.1:4391/avatars/f4f2d8791f3568d098508a57e75c80a2b9bf70e4f894662014c2f3c8c5c5aac5",
-            "html_url": "http://127.0.0.1:4391/aiops-admin",
+            "html_url": "http://127.0.0.1:4391/mandate-admin",
             "language": "",
             "is_admin": false,
             "last_login": "0001-01-01T00:00:00Z",
@@ -39,7 +39,7 @@
             "followers_count": 0,
             "following_count": 0,
             "starred_repos_count": 0,
-            "username": "aiops-admin"
+            "username": "mandate-admin"
           },
           "original_author": "",
           "original_author_id": 0,

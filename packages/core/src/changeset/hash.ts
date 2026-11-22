@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash, type Hash } from 'node:crypto';
 import { canonicalJson, compareTargetIds } from './canonical.js';
 
@@ -11,7 +11,7 @@ export interface HashableItem {
   after: unknown;
 }
 
-const FORMAT = 'aiops.changeset.v1';
+const FORMAT = 'mandate.changeset.v1';
 
 /** Incremental change-set hash over operation, arguments and items in target order (CS-4). */
 export class ChangeSetHasher {

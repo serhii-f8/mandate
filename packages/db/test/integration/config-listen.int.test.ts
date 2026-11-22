@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type { AuditEventInput, ConfigListener, NewConfigRevision } from '@aiops/core';
+import type { AuditEventInput, ConfigListener, NewConfigRevision } from '@mandate/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startPostgres, type StartedPostgres } from '@aiops/testing';
+import { startPostgres, type StartedPostgres } from '@mandate/testing';
 import { createDb, type Database } from '../../src/client.js';
 import { CONFIG_CHANNEL, PostgresConfigRevisionStore } from '../../src/config-revision-store.js';
 import { runMigrations } from '../../src/migrate.js';
@@ -12,7 +12,7 @@ import { runMigrations } from '../../src/migrate.js';
 const BACKOFF = { initialMs: 50, maxMs: 200 } as const;
 const SUMMARY = { connections: 1, operations: 2, roles: 3, notifications: 0 } as const;
 const LISTENER_ROWS =
-  "SELECT pid FROM pg_stat_activity WHERE application_name = 'aiops-config-listener' AND datname = current_database()";
+  "SELECT pid FROM pg_stat_activity WHERE application_name = 'mandate-config-listener' AND datname = current_database()";
 
 let postgres: StartedPostgres;
 const databases: Database[] = [];
@@ -125,7 +125,7 @@ describe('CFG-3 PostgresConfigRevisionStore.listen', () => {
     if (before === undefined) throw new Error('no listener backend');
 
     await database.pool.query(
-      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'aiops-config-listener' AND datname = current_database()",
+      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'mandate-config-listener' AND datname = current_database()",
     );
     await waitFor(() => recorded.errors.length >= 1 && recorded.reconnects >= 1);
     const after = await listenerPids(database);
@@ -147,7 +147,7 @@ describe('CFG-3 PostgresConfigRevisionStore.listen', () => {
     const closed = await listen(store);
     await closed.listener.close();
     await database.pool.query(
-      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'aiops-config-listener' AND datname = current_database()",
+      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'mandate-config-listener' AND datname = current_database()",
     );
     let empty = 0;
     await waitFor(async () => {

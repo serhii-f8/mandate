@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import type { ChangeItemRecord, ItemsPageQuery } from '@aiops/core';
+import type { ChangeItemRecord, ItemsPageQuery } from '@mandate/core';
 import {
   CELL_LIMIT,
   EXPORT_PAGE,

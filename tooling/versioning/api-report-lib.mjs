@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Public API reports (NFR-18). Reads built declaration files; no process access beyond the file system.
 import { existsSync, readFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
@@ -7,7 +7,7 @@ import { toJSONSchema } from 'zod';
 
 /** Header line of the connector SDK report; `versionOf` in the semver gate reads it back. */
 export function sdkHeader(version) {
-  return `// @aiops/connector-sdk ${version} public API report — generated, do not edit`;
+  return `// @mandate/connector-sdk ${version} public API report — generated, do not edit`;
 }
 
 /** Removes block and line comments and sourceMappingURL lines from a declaration file. */
@@ -114,13 +114,13 @@ export function diffReport(a, b) {
 /** Version carried by a report: the SDK header line or the config schema's version key; undefined when absent. */
 export function headerVersion(report) {
   const m =
-    /^\/\/ @aiops\/connector-sdk (\S+) public API report/m.exec(report) ??
-    /^\s*"x-aiops-schema-version": "([^"]+)"/m.exec(report) ??
-    /^\s*"x-aiops-sdk-version": "([^"]+)"/m.exec(report);
+    /^\/\/ @mandate\/connector-sdk (\S+) public API report/m.exec(report) ??
+    /^\s*"x-mandate-schema-version": "([^"]+)"/m.exec(report) ??
+    /^\s*"x-mandate-sdk-version": "([^"]+)"/m.exec(report);
   return m ? m[1] : undefined;
 }
 
-const CONFIG_SCHEMA_ID = 'https://aiops.invalid/schema/aiops-config.v1.json';
+const CONFIG_SCHEMA_ID = 'https://mandate.invalid/schema/mandate-config.v1.json';
 
 function sortKeys(value) {
   if (Array.isArray(value)) return value.map(sortKeys);
@@ -140,11 +140,11 @@ function sortKeys(value) {
  */
 export function configReport(schema, version) {
   const json = toJSONSchema(schema, { io: 'input', unrepresentable: 'any' });
-  const doc = sortKeys({ ...json, $id: CONFIG_SCHEMA_ID, 'x-aiops-schema-version': version });
+  const doc = sortKeys({ ...json, $id: CONFIG_SCHEMA_ID, 'x-mandate-schema-version': version });
   return `${JSON.stringify(doc, null, 2)}\n`;
 }
 
-const PRESET_SCHEMA_ID = 'https://aiops.invalid/schema/aiops-preset.v1.json';
+const PRESET_SCHEMA_ID = 'https://mandate.invalid/schema/mandate-preset.v1.json';
 
 function inputSchema(schema) {
   const json = toJSONSchema(schema, { io: 'input', unrepresentable: 'any' });
@@ -154,15 +154,15 @@ function inputSchema(schema) {
 
 /**
  * JSON Schema of the preset format, versioned with the connector SDK: the preset document
- * (`$defs.presetDocument`) and the `aiops` block of a preset's package.json
- * (`$defs.packageJsonAiops`). Same conventions as the configuration report.
+ * (`$defs.presetDocument`) and the `mandate` block of a preset's package.json
+ * (`$defs.packageJsonMandate`). Same conventions as the configuration report.
  */
-export function presetReport(presetDocumentSchema, aiopsSchema, sdkVersion) {
+export function presetReport(presetDocumentSchema, mandateSchema, sdkVersion) {
   const doc = sortKeys({
     $id: PRESET_SCHEMA_ID,
     $schema: 'https://json-schema.org/draft/2020-12/schema',
-    $defs: { packageJsonAiops: inputSchema(aiopsSchema), presetDocument: inputSchema(presetDocumentSchema) },
-    'x-aiops-sdk-version': sdkVersion,
+    $defs: { packageJsonMandate: inputSchema(mandateSchema), presetDocument: inputSchema(presetDocumentSchema) },
+    'x-mandate-sdk-version': sdkVersion,
   });
   return `${JSON.stringify(doc, null, 2)}\n`;
 }

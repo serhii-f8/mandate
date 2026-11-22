@@ -40,7 +40,7 @@ const protectedResourceMetadata = {
     authorization_servers: [KC_ISSUER],
     scopes_supported: ['mcp:tools'],
     bearer_methods_supported: ['header'],
-    resource_name: 'AI Operations Layer spike 2'
+    resource_name: 'Mandate spike 2'
 };
 
 const jwks = createRemoteJWKSet(new URL(KC_JWKS_URL));

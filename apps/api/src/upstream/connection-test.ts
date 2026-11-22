@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * CONN-7 connection test (design part 1 §4.7): runs a connection's declared test read
  * through its adapter with the stored credential and reports status, item count and the
@@ -8,10 +8,10 @@
  * listed tool still matches its pin (CONN-4); its item count is the number of listed tools.
  * A code-bound test operation runs its preset code read through `codeRead` (OPS-5).
  */
-import type { CodeAdapter, ConnectionSettings, ConnectionTestReport, CredentialSource, McpToolAdapter, ReadAdapter, ReadErrorCode, ReadOutcome, ScopeReport } from '@aiops/connector-sdk';
-import type { LoadedConfiguration, McpOperationBinding } from '@aiops/config';
-import type { AuditLog, CredentialVault } from '@aiops/core';
-import { connectionCredential } from '@aiops/upstream';
+import type { CodeAdapter, ConnectionSettings, ConnectionTestReport, CredentialSource, McpToolAdapter, ReadAdapter, ReadErrorCode, ReadOutcome, ScopeReport } from '@mandate/connector-sdk';
+import type { LoadedConfiguration, McpOperationBinding } from '@mandate/config';
+import type { AuditLog, CredentialVault } from '@mandate/core';
+import { connectionCredential } from '@mandate/upstream';
 
 export const NO_TEST_DECLARED = 'no connection test is declared';
 export const CONNECTION_UNKNOWN = 'connection is not configured';

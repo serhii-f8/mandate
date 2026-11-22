@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { loadConfigurationDirectory, loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import { mcpToolHash, type McpToolDefinition, type ToolListOutcome } from '@aiops/connector-sdk';
-import { FakeResolver } from '@aiops/testing';
+import { loadConfigurationDirectory, loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
+import { mcpToolHash, type McpToolDefinition, type ToolListOutcome } from '@mandate/connector-sdk';
+import { FakeResolver } from '@mandate/testing';
 import { explainCall, formatExplain, type ExplainInput } from './explain.js';
 
 const DEV_CONFIG = fileURLToPath(new URL('../../../../deploy/config', import.meta.url));

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
@@ -9,7 +9,7 @@ import {
   ROLLBACK_REQUEST_MARGIN_MS,
   rollbackRequestEvents,
   startEventFactory,
-} from '@aiops/core';
+} from '@mandate/core';
 import { recordApproval, submitChangeSet } from './approval-fixtures.js';
 import type {
   AuditEventInput,
@@ -26,7 +26,7 @@ import type {
   NotificationRow,
   RollbackItemOutcome,
   RollbackRequest,
-} from '@aiops/core';
+} from '@mandate/core';
 
 /**
  * One harness per case from `setup()`, but a PostgreSQL implementation may share one database across

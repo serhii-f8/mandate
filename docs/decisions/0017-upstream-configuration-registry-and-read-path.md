@@ -8,7 +8,7 @@
 Phase 3 connects allowed `read` calls to real systems (MCP-4, CONN-2, OPS-1, MCP-9) and
 must pass "a content-manager role searches products of an allowed brand through an AI
 client" against a Magento sandbox. [ADR 0015](0015-configuration-format-and-loader.md) left the operation's `upstream` block
-open, and `@aiops/config` may not import `@aiops/adapters` (package boundary rules).
+open, and `@mandate/config` may not import `@mandate/adapters` (package boundary rules).
 
 ## Options considered
 
@@ -16,15 +16,15 @@ open, and `@aiops/config` may not import `@aiops/adapters` (package boundary rul
    pages).
 2. **How arguments reach the upstream:** a declarative mapping in `upstream` (templates and
    response mapping); raw OpenAPI passthrough; preset code per operation (OPS-5).
-3. **Where spec loading happens:** inside `@aiops/config` (needs adapter code); in `api`
+3. **Where spec loading happens:** inside `@mandate/config` (needs adapter code); in `api`
    after loading (two configuration stages); an `UpstreamResolver` interface in
-   `@aiops/connector-sdk` that the loader calls and `api` implements with the adapter.
+   `@mandate/connector-sdk` that the loader calls and `api` implements with the adapter.
 4. **Presets before versioned packages (CONN-8 is Phase 9):** operators copy preset YAML;
    presets resolved by package name from preset directories; npm-installed packages.
 5. **MCP-9 overrides:** edit the operation; a top-level `overrides` list.
 6. **Result shape (MCP-4):** text only; structured content only; summary text +
    structured content + the serialized JSON as a second text block.
-7. **CLI for `test-connection`:** in `@aiops/config` (cannot reach adapters or the
+7. **CLI for `test-connection`:** in `@mandate/config` (cannot reach adapters or the
    database); a second CLI in `apps/api`.
 8. **"Through an AI client" in the acceptance criterion:** block the phase on a manual
    claude.ai run; an MCP client on the same protocol path with a real Keycloak token.
@@ -37,11 +37,11 @@ open, and `@aiops/config` may not import `@aiops/adapters` (package boundary rul
    `headers`, `body`, `response.items|total|flatten|fields_from_arg|max_items`). Derived
    operations get a default mapping. Passthrough cannot express Magento search criteria
    or keep denied fields out of results; preset code belongs to Phase 9.
-3. **`UpstreamResolver` in `@aiops/connector-sdk`**, passed to the loader by `api` (and by
+3. **`UpstreamResolver` in `@mandate/connector-sdk`**, passed to the loader by `api` (and by
    the api CLI). All issues of all stages are reported together and the configuration is
-   accepted only as a whole (CFG-2). `aiops-config validate` without a resolver keeps
-   checking the static schema; `aiops validate` (api CLI) runs every check.
-4. **Preset directories** (`AIOPS_PRESET_DIRS`), resolved by `package.json` name, with an
+   accepted only as a whole (CFG-2). `mandate-config validate` without a resolver keeps
+   checking the static schema; `mandate validate` (api CLI) runs every check.
+4. **Preset directories** (`MANDATE_PRESET_DIRS`), resolved by `package.json` name, with an
    exact version check when `version` is given. One connection per preset in Phase 3.
 5. **`overrides`** with `tool_name`, `title`, `description`, `enabled`. Grants keep naming
    operation IDs; tool names must be unique.
@@ -52,7 +52,7 @@ open, and `@aiops/config` may not import `@aiops/adapters` (package boundary rul
    itself. No `outputSchema` is declared in Phase 3: the low-level `Server` would not
    validate it and clients do (verified below), so a schema would turn a mapping mistake
    into a client error.
-7. **`apps/api/src/cli.ts`** (`aiops validate | test-connection <connection> |
+7. **`apps/api/src/cli.ts`** (`mandate validate | test-connection <connection> |
    credentials rotate`), which reads the api environment.
 8. **MCP client on the same path**, as in Phase 2's acceptance: the criterion tests the
    platform's behaviour, which is identical for any MCP client (SPEC section 1, "Client

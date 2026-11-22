@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The requester's exclusions (CS-5): derive a new change-set and start its workflow (EXE-1), shared by
  * the MCP tool and the page route so one request yields one outcome.
  */
-import { deriveChangeSet, isOpaque, type OperationDefinition, type ChangeSetRepository, type DeriveOutcome, type DeriveRequest, type WorkflowStarter } from '@aiops/core';
+import { deriveChangeSet, isOpaque, type OperationDefinition, type ChangeSetRepository, type DeriveOutcome, type DeriveRequest, type WorkflowStarter } from '@mandate/core';
 
 /** The `excludable` predicate of a derivation from a configuration snapshot: an opaque operation has no items to exclude (CS-5). */
 export function excludableIn(snapshot: { readonly configuration: { readonly policy: { readonly operations: readonly OperationDefinition[] } } }): (operationId: string) => boolean {

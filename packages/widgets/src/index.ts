@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** React views built as MCP Apps widgets and as trusted-page parts. */
 export * from "./model.js";
 export * from "./format.js";

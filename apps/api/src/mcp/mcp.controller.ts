@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { All, Controller, Inject, Post, Req, Res } from '@nestjs/common';
 import { SpanKind, type Tracer } from '@opentelemetry/api';
@@ -7,8 +7,8 @@ import { toNodeHandler } from '@modelcontextprotocol/node';
 import type { McpHttpHandler } from '@modelcontextprotocol/server';
 import type { Request, Response } from 'express';
 import type { Logger } from 'pino';
-import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
-import type { AuditLog } from '@aiops/core';
+import type { ApiEnv, ConfigurationHolder } from '@mandate/config';
+import type { AuditLog } from '@mandate/core';
 import type { BearerGate } from '../auth/bearer-gate.js';
 import { clientAddress } from '../http/client-address.js';
 import { hostAllowed, originAllowed } from '../http/host-origin.js';
@@ -49,7 +49,7 @@ export class McpController {
     }
     const correlationId = randomUUID();
     // NFR-11: one server span per request; its only attribute is the correlation ID (SEC-3).
-    await this.tracer.startActiveSpan('mcp.request', { kind: SpanKind.SERVER, attributes: { 'aiops.correlation_id': correlationId } }, async (span) => {
+    await this.tracer.startActiveSpan('mcp.request', { kind: SpanKind.SERVER, attributes: { 'mandate.correlation_id': correlationId } }, async (span) => {
       try {
         await this.serve(req, res, correlationId);
       } finally {

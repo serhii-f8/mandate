@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * A workflow started for a derived, already prepared change-set (CS-5, design §3): the unchanged
  * `changesetWorkflow` parks in `prepared`, executes on start and writes only the included items.
  */
 import { randomUUID } from 'node:crypto';
-import { deriveChangeSet, type ReadPage, type UpstreamReader } from '@aiops/core';
-import { ScriptedWriter } from '@aiops/testing';
+import { deriveChangeSet, type ReadPage, type UpstreamReader } from '@mandate/core';
+import { ScriptedWriter } from '@mandate/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { changesetWorkflow } from '../../src/workflows/changeset.js';
 import { EDITOR_GROUP } from '../support/configuration.js';

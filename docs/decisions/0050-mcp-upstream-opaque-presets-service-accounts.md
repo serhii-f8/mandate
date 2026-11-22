@@ -36,7 +36,7 @@ are directories found by `package.json` name with an exact version check; no ser
 10. **Opaque execution retry:** retry like other writes; at most once (record before sending), with an
     opt-in idempotency header for OpenAPI endpoints that deduplicate.
 11. **Preset packages:** npm-installed into `node_modules` of the app; preset directories that accept
-    unpacked packages and `node_modules` layouts, with an `aiops` field in `package.json`, a semver
+    unpacked packages and `node_modules` layouts, with an `mandate` field in `package.json`, a semver
     range in configuration and an SDK range in the package.
 12. **Code operations:** arbitrary hooks into `core` ports; three kinds (`read`, `write` records,
     opaque `call`) over a guarded HTTP client in a context, under the existing read-before-write writer.
@@ -55,7 +55,7 @@ are directories found by `package.json` name with an exact version check; no ser
    false`, `onInsufficientScope: 'throw'`, era cached per connection, a guarded `fetch` that applies
    the egress rules, credential injection, timeouts, size cap, scrubbing and instrumentation.
 3. **One pin per tool** on the operation (`upstream: { tool, pin }`), hash
-   `aiops.mcp-tool.v1` over name, title, description, input and output schema, annotations; `_meta`
+   `mandate.mcp-tool.v1` over name, title, description, input and output schema, annotations; `_meta`
    excluded. A list-wide hash would disable unaffected operations on any change; CONN-4 asks to
    disable "the affected operations".
 4. **Load + monitor every `pin_check_seconds` (default 300) + a call-path refresh when the last list is
@@ -72,7 +72,7 @@ are directories found by `package.json` name with an exact version check; no ser
 10. **At most once**, submission recorded before sending; a resumed batch with a recorded submission is
     `failed/no_outcome`. With `idempotency: { header }` the call is resent with the same key. The
     response body is not stored (known gap: no created-resource ID for the requester).
-11. **Preset directories with the `aiops` field**, `node_modules` layouts accepted, semver range in
+11. **Preset directories with the `mandate` field**, `node_modules` layouts accepted, semver range in
     `presets[].version` (a bare version stays exact), SDK range checked, `operation_prefix` aliases,
     code files in the configuration hash, generic Dockerfile copy of `presets/*/dist`.
 12. **Three code kinds over `CodeContext.http`** (never a credential), plus declarative per-record
@@ -83,7 +83,7 @@ are directories found by `package.json` name with an exact version check; no ser
 14. **`azp` in `service_accounts`, `client_id == azp`, no `sid`;** a configured `azp` failing the other
     checks is rejected; groups ignored; subject `service:<client_id>`; no decisions, no step-up.
 15. **`@modelcontextprotocol/server-everything` 2.2.1** (published 2026-11-04) for attachment and
-    grants, plus the fake MCP server of `@aiops/testing` in a container for the changed-description
+    grants, plus the fake MCP server of `@mandate/testing` in a container for the changed-description
     criterion (a published server's descriptions cannot be changed at run time).
 
 [SPEC](../SPEC.md) §3 is amended: the MCP row names `@modelcontextprotocol/client` for MCP upstreams in

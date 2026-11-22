@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
-import { InMemoryExecutor, pageLogin, ScriptedWriter, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@aiops/testing';
+import { createDb, PostgresChangeSetRepository, type Database } from '@mandate/db';
+import { InMemoryExecutor, pageLogin, ScriptedWriter, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@mandate/testing';
 import { seedExecuted, seedPending } from './approval-seed.js';
 import { startApi, startDatabase, type RunningApi } from './helpers.js';
 import { ToggleExecutor } from './toggle-executor.js';
@@ -34,8 +34,8 @@ let outDir: string;
 beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
-  outDir = await mkdtemp(join(tmpdir(), 'aiops-export-out-'));
-  webDir = await mkdtemp(join(tmpdir(), 'aiops-web-e2e-'));
+  outDir = await mkdtemp(join(tmpdir(), 'mandate-export-out-'));
+  webDir = await mkdtemp(join(tmpdir(), 'mandate-web-e2e-'));
   await mkdir(join(webDir, 'assets'));
   await writeFile(join(webDir, 'index.html'), '<!doctype html><title>Approvals</title><div id="root"></div>');
   seedDb = createDb(databaseUrl, { onError: () => undefined });
@@ -70,7 +70,7 @@ describe('CS-8 page-api.mjs export', () => {
   it('CS-8 page-api.mjs export writes the CSV and XLSX files of a change-set the caller may view', async () => {
     const seeded = await seedPending(repo, { requester: ALICE.sub, groups: ['content', 'leads'], role: 'content_manager', items: 3, excluded: 1 });
     const alice = await login(ALICE);
-    const env = { ...process.env, AIOPS_PAGE_COOKIE: alice.cookie };
+    const env = { ...process.env, MANDATE_PAGE_COOKIE: alice.cookie };
     const call = async (...args: string[]): Promise<{ status: number; contentType?: string; bytes?: number }> => {
       const { stdout } = await run(process.execPath, [PAGE_API, api.url, ...args], { env });
       return JSON.parse(stdout.trim().split('\n')[0] ?? '') as { status: number; contentType?: string; bytes?: number };
@@ -90,7 +90,7 @@ describe('CS-8 page-api.mjs export', () => {
     expect((await readFile(xlsxPath)).subarray(0, 2).toString('latin1')).toBe('PK');
 
     const bob = await login(BOB);
-    const refused = await run(process.execPath, [PAGE_API, api.url, 'export', seeded.id, 'csv', join(outDir, 'b.csv')], { env: { ...process.env, AIOPS_PAGE_COOKIE: bob.cookie } });
+    const refused = await run(process.execPath, [PAGE_API, api.url, 'export', seeded.id, 'csv', join(outDir, 'b.csv')], { env: { ...process.env, MANDATE_PAGE_COOKIE: bob.cookie } });
     expect(JSON.parse(refused.stdout.trim())).toMatchObject({ status: 404 });
 
     await expect(run(process.execPath, [PAGE_API, api.url, 'export', seeded.id, 'pdf', join(outDir, 'x')], { env })).rejects.toMatchObject({ code: 2 });
@@ -102,7 +102,7 @@ describe('UI-4 SEC-8 page-api.mjs rollback', () => {
     const seeded = await seedExecuted(repo, { requester: ALICE.sub, items: 2, rollbackUntil: new Date(Date.now() + 3_600_000) });
     executor.started.push(seeded.id);
     const alice = await login(ALICE);
-    const { stdout } = await run(process.execPath, [PAGE_API, api.url, 'rollback', seeded.id, seeded.hash], { env: { ...process.env, AIOPS_PAGE_COOKIE: alice.cookie } });
+    const { stdout } = await run(process.execPath, [PAGE_API, api.url, 'rollback', seeded.id, seeded.hash], { env: { ...process.env, MANDATE_PAGE_COOKIE: alice.cookie } });
     expect(JSON.parse(stdout.trim())).toEqual({ status: 200, body: { status: 'rolling_back' } });
   });
 });

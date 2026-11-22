@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The change-set activities of `changesetWorkflow` (design §4, §5). Each one reads the truth from
  * PostgreSQL and is safe to retry (NFR-2). The failures they raise themselves carry fixed codes,
@@ -7,7 +7,7 @@
  * messages (SEC-3); an unexpected programming error is not rewritten. Activity names and argument
  * shapes are part of workflow history (EXE-10).
  */
-import type { LoadedConfiguration } from '@aiops/config';
+import type { LoadedConfiguration } from '@mandate/config';
 import {
   BatchFenced,
   changesetBatchEvent,
@@ -36,14 +36,14 @@ import {
   type ItemOutcome,
   type RollbackCounts,
   type UpstreamReader,
-} from '@aiops/core';
+} from '@mandate/core';
 import {
   PREPARE_MAX_ATTEMPTS,
   type ActivityTuning,
   type BatchResult,
   type ChangesetActivities,
   type RollbackBatchResult,
-} from '@aiops/temporal';
+} from '@mandate/temporal';
 import { Context } from '@temporalio/activity';
 import { ApplicationFailure } from '@temporalio/common';
 import { markActivitySpan, rollbackCorrelation } from '../telemetry/span-attributes.js';

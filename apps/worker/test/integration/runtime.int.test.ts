@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAdapters } from '@aiops/adapters';
-import { parseWorkerEnv } from '@aiops/config';
-import { mcpToolHash } from '@aiops/connector-sdk';
-import { createDb, insertNotifications, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, runMigrations } from '@aiops/db';
-import { startFakeMcpServer, startPostgres, startSmtpSink, type StartedPostgres } from '@aiops/testing';
-import { connectionCredential } from '@aiops/upstream';
+import { createAdapters } from '@mandate/adapters';
+import { parseWorkerEnv } from '@mandate/config';
+import { mcpToolHash } from '@mandate/connector-sdk';
+import { createDb, insertNotifications, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, runMigrations } from '@mandate/db';
+import { startFakeMcpServer, startPostgres, startSmtpSink, type StartedPostgres } from '@mandate/testing';
+import { connectionCredential } from '@mandate/upstream';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { pino } from 'pino';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -34,11 +34,11 @@ describe('NFR-4 worker runtime start-up', () => {
       DATABASE_URL: await postgres.createDatabase(),
       // Nothing listens here: reaching Temporal (or the configuration) would fail differently.
       TEMPORAL_ADDRESS: '127.0.0.1:1',
-      AIOPS_CONFIG_DIR: '/nonexistent/aiops-config',
-      AIOPS_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
-      AIOPS_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
+      MANDATE_CONFIG_DIR: '/nonexistent/mandate-config',
+      MANDATE_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
+      MANDATE_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
       // An ephemeral port: integration files run in parallel (ruling F11).
-      AIOPS_WORKER_HTTP_PORT: '0',
+      MANDATE_WORKER_HTTP_PORT: '0',
     });
     await expect(startWorkerRuntime(env, pino({ level: 'silent' }))).rejects.toThrow(/not migrated/);
   });
@@ -50,12 +50,12 @@ describe('NFR-4 worker runtime start-up', () => {
       DATABASE_URL: url,
       // Nothing listens here: the connect fails after the configuration was loaded.
       TEMPORAL_ADDRESS: '127.0.0.1:1',
-      AIOPS_CONFIG_DIR: fileURLToPath(new URL('../../../../deploy/config', import.meta.url)),
-      AIOPS_PRESET_DIRS: fileURLToPath(new URL('../../../../presets', import.meta.url)),
-      AIOPS_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
-      AIOPS_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
+      MANDATE_CONFIG_DIR: fileURLToPath(new URL('../../../../deploy/config', import.meta.url)),
+      MANDATE_PRESET_DIRS: fileURLToPath(new URL('../../../../presets', import.meta.url)),
+      MANDATE_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
+      MANDATE_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
       // An ephemeral port: integration files run in parallel (ruling F11).
-      AIOPS_WORKER_HTTP_PORT: '0',
+      MANDATE_WORKER_HTTP_PORT: '0',
     });
     const signals = new EventEmitter();
     // The start-failure cleanup removes the handler again (F6), so the count is taken when it does:
@@ -99,26 +99,26 @@ roles:
 `;
 
 describe('NTF-3 worker runtime without a mail relay', () => {
-  it('NTF-3 the worker warns at start when e-mail notifications are configured without AIOPS_SMTP_URL', async () => {
-    const configDir = await mkdtemp(join(tmpdir(), 'aiops-worker-nosmtp-'));
+  it('NTF-3 the worker warns at start when e-mail notifications are configured without MANDATE_SMTP_URL', async () => {
+    const configDir = await mkdtemp(join(tmpdir(), 'mandate-worker-nosmtp-'));
     const url = await postgres.createDatabase();
     await runMigrations(url);
     const lines: string[] = [];
     const logger = pino({ level: 'warn' }, { write: (line: string) => lines.push(line) });
     try {
-      await writeFile(join(configDir, 'aiops.yaml'), NOTIFYING_CONFIG);
+      await writeFile(join(configDir, 'mandate.yaml'), NOTIFYING_CONFIG);
       const env = parseWorkerEnv({
         DATABASE_URL: url,
         // Nothing listens here: the start fails after the warning.
         TEMPORAL_ADDRESS: '127.0.0.1:1',
-        AIOPS_CONFIG_DIR: configDir,
-        AIOPS_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
-        AIOPS_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
-        AIOPS_WORKER_HTTP_PORT: '0',
+        MANDATE_CONFIG_DIR: configDir,
+        MANDATE_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
+        MANDATE_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
+        MANDATE_WORKER_HTTP_PORT: '0',
       });
       await expect(startWorkerRuntime(env, logger, new EventEmitter())).rejects.toThrow(/ConnectionRefused/);
       const warnings = lines.map((l) => JSON.parse(l) as { msg?: string }).map((l) => l.msg);
-      expect(warnings).toContain('AIOPS_SMTP_URL is not set: email notifications fail with channel_unconfigured');
+      expect(warnings).toContain('MANDATE_SMTP_URL is not set: email notifications fail with channel_unconfigured');
     } finally {
       await rm(configDir, { recursive: true, force: true });
     }
@@ -153,22 +153,22 @@ roles:
 describe('CONN-1 worker runtime with an mcp connection', () => {
   it('CONN-1 the worker loads a configuration with an mcp connection and lists its tools at load', async () => {
     const fake = await startFakeMcpServer({ tools: [LOOKUP_TOOL], mode: 'stateless' });
-    const configDir = await mkdtemp(join(tmpdir(), 'aiops-worker-mcp-'));
+    const configDir = await mkdtemp(join(tmpdir(), 'mandate-worker-mcp-'));
     const url = await postgres.createDatabase();
     await runMigrations(url);
     const database = createDb(url, { onError: () => undefined });
     try {
-      await writeFile(join(configDir, 'aiops.yaml'), mcpConfig(fake.url, mcpToolHash(LOOKUP_TOOL)));
+      await writeFile(join(configDir, 'mandate.yaml'), mcpConfig(fake.url, mcpToolHash(LOOKUP_TOOL)));
       const vault = new PostgresCredentialVault(database.db, parseMasterKeys(MCP_MASTER_KEYS));
       await vault.put({ ref: 'tools-token', scheme: 'bearer', secret: { token: MCP_TOKEN }, actor: 'int' });
       const env = parseWorkerEnv({
         DATABASE_URL: url,
         // Nothing listens here: the start fails at the connect, after the configuration was loaded and checked.
         TEMPORAL_ADDRESS: '127.0.0.1:1',
-        AIOPS_CONFIG_DIR: configDir,
-        AIOPS_MASTER_KEYS: MCP_MASTER_KEYS,
-        AIOPS_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
-        AIOPS_WORKER_HTTP_PORT: '0',
+        MANDATE_CONFIG_DIR: configDir,
+        MANDATE_MASTER_KEYS: MCP_MASTER_KEYS,
+        MANDATE_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
+        MANDATE_WORKER_HTTP_PORT: '0',
       });
       // Ruling F10: the holder is only reachable through startRuntimeConfiguration; the adapter reads the vault as the runtime's does (R10).
       const adapter = createAdapters({
@@ -221,21 +221,21 @@ describe('NTF-1 NFR-10 NFR-12 a running worker runtime', () => {
     temporal = env0;
     const smtp = await startSmtpSink();
     sink = smtp;
-    const dir = await mkdtemp(join(tmpdir(), 'aiops-worker-notify-'));
+    const dir = await mkdtemp(join(tmpdir(), 'mandate-worker-notify-'));
     configDir = dir;
     const url = await postgres.createDatabase();
     await runMigrations(url);
     database = createDb(url, { onError: () => undefined });
-    await writeFile(join(dir, 'aiops.yaml'), NOTIFYING_CONFIG);
+    await writeFile(join(dir, 'mandate.yaml'), NOTIFYING_CONFIG);
     const env = parseWorkerEnv({
       DATABASE_URL: url,
       TEMPORAL_ADDRESS: env0.address,
       TEMPORAL_TASK_QUEUE: `notify-${randomUUID()}`,
-      AIOPS_CONFIG_DIR: dir,
-      AIOPS_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
-      AIOPS_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
-      AIOPS_SMTP_URL: smtp.url,
-      AIOPS_WORKER_HTTP_PORT: '0',
+      MANDATE_CONFIG_DIR: dir,
+      MANDATE_MASTER_KEYS: '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=',
+      MANDATE_TEMPORAL_KEYS: '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=',
+      MANDATE_SMTP_URL: smtp.url,
+      MANDATE_WORKER_HTTP_PORT: '0',
     });
     const rt = await startWorkerRuntime(env, pino({ level: 'silent' }), new EventEmitter());
     runtime = rt;
@@ -288,6 +288,6 @@ describe('NTF-1 NFR-10 NFR-12 a running worker runtime', () => {
     expect(state.status).toBe('active');
     expect(report.configuration.hash).toBe(state.status === 'active' ? state.hash : undefined);
     const metrics = await (await fetch(`${base}/metrics`)).text();
-    expect(metrics).toMatch(/^aiops_changesets\{status="prepared"\} [1-9]/m);
+    expect(metrics).toMatch(/^mandate_changesets\{status="prepared"\} [1-9]/m);
   }, 60_000);
 });

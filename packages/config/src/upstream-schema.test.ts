@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import { schemaIssues } from './schema.js';
 import { pathPlaceholders, templateArgs, templateRecords, toUpstreamMapping, upstreamSchema } from './upstream-schema.js';

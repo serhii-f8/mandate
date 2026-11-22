@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { appendFile, cp, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
-import { CODE_FIXTURE_PRESET_DIR } from '@aiops/testing';
+import { CODE_FIXTURE_PRESET_DIR } from '@mandate/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { diffConfigurations, formatDiff } from './diff.js';
 import { loadConfigurationDirectory, type LoadedConfiguration } from './load.js';
 import { loadPresetCode, resetPresetCodeImports } from './preset-code.js';
 
-const PACKAGE = '@aiops/code-fixture-preset';
+const PACKAGE = '@mandate/code-fixture-preset';
 const CODE = 'lib/index.js';
 
 const dirs: string[] = [];
@@ -30,7 +30,7 @@ async function tempDir(prefix: string): Promise<string> {
 
 /** Copies the code fixture to `<new temp root>/code-fixture` and returns the package directory. */
 async function copyFixture(): Promise<string> {
-  const dir = join(await tempDir('aiops-preset-code-'), 'code-fixture');
+  const dir = join(await tempDir('mandate-preset-code-'), 'code-fixture');
   await cp(CODE_FIXTURE_PRESET_DIR, dir, { recursive: true });
   return dir;
 }
@@ -38,7 +38,7 @@ async function copyFixture(): Promise<string> {
 const load = (dir: string, code = CODE, importModule?: (url: string) => Promise<unknown>) =>
   loadPresetCode({ packageName: PACKAGE, dir, code, ...(importModule === undefined ? {} : { importModule }) });
 
-const issue = (message: string) => ({ ok: false, issues: [{ file: `${PACKAGE}/package.json`, path: 'aiops.code', message }] });
+const issue = (message: string) => ({ ok: false, issues: [{ file: `${PACKAGE}/package.json`, path: 'mandate.code', message }] });
 
 /**
  * Imports a module with Node's own loader in a worker thread, as production does: Vitest's
@@ -147,12 +147,12 @@ describe('OPS-5 CONN-8 preset code modules', () => {
 
   it('CFG-4 the configuration hash differs for two copies whose dist differs by one byte', async () => {
     const hashOf = async (edit?: (dir: string) => Promise<void>): Promise<LoadedConfiguration> => {
-      const presets = await tempDir('aiops-preset-code-presets-');
+      const presets = await tempDir('mandate-preset-code-presets-');
       const dir = join(presets, 'code-fixture');
       await cp(CODE_FIXTURE_PRESET_DIR, dir, { recursive: true });
       await writeFile(join(dir, 'preset.yaml'), REDUCED_PRESET);
       await edit?.(dir);
-      const config = await tempDir('aiops-preset-code-config-');
+      const config = await tempDir('mandate-preset-code-config-');
       await writeFile(join(config, 'config.yaml'), CONFIG);
       const result = await loadConfigurationDirectory(config, { presetDirs: [presets] });
       if (!result.ok) throw new Error(JSON.stringify(result.issues));
@@ -185,7 +185,7 @@ describe('OPS-5 CONN-8 preset code modules', () => {
   });
 
   it('OPS-5 CONN-8 a code directory or entry file that is a link out of the package is refused', async () => {
-    const elsewhere = await tempDir('aiops-preset-code-out-');
+    const elsewhere = await tempDir('mandate-preset-code-out-');
     await writeFile(join(elsewhere, 'index.js'), 'export default { operations: {} };\n');
     const placement = issue('must be a path inside a subdirectory of the preset');
 
@@ -202,7 +202,7 @@ describe('OPS-5 CONN-8 preset code modules', () => {
 
   it('OPS-5 a symlink in the code tree that points outside the preset is refused', async () => {
     const dir = await copyFixture();
-    const elsewhere = await tempDir('aiops-preset-code-elsewhere-');
+    const elsewhere = await tempDir('mandate-preset-code-elsewhere-');
     await writeFile(join(elsewhere, 'secret.js'), 'export const s = 1;\n');
     await symlink(join(elsewhere, 'secret.js'), join(dir, 'lib', 'secret.js'));
     expect(await load(dir)).toEqual(issue('code directory links outside the preset'));
@@ -235,7 +235,7 @@ describe('OPS-5 CONN-8 preset code modules', () => {
     expect(await load(syntax)).toEqual(issue('cannot be imported (unknown)'));
 
     const missing = await copyFixture();
-    await writeFile(join(missing, CODE), "import { CONNECTOR_SDK_VERSION } from '@aiops/connector-sdk';\nexport default { operations: {}, v: CONNECTOR_SDK_VERSION };\n");
+    await writeFile(join(missing, CODE), "import { CONNECTOR_SDK_VERSION } from '@mandate/connector-sdk';\nexport default { operations: {}, v: CONNECTOR_SDK_VERSION };\n");
     const missingResult = await load(missing, CODE, nativeImport);
     expect(missingResult).toEqual(issue('cannot be imported (ERR_MODULE_NOT_FOUND)'));
 

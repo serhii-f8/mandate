@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { LoadedConfiguration, NotificationConfig } from '@aiops/config';
-import { DEFAULT_TUNING } from '@aiops/temporal';
-import { insertNotifications, PostgresChangeSetRepository, PostgresNotificationOutbox } from '@aiops/db';
-import { allowAllGuard, ScriptedWriter, startSmtpSink, type SmtpSink } from '@aiops/testing';
+import type { LoadedConfiguration, NotificationConfig } from '@mandate/config';
+import { DEFAULT_TUNING } from '@mandate/temporal';
+import { insertNotifications, PostgresChangeSetRepository, PostgresNotificationOutbox } from '@mandate/db';
+import { allowAllGuard, ScriptedWriter, startSmtpSink, type SmtpSink } from '@mandate/testing';
 import { MockActivityEnvironment } from '@temporalio/testing';
 import { DefaultLogger } from '@temporalio/worker';
 import { pino } from 'pino';
@@ -20,7 +20,7 @@ import { testConfiguration } from '../support/configuration.js';
 import { MemoryVault } from '../support/magento.js';
 import { auditEventsOf, startTestPostgres, type TestPostgres } from '../support/postgres.js';
 
-const PUBLIC_URL = 'http://aiops.example.test';
+const PUBLIC_URL = 'http://mandate.example.test';
 
 let postgres: TestPostgres;
 let repository: PostgresChangeSetRepository;
@@ -149,7 +149,7 @@ describe('NTF-3 notification delivery on PostgreSQL', () => {
       await insertNotifications(postgres.database.db, cs.id, [{ kind: 'execution_finished', round: 0, step: 0, target: 'ops-mail' }], at);
     }
     const now = new Date(Math.max(Date.now(), at.getTime()));
-    const email = createSmtpSender({ url: sink.url, from: 'aiops@example.test' });
+    const email = createSmtpSender({ url: sink.url, from: 'mandate@example.test' });
     let clock = now;
     const a = createNotificationDispatcher(deps(configuration, () => clock, { email, webhook: createWebhookSender({ vault: new MemoryVault() }) }));
     const b = createNotificationDispatcher(deps(configuration, () => clock, { email, webhook: createWebhookSender({ vault: new MemoryVault() }) }));

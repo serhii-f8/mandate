@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
-import { auditRowHash, checkLink, GENESIS_HASH, type ChainHead } from '@aiops/core';
+import { auditRowHash, checkLink, GENESIS_HASH, type ChainHead } from '@mandate/core';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startPostgres, type StartedPostgres } from '@aiops/testing';
+import { startPostgres, type StartedPostgres } from '@mandate/testing';
 import { CHAIN_COLUMNS, sealAuditChain, toSealedChainRow } from '../../src/audit-chain.js';
 import { DrizzleAuditLog } from '../../src/audit-log.js';
 import { createDb, type Database } from '../../src/client.js';
@@ -237,7 +237,7 @@ describe('AUD-3 audit sealer', () => {
            VALUES (2, $1, 'audit-1-2.jsonl', $2, 2)`,
           [anchorHash, `sha256:${'a'.repeat(64)}`],
         );
-        await client.query("SELECT set_config('aiops.audit_retention', 'on', true)");
+        await client.query("SELECT set_config('mandate.audit_retention', 'on', true)");
         const deleted = await client.query('DELETE FROM audit_event WHERE chain_pos <= 2');
         expect(deleted.rowCount).toBe(2);
         await client.query('COMMIT');

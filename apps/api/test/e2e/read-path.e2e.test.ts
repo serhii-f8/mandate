@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,8 +7,8 @@ import { Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { READ_RESULT_TEXT } from '@aiops/core';
-import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { READ_RESULT_TEXT } from '@mandate/core';
+import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { createLogger } from '../../src/logger.js';
 import { auditRows, connectClient, modernRequest, rawPost, startApi, startDatabase, tokenFor, vaultOf, type RunningApi } from './helpers.js';
 
@@ -39,7 +39,7 @@ beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
   upstream = await startFakeUpstream();
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-read-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-read-e2e-'));
   await cp(READ_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));
@@ -212,7 +212,7 @@ describe('AUD-2 every event carries actor, client and correlation ID', () => {
     expect(listRows.map((r) => r.action)).toEqual(['tools.list']);
     expect(callRows.map((r) => r.action)).toEqual(['policy.decision', 'tool.call']);
     for (const row of [...listRows, ...callRows]) {
-      expect(row).toMatchObject({ actor: 'alice-id', client_id: 'aiops-mcp' });
+      expect(row).toMatchObject({ actor: 'alice-id', client_id: 'mandate-mcp' });
     }
     expect(listRows[0]?.correlation_id).toBe(listId);
     expect(callRows.every((r) => r.correlation_id === callId)).toBe(true);
@@ -231,7 +231,7 @@ describe('AUD-1 tool calls of read operations are audited', () => {
       itemCount: 2,
       upstreamMs: expect.any(Number) as unknown,
       durationMs: expect.any(Number) as unknown,
-      declaredClientName: 'aiops-e2e',
+      declaredClientName: 'mandate-e2e',
     });
     expect(JSON.stringify(row)).not.toContain('globex');
   });

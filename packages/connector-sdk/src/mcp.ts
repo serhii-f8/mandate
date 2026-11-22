@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash } from 'node:crypto';
 import type { ConnectionSettings } from './connection.js';
 import type { CredentialSource } from './credentials.js';
@@ -46,7 +46,7 @@ export interface McpToolAdapter {
 
 /**
  * Deterministic JSON: sorted keys (UTF-16 code unit order), no whitespace. Byte-identical to
- * `canonicalJson` of `@aiops/core`, which the SDK may not import. Non-finite numbers, sparse
+ * `canonicalJson` of `@mandate/core`, which the SDK may not import. Non-finite numbers, sparse
  * arrays, non-plain objects and other unsupported values throw a `TypeError`.
  */
 export function canonicalJson(value: unknown): string {
@@ -79,7 +79,7 @@ export function canonicalJson(value: unknown): string {
   }
 }
 
-const TOOL_HASH_FORMAT = 'aiops.mcp-tool.v1';
+const TOOL_HASH_FORMAT = 'mandate.mcp-tool.v1';
 
 /**
  * The pin of a tool (CONN-4): `sha256:` and the hex SHA-256 of the canonical JSON of its name,

@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { extname, join, resolve, sep } from 'node:path';
 import { Controller, Get, Inject, Param, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { Logger } from 'pino';
-import type { ApiEnv } from '@aiops/config';
+import type { ApiEnv } from '@mandate/config';
 import { API_ENV, LOGGER } from '../tokens.js';
 import { Public } from './access.js';
 
 /** The web bundle in a development checkout: `apps/web/dist`, next to `apps/api`. */
 const DEVELOPMENT_WEB_DIR = fileURLToPath(new URL('../../../web/dist', import.meta.url));
 
-/** `AIOPS_WEB_DIR` when set, else the development bundle location (absolute either way). */
+/** `MANDATE_WEB_DIR` when set, else the development bundle location (absolute either way). */
 export function resolveWebDir(webDir: string | undefined): string {
   return resolve(webDir ?? DEVELOPMENT_WEB_DIR);
 }
@@ -96,7 +96,7 @@ export class WebAppController {
     if (!(await isFile(file))) {
       if (!this.warned) {
         this.warned = true;
-        this.logger.warn('web bundle not found; /app is not served (set AIOPS_WEB_DIR or build apps/web)');
+        this.logger.warn('web bundle not found; /app is not served (set MANDATE_WEB_DIR or build apps/web)');
       }
       notFound();
       return undefined;

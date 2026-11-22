@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { startFakeMagentoServer } from './fake-magento-server.js';
 
 /** Entry for the restart acceptance container: PORT (default 3003) and PRODUCTS (default 400); control routes on. */

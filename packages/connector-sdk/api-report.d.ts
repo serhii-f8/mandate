@@ -1,4 +1,4 @@
-// @aiops/connector-sdk 1.0.0 public API report — generated, do not edit
+// @mandate/connector-sdk 1.0.0 public API report — generated, do not edit
 
 // file: code.d.ts
 import type { HttpMethod } from './mapping.js';

@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { TASK_TTL_MS, type ChangeSetExecutor } from '@aiops/core';
+import { TASK_TTL_MS, type ChangeSetExecutor } from '@mandate/core';
 import { createTaskResult } from './tasks/task-result.js';
 import type { BuiltinTool } from './tool-catalog.js';
-import { loadConfigurationSources } from '@aiops/config';
-import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryTaskRepository } from '@aiops/testing';
+import { loadConfigurationSources } from '@mandate/config';
+import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryTaskRepository } from '@mandate/testing';
 import { authInfoFor, createServerFactory } from './mcp-server-factory.js';
 import { snapshotOf, type PipelineDeps } from './tool-pipeline.js';
 import type { TaskHandlerDeps } from './tasks/task-handlers.js';
@@ -68,7 +68,7 @@ let widgetDir: string;
 let twoBundles: WidgetBundles;
 
 beforeAll(async () => {
-  widgetDir = await mkdtemp(join(tmpdir(), 'aiops-factory-widgets-'));
+  widgetDir = await mkdtemp(join(tmpdir(), 'mandate-factory-widgets-'));
   await writeFile(join(widgetDir, 'changeset.html'), CHANGESET_HTML);
   await writeFile(join(widgetDir, 'approval.html'), APPROVAL_HTML);
   twoBundles = await WidgetBundles.load(widgetDir, (message) => {
@@ -95,7 +95,7 @@ function handler(builtins: PipelineDeps['builtins'] = [], tasks = new InMemoryTa
     rateCounter: { hit: () => Promise.reject(new Error('not used')) },
     wallClock: () => new Date(0),
     widgets,
-    publicUrl: new URL('https://aiops.example.test'),
+    publicUrl: new URL('https://mandate.example.test'),
   };
   const taskDeps: TaskHandlerDeps = {
     tasks,
@@ -103,7 +103,7 @@ function handler(builtins: PipelineDeps['builtins'] = [], tasks = new InMemoryTa
     executor: unusedExecutor,
     audit,
     newId: () => '00000000-0000-4000-8000-000000000002',
-    publicUrl: new URL('https://aiops.example.test'),
+    publicUrl: new URL('https://mandate.example.test'),
     kindOf: () => 'diff',
   };
   const mcp = createMcpHandler(createServerFactory(deps, taskDeps), { legacy: 'stateless', responseMode: 'json' });
@@ -190,8 +190,8 @@ describe('MCP-7 server factory', () => {
 
 describe('MCP-5 UI resources', () => {
   const UI_META = { ui: { csp: {}, prefersBorder: true } };
-  const CHANGESET = { uri: 'ui://aiops/changeset.html', name: 'changeset', title: 'Change-set', mimeType: 'text/html;profile=mcp-app', _meta: UI_META };
-  const APPROVAL = { uri: 'ui://aiops/approval.html', name: 'approval', title: 'Approval', mimeType: 'text/html;profile=mcp-app', _meta: UI_META };
+  const CHANGESET = { uri: 'ui://mandate/changeset.html', name: 'changeset', title: 'Change-set', mimeType: 'text/html;profile=mcp-app', _meta: UI_META };
+  const APPROVAL = { uri: 'ui://mandate/approval.html', name: 'approval', title: 'Approval', mimeType: 'text/html;profile=mcp-app', _meta: UI_META };
 
   it('MCP-5 server/discover declares the resources capability next to tools and the Tasks extension', async () => {
     const { json } = await handler().call(modernRequest('server/discover'));
@@ -224,7 +224,7 @@ describe('MCP-5 UI resources', () => {
 
   it('MCP-5 an unknown URI answers -32602 with data.uri', async () => {
     const h = handler();
-    for (const uri of ['ui://aiops/nope.html', 'ui://aiops/changeset.html?x=1', 'UI://aiops/changeset.html', 'ui://aiops/../aiops/changeset.html']) {
+    for (const uri of ['ui://mandate/nope.html', 'ui://mandate/changeset.html?x=1', 'UI://mandate/changeset.html', 'ui://mandate/../mandate/changeset.html']) {
       const { json } = await h.call(modernRequest('resources/read', { uri }));
       expect(json.result).toBeUndefined();
       expect(json.error).toMatchObject({ code: -32602, data: { uri } });
@@ -251,7 +251,7 @@ describe('MCP-5 UI resources', () => {
     const h = handler();
     const listed = await h.call(modernRequest('resources/list'));
     const read = await h.call(modernRequest('resources/read', { uri: CHANGESET.uri }));
-    await h.call(modernRequest('resources/read', { uri: 'ui://aiops/nope.html' }));
+    await h.call(modernRequest('resources/read', { uri: 'ui://mandate/nope.html' }));
     await h.call(modernRequest('resources/templates/list'));
     expect((listed.json.result as { resources: unknown[] }).resources).toHaveLength(2);
     expect((read.json.result as { contents: unknown[] }).contents).toHaveLength(1);

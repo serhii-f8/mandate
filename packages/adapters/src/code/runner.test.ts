@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -12,8 +12,8 @@ import {
   type ConnectionSettings,
   type CredentialSource,
   type PresetModule,
-} from '@aiops/connector-sdk';
-import { CODE_FIXTURE_PRESET_DIR, installFakeItems, startFakeUpstream, type FakeItems, type FakeUpstream } from '@aiops/testing';
+} from '@mandate/connector-sdk';
+import { CODE_FIXTURE_PRESET_DIR, installFakeItems, startFakeUpstream, type FakeItems, type FakeUpstream } from '@mandate/testing';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createConnectionClient, type ConnectionClient } from '../http/client.js';
 import { clearTokenCache } from '../http/oauth.js';

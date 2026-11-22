@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import {
   approvalRequirement,
@@ -10,7 +10,7 @@ import {
   type OperationDefinition,
   type RiskClass,
   type RoleApprovalRule,
-} from '@aiops/core';
+} from '@mandate/core';
 import {
   changesetDetail,
   changesetDetailWith,
@@ -111,7 +111,7 @@ const daveApproved = approval({ comment: '<b>ok</b>' });
 const atStep2 = pending({ awaitingRole: 'brand_owner' });
 
 function viewer(subject: string, roles: readonly string[], overrides: Partial<PageViewer> = {}): PageViewer {
-  return { subject, roles, clientId: 'aiops-pages', authTime: new Date(NOW.getTime() - 10_000), fresh: true, ...overrides };
+  return { subject, roles, clientId: 'mandate-pages', authTime: new Date(NOW.getTime() - 10_000), fresh: true, ...overrides };
 }
 const alice = viewer('alice', ['content_manager']);
 const dave = viewer('dave-sub', ['content_lead'], { name: 'dave' });
@@ -331,8 +331,8 @@ describe('checkPageStart', () => {
 
 describe('toApprover', () => {
   it('AUTH-6 maps the page viewer to the approver identity', () => {
-    expect(toApprover(dave)).toStrictEqual({ subject: 'dave-sub', name: 'dave', roles: ['content_lead'], clientId: 'aiops-pages', authTime: dave.authTime });
-    expect(toApprover(alice)).toStrictEqual({ subject: 'alice', roles: ['content_manager'], clientId: 'aiops-pages', authTime: alice.authTime });
+    expect(toApprover(dave)).toStrictEqual({ subject: 'dave-sub', name: 'dave', roles: ['content_lead'], clientId: 'mandate-pages', authTime: dave.authTime });
+    expect(toApprover(alice)).toStrictEqual({ subject: 'alice', roles: ['content_manager'], clientId: 'mandate-pages', authTime: alice.authTime });
   });
 });
 

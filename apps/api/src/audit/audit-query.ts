@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Query-string parsing for the audit search and export routes (AUD-6, NFR-8). Every value is
  * checked here so a malformed query is a 400, never a database error: only strings are accepted
@@ -7,7 +7,7 @@
  * are refused, text filters have bounded length and no control characters, dates must round-trip
  * through `toISOString`, and the cursor is a canonical `seq` within PostgreSQL's bigint range.
  */
-import { AUDIT_ACTIONS, type AuditAction, type AuditOutcome, type AuditSearchFilter } from '@aiops/core';
+import { AUDIT_ACTIONS, type AuditAction, type AuditOutcome, type AuditSearchFilter } from '@mandate/core';
 import { CHANGESET_ID, decodeCursor, encodeItemCursor, type Parsed } from '../approvals/page-query.js';
 
 export interface AuditQuery {

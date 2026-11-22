@@ -6,13 +6,13 @@ small brands of products. At the end the connection test passes and the `catalog
 reach the shop.
 
 Run every command from the repository root, with the stack from the previous page running. The
-commands on these pages read the ports from your shell (`${AIOPS_API_PORT:-8400}` and so on), while
+commands on these pages read the ports from your shell (`${MANDATE_API_PORT:-8400}` and so on), while
 Compose reads them from `.env`: if you changed a port in `.env`, export it in your shell as well, for
-example `export AIOPS_API_PORT=8401`.
+example `export MANDATE_API_PORT=8401`.
 
 ## Start the Magento sandbox
 
-The sandbox runs as its own Compose project on a Docker network called `aiops-sandbox`. The first
+The sandbox runs as its own Compose project on a Docker network called `mandate-sandbox`. The first
 run downloads Mage-OS and installs it, which takes several minutes; later runs take seconds.
 
 <!-- doc-test: attach -->
@@ -21,14 +21,14 @@ bash deploy/sandbox/magento/up.sh
 ```
 
 The script prints `CONSUMER async.operations.all running` and `SANDBOX UP <seconds>`. The shop
-answers on `http://127.0.0.1:4390` (set `AIOPS_MAGENTO_PORT` to use another port).
+answers on `http://127.0.0.1:4390` (set `MANDATE_MAGENTO_PORT` to use another port).
 
 Add the demo products: brands `acme` (3 products), `globex` (2), `initech` (2) and `umbrella`
 (3000). Seeding is idempotent.
 
 <!-- doc-test: attach -->
 ```bash
-node deploy/sandbox/magento/seed.mjs "http://127.0.0.1:${AIOPS_MAGENTO_PORT:-4390}"
+node deploy/sandbox/magento/seed.mjs "http://127.0.0.1:${MANDATE_MAGENTO_PORT:-4390}"
 ```
 
 Seeding adds the `brand` attribute. Restart Magento's bulk consumer so it sees the new attribute;
@@ -36,7 +36,7 @@ the product writes of a later page go through it.
 
 <!-- doc-test: attach -->
 ```bash
-AIOPS_RESTART_CONSUMER=1 bash deploy/sandbox/magento/up.sh
+MANDATE_RESTART_CONSUMER=1 bash deploy/sandbox/magento/up.sh
 ```
 
 ## Get an integration token
@@ -74,7 +74,7 @@ shop is called `magento-sandbox`.
 cat > my-config/connections.yaml <<'EOF'
 version: 1
 presets:
-  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '1.0.0' }
+  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '1.0.0' }
 connections:
   - id: magento
     adapter: openapi
@@ -116,7 +116,7 @@ configuration revision, only `config apply` changes it. Apply your copy:
 
 <!-- doc-test: attach -->
 ```bash
-docker compose exec -T api node dist/cli.js config apply /etc/aiops/config --actor guide
+docker compose exec -T api node dist/cli.js config apply /etc/mandate/config --actor guide
 ```
 
 The command prints the changed connection and the new revision hash. A running `api` and `worker`
@@ -143,11 +143,11 @@ end of [Your first bulk update](first-bulk-update.md).
 <!-- doc-test: attach -->
 ```bash
 export DEV_PASSWORD=dev-only-password
-CAROL_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${AIOPS_API_PORT:-8400}" carol "$DEV_PASSWORD" /app/credentials)"
-SAVED="$(printf '%s\n' "$MAGENTO_TOKEN" | AIOPS_PAGE_COOKIE="$CAROL_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" put-credential magento-integration)"
+CAROL_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${MANDATE_API_PORT:-8400}" carol "$DEV_PASSWORD" /app/credentials)"
+SAVED="$(printf '%s\n' "$MAGENTO_TOKEN" | MANDATE_PAGE_COOKIE="$CAROL_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${MANDATE_API_PORT:-8400}" put-credential magento-integration)"
 echo "$SAVED"
 test "$SAVED" = '{"status":204}'
-REPORT="$(AIOPS_PAGE_COOKIE="$CAROL_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" test magento)"
+REPORT="$(MANDATE_PAGE_COOKIE="$CAROL_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${MANDATE_API_PORT:-8400}" test magento)"
 echo "$REPORT"
 test "$(node -p 'JSON.parse(process.argv[1]).body.ok' "$REPORT")" = true
 ```
@@ -157,7 +157,7 @@ or notifications.
 
 ## What the preset offers
 
-The connection applies the Magento catalog preset (`@aiops/magento2-catalog` 1.0.0), which brings
+The connection applies the Magento catalog preset (`@mandate/magento2-catalog` 1.0.0), which brings
 four operations:
 
 | Operation | Risk | What it does |

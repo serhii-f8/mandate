@@ -49,7 +49,7 @@ states why the first option did not fit the code.
 9. **Connector SDK 0.6.0 is set once**, with the adapter; the later parts add to 0.6.0.
 10. **Acceptance:** `@modelcontextprotocol/server-everything` 2.2.1 runs as
     `npx … streamableHttp`, `PORT` (default 3001), endpoint `/mcp`, Node ≥ 24 (read from the
-    package source); the fake MCP server is built from `@aiops/testing` into an image
+    package source); the fake MCP server is built from `@mandate/testing` into an image
     (`tooling/acceptance/fake-mcp.Dockerfile`) with a `/_control/tools/<name>` endpoint that
     changes a description at run time.
 
@@ -83,7 +83,7 @@ states why the first option did not fit the code.
 17. A code write is `write(ctx, records, args)`: it also receives the change-set's validated
     arguments.
 18. **No runtime `definePreset`:** code mounted outside `/app` cannot resolve
-    `@aiops/connector-sdk`, so preset code imports `@aiops/*` as types only (new lint rule) and
+    `@mandate/connector-sdk`, so preset code imports `@mandate/*` as types only (new lint rule) and
     default-exports an object `satisfies PresetModule`.
 19. The code module is imported with a digest of its code directory in the URL, and that digest
     is hashed into the configuration. A running process that sees the same entry file with a
@@ -92,11 +92,11 @@ states why the first option did not fit the code.
 20. Per-record and code writes are a second mode of `ManifestBatchWriter` (`directFor`) next to
     the unchanged bulk path; any `retriable` record outcome throws so the activity retries and
     read-before-write marks the written records `already_applied`; `failed` → `upstream_failed`.
-21. Contract helpers in `@aiops/testing` take the loader and adapters as parameters (a dependency
+21. Contract helpers in `@mandate/testing` take the loader and adapters as parameters (a dependency
     would create a workspace cycle): `presetConnectionYaml`, `replayRecordings`, `contractRead`,
     `contractWrite`, `recordingsFreeOf`.
 22. The image builds and `pnpm pack`s every `presets/*` package; `semver` 7.8.6 (already in the
-    lockfile) becomes a direct dependency of `@aiops/config`.
+    lockfile) becomes a direct dependency of `@mandate/config`.
 23. Target IDs stay strings; the loader requires `read_before.ids_arg` items to be strings. A
     preset whose upstream uses integers declares a numeric string pattern and converts in code.
     `response.items: '$'` maps a bare JSON-array response; a total from a response header is not
@@ -134,7 +134,7 @@ states why the first option did not fit the code.
 31. Core `checkDecision` refuses a service approver (`not_approver`), in addition to hiding
     `review_changeset` and `decide_changeset`; `config diff` gains a `service_account` entity
     kind; `config explain` takes exactly one of `--groups` and `--service`.
-32. Compose default `${AIOPS_KEYCLOAK_SERVICE_ACCOUNTS-aiops-sa-ci}` (an explicit empty value
+32. Compose default `${MANDATE_KEYCLOAK_SERVICE_ACCOUNTS-mandate-sa-ci}` (an explicit empty value
     creates none); the bootstrap never deletes clients and never sends a secret on update;
     acceptance reads the secret through the admin API into
     `tooling/acceptance/service-token.mjs`, never argv or logs.
@@ -243,8 +243,8 @@ made; some code comments cite them.
 51. **A per-record writer starts no request after a retriable answer** (F10; refines item 20).
     In-flight ones finish and unsent records answer `retriable`; the batch throws, and the retry
     marks written ones `already_applied`.
-52. **Loader tightenings** (F25): `aiops.code` must be in a subdirectory, `aiops.sdk` is required
-    when `aiops` exists, and a per-record binding on GET is refused. Adding `aiops` to Magento's
+52. **Loader tightenings** (F25): `mandate.code` must be in a subdirectory, `mandate.sdk` is required
+    when `mandate` exists, and a per-record binding on GET is refused. Adding `mandate` to Magento's
     `package.json` changes the configuration hash of every Magento configuration.
 53. **Preset package selection also scans `<dir>/node_modules`** (T2-M1) and reads every
     `package.json` there.
@@ -321,7 +321,7 @@ made; some code comments cite them.
   `required: never`), an opaque GET or `bulk` binding, and a bulk write on a destructive operation
   without a manifest. A configuration that loaded under Phase 8 can be refused; the only fixture
   affected is `read-config`.
-- Item 52: the Magento `package.json` gains `aiops`, which changes the configuration hash. A
+- Item 52: the Magento `package.json` gains `mandate`, which changes the configuration hash. A
   stored revision from before the upgrade is refused `configuration_mismatch` until
   `config apply` is re-run.
 - Item 37: MCP tools whose schemas fail strict Ajv need an operator-supplied `input_schema`.

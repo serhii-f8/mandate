@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Calls the api's REST API for trusted pages like the credential page does (UI-5, SEC-8):
 // the session cookie, the CSRF token from GET /api/v1/session and the page's Origin.
 // Secrets never come from argv (argv shows in `ps`) and are never printed:
-//   AIOPS_PAGE_COOKIE   the `aiops_session=…` cookie from page-login.mjs (environment)
+//   MANDATE_PAGE_COOKIE   the `mandate_session=…` cookie from page-login.mjs (environment)
 //   stdin               the secret for put-credential (the bearer token, one line)
 //
 //   page-api.mjs <api-base-url> session                   → {"status":200,"body":{…}}
@@ -22,7 +22,7 @@
 import { writeFile } from 'node:fs/promises';
 
 const [base, command, ...args] = process.argv.slice(2);
-const cookie = process.env.AIOPS_PAGE_COOKIE;
+const cookie = process.env.MANDATE_PAGE_COOKIE;
 const USAGE =
   'usage: page-api.mjs <api-base-url> session | put-credential <ref> | test <connection-id> | approvals [after] | changeset <id> | items <id> [after] | decide <id> <approve|reject|return> <hash> <count> [comment] | start <id> | rollback <id> <hash> | export <id> <csv|xlsx> <outfile>';
 // Required and optional argument counts per subcommand.
@@ -53,7 +53,7 @@ if (
 }
 const name = args[0];
 if (cookie === undefined || cookie === '') {
-  console.error('page-api.mjs: set AIOPS_PAGE_COOKIE');
+  console.error('page-api.mjs: set MANDATE_PAGE_COOKIE');
   process.exit(2);
 }
 const api = new URL(base);

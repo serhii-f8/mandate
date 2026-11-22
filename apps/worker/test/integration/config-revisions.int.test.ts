@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createOpenApiAdapter } from '@aiops/adapters';
-import { loadConfigurationDirectory, parseWorkerEnv, revisionFilesOf, revisionSummary } from '@aiops/config';
-import { createDb, PostgresConfigRevisionStore, runMigrations, type Database } from '@aiops/db';
-import { startPostgres, type StartedPostgres } from '@aiops/testing';
-import { configurationLoadOptions } from '@aiops/upstream';
+import { createOpenApiAdapter } from '@mandate/adapters';
+import { loadConfigurationDirectory, parseWorkerEnv, revisionFilesOf, revisionSummary } from '@mandate/config';
+import { createDb, PostgresConfigRevisionStore, runMigrations, type Database } from '@mandate/db';
+import { startPostgres, type StartedPostgres } from '@mandate/testing';
+import { configurationLoadOptions } from '@mandate/upstream';
 import { pino } from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startRuntimeConfiguration, startWorkerRuntime } from '../../src/runtime.js';
@@ -20,7 +20,7 @@ const PRESET_DIRS = fileURLToPath(new URL('../../../../presets', import.meta.url
 /** A read operation of the Magento preset that `support_agent` is not granted in `deploy/config`. */
 const GRANTED = 'catalog.get_product';
 /** AUD-1 CONN-8: `config.load` names the preset version each load chose. */
-const MAGENTO_PRESETS = [{ id: 'magento-catalog', package: '@aiops/magento2-catalog', version: '1.0.0' }];
+const MAGENTO_PRESETS = [{ id: 'magento-catalog', package: '@mandate/magento2-catalog', version: '1.0.0' }];
 const MASTER_KEYS = '1:ZGV2LW9ubHktbWFzdGVyLWtleS0wMTIzNDU2Nzg5YWI=';
 const TEMPORAL_KEYS = '1:ZGV2LW9ubHktdGVtcG9yYWwta2V5LTAxMjM0NTY3ODk=';
 
@@ -54,12 +54,12 @@ describe('CFG-3 CFG-4 AUD-1 the worker follows applied revisions', () => {
     const env = parseWorkerEnv({
       DATABASE_URL: url,
       TEMPORAL_ADDRESS: '127.0.0.1:1',
-      AIOPS_CONFIG_DIR: CONFIG_DIR,
-      AIOPS_PRESET_DIRS: PRESET_DIRS,
-      AIOPS_MASTER_KEYS: MASTER_KEYS,
-      AIOPS_TEMPORAL_KEYS: TEMPORAL_KEYS,
+      MANDATE_CONFIG_DIR: CONFIG_DIR,
+      MANDATE_PRESET_DIRS: PRESET_DIRS,
+      MANDATE_MASTER_KEYS: MASTER_KEYS,
+      MANDATE_TEMPORAL_KEYS: TEMPORAL_KEYS,
       // An ephemeral port: integration files run in parallel (ruling F11).
-      AIOPS_WORKER_HTTP_PORT: '0',
+      MANDATE_WORKER_HTTP_PORT: '0',
     });
     const adapter = createOpenApiAdapter();
     const signals = new EventEmitter();
@@ -77,7 +77,7 @@ describe('CFG-3 CFG-4 AUD-1 the worker follows applied revisions', () => {
         ]);
 
         // A temp copy of deploy/config whose support_agent is granted one more read operation.
-        editedDir = await mkdtemp(join(tmpdir(), 'aiops-worker-revision-'));
+        editedDir = await mkdtemp(join(tmpdir(), 'mandate-worker-revision-'));
         await cp(CONFIG_DIR, editedDir, { recursive: true });
         const roles = await readFile(join(editedDir, 'roles.yaml'), 'utf8');
         const granted = roles.replace('      - operation: support.lookup_order\n', `      - operation: support.lookup_order\n      - operation: ${GRANTED}\n`);
@@ -88,7 +88,7 @@ describe('CFG-3 CFG-4 AUD-1 the worker follows applied revisions', () => {
         const files = revisionFilesOf(loaded.configuration);
         if (!files.ok) throw new Error('edited configuration cannot be stored');
 
-        // On a second pool, as `aiops config apply` would write it.
+        // On a second pool, as `mandate config apply` would write it.
         const id = randomUUID();
         const applied = await new PostgresConfigRevisionStore(cli.db, { databaseUrl: url }).apply(
           { id, hash: loaded.configuration.hash, files: files.files, actor: 'cli:test', summary: revisionSummary(loaded.configuration) },
@@ -144,12 +144,12 @@ describe('CFG-3 CFG-4 AUD-1 the worker follows applied revisions', () => {
       DATABASE_URL: url,
       // Nothing listens here: reaching the connect proves the wait ended.
       TEMPORAL_ADDRESS: '127.0.0.1:1',
-      AIOPS_CONFIG_DIR: CONFIG_DIR,
-      AIOPS_PRESET_DIRS: PRESET_DIRS,
-      AIOPS_MASTER_KEYS: MASTER_KEYS,
-      AIOPS_TEMPORAL_KEYS: TEMPORAL_KEYS,
+      MANDATE_CONFIG_DIR: CONFIG_DIR,
+      MANDATE_PRESET_DIRS: PRESET_DIRS,
+      MANDATE_MASTER_KEYS: MASTER_KEYS,
+      MANDATE_TEMPORAL_KEYS: TEMPORAL_KEYS,
       // An ephemeral port: integration files run in parallel (ruling F11).
-      AIOPS_WORKER_HTTP_PORT: '0',
+      MANDATE_WORKER_HTTP_PORT: '0',
     });
     const adapter = createOpenApiAdapter();
     const loaded = await loadConfigurationDirectory(CONFIG_DIR, configurationLoadOptions(adapter, env));

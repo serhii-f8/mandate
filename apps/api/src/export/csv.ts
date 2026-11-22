@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** CSV export of a change-set (CS-8): RFC 4180, UTF-8 with BOM, every field quoted, CRLF. */
-import type { ChangeItemRecord } from '@aiops/core';
+import type { ChangeItemRecord } from '@mandate/core';
 import { formulaSafe, headerRow, itemRow, truncateCell } from './columns.js';
 
 const BOM = '﻿';

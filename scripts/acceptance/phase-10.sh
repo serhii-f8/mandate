@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 # Phase 10 acceptance (SPEC section 7, design phase-10-release-docs §6): a clean-room dry run of the
 # public guide. A fresh clone of HEAD runs the marked `doc-test` blocks of docs/guide/ through
 # tooling/doc-test/run.mjs, exactly as a reader would type them from the repository root, with only
@@ -27,7 +27,7 @@
 # fresh stack, read from the database) in its environment, as the reader's shell still has it.
 # The runner prints `pass|fail|skip <section>`; fail and skip are FAIL here. On a failure the tail of
 # the masked .doc-test.log is printed.
-# The Magento sandbox (network aiops-sandbox, port AIOPS_MAGENTO_PORT, default 4390) is shared with
+# The Magento sandbox (network mandate-sandbox, port MANDATE_MAGENTO_PORT, default 4390) is shared with
 # other checkouts: the guide brings it up and seeds it idempotently; this script never stops it. Only
 # this run's Compose project is removed on exit.
 # Prints one PASS/FAIL line per check and `# RESULT: PASS|FAIL`, then the manual steps of design §7;
@@ -62,23 +62,23 @@ check_of() {
 }
 
 WORK="$(mktemp -d)"
-CLONE="$WORK/aiops"
-export COMPOSE_PROJECT_NAME="aiops-accept10-$$"
+CLONE="$WORK/mandate"
+export COMPOSE_PROJECT_NAME="mandate-accept10-$$"
 # The guide sets COMPOSE_FILE in the clone's .env; a value in this shell would win over it.
 unset COMPOSE_FILE COMPOSE_PROFILES
 
 free_port() { node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})"; }
-AIOPS_API_PORT="$(free_port)" AIOPS_KEYCLOAK_PORT="$(free_port)" AIOPS_TEMPORAL_PORT="$(free_port)" AIOPS_POSTGRES_PORT="$(free_port)"
-AIOPS_MAILPIT_PORT="$(free_port)"
-export AIOPS_API_PORT AIOPS_KEYCLOAK_PORT AIOPS_TEMPORAL_PORT AIOPS_POSTGRES_PORT AIOPS_MAILPIT_PORT
-export AIOPS_KEYCLOAK_PUBLIC_URL="http://localhost:${AIOPS_KEYCLOAK_PORT}"
-export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
-export AIOPS_PUBLIC_URL="http://localhost:${AIOPS_API_PORT}"
+MANDATE_API_PORT="$(free_port)" MANDATE_KEYCLOAK_PORT="$(free_port)" MANDATE_TEMPORAL_PORT="$(free_port)" MANDATE_POSTGRES_PORT="$(free_port)"
+MANDATE_MAILPIT_PORT="$(free_port)"
+export MANDATE_API_PORT MANDATE_KEYCLOAK_PORT MANDATE_TEMPORAL_PORT MANDATE_POSTGRES_PORT MANDATE_MAILPIT_PORT
+export MANDATE_KEYCLOAK_PUBLIC_URL="http://localhost:${MANDATE_KEYCLOAK_PORT}"
+export MANDATE_MCP_RESOURCE="http://localhost:${MANDATE_API_PORT}/mcp"
+export MANDATE_PUBLIC_URL="http://localhost:${MANDATE_API_PORT}"
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-SANDBOX="http://127.0.0.1:${AIOPS_MAGENTO_PORT:-4390}"
+SANDBOX="http://127.0.0.1:${MANDATE_MAGENTO_PORT:-4390}"
 
 dc() { (cd "$CLONE" && docker compose "$@"); }
-psql_q() { dc exec -T postgres psql -U aiops -d aiops -tAc "$1"; }
+psql_q() { dc exec -T postgres psql -U mandate -d mandate -tAc "$1"; }
 
 cleanup() {
   # The clone's .env names the attach override; its sandbox network is external and stays.
@@ -119,7 +119,7 @@ run_sections() {
   fi
 }
 
-echo "# Phase 10 acceptance of ${SHA:0:12} (project $COMPOSE_PROJECT_NAME, api port $AIOPS_API_PORT, sandbox $SANDBOX)"
+echo "# Phase 10 acceptance of ${SHA:0:12} (project $COMPOSE_PROJECT_NAME, api port $MANDATE_API_PORT, sandbox $SANDBOX)"
 
 git clone --quiet --no-local --no-checkout "$REPO" "$CLONE"
 git -C "$CLONE" checkout --quiet --detach "$SHA"
@@ -197,7 +197,7 @@ else
 fi
 
 # ---- Doc lint in the clone --------------------------------------------------------------------------
-if LINT="$(cd "$CLONE" && corepack pnpm --filter @aiops/tooling exec vitest run --project unit test/docs.unit.test.ts 2>&1)"; then
+if LINT="$(cd "$CLONE" && corepack pnpm --filter @mandate/tooling exec vitest run --project unit test/docs.unit.test.ts 2>&1)"; then
   pass docs-lint "$(grep -E 'Tests +[0-9]+' <<<"$LINT" | tr -s ' ' | sed 's/^ //' | head -1)"
 else
   fail docs-lint "$(grep -E 'FAIL|Tests +[0-9]+' <<<"$LINT" | tr -s ' ' | head -5 | tr '\n' ' ')"

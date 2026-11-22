@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { HttpMethod, TemplateValue, UpstreamMapping, WriteRecord } from '@aiops/connector-sdk';
+// Copyright 2026 The Mandate Authors
+import type { HttpMethod, TemplateValue, UpstreamMapping, WriteRecord } from '@mandate/connector-sdk';
 import { FORBIDDEN_HEADERS } from '../http/headers.js';
 
 /** Raised for mapping/argument problems. Messages never contain argument values (SEC-3). */

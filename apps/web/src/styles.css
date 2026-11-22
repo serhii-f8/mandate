@@ -45,17 +45,17 @@ body {
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
 }
-/* The root carries the shared `.aiops` scope; on a page it is the canvas, not a panel. */
-#root.aiops {
+/* The root carries the shared `.mandate` scope; on a page it is the canvas, not a panel. */
+#root.mandate {
   min-height: 100vh;
   padding: 0;
   background: var(--paper);
 }
-.aiops a {
+.mandate a {
   color: var(--seal);
   text-underline-offset: 2px;
 }
-.aiops :focus-visible {
+.mandate :focus-visible {
   outline-color: var(--seal);
 }
 
@@ -71,7 +71,7 @@ body {
   padding: 20px 0 14px;
   border-bottom: 1px solid var(--color-border-primary);
 }
-.aiops .masthead .brand {
+.mandate .masthead .brand {
   color: var(--color-text-primary);
   font-weight: 750;
   font-size: 1.0625rem;
@@ -82,16 +82,16 @@ body {
   display: flex;
   gap: 20px;
 }
-.aiops .masthead nav a {
+.mandate .masthead nav a {
   color: var(--color-text-secondary);
   text-decoration: none;
   padding-bottom: 2px;
   border-bottom: 2px solid transparent;
 }
-.aiops .masthead nav a:hover {
+.mandate .masthead nav a:hover {
   color: var(--color-text-primary);
 }
-.aiops .masthead nav a[aria-current='page'] {
+.mandate .masthead nav a[aria-current='page'] {
   color: var(--color-text-primary);
   border-bottom-color: var(--seal);
 }
@@ -135,12 +135,12 @@ body {
 }
 
 /* Primary actions carry the seal colour on the pages. */
-.aiops button.primary {
+.mandate button.primary {
   color: var(--on-seal);
   border-color: var(--seal);
   background: var(--seal);
 }
-.aiops button.primary:hover:not(:disabled) {
+.mandate button.primary:hover:not(:disabled) {
   opacity: 1;
   border-color: var(--seal-strong);
   background: var(--seal-strong);

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createOpenApiAdapter, type OpenApiAdapter } from '@aiops/adapters';
-import { loadConfigurationDirectory, revisionFilesOf, revisionSummary } from '@aiops/config';
-import type { ConfigRevisionStore } from '@aiops/core';
-import { FakeResolver, fakeCatalogEntry, InMemoryAuditLog, InMemoryConfigRevisionStore } from '@aiops/testing';
+import { createOpenApiAdapter, type OpenApiAdapter } from '@mandate/adapters';
+import { loadConfigurationDirectory, revisionFilesOf, revisionSummary } from '@mandate/config';
+import type { ConfigRevisionStore } from '@mandate/core';
+import { FakeResolver, fakeCatalogEntry, InMemoryAuditLog, InMemoryConfigRevisionStore } from '@mandate/testing';
 import { runApiCli, type CliDeps } from './cli.js';
 
 const SHOP_SPEC = fileURLToPath(new URL('../../../packages/config/test/fixtures/derived/specs/shop.json', import.meta.url));
@@ -66,7 +66,7 @@ afterEach(async () => {
 
 /** A configuration directory whose role `viewer` holds the given grants. */
 async function configDir(grants: readonly string[] = ['shop.list_items'], serviceAccounts: readonly string[] = []): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'aiops-cli-config-'));
+  const dir = await mkdtemp(join(tmpdir(), 'mandate-cli-config-'));
   dirs.push(dir);
   await mkdir(join(dir, 'specs'));
   await cp(SHOP_SPEC, join(dir, 'specs', 'shop.json'));
@@ -125,7 +125,7 @@ async function run(argv: string[], store: ConfigRevisionStore, env: Record<strin
   return { code, lines, closed };
 }
 
-describe('CFG-3 CFG-4 aiops config diff and apply', () => {
+describe('CFG-3 CFG-4 mandate config diff and apply', () => {
   it('CFG-3 diff of the active configuration prints No changes and exits 0', async () => {
     const dir = await configDir();
     const { store } = fixture();
@@ -279,7 +279,7 @@ describe('CFG-3 CFG-4 aiops config diff and apply', () => {
   it('CFG-3 a file key the revision cannot hold (spec outside the directory) makes apply exit 1', async () => {
     const { store, audit } = fixture();
     await bootstrap(store, await configDir());
-    const root = await mkdtemp(join(tmpdir(), 'aiops-cli-config-outside-'));
+    const root = await mkdtemp(join(tmpdir(), 'mandate-cli-config-outside-'));
     dirs.push(root);
     const dir = join(root, 'conf');
     await mkdir(dir);
@@ -294,7 +294,7 @@ describe('CFG-3 CFG-4 aiops config diff and apply', () => {
   });
 });
 
-describe('CFG-3 POL-7 aiops config explain', () => {
+describe('CFG-3 POL-7 mandate config explain', () => {
   const explain = (...flags: string[]): string[] => ['config', 'explain', ...flags];
 
   it('CFG-3 POL-7 config explain exits 0 for allow, 1 for deny, 2 for usage', async () => {
@@ -378,7 +378,7 @@ describe('CFG-3 POL-7 aiops config explain', () => {
   it('CFG-3 config explain without an active revision exits 2', async () => {
     const empty = fixture();
     const none = await run(explain('--operation', 'shop.list_items', '--groups', 'viewers'), empty.store);
-    expect(none.lines).toEqual(['no active configuration: start the api once or run aiops config apply']);
+    expect(none.lines).toEqual(['no active configuration: start the api once or run mandate config apply']);
     expect(none.code).toBe(2);
     expect(none.closed).toBe(1);
 
@@ -392,7 +392,7 @@ describe('CFG-3 POL-7 aiops config explain', () => {
   });
 });
 
-describe('AUD-7 CFG-3 aiops audit retention reads the active revision', () => {
+describe('AUD-7 CFG-3 mandate audit retention reads the active revision', () => {
   const retention = ['audit', 'retention', '--now'];
   let pools = 0;
   const openPool: CliDeps['openPool'] = () => {
@@ -404,8 +404,8 @@ describe('AUD-7 CFG-3 aiops audit retention reads the active revision', () => {
     pools = 0;
     const dir = await configDir();
     const empty = fixture();
-    const none = await run(retention, empty.store, { DATABASE_URL, AIOPS_CONFIG_DIR: dir }, { openPool });
-    expect(none.lines).toEqual(['no active configuration: start the api once or run aiops config apply']);
+    const none = await run(retention, empty.store, { DATABASE_URL, MANDATE_CONFIG_DIR: dir }, { openPool });
+    expect(none.lines).toEqual(['no active configuration: start the api once or run mandate config apply']);
     expect(none.code).toBe(2);
     expect(none.closed).toBe(1);
     expect(pools).toBe(0);
@@ -427,12 +427,12 @@ describe('AUD-7 CFG-3 aiops audit retention reads the active revision', () => {
     expect(pools).toBe(0);
   });
 
-  it('AUD-7 CFG-3 audit retention --now needs no AIOPS_CONFIG_DIR, only DATABASE_URL', async () => {
+  it('AUD-7 CFG-3 audit retention --now needs no MANDATE_CONFIG_DIR, only DATABASE_URL', async () => {
     const { store } = fixture();
     await bootstrap(store, await configDir());
     const missing = await run(retention, store, {}, { openPool });
     expect(missing.lines.join('\n')).toMatch(/DATABASE_URL/);
-    expect(missing.lines.join('\n')).not.toMatch(/AIOPS_CONFIG_DIR/);
+    expect(missing.lines.join('\n')).not.toMatch(/MANDATE_CONFIG_DIR/);
     expect(missing.code).toBe(2);
   });
 });

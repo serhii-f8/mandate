@@ -1,4 +1,4 @@
-# AI Operations Layer — Technical Specification
+# Mandate — Technical Specification
 
 Version 1.0. This document specifies the product. Requirement identifiers from sections 5 and 6
 (`MCP-1`, `POL-3`, `NFR-7`, ...) are cited in code comments, test names and commit messages. Decisions

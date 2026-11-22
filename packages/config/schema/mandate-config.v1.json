@@ -1,5 +1,5 @@
 {
-  "$id": "https://aiops.invalid/schema/aiops-config.v1.json",
+  "$id": "https://mandate.invalid/schema/mandate-config.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -1200,5 +1200,5 @@
     "version"
   ],
   "type": "object",
-  "x-aiops-schema-version": "1.0.0"
+  "x-mandate-schema-version": "1.0.0"
 }

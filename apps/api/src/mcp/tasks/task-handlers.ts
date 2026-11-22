@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * `tasks/get`, `tasks/update` and `tasks/cancel` of the Tasks extension (MCP-7). Every request
  * must declare the extension, and the task must belong to the caller (SEC-1): unknown, foreign and
@@ -20,7 +20,7 @@ import {
   type InvocationResult,
   type TaskRecord,
   type TaskRepository,
-} from '@aiops/core';
+} from '@mandate/core';
 import {
   executionAnswer,
   expiredDuringPreparationAnswer,
@@ -39,7 +39,7 @@ export interface TaskHandlerDeps {
   readonly executor: ChangeSetExecutor;
   readonly audit: AuditLog;
   readonly newId: () => string;
-  /** `AIOPS_PUBLIC_URL`, the base of the change-set page link in final results (MCP-6). */
+  /** `MANDATE_PUBLIC_URL`, the base of the change-set page link in final results (MCP-6). */
   readonly publicUrl: URL;
   /** The kind of a change-set's operation under the current configuration (R7, R8). */
   readonly kindOf: (operationId: string) => ChangeSetKind;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -12,7 +12,7 @@ interface DryRun {
 
 describe('Turborepo cache inputs (CI must not replay stale results)', () => {
   it('treats the root lint, type-check and test configuration as global inputs', () => {
-    const out = execFileSync('pnpm', ['exec', 'turbo', 'run', 'lint', '--filter=@aiops/core', '--dry=json'], {
+    const out = execFileSync('pnpm', ['exec', 'turbo', 'run', 'lint', '--filter=@mandate/core', '--dry=json'], {
       cwd: repoRoot,
       encoding: 'utf8',
     });

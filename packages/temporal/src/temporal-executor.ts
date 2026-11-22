@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import {
   CANCELLABLE,
   changesetTransitionEvent,
@@ -16,7 +16,7 @@ import {
   type RollbackRequestOutcome,
   type StartOutcome,
   type StartRequest,
-} from '@aiops/core';
+} from '@mandate/core';
 import {
   NamespaceNotFoundError,
   ServiceError,

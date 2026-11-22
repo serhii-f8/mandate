@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { HttpException, SetMetadata, type CanActivate, type ExecutionContext } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
 import type { Request, Response } from 'express';
-import type { SessionRow } from '@aiops/db';
+import type { SessionRow } from '@mandate/db';
 import { pageCorrelation } from './correlation.js';
 import { csrfAllowed } from './csrf.js';
 import { sessionCookieValue, type SessionLookup } from './session.service.js';
 
-export const PUBLIC_KEY = 'aiops:public';
-export const PAGE_ACCESS_KEY = 'aiops:page-access';
+export const PUBLIC_KEY = 'mandate:public';
+export const PAGE_ACCESS_KEY = 'mandate:page-access';
 
 export interface PageAccessOptions {
   /** Mutations: `X-CSRF-Token` and `Origin` must match (SEC-8). */
   readonly csrf?: boolean;
-  /** `now − auth_time ≤ AIOPS_FRESH_AUTH_SECONDS` (SEC-8). */
+  /** `now − auth_time ≤ MANDATE_FRESH_AUTH_SECONDS` (SEC-8). */
   readonly fresh?: boolean;
 }
 
@@ -55,7 +55,7 @@ export function routeAccess(reflector: Reflector, handler: RouteTarget, cls: Rou
 
 /** The settings of the SEC-8 checks, shared by the guard and the controllers that run them themselves. */
 export interface PageChecks {
-  /** `AIOPS_PUBLIC_URL`'s origin. */
+  /** `MANDATE_PUBLIC_URL`'s origin. */
   readonly publicOrigin: string;
   readonly freshAuthSeconds: number;
   readonly now?: () => number;

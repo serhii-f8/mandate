@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** Fixed answers for refused approval decisions (SEC-5: IDs only, never change-set content). */
-import type { DecisionRefusal } from '@aiops/core';
+import type { DecisionRefusal } from '@mandate/core';
 
 export const DECISION_REFUSAL_TEXT: Readonly<Record<DecisionRefusal, (id: string) => string>> = {
   not_found: (id) => `Change-set ${id} was not found.`,

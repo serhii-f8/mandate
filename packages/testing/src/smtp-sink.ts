@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createServer, type AddressInfo, type Socket } from 'node:net';
 
 /** One message as the sink accepted it: envelope addresses and the DATA payload (dot-unstuffed, CRLF line ends). */

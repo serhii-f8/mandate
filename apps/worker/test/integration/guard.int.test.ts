@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
-import type { LoadedConfiguration } from '@aiops/config';
-import { OPAQUE_TARGET_ID, type OperationDefinition, type RoleApprovalRule } from '@aiops/core';
-import { DrizzleAuditLog, PostgresChangeSetRepository } from '@aiops/db';
-import { recordApproval, submitChangeSet } from '@aiops/testing';
+import type { LoadedConfiguration } from '@mandate/config';
+import { OPAQUE_TARGET_ID, type OperationDefinition, type RoleApprovalRule } from '@mandate/core';
+import { DrizzleAuditLog, PostgresChangeSetRepository } from '@mandate/db';
+import { recordApproval, submitChangeSet } from '@mandate/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createExecutionGuard } from '../../src/activities/guard.js';
 import { createPrepared, startExecutionOf } from '../support/changesets.js';
@@ -59,19 +59,19 @@ describe('production execution guard', () => {
     // The service account holds `editor` (no approval, grants the operation on brand acme); its groups are empty.
     const withServiceAccount: LoadedConfiguration = {
       ...configuration,
-      serviceAccounts: new Map([['aiops-sa-ci', { role: 'editor' }]]),
-      policy: { ...configuration.policy, serviceAccounts: [{ clientId: 'aiops-sa-ci', role: 'editor' }] },
+      serviceAccounts: new Map([['mandate-sa-ci', { role: 'editor' }]]),
+      policy: { ...configuration.policy, serviceAccounts: [{ clientId: 'mandate-sa-ci', role: 'editor' }] },
     };
     const cs = await createPrepared(repository, 3, {
-      requester: 'service:aiops-sa-ci',
-      execute: { actor: 'service:aiops-sa-ci', groups: [], clientId: 'aiops-sa-ci', correlationId: 'corr-exec-service' },
+      requester: 'service:mandate-sa-ci',
+      execute: { actor: 'service:mandate-sa-ci', groups: [], clientId: 'mandate-sa-ci', correlationId: 'corr-exec-service' },
     });
     await expect(guardFor(withServiceAccount).check(cs)).resolves.toEqual({ ok: true });
     // A reload without the service_accounts entry leaves the subject without a role.
     expect(configuration.policy.serviceAccounts ?? []).toEqual([]);
     await expect(guardFor(configuration).check(cs)).resolves.toEqual({ ok: false, outcome: 'policy_denied' });
     const decisions = (await auditEventsOf(postgres.database, cs.id)).filter((e) => e.action === 'policy.decision');
-    expect(decisions).toMatchObject([{ actor: 'service:aiops-sa-ci', clientId: 'aiops-sa-ci', decision: 'deny', details: { rule: 'default-deny' } }]);
+    expect(decisions).toMatchObject([{ actor: 'service:mandate-sa-ci', clientId: 'mandate-sa-ci', decision: 'deny', details: { rule: 'default-deny' } }]);
   });
 
   it('POL-6 the production guard denies a change-set without an execution request', async () => {

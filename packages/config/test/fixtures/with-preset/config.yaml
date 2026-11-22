@@ -1,6 +1,6 @@
 version: 1
 presets:
-  - { id: fake, package: "@aiops/fake-preset", version: "0.1.0" }
+  - { id: fake, package: "@mandate/fake-preset", version: "0.1.0" }
 connections:
   - id: shop
     adapter: openapi

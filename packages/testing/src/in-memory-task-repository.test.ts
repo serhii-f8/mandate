@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { InMemoryTaskRepository } from './in-memory-task-repository.js';
 import { describeTaskRepositoryContract } from './task-repository-contract.js';

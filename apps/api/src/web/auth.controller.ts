@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { Controller, Get, Inject, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { Logger } from 'pino';
-import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
-import type { AuditLog } from '@aiops/core';
+import type { ApiEnv, ConfigurationHolder } from '@mandate/config';
+import type { AuditLog } from '@mandate/core';
 import { mayViewAudit } from '../audit/access.js';
 import { clientAddress } from '../http/client-address.js';
 import { UNAVAILABLE_RETRY_AFTER_SECONDS } from '../http/rate-limit-answer.js';

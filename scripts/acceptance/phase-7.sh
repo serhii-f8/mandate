@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 # Phase 7 acceptance (SPEC section 7, designs phase-7-widgets*) against the Magento sandbox:
 #   sandbox-ready, stack-healthy, credential-entered, widgets-in-image;
 #   group 1, the terminal client (text fallback, MCP-6): text-prepare, text-get, text-exclude,
@@ -23,25 +23,25 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SHA="$(git -C "$REPO" rev-parse HEAD)"
 WORK="$(mktemp -d)"
-PROJECT="aiops-accept7-$$"
+PROJECT="mandate-accept7-$$"
 FAILED=0
-SANDBOX="http://127.0.0.1:${AIOPS_MAGENTO_PORT:-4390}"
+SANDBOX="http://127.0.0.1:${MANDATE_MAGENTO_PORT:-4390}"
 
 free_port() { node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})"; }
-export AIOPS_API_PORT="$(free_port)" AIOPS_KEYCLOAK_PORT="$(free_port)" AIOPS_TEMPORAL_PORT="$(free_port)" AIOPS_POSTGRES_PORT="$(free_port)"
-export AIOPS_MAILPIT_PORT="$(free_port)"
-export AIOPS_KEYCLOAK_PUBLIC_URL="http://localhost:${AIOPS_KEYCLOAK_PORT}"
-export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
+export MANDATE_API_PORT="$(free_port)" MANDATE_KEYCLOAK_PORT="$(free_port)" MANDATE_TEMPORAL_PORT="$(free_port)" MANDATE_POSTGRES_PORT="$(free_port)"
+export MANDATE_MAILPIT_PORT="$(free_port)"
+export MANDATE_KEYCLOAK_PUBLIC_URL="http://localhost:${MANDATE_KEYCLOAK_PORT}"
+export MANDATE_MCP_RESOURCE="http://localhost:${MANDATE_API_PORT}/mcp"
 # Origin of the trusted pages and the base of the page links in tool results (MCP-6).
-export AIOPS_PUBLIC_URL="http://localhost:${AIOPS_API_PORT}"
-export AIOPS_ACCEPT_CONFIG_DIR="$WORK/config"
-MCP="http://127.0.0.1:${AIOPS_API_PORT}/mcp"
-API="$AIOPS_PUBLIC_URL"
+export MANDATE_PUBLIC_URL="http://localhost:${MANDATE_API_PORT}"
+export MANDATE_ACCEPT_CONFIG_DIR="$WORK/config"
+MCP="http://127.0.0.1:${MANDATE_API_PORT}/mcp"
+API="$MANDATE_PUBLIC_URL"
 
 compose() { docker compose -p "$PROJECT" -f compose.yaml -f scripts/acceptance/phase-7.compose.yaml "$@"; }
 
 cleanup() {
-  (cd "$WORK/aiops" 2>/dev/null && compose down -v --remove-orphans >/dev/null 2>&1) || true
+  (cd "$WORK/mandate" 2>/dev/null && compose down -v --remove-orphans >/dev/null 2>&1) || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -49,14 +49,14 @@ trap cleanup EXIT
 pass() { echo "PASS $1${2:+ — $2}"; }
 fail() { echo "FAIL $1${2:+ — $2}"; FAILED=1; }
 json() { node -e "try{const v=JSON.parse(process.argv[1])$2;console.log(v===undefined?'':typeof v==='string'?v:JSON.stringify(v))}catch{console.log('')}" "$1"; }
-login() { node "$REPO/tooling/acceptance/login.mjs" "$AIOPS_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$AIOPS_MCP_RESOURCE"; }
+login() { node "$REPO/tooling/acceptance/login.mjs" "$MANDATE_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$MANDATE_MCP_RESOURCE"; }
 page_login() { node "$REPO/tooling/acceptance/page-login.mjs" "$API" "$1" dev-only-password "${2:-/app/approvals}"; }
-page_api() { AIOPS_PAGE_COOKIE="$1" node "$REPO/tooling/acceptance/page-api.mjs" "$API" "${@:2}"; }
+page_api() { MANDATE_PAGE_COOKIE="$1" node "$REPO/tooling/acceptance/page-api.mjs" "$API" "${@:2}"; }
 # A user calls a tool; the user logs in again before every call, so no token expires during the run.
 user_mcp() {
   local token
   token="$(login "$1" 2>&1)" || { echo "{\"loginError\":$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$token")}"; return 0; }
-  AIOPS_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --tool "$2" --args "$3" 2>&1 || true
+  MANDATE_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --tool "$2" --args "$3" 2>&1 || true
 }
 alice_mcp() { user_mcp alice "$@"; }
 dave_mcp() { user_mcp dave "$@"; }
@@ -65,9 +65,9 @@ host() {
   local user="$1" token
   shift
   token="$(login "$user" 2>&1)" || { echo "{\"errors\":[\"login $user failed\"]}"; return 0; }
-  AIOPS_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/widget-host.mjs" "$MCP" "$@" 2>&1 || true
+  MANDATE_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/widget-host.mjs" "$MCP" "$@" 2>&1 || true
 }
-psql_q() { compose exec -T postgres psql -U aiops -d aiops -tAc "$1"; }
+psql_q() { compose exec -T postgres psql -U mandate -d mandate -tAc "$1"; }
 # get_changeset every 2 s until the status matches the regex or the timeout (s) passes; the last
 # answer is left in POLL and its status in POLL_STATUS. Returns 1 on timeout.
 poll_cs() {
@@ -92,9 +92,9 @@ none_has() { node -e 'try{const o=JSON.parse(process.argv[1]);console.log(Object
 # yes when every SKU in the list has exactly the value.
 all_have() { node -e 'try{const o=JSON.parse(process.argv[1]);console.log(process.argv[2].split(",").every((s)=>o[s]===process.argv[3])?"yes":"no")}catch{console.log("no")}' "$1" "$2" "$3"; }
 # yes when the text contains the page link of the change-set (MCP-6).
-has_link() { [[ -n "$2" && "$1" == *"$AIOPS_PUBLIC_URL/app/changesets/$2"* ]] && echo yes || echo no; }
+has_link() { [[ -n "$2" && "$1" == *"$MANDATE_PUBLIC_URL/app/changesets/$2"* ]] && echo yes || echo no; }
 # How often the text contains the page link of the change-set.
-link_count() { node -e 'console.log(process.argv[1].split(process.argv[2]).length - 1)' "$1" "$AIOPS_PUBLIC_URL/app/changesets/$2"; }
+link_count() { node -e 'console.log(process.argv[1].split(process.argv[2]).length - 1)' "$1" "$MANDATE_PUBLIC_URL/app/changesets/$2"; }
 # The first text block of an mcp-call.mjs answer (the summary; content[1] is the JSON block).
 text0() { json "$1" '.content[0]'; }
 
@@ -142,29 +142,29 @@ if [[ "${1:-}" == --manual-config ]]; then
   exit 0
 fi
 
-echo "# Phase 7 acceptance of ${SHA:0:12} (project $PROJECT, api port $AIOPS_API_PORT)"
+echo "# Phase 7 acceptance of ${SHA:0:12} (project $PROJECT, api port $MANDATE_API_PORT)"
 
 # 1. The sandbox is up (idempotent) and seeded (idempotent); its token is the credential.
 if bash "$REPO/deploy/sandbox/magento/up.sh" >"$WORK/sandbox.log" 2>&1 &&
   node "$REPO/deploy/sandbox/magento/seed.mjs" "$SANDBOX" >>"$WORK/sandbox.log" 2>&1 &&
   TOKEN="$(bash "$REPO/deploy/sandbox/magento/token.sh" "$SANDBOX" 2>>"$WORK/sandbox.log")" && [[ -n "$TOKEN" ]]; then
-  if docker network inspect aiops-sandbox >/dev/null 2>&1; then
-    pass sandbox-ready "$(grep -o 'SANDBOX UP.*' "$WORK/sandbox.log" | tail -1); $(grep -o 'SEEDED umbrella.*' "$WORK/sandbox.log" | tail -1); token present; network aiops-sandbox present"
+  if docker network inspect mandate-sandbox >/dev/null 2>&1; then
+    pass sandbox-ready "$(grep -o 'SANDBOX UP.*' "$WORK/sandbox.log" | tail -1); $(grep -o 'SEEDED umbrella.*' "$WORK/sandbox.log" | tail -1); token present; network mandate-sandbox present"
   else
-    fail sandbox-ready "network aiops-sandbox missing"; exit 1
+    fail sandbox-ready "network mandate-sandbox missing"; exit 1
   fi
 else
   fail sandbox-ready "see sandbox output below"; tail -30 "$WORK/sandbox.log"; exit 1
 fi
 
-git clone --quiet --no-local --no-checkout "$REPO" "$WORK/aiops"
-git -C "$WORK/aiops" checkout --quiet --detach "$SHA"
-cd "$WORK/aiops"
+git clone --quiet --no-local --no-checkout "$REPO" "$WORK/mandate"
+git -C "$WORK/mandate" checkout --quiet --detach "$SHA"
+cd "$WORK/mandate"
 
-write_config "$AIOPS_ACCEPT_CONFIG_DIR" deploy/config
+write_config "$MANDATE_ACCEPT_CONFIG_DIR" deploy/config
 
 # 2. One command from a fresh clone; one worker; Mailpit up.
-MAILPIT="http://127.0.0.1:${AIOPS_MAILPIT_PORT}"
+MAILPIT="http://127.0.0.1:${MANDATE_MAILPIT_PORT}"
 if compose up -d --build --wait >"$WORK/up.log" 2>&1; then
   WORKERS="$(running_workers)"
   MAILPIT_UP="$(compose ps mailpit --status running -q | wc -l | tr -d ' ')"
@@ -239,7 +239,7 @@ HASH_1="$PREP_HASH"
 T1="$(text0 "$PREP")"
 PAGE_URL_1="$(json "$PREP" '.structuredContent.pageUrl')"
 if [[ "$PREP_STATUS" == prepared && "$T1" == *"4 change(s)"* && -n "$HASH_1" && "$T1" == *"$HASH_1"* &&
-  "$(has_link "$T1" "$CS_1")" == yes && "$PAGE_URL_1" == "$AIOPS_PUBLIC_URL/app/changesets/$CS_1" ]]; then
+  "$(has_link "$T1" "$CS_1")" == yes && "$PAGE_URL_1" == "$MANDATE_PUBLIC_URL/app/changesets/$CS_1" ]]; then
   pass text-prepare "change-set $CS_1 $PREP_STATUS (first answer $PREP_FIRST); pageUrl $PAGE_URL_1 — $T1"
 else
   fail text-prepare "status=$PREP_STATUS first=$PREP_FIRST pageUrl=$PAGE_URL_1 answer=${PREP:0:1200}"
@@ -336,10 +336,10 @@ else
 fi
 
 # 14. The page URL of the text answers: the page shell and the page's API for that change-set.
-SHELL_CODE="$(AIOPS_PAGE_COOKIE="$ALICE" node -e 'fetch(process.argv[1], { headers: { cookie: process.env.AIOPS_PAGE_COOKIE }, redirect: "manual" }).then((r) => console.log(r.status), () => console.log(0))' "$AIOPS_PUBLIC_URL/app/changesets/$CS_N")"
+SHELL_CODE="$(MANDATE_PAGE_COOKIE="$ALICE" node -e 'fetch(process.argv[1], { headers: { cookie: process.env.MANDATE_PAGE_COOKIE }, redirect: "manual" }).then((r) => console.log(r.status), () => console.log(0))' "$MANDATE_PUBLIC_URL/app/changesets/$CS_N")"
 VIEW_N="$(page_api "$ALICE" changeset "$CS_N" 2>&1 || true)"
 if [[ "$SHELL_CODE" == 200 && "$(json "$VIEW_N" '.status')" == 200 && "$(json "$VIEW_N" '.body.id')" == "$CS_N" ]]; then
-  pass page-url-answers "GET $AIOPS_PUBLIC_URL/app/changesets/$CS_N → $SHELL_CODE; page_api changeset → 200 id $CS_N"
+  pass page-url-answers "GET $MANDATE_PUBLIC_URL/app/changesets/$CS_N → $SHELL_CODE; page_api changeset → 200 id $CS_N"
 else
   fail page-url-answers "shell=$SHELL_CODE view=${VIEW_N:0:600}"
 fi
@@ -355,9 +355,9 @@ fi
 # ---- Group 2: the reference MCP Apps host in headless Chromium (MCP-5, UI-6) --------------------
 
 # 16. The host page builds from this checkout.
-if pnpm --dir "$REPO" --filter @aiops/tooling build:widget-host >"$WORK/host-build.log" 2>&1 &&
+if pnpm --dir "$REPO" --filter @mandate/tooling build:widget-host >"$WORK/host-build.log" 2>&1 &&
   test -s "$REPO/tooling/acceptance/widget-host/dist/index.html"; then
-  pass host-build "pnpm --filter @aiops/tooling build:widget-host → dist/index.html $(wc -c <"$REPO/tooling/acceptance/widget-host/dist/index.html") bytes"
+  pass host-build "pnpm --filter @mandate/tooling build:widget-host → dist/index.html $(wc -c <"$REPO/tooling/acceptance/widget-host/dist/index.html") bytes"
 else
   fail host-build "$(tail -20 "$WORK/host-build.log")"
 fi
@@ -368,9 +368,9 @@ LINKS_CHECK="$(node -e '
   const o = JSON.parse(process.argv[1]);
   const uri = (n) => { const m = o.tools.find((t) => t.name === n)?.meta ?? {}; return [m.ui?.resourceUri ?? null, m["ui/resourceUri"] ?? null]; };
   const linked = ["catalog.update_content", "get_changeset", "submit_for_approval", "exclude_changeset_items"]
-    .every((n) => uri(n).every((u) => u === "ui://aiops/changeset.html"));
+    .every((n) => uri(n).every((u) => u === "ui://mandate/changeset.html"));
   const search = uri("catalog.search_products");
-  const res = ["ui://aiops/changeset.html", "ui://aiops/approval.html"].map((u) => o.resources.find((r) => r.uri === u));
+  const res = ["ui://mandate/changeset.html", "ui://mandate/approval.html"].map((u) => o.resources.find((r) => r.uri === u));
   const resOk = res.every((r) => r && r.mimeType === "text/html;profile=mcp-app" && JSON.stringify(r.meta?.ui?.csp) === "{}");
   console.log(JSON.stringify({ linked, searchLinksNothing: search[0] === null && search[1] === null && o.tools.some((t) => t.name === "catalog.search_products"), resources: resOk }));' "$LIST" 2>/dev/null || echo '{}')"
 if [[ "$LINKS_CHECK" == '{"linked":true,"searchLinksNothing":true,"resources":true}' ]]; then
@@ -439,7 +439,7 @@ D_CHECK="$(node -e '
   const o = JSON.parse(process.argv[1]);
   console.log(JSON.stringify({ approveButton: o.buttons.some((b) => /^Approve/.test(b)), links: o.links, errors: o.errors }));' "$RENDER_D" 2>/dev/null || echo '{}')"
 if [[ "$(json "$SUB_D" '.structuredContent.status')" == pending_approval && "$(json "$D_CHECK" '.approveButton')" == false &&
-  "$(json "$D_CHECK" '.links')" == "[\"$AIOPS_PUBLIC_URL/app/changesets/$CS_D\"]" && "$(json "$D_CHECK" '.errors')" == '[]' ]]; then
+  "$(json "$D_CHECK" '.links')" == "[\"$MANDATE_PUBLIC_URL/app/changesets/$CS_D\"]" && "$(json "$D_CHECK" '.errors')" == '[]' ]]; then
   pass host-approval-default "dave: review_changeset $CS_D (pending) → $D_CHECK; buttons $(json "$RENDER_D" '.buttons')"
 else
   fail host-approval-default "submit=$(json "$SUB_D" '.structuredContent.status') check=$D_CHECK render=${RENDER_D:0:2000}"
@@ -447,19 +447,19 @@ fi
 
 # 23. Allow widget decisions and reload; decide_changeset becomes visible to dave.
 DAVE_TOKEN="$(login dave 2>/dev/null || true)"
-BEFORE="$(AIOPS_MCP_TOKEN="$DAVE_TOKEN" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --list 2>&1 || true)"
+BEFORE="$(MANDATE_MCP_TOKEN="$DAVE_TOKEN" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --list 2>&1 || true)"
 LISTED_BEFORE="$(json "$BEFORE" '.tools.includes("decide_changeset")')"
-sed -i 's/allow_widget: false }/allow_widget: true }/' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml"
-APPLY_OUT="$(compose exec -T api node dist/cli.js config apply /etc/aiops/config --actor acceptance 2>&1 || true)"
+sed -i 's/allow_widget: false }/allow_widget: true }/' "$MANDATE_ACCEPT_CONFIG_DIR/roles.yaml"
+APPLY_OUT="$(compose exec -T api node dist/cli.js config apply /etc/mandate/config --actor acceptance 2>&1 || true)"
 LISTED=no
 T0=$SECONDS
 while ((SECONDS - T0 < 60)); do
   DAVE_TOKEN="$(login dave 2>/dev/null || true)"
-  DLIST="$(AIOPS_MCP_TOKEN="$DAVE_TOKEN" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --list 2>&1 || true)"
+  DLIST="$(MANDATE_MCP_TOKEN="$DAVE_TOKEN" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --list 2>&1 || true)"
   if [[ "$(json "$DLIST" '.tools.includes("decide_changeset")')" == true ]]; then LISTED=yes; break; fi
   sleep 2
 done
-if grep -q 'allow_widget: true }' "$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml" && [[ "$APPLY_OUT" =~ '~ role '.*': approval' ]] && [[ "$LISTED_BEFORE" == false && "$LISTED" == yes ]]; then
+if grep -q 'allow_widget: true }' "$MANDATE_ACCEPT_CONFIG_DIR/roles.yaml" && [[ "$APPLY_OUT" =~ '~ role '.*': approval' ]] && [[ "$LISTED_BEFORE" == false && "$LISTED" == yes ]]; then
   pass reconfigure-allow-widget "before: decide_changeset listed to dave: $LISTED_BEFORE; allow_widget: true, config apply ($(tr '\n' '|' <<<"$APPLY_OUT")); dave lists decide_changeset after $((SECONDS - T0)) s"
 else
   fail reconfigure-allow-widget "apply=${APPLY_OUT:0:400} before=$LISTED_BEFORE listed=$LISTED tools=${DLIST:0:800}"
@@ -490,18 +490,18 @@ cat <<'MANUAL'
 # 1. Start the stack for HTTPS clients, with the sandbox and the acceptance configuration (sandbox URL,
 #    record_threshold 2 so dave approves, allow_widget false):
 #    - `bash deploy/sandbox/magento/up.sh && node deploy/sandbox/magento/seed.mjs http://127.0.0.1:4390`.
-#    - `bash scripts/acceptance/phase-7.sh --manual-config "$HOME/aiops-phase7-config"`.
+#    - `bash scripts/acceptance/phase-7.sh --manual-config "$HOME/mandate-phase7-config"`.
 #    - Open two HTTPS tunnels of your choice, for example `cloudflared tunnel --url http://localhost:8400` (api)
 #      and `cloudflared tunnel --url http://localhost:8480` (Keycloak). Note the hosts <api-host> and <kc-host>.
-#    - Start the stack: `AIOPS_ACCEPT_CONFIG_DIR="$HOME/aiops-phase7-config" AIOPS_PUBLIC_URL=https://<api-host>
-#      AIOPS_MCP_RESOURCE=https://<api-host>/mcp AIOPS_KEYCLOAK_PUBLIC_URL=https://<kc-host>
+#    - Start the stack: `MANDATE_ACCEPT_CONFIG_DIR="$HOME/mandate-phase7-config" MANDATE_PUBLIC_URL=https://<api-host>
+#      MANDATE_MCP_RESOURCE=https://<api-host>/mcp MANDATE_KEYCLOAK_PUBLIC_URL=https://<kc-host>
 #      API_ALLOWED_HOSTS=localhost,127.0.0.1,<api-host>
 #      docker compose -f compose.yaml -f scripts/acceptance/phase-7.compose.yaml up -d --build --wait`.
 #    - Store the Magento token (`bash deploy/sandbox/magento/token.sh http://127.0.0.1:4390`) as carol on
 #      `https://<api-host>/app/credentials`.
 #    - Check that `curl -s https://<api-host>/readyz` answers ok.
 # 2. Claude Desktop:
-#    - Add the connector: claude.ai → Customize → Connectors → add custom connector `aiops`, URL `https://<api-host>/mcp`.
+#    - Add the connector: claude.ai → Customize → Connectors → add custom connector `mandate`, URL `https://<api-host>/mcp`.
 #      Log in as `alice` / `dev-only-password` (CIMD, as in manual check M1).
 #    - In Claude Desktop, start a new chat, enable the connector and ask: "Update the description of UMBRELLA-0401,
 #      UMBRELLA-0402, UMBRELLA-0403 and UMBRELLA-0404 to 'Manual check Claude <date>'".
@@ -511,8 +511,8 @@ cat <<'MANUAL'
 #      widget with 3 written.
 #    - Toggle light and dark mode: the widget follows.
 # 3. ChatGPT:
-#    - Add the custom MCP server `aiops` at `https://<api-host>/mcp` with OAuth through the pre-registered client
-#      `aiops-mcp` (as in manual check M1).
+#    - Add the custom MCP server `mandate` at `https://<api-host>/mcp` with OAuth through the pre-registered client
+#      `mandate-mcp` (as in manual check M1).
 #    - Run the same flow with UMBRELLA-0411..0414 and expect the same results.
 # 4. Record pass or fail per client, with the date, client version and what was observed, in
 #    the project notes under "Phase 7 — optional client checks".

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
-import type { LoadedConfiguration } from '@aiops/config';
+import type { LoadedConfiguration } from '@mandate/config';
 import {
   changesetTransitionEvent,
   type BatchContext,
@@ -13,10 +13,10 @@ import {
   type ReadPage,
   type RollbackStrategy,
   type UpstreamReader,
-} from '@aiops/core';
-import { PostgresChangeSetRepository, PostgresNotificationOutbox } from '@aiops/db';
-import { DEFAULT_TUNING, PREPARE_MAX_ATTEMPTS, type ChangesetActivities } from '@aiops/temporal';
-import { allowAllGuard, ScriptedWriter } from '@aiops/testing';
+} from '@mandate/core';
+import { PostgresChangeSetRepository, PostgresNotificationOutbox } from '@mandate/db';
+import { DEFAULT_TUNING, PREPARE_MAX_ATTEMPTS, type ChangesetActivities } from '@mandate/temporal';
+import { allowAllGuard, ScriptedWriter } from '@mandate/testing';
 import { MockActivityEnvironment } from '@temporalio/testing';
 import { DefaultLogger } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

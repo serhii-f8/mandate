@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The JSON-RPC answers of the MCP endpoint when a request is over its rate limit or the limit
  * cannot be checked (SEC-10). Fixed text: nothing of the request but its JSON-RPC id is echoed.

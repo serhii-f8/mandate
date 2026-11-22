@@ -1,5 +1,5 @@
 {
-  "name": "@aiops/api",
+  "name": "@mandate/api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,13 +7,13 @@
   "license": "Apache-2.0",
   "exports": {
     ".": {
-      "@aiops/source": "./src/index.ts",
+      "@mandate/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
   },
   "bin": {
-    "aiops": "dist/cli.js"
+    "mandate": "dist/cli.js"
   },
   "files": [
     "dist"
@@ -27,9 +27,9 @@
     "start": "node dist/main.js"
   },
   "devDependencies": {
-    "@aiops/gitea-issues": "workspace:*",
-    "@aiops/magento2-catalog": "workspace:*",
-    "@aiops/testing": "workspace:*",
+    "@mandate/gitea-issues": "workspace:*",
+    "@mandate/magento2-catalog": "workspace:*",
+    "@mandate/testing": "workspace:*",
     "@modelcontextprotocol/client": "2.4.0",
     "@modelcontextprotocol/conformance": "0.2.0-alpha.12",
     "@modelcontextprotocol/ext-tasks": "0.2.3",
@@ -41,13 +41,13 @@
     "yaml": "2.9.1"
   },
   "dependencies": {
-    "@aiops/adapters": "workspace:*",
-    "@aiops/config": "workspace:*",
-    "@aiops/connector-sdk": "workspace:*",
-    "@aiops/core": "workspace:*",
-    "@aiops/db": "workspace:*",
-    "@aiops/temporal": "workspace:*",
-    "@aiops/upstream": "workspace:*",
+    "@mandate/adapters": "workspace:*",
+    "@mandate/config": "workspace:*",
+    "@mandate/connector-sdk": "workspace:*",
+    "@mandate/core": "workspace:*",
+    "@mandate/db": "workspace:*",
+    "@mandate/temporal": "workspace:*",
+    "@mandate/upstream": "workspace:*",
     "@modelcontextprotocol/node": "2.1.2",
     "@modelcontextprotocol/server": "2.4.0",
     "@nestjs/common": "12.5.0",

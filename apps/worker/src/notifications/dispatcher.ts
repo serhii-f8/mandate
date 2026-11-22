@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { LoadedConfiguration, NotificationConfig } from '@aiops/config';
+// Copyright 2026 The Mandate Authors
+import type { LoadedConfiguration, NotificationConfig } from '@mandate/config';
 import {
   afterFailure,
   NOTIFICATION_CLAIM_LIMIT,
@@ -13,7 +13,7 @@ import {
   type NotificationError,
   type NotificationOutbox,
   type NotificationRow,
-} from '@aiops/core';
+} from '@mandate/core';
 import type { Logger } from 'pino';
 import type { EmailSender, SendOutcome, WebhookSender, WebhookTarget } from './senders.js';
 
@@ -21,7 +21,7 @@ export interface DispatcherDeps {
   readonly outbox: NotificationOutbox;
   readonly repository: Pick<ChangeSetRepository, 'get' | 'approvals'>;
   readonly configuration: () => LoadedConfiguration;
-  /** Absent when `AIOPS_SMTP_URL` is not set: e-mail rows fail with `channel_unconfigured`. */
+  /** Absent when `MANDATE_SMTP_URL` is not set: e-mail rows fail with `channel_unconfigured`. */
   readonly email?: EmailSender;
   readonly webhook: WebhookSender;
   /** Origin without trailing slash. */

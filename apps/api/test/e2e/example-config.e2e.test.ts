@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { fileURLToPath } from 'node:url';
-import { loadConfigurationDirectory } from '@aiops/config';
+import { loadConfigurationDirectory } from '@mandate/config';
 import { describe, expect, it } from 'vitest';
 
 const EXAMPLE_DIR = fileURLToPath(new URL('../../../../examples/config', import.meta.url));

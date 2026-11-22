@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash } from 'node:crypto';
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type CryptoKey } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createOidcClient, type OidcClient } from './oidc-client.js';
 
-const ISSUER = 'https://idp.example.test/realms/aiops';
-const CLIENT_ID = 'aiops-web';
+const ISSUER = 'https://idp.example.test/realms/mandate';
+const CLIENT_ID = 'mandate-web';
 const SECRET = 'unit-only-secret:with/special';
-const REDIRECT = 'https://aiops.example.test/auth/callback';
+const REDIRECT = 'https://mandate.example.test/auth/callback';
 
 let privateKey: CryptoKey;
 let otherKey: CryptoKey;
@@ -61,7 +61,7 @@ interface Recorded {
 function clientWith(respond: (r: Recorded) => Promise<Response> | Response, sent: Recorded[] = []): OidcClient {
   return createOidcClient({
     authorizationUrl: new URL(`${ISSUER}/protocol/openid-connect/auth`),
-    tokenUrl: new URL('http://keycloak:8080/realms/aiops/protocol/openid-connect/token'),
+    tokenUrl: new URL('http://keycloak:8080/realms/mandate/protocol/openid-connect/token'),
     issuer: ISSUER,
     clientId: CLIENT_ID,
     clientSecret: SECRET,
@@ -113,7 +113,7 @@ describe('AUTH-5 OIDC client for trusted pages', () => {
     });
     expect(sent).toHaveLength(1);
     const [request] = sent;
-    expect(request?.url).toBe('http://keycloak:8080/realms/aiops/protocol/openid-connect/token');
+    expect(request?.url).toBe('http://keycloak:8080/realms/mandate/protocol/openid-connect/token');
     const basic = Buffer.from(`${encodeURIComponent(CLIENT_ID)}:${encodeURIComponent(SECRET)}`).toString('base64');
     expect(request?.headers.get('authorization')).toBe(`Basic ${basic}`);
     expect(Object.fromEntries(request?.body ?? [])).toEqual({ grant_type: 'authorization_code', code: 'c-1', redirect_uri: REDIRECT, code_verifier: 'v-1' });
@@ -131,9 +131,9 @@ describe('AUTH-5 OIDC client for trusted pages', () => {
 
   it.each<[string, Claims]>([
     ['wrong nonce', { nonce: 'other' }],
-    ['wrong audience', { aud: 'aiops-mcp' }],
-    ['wrong issuer', { iss: 'https://evil.example.test/realms/aiops' }],
-    ['another authorized party', { azp: 'aiops-mcp' }],
+    ['wrong audience', { aud: 'mandate-mcp' }],
+    ['wrong issuer', { iss: 'https://evil.example.test/realms/mandate' }],
+    ['another authorized party', { azp: 'mandate-mcp' }],
     ['no auth_time', { auth_time: null }],
     ['unpublished signing key', {}],
   ])('AUTH-5 an ID token with %s is id_token_invalid', async (name, claims) => {
@@ -141,7 +141,7 @@ describe('AUTH-5 OIDC client for trusted pages', () => {
     expect(await clientWith(() => json(200, { id_token: token })).exchange({ code: 'c', codeVerifier: 'v', nonce: 'nonce-1' })).toEqual({ ok: false, reason: 'id_token_invalid' });
   });
 
-  it.each(['service:aiops-sa-ci', 'service:'])('AUTH-4 AUTH-5 an ID token whose sub starts with service: is refused (%s)', async (sub) => {
+  it.each(['service:mandate-sa-ci', 'service:'])('AUTH-4 AUTH-5 an ID token whose sub starts with service: is refused (%s)', async (sub) => {
     const token = await idToken({ sub });
     expect(await clientWith(() => json(200, { id_token: token })).exchange({ code: 'c', codeVerifier: 'v', nonce: 'nonce-1' })).toEqual({ ok: false, reason: 'id_token_invalid' });
   });

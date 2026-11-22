@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AuditRedactionError } from '@aiops/core';
-import { startPostgres, type StartedPostgres } from '@aiops/testing';
+import { AuditRedactionError } from '@mandate/core';
+import { startPostgres, type StartedPostgres } from '@mandate/testing';
 import { DrizzleAuditLog } from '../../src/audit-log.js';
 import { createDb, type Database } from '../../src/client.js';
 import { runMigrations } from '../../src/migrate.js';

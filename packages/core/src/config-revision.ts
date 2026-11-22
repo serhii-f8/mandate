@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { AuditEventInput } from './audit.js';
 
 /** How a configuration revision came to be (CFG-4): applied by an operator, or bootstrapped from files on first start. */

@@ -2,5 +2,5 @@
 version: 1
 rate_limits: { mcp_user_per_minute: 3, mcp_service_account_per_minute: 4, unauthenticated_per_minute: 2 }
 service_accounts:
-  - { client_id: aiops-sa-limited, role: catalog_reader, rate_limit_per_minute: 2 }
-  - { client_id: aiops-sa-default, role: catalog_reader }
+  - { client_id: mandate-sa-limited, role: catalog_reader, rate_limit_per_minute: 2 }
+  - { client_id: mandate-sa-default, role: catalog_reader }

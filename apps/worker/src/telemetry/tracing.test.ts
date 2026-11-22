@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { SpanKind, SpanStatusCode, TraceFlags } from '@opentelemetry/api';
 import { JsonTraceSerializer } from '@opentelemetry/otlp-transformer';
 import { resourceFromAttributes } from '@opentelemetry/resources';
@@ -7,7 +7,7 @@ import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-base'
 import { describe, expect, it } from 'vitest';
 import { workflowSpanProcessor, type WorkflowSinkSpan } from './tracing.js';
 
-const resource = resourceFromAttributes({ 'service.name': 'aiops-worker' });
+const resource = resourceFromAttributes({ 'service.name': 'mandate-worker' });
 
 /** A span as the plugin's sink builds it from the workflow isolate (1.x SDK shape). */
 function sinkSpan(parentSpanId: string | undefined): WorkflowSinkSpan {
@@ -103,7 +103,7 @@ describe('NFR-11 workflow span processor (OpenTelemetry 2.x span shape)', () => 
     processor.onEnd(withoutScope(sinkSpan('00f067aa0ba902b7')));
     const body: unknown = JSON.parse(new TextDecoder().decode(JsonTraceSerializer.serializeRequest(target.ended)));
     const [resourceSpans] = (body as { resourceSpans: { resource: { attributes: { key: string; value: { stringValue?: string } }[] }; scopeSpans: { scope: { name: string }; spans: { parentSpanId?: string; spanId: string }[] }[] }[] }).resourceSpans;
-    expect(resourceSpans?.resource.attributes).toContainEqual({ key: 'service.name', value: { stringValue: 'aiops-worker' } });
+    expect(resourceSpans?.resource.attributes).toContainEqual({ key: 'service.name', value: { stringValue: 'mandate-worker' } });
     expect(resourceSpans?.scopeSpans.map((s) => s.scope.name)).toEqual(['@temporalio/interceptor-workflow', '@temporalio/interceptor-workflow']);
     const spans = resourceSpans?.scopeSpans.flatMap((s) => s.spans) ?? [];
     expect(spans.map((s) => [s.parentSpanId, s.spanId])).toEqual([

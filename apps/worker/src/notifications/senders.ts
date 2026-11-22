@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { NotificationError } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import type { NotificationError } from '@mandate/core';
 
 /** Result of one delivery attempt; a failure carries only a fixed code (SEC-3). */
 export type SendOutcome = { readonly ok: true } | { readonly ok: false; readonly error: NotificationError };

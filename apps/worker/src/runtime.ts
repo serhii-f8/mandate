@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
-import { createAdapters, type OpenApiAdapter, type UpstreamAdapters } from '@aiops/adapters';
+import { createAdapters, type OpenApiAdapter, type UpstreamAdapters } from '@mandate/adapters';
 import {
   ConfigurationError,
   ConfigurationHolder,
@@ -13,7 +13,7 @@ import {
   type ConfigurationSync,
   type ReadinessReport,
   type WorkerEnv,
-} from '@aiops/config';
+} from '@mandate/config';
 import {
   assertMigrated,
   countChangeSetsByStatus,
@@ -28,8 +28,8 @@ import {
   runAuditRetention,
   sealAuditChain,
   type Database,
-} from '@aiops/db';
-import { parseTemporalKeys, workerDataConverter, type ActivityTuning } from '@aiops/temporal';
+} from '@mandate/db';
+import { parseTemporalKeys, workerDataConverter, type ActivityTuning } from '@mandate/temporal';
 import {
   assertFullyChecked,
   configurationLoadOptions,
@@ -38,8 +38,8 @@ import {
   createUpstreamReader,
   vaultToolLister,
   type UpstreamCallLog,
-} from '@aiops/upstream';
-import type { McpToolAdapter } from '@aiops/connector-sdk';
+} from '@mandate/upstream';
+import type { McpToolAdapter } from '@mandate/connector-sdk';
 import { heartbeat } from '@temporalio/activity';
 import { NativeConnection, type Worker } from '@temporalio/worker';
 import type { Logger } from 'pino';
@@ -124,7 +124,7 @@ function activitiesFor(stores: RuntimeStores): WorkerActivities {
 
 /**
  * The configuration part of the start (CFG-3, CFG-4): a holder backed by the stored revisions
- * (an empty table is bootstrapped from AIOPS_CONFIG_DIR) and the sync that keeps it current
+ * (an empty table is bootstrapped from MANDATE_CONFIG_DIR) and the sync that keeps it current
  * through SIGHUP, NOTIFY and the poll. Its `config.load` rows are written by `system:worker`
  * (AUD-1) through an audit log without sensitive keys (F5): they come from the active
  * configuration, which may not exist yet. SIGHUP is installed before this resolves.
@@ -243,12 +243,12 @@ export async function startWorkerRuntime(
     assertFullyChecked(configuration.current);
 
     if (email === undefined && configuration.current.notifications.some((n) => n.kind === 'email')) {
-      logger.warn('AIOPS_SMTP_URL is not set: email notifications fail with channel_unconfigured');
+      logger.warn('MANDATE_SMTP_URL is not set: email notifications fail with channel_unconfigured');
     }
     const repository = new PostgresChangeSetRepository(database.db);
     // Preset sensitive fields are covered: the configuration was loaded with the preset directories (AUD-4).
     const audit = new DrizzleAuditLog(database.db, { sensitiveKeys: () => configuration.current.sensitiveFields });
-    // The two batch activities record aiops_batch_duration_seconds (NFR-12).
+    // The two batch activities record mandate_batch_duration_seconds (NFR-12).
     const activities = timeBatchActivities(activitiesFor({
       configuration,
       adapter,
@@ -294,7 +294,7 @@ export async function startWorkerRuntime(
       activities,
       dataConverter: workerDataConverter(temporalKeys),
       // Workflow, activity and client spans (NFR-11); the trace header carries only W3C context (SEC-4, ADR 0047).
-      plugins: [createTracingPlugin({ spanProcessor, serviceName: 'aiops-worker' })],
+      plugins: [createTracingPlugin({ spanProcessor, serviceName: 'mandate-worker' })],
     });
     worker = running;
     const open = connection;

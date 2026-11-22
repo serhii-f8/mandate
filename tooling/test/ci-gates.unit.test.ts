@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,7 +37,7 @@ describe('NFR-15 ci.sh runs the integration tests against real PostgreSQL and th
         .split('\n')
         .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
         .join('\n')
-        .match(/import\s*\{([^}]*)\}\s*from\s*'@aiops\/testing'/g)
+        .match(/import\s*\{([^}]*)\}\s*from\s*'@mandate\/testing'/g)
         ?.some((m) => /\bstartPostgres\b/.test(m)) ?? false;
     const bad = files.filter((f) => !importsFixture(read(join(dir, f))));
     expect(bad).toEqual([]);
@@ -68,7 +68,7 @@ describe('NFR-17 every preset package ships contract tests that run in pnpm test
   for (const dir of dirs) {
     it(`NFR-17 preset ${dir} has a unit contract test, recordings and a vitest test script`, () => {
       const tests = walk(`${dir}/test`).filter((f) => f.endsWith('.unit.test.ts'));
-      const valueImport = /import\s*\{([^}]*)\}\s*from\s*'@aiops\/testing'/;
+      const valueImport = /import\s*\{([^}]*)\}\s*from\s*'@mandate\/testing'/;
       const ok = tests.filter((f) => {
         const names = (valueImport.exec(read(f))?.[1] ?? '').split(',').map((s) => s.trim());
         return names.some((n) => n === 'replayRecordings' || n === 'contractRead');

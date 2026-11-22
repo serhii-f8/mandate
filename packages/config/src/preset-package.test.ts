@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseAiopsField, selectPackage } from './preset-package.js';
+import { parseMandateField, selectPackage } from './preset-package.js';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -12,12 +12,12 @@ afterEach(async () => {
 });
 
 async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'aiops-preset-package-'));
+  const dir = await mkdtemp(join(tmpdir(), 'mandate-preset-package-'));
   dirs.push(dir);
   return dir;
 }
 
-const NAME = '@acme/aiops-preset-x';
+const NAME = '@acme/mandate-preset-x';
 
 /** Writes `<root>/<sub>/package.json` with the name and version. */
 async function pkg(root: string, sub: string, version: string, name = NAME): Promise<string> {
@@ -66,34 +66,34 @@ describe('CONN-8 preset package selection', () => {
     const root = await tempDir();
     const store = await pkg(root, join('store', 'x'), '0.4.0');
     await mkdir(join(root, 'node_modules', '@acme'), { recursive: true });
-    await symlink(store, join(root, 'node_modules', '@acme', 'aiops-preset-x'), 'dir');
+    await symlink(store, join(root, 'node_modules', '@acme', 'mandate-preset-x'), 'dir');
     // pnpm's hidden store holds a higher version; it is not a candidate.
     await pkg(join(root, 'node_modules', '.pnpm'), 'x', '9.0.0');
     const viaRoot = await selectPackage(NAME, undefined, [root]);
-    expect(viaRoot).toMatchObject({ version: '0.4.0', dir: join(root, 'node_modules', '@acme', 'aiops-preset-x') });
+    expect(viaRoot).toMatchObject({ version: '0.4.0', dir: join(root, 'node_modules', '@acme', 'mandate-preset-x') });
     const viaNodeModules = await selectPackage(NAME, undefined, [join(root, 'node_modules')]);
     expect(viaNodeModules?.version).toBe('0.4.0');
   });
 
-  it('CONN-8 parses the aiops field: preset default, sdk required, unknown keys refused', async () => {
-    expect(parseAiopsField({ name: 'x', version: '1.0.0' })).toEqual({ ok: true });
-    expect(parseAiopsField({ aiops: { sdk: '^1.0.0' } })).toEqual({ ok: true, aiops: { preset: 'preset.yaml', sdk: '^1.0.0' } });
-    expect(parseAiopsField({ aiops: { preset: 'presets/main.yaml', sdk: '0.6.x', code: 'dist/index.js' } })).toEqual({
+  it('CONN-8 parses the mandate field: preset default, sdk required, unknown keys refused', async () => {
+    expect(parseMandateField({ name: 'x', version: '1.0.0' })).toEqual({ ok: true });
+    expect(parseMandateField({ mandate: { sdk: '^1.0.0' } })).toEqual({ ok: true, mandate: { preset: 'preset.yaml', sdk: '^1.0.0' } });
+    expect(parseMandateField({ mandate: { preset: 'presets/main.yaml', sdk: '0.6.x', code: 'dist/index.js' } })).toEqual({
       ok: true,
-      aiops: { preset: 'presets/main.yaml', sdk: '0.6.x', code: 'dist/index.js' },
+      mandate: { preset: 'presets/main.yaml', sdk: '0.6.x', code: 'dist/index.js' },
     });
-    expect(parseAiopsField({ aiops: {} })).toEqual({ ok: false, issues: [{ path: ['aiops', 'sdk'], message: 'is required' }] });
-    expect(parseAiopsField({ aiops: { sdk: 'not a range' } })).toEqual({ ok: false, issues: [{ path: ['aiops', 'sdk'], message: 'must be a semver range' }] });
-    const unknown = parseAiopsField({ aiops: { sdk: '^1.0.0', hooks: 'x' } });
+    expect(parseMandateField({ mandate: {} })).toEqual({ ok: false, issues: [{ path: ['mandate', 'sdk'], message: 'is required' }] });
+    expect(parseMandateField({ mandate: { sdk: 'not a range' } })).toEqual({ ok: false, issues: [{ path: ['mandate', 'sdk'], message: 'must be a semver range' }] });
+    const unknown = parseMandateField({ mandate: { sdk: '^1.0.0', hooks: 'x' } });
     expect(unknown.ok).toBe(false);
-    expect(!unknown.ok && unknown.issues.map((i) => i.path)).toEqual([['aiops']]);
-    expect(parseAiopsField({ aiops: 'preset.yaml' }).ok).toBe(false);
+    expect(!unknown.ok && unknown.issues.map((i) => i.path)).toEqual([['mandate']]);
+    expect(parseMandateField({ mandate: 'preset.yaml' }).ok).toBe(false);
 
-    // The candidate carries a valid aiops field.
+    // The candidate carries a valid mandate field.
     const root = await tempDir();
     const dir = join(root, 'x');
     await mkdir(dir);
-    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: NAME, version: '1.0.0', aiops: { sdk: '^1.0.0' } }));
-    expect((await selectPackage(NAME, undefined, [root]))?.aiops).toEqual({ preset: 'preset.yaml', sdk: '^1.0.0' });
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: NAME, version: '1.0.0', mandate: { sdk: '^1.0.0' } }));
+    expect((await selectPackage(NAME, undefined, [root]))?.mandate).toEqual({ preset: 'preset.yaml', sdk: '^1.0.0' });
   });
 });

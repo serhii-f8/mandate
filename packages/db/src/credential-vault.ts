@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
-import type { AuditEventInput, CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
+import type { AuditEventInput, CredentialHandle, CredentialStatus, CredentialVault } from '@mandate/core';
 import { DrizzleAuditLog } from './audit-log.js';
 import type { Db } from './client.js';
 import { openSealed, rewrap, seal, type SealedCredential } from './envelope.js';

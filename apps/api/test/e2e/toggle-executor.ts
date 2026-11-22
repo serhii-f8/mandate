@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import {
   ExecutorUnavailable,
   type ChangeSetExecutor,
@@ -7,8 +7,8 @@ import {
   type RollbackRequestOutcome,
   type StartOutcome,
   type StartRequest,
-} from '@aiops/core';
-import type { InMemoryExecutor } from '@aiops/testing';
+} from '@mandate/core';
+import type { InMemoryExecutor } from '@mandate/testing';
 
 /** Wraps the in-memory executor; a test can make starts refuse or the executor (starts and rollback requests) unreachable. */
 export class ToggleExecutor implements ChangeSetExecutor {

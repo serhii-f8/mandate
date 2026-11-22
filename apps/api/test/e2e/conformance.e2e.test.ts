@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The official MCP conformance suite against the running api (NFR-16, MCP-1).
  *
@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
-import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { MUST_PASS } from '../conformance/must-pass.js';
 import { startTokenProxy } from '../support/token-proxy.js';
 import { startApi, startDatabase, vaultOf, type RunningApi } from './helpers.js';
@@ -54,17 +54,17 @@ beforeAll(async () => {
     const items = (req.query.get('skus') ?? '').split(',').map((sku) => ({ sku, name: `Old ${sku}` }));
     return { status: 200, body: { items, total_count: items.length } };
   });
-  const dir = await mkdtemp(join(tmpdir(), 'aiops-conformance-e2e-'));
+  const dir = await mkdtemp(join(tmpdir(), 'mandate-conformance-e2e-'));
   configDir = dir;
   await cp(CONFIG, dir, { recursive: true });
   const connections = join(dir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', fake.url));
-  outDir = await mkdtemp(join(tmpdir(), 'aiops-conformance-out-'));
+  outDir = await mkdtemp(join(tmpdir(), 'mandate-conformance-out-'));
   const running = await startApi(started.databaseUrl, { issuer: testIssuer, configDir: dir, widgetDir: WIDGET_DIR });
   api = running;
   await vaultOf(running).put({ ref: 'shop-token', scheme: 'bearer', secret: { token: 'e2e-only-upstream-token-conformance' }, actor: 'e2e-setup' });
   // One token for the whole run: the default 300 s would expire before the last scenario.
-  const token = await testIssuer.token({ sub: 'conformance-id', groups: ['conformance'], aud: running.resource, azp: 'aiops-mcp', expiresIn: 3600 });
+  const token = await testIssuer.token({ sub: 'conformance-id', groups: ['conformance'], aud: running.resource, azp: 'mandate-mcp', expiresIn: 3600 });
   proxy = await startTokenProxy({ target: running.url, token });
 });
 

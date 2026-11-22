@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Usage: node tooling/license-headers.mjs [--write] [paths...]  (default: git ls-files)
 // Lists files missing the license header and exits 1; --write adds the header instead.
 import { spawnSync } from 'node:child_process';

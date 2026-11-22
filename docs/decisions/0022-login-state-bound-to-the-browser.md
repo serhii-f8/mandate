@@ -24,7 +24,7 @@ Practice) requires the client to bind `state` (or PKCE) to the user agent.
 
 ## Decision
 
-Option 2. `/auth/login` sets `aiops_login=<state>` (`HttpOnly; SameSite=Lax;
+Option 2. `/auth/login` sets `mandate_login=<state>` (`HttpOnly; SameSite=Lax;
 Path=/auth/callback; Max-Age=600`, `Secure` on https). The callback requires it to equal
 the `state` parameter (constant-time) before consuming the login row and clears it in
 every outcome. `SameSite=Lax` is needed because the callback is a cross-site top-level

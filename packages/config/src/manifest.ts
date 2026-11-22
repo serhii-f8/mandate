@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The operation manifest (design phase 4 §3.1; OPS-2, OPS-3, OPS-4): its YAML schema,
  * conversion to the core `ManifestDefinition`, and the loader checks 1–7 that need
  * the registry (enabled read operations and their final input schemas).
  */
-import type { ManifestDefinition, ManifestRead, ManifestTemplate, RollbackStrategy } from '@aiops/core';
+import type { ManifestDefinition, ManifestRead, ManifestTemplate, RollbackStrategy } from '@mandate/core';
 import { z } from 'zod';
 import type { At, RegisteredOperation } from './registry.js';
 import { propertiesOf, requiredOf } from './registry.js';

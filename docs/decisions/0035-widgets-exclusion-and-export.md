@@ -54,7 +54,7 @@ poll backs off.
   (from its 0009 body).
 - `fflate` becomes an `api` dependency; `@modelcontextprotocol/ext-apps`, `vite-plugin-singlefile`
   become `widgets` dependencies; Playwright a tooling dev dependency for acceptance.
-- The widget bundles ship in the image next to the web bundle (`AIOPS_WIDGET_DIR`).
+- The widget bundles ship in the image next to the web bundle (`MANDATE_WIDGET_DIR`).
 - Widget approval stays opt-in and excluded for step-up and destructive change-sets: the widget
   only renders decision buttons when the server computed `canDecide` for channel `widget`, and
   `decide_changeset` re-checks everything ([ADR 0008](0008-approval-in-widgets-is-opt-in.md)).

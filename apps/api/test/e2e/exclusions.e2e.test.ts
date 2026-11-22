@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
-import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { createDb, PostgresChangeSetRepository, type Database } from '@mandate/db';
+import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { seedPrepared, type Seeded } from './approval-seed.js';
 import { auditRows, connectClient, startApi, startDatabase, tokenFor, type RunningApi } from './helpers.js';
 import { RecordingStarter } from './recording-starter.js';

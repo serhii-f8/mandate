@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 # Phase 9 acceptance (SPEC section 7, designs phase-9-mcp-upstream*) against two MCP upstreams on
 # the Compose network: the reference server `everything` (@modelcontextprotocol/server-everything
 # 2.2.1) and the fake MCP server of packages/testing, whose tools change at run time:
@@ -8,7 +8,7 @@
 #   group 1, MCP upstream attach, grants and pinning (CONN-1, CONN-4, SEC-5, SEC-6): mcp-attach,
 #   mcp-enable-grants, mcp-sec6, mcp-sec5, mcp-pin-changed, mcp-repin. It attaches both servers
 #   with `mcp.yaml` and no operations (every tool disabled, CONN-1), binds three operations with the
-#   pins `aiops mcp tools` shows and grants them, checks that bob sees only the configured text
+#   pins `mandate mcp tools` shows and grants them, checks that bob sees only the configured text
 #   (SEC-6) and alice no image or base64 (SEC-5), changes the fake's tool and sees the operation
 #   refused and audited, then records the new pin and sees it offered again, all without a restart
 #   of the api or the worker;
@@ -38,11 +38,11 @@
 #   CFG-3, POL-7): sa-config, sa-token, sa-tools, sa-denied, sa-approved-write, sa-no-secret. It needs
 #   group 2 on the same stack: notes.create_note is bound by group 2's own apply. It adds
 #   `service-accounts.yaml` (role integration, notes.create_note only, always one content_lead step;
-#   service account aiops-sa-ci, the client the bundled Keycloak bootstrap creates); `config apply`
-#   shows `+ service_account aiops-sa-ci` and `config explain --service` allows the operation; the
-#   client-credentials token has azp aiops-sa-ci and no sid; it lists notes.create_note and neither
+#   service account mandate-sa-ci, the client the bundled Keycloak bootstrap creates); `config apply`
+#   shows `+ service_account mandate-sa-ci` and `config explain --service` allows the operation; the
+#   client-credentials token has azp mandate-sa-ci and no sid; it lists notes.create_note and neither
 #   everything.echo nor review_changeset nor decide_changeset; everything.echo is not found and the
-#   deny is audited for service:aiops-sa-ci; its note change-set (requester service:aiops-sa-ci) is
+#   deny is audited for service:mandate-sa-ci; its note change-set (requester service:mandate-sa-ci) is
 #   submitted, approved by dave on the page, completes, and the fake receives exactly one more call;
 #   the api, worker and keycloak-setup logs hold neither the token nor the client secret.
 # `--history-only` runs only no-core-change (git history, no Docker) and prints `# RESULT`.
@@ -50,12 +50,12 @@
 # in GTOKEN), presets-packed (every preset of the built image is packed with `npm pack` and extracted
 # into a node_modules tree that the api and the worker mount as their only preset directory, so every
 # group loads presets from tarballs, CONN-8), stack-healthy, presets-dir-env.
-# AIOPS_ACCEPT9_GROUPS selects the groups (default "1 2 3 4"); a selected group that is not defined is a
+# MANDATE_ACCEPT9_GROUPS selects the groups (default "1 2 3 4"); a selected group that is not defined is a
 # FAIL (ADR 0043).
 # Tests the committed HEAD (a fresh clone sees only commits), with a Compose override that mounts a
 # generated configuration and the packed presets, joins the api and the worker to the sandbox network
-# `aiops-sandbox` and adds the two MCP containers. No Magento sandbox; the Gitea sandbox (port
-# AIOPS_GITEA_PORT, default 4391) is brought up and seeded idempotently.
+# `mandate-sandbox` and adds the two MCP containers. No Magento sandbox; the Gitea sandbox (port
+# MANDATE_GITEA_PORT, default 4391) is brought up and seeded idempotently.
 # Prints one PASS/FAIL line per check and `# RESULT: PASS|FAIL`; exits non-zero if any fails.
 # Not part of CI: pulls node:24-bookworm-slim and fetches the everything server with npx.
 # Secrets: access tokens, the Gitea tokens and session cookies travel through variables, stdin and the
@@ -123,45 +123,45 @@ fi
 (($# == 0)) || { echo "usage: $0 [--history-only]" >&2; exit 2; }
 
 WORK="$(mktemp -d)"
-PROJECT="aiops-accept9-$$"
+PROJECT="mandate-accept9-$$"
 
 free_port() { node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})"; }
-AIOPS_API_PORT="$(free_port)" AIOPS_KEYCLOAK_PORT="$(free_port)" AIOPS_TEMPORAL_PORT="$(free_port)" AIOPS_POSTGRES_PORT="$(free_port)"
-AIOPS_MAILPIT_PORT="$(free_port)" AIOPS_FAKE_MCP_PORT="$(free_port)"
-export AIOPS_API_PORT AIOPS_KEYCLOAK_PORT AIOPS_TEMPORAL_PORT AIOPS_POSTGRES_PORT AIOPS_MAILPIT_PORT AIOPS_FAKE_MCP_PORT
-export AIOPS_KEYCLOAK_PUBLIC_URL="http://localhost:${AIOPS_KEYCLOAK_PORT}"
-export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
-export AIOPS_PUBLIC_URL="http://localhost:${AIOPS_API_PORT}"
+MANDATE_API_PORT="$(free_port)" MANDATE_KEYCLOAK_PORT="$(free_port)" MANDATE_TEMPORAL_PORT="$(free_port)" MANDATE_POSTGRES_PORT="$(free_port)"
+MANDATE_MAILPIT_PORT="$(free_port)" MANDATE_FAKE_MCP_PORT="$(free_port)"
+export MANDATE_API_PORT MANDATE_KEYCLOAK_PORT MANDATE_TEMPORAL_PORT MANDATE_POSTGRES_PORT MANDATE_MAILPIT_PORT MANDATE_FAKE_MCP_PORT
+export MANDATE_KEYCLOAK_PUBLIC_URL="http://localhost:${MANDATE_KEYCLOAK_PORT}"
+export MANDATE_MCP_RESOURCE="http://localhost:${MANDATE_API_PORT}/mcp"
+export MANDATE_PUBLIC_URL="http://localhost:${MANDATE_API_PORT}"
 # The admin password service-token.mjs reads the service account's client secret with (group 4).
 export KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-dev-only-keycloak-admin-password}"
-export AIOPS_ACCEPT_CONFIG_DIR="$WORK/config"
+export MANDATE_ACCEPT_CONFIG_DIR="$WORK/config"
 # The packed presets (presets-packed); the overlay requires it for every compose call, the cleanup's
 # `compose down` included.
-export AIOPS_ACCEPT_PRESET_DIR="$WORK/presets"
-GITEA="http://127.0.0.1:${AIOPS_GITEA_PORT:-4391}"
-MCP="http://127.0.0.1:${AIOPS_API_PORT}/mcp"
-API="$AIOPS_PUBLIC_URL"
-FAKE="http://127.0.0.1:${AIOPS_FAKE_MCP_PORT}"
+export MANDATE_ACCEPT_PRESET_DIR="$WORK/presets"
+GITEA="http://127.0.0.1:${MANDATE_GITEA_PORT:-4391}"
+MCP="http://127.0.0.1:${MANDATE_API_PORT}/mcp"
+API="$MANDATE_PUBLIC_URL"
+FAKE="http://127.0.0.1:${MANDATE_FAKE_MCP_PORT}"
 
 compose() { docker compose -p "$PROJECT" -f compose.yaml -f scripts/acceptance/phase-9.compose.yaml "$@"; }
 
 cleanup() {
-  (cd "$WORK/aiops" 2>/dev/null && compose down -v --remove-orphans >/dev/null 2>&1) || true
+  (cd "$WORK/mandate" 2>/dev/null && compose down -v --remove-orphans >/dev/null 2>&1) || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
 
 json() { node -e "try{const v=JSON.parse(process.argv[1])$2;console.log(v===undefined?'':typeof v==='string'?v:JSON.stringify(v))}catch{console.log('')}" "$1"; }
-login() { node "$REPO/tooling/acceptance/login.mjs" "$AIOPS_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$AIOPS_MCP_RESOURCE"; }
+login() { node "$REPO/tooling/acceptance/login.mjs" "$MANDATE_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$MANDATE_MCP_RESOURCE"; }
 page_login() { node "$REPO/tooling/acceptance/page-login.mjs" "$API" "$1" dev-only-password "${2:-/app/approvals}"; }
-page_api() { AIOPS_PAGE_COOKIE="$1" node "$REPO/tooling/acceptance/page-api.mjs" "$API" "${@:2}"; }
+page_api() { MANDATE_PAGE_COOKIE="$1" node "$REPO/tooling/acceptance/page-api.mjs" "$API" "${@:2}"; }
 # A user runs mcp-call.mjs with the given flags; the user logs in again before every call, so no
 # token expires during the run.
 user_client() {
   local user="$1" token
   shift
   token="$(login "$user" 2>&1)" || { echo "{\"loginError\":$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$token")}"; return 0; }
-  AIOPS_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" "$@" 2>&1 || true
+  MANDATE_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" "$@" 2>&1 || true
 }
 user_mcp() { user_client "$1" --tool "$2" --args "$3"; }
 # Whether the user lists the tool: yes|no.
@@ -175,7 +175,7 @@ await_listed() {
     sleep 2
   done
 }
-psql_q() { compose exec -T postgres psql -U aiops -d aiops -tAc "$1"; }
+psql_q() { compose exec -T postgres psql -U mandate -d mandate -tAc "$1"; }
 # Polls the count query every 2 s for at most 30 s until it reaches MIN; prints the last count. The
 # pin monitor audits a transition on its next evaluation (about a second after the state changes),
 # so a client can see the new state before its upstream.pin row exists.
@@ -191,7 +191,7 @@ await_count() {
 }
 started_at() { docker inspect -f '{{.State.StartedAt}}' "$(compose ps -q "$1")"; }
 cli() { compose exec -T api node dist/cli.js "$@"; }
-apply_config() { cli config apply /etc/aiops/config --actor acceptance 2>&1; }
+apply_config() { cli config apply /etc/mandate/config --actor acceptance 2>&1; }
 # The hash of the tool in `mcp tools` output (`<tool> <hash> <operation|-> <state|unreferenced>`).
 hash_of() { sed -n "s/^$2 \(sha256:[0-9a-f]\{64\}\) .*$/\1/p" <<<"$1" | head -1; }
 
@@ -205,7 +205,7 @@ write_gitea_config() {
   cat >"$1" <<'YAML'
 version: 1
 presets:
-  - { id: gitea-issues, package: '@aiops/gitea-issues', version: '^1.0.0' }
+  - { id: gitea-issues, package: '@mandate/gitea-issues', version: '^1.0.0' }
 connections:
   - id: gitea
     adapter: openapi
@@ -250,7 +250,7 @@ gitea_labels() {
 # roles.yaml as in phase-8.sh (alice content, bob support), with extra grants for support_agent ($1)
 # and content_manager ($2), each a list of flow-mapping lines.
 write_roles() {
-  cat >"$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml" <<YAML
+  cat >"$MANDATE_ACCEPT_CONFIG_DIR/roles.yaml" <<YAML
 version: 1
 notifications:
   - { id: content-leads-mail, kind: email, to: [content-leads@example.test] }
@@ -280,7 +280,7 @@ YAML
 # mcp.yaml: both connections; with pins ($1 echo, $2 get-tiny-image, $3 lookup) also the operations,
 # and with a fourth pin ($4 create_note) also the opaque operation notes.create_note.
 write_mcp() {
-  cat >"$AIOPS_ACCEPT_CONFIG_DIR/mcp.yaml" <<'YAML'
+  cat >"$MANDATE_ACCEPT_CONFIG_DIR/mcp.yaml" <<'YAML'
 version: 1
 connections:
   - id: everything
@@ -295,7 +295,7 @@ connections:
     pin_check_seconds: 10
 YAML
   (($# == 0)) && return 0
-  cat >>"$AIOPS_ACCEPT_CONFIG_DIR/mcp.yaml" <<YAML
+  cat >>"$MANDATE_ACCEPT_CONFIG_DIR/mcp.yaml" <<YAML
 operations:
   - id: everything.echo
     connection: everything
@@ -314,7 +314,7 @@ operations:
     upstream: { tool: lookup, pin: '$3' }
 YAML
   (($# >= 4)) || return 0
-  cat >>"$AIOPS_ACCEPT_CONFIG_DIR/mcp.yaml" <<YAML
+  cat >>"$MANDATE_ACCEPT_CONFIG_DIR/mcp.yaml" <<YAML
   - id: notes.create_note
     connection: fakemcp
     risk: write_opaque
@@ -327,21 +327,21 @@ GRANTS_SUPPORT='      - { operation: everything.echo }'
 GRANTS_CONTENT='      - { operation: everything.tiny_image }
       - { operation: fakemcp.lookup }'
 
-echo "# Phase 9 acceptance of ${SHA:0:12} (project $PROJECT, api port $AIOPS_API_PORT, fake MCP port $AIOPS_FAKE_MCP_PORT)"
+echo "# Phase 9 acceptance of ${SHA:0:12} (project $PROJECT, api port $MANDATE_API_PORT, fake MCP port $MANDATE_FAKE_MCP_PORT)"
 
-git clone --quiet --no-local --no-checkout "$REPO" "$WORK/aiops"
-git -C "$WORK/aiops" checkout --quiet --detach "$SHA"
-cd "$WORK/aiops"
+git clone --quiet --no-local --no-checkout "$REPO" "$WORK/mandate"
+git -C "$WORK/mandate" checkout --quiet --detach "$SHA"
+cd "$WORK/mandate"
 
 # The base configuration: deploy/config with the acceptance roles, and no MCP connection.
-mkdir -p "$AIOPS_ACCEPT_CONFIG_DIR"
-cp deploy/config/*.yaml "$AIOPS_ACCEPT_CONFIG_DIR/"
-if grep -lE 'adapter: mcp' "$AIOPS_ACCEPT_CONFIG_DIR"/*.yaml >/dev/null; then
+mkdir -p "$MANDATE_ACCEPT_CONFIG_DIR"
+cp deploy/config/*.yaml "$MANDATE_ACCEPT_CONFIG_DIR/"
+if grep -lE 'adapter: mcp' "$MANDATE_ACCEPT_CONFIG_DIR"/*.yaml >/dev/null; then
   fail acceptance-config "the development configuration already has an mcp connection"; exit 1
 fi
 write_roles "" ""
 
-# The Gitea sandbox is up (idempotent; it creates the network aiops-sandbox the overlay joins) and
+# The Gitea sandbox is up (idempotent; it creates the network mandate-sandbox the overlay joins) and
 # seeded (idempotent) with a seeding-scope token; GTOKEN is a write:issue token, the credential of
 # group 3. Neither token is printed.
 if bash "$REPO/deploy/sandbox/gitea/up.sh" >"$WORK/gitea.log" 2>&1 &&
@@ -349,10 +349,10 @@ if bash "$REPO/deploy/sandbox/gitea/up.sh" >"$WORK/gitea.log" 2>&1 &&
   GITEA_SANDBOX_TOKEN="$SEED_TOKEN" node "$REPO/deploy/sandbox/gitea/seed.mjs" "$GITEA" >>"$WORK/gitea.log" 2>&1 &&
   GTOKEN="$(bash "$REPO/deploy/sandbox/gitea/token.sh" write:issue 2>>"$WORK/gitea.log")" && [[ "$GTOKEN" =~ ^[0-9a-f]{40}$ ]]; then
   unset SEED_TOKEN
-  if docker network inspect aiops-sandbox >/dev/null 2>&1; then
-    pass sandbox-gitea-ready "$(grep -o 'GITEA UP.*' "$WORK/gitea.log" | tail -1); $(grep -o 'SEEDED gitea.*' "$WORK/gitea.log" | tail -1); write:issue token present; network aiops-sandbox present"
+  if docker network inspect mandate-sandbox >/dev/null 2>&1; then
+    pass sandbox-gitea-ready "$(grep -o 'GITEA UP.*' "$WORK/gitea.log" | tail -1); $(grep -o 'SEEDED gitea.*' "$WORK/gitea.log" | tail -1); write:issue token present; network mandate-sandbox present"
   else
-    fail sandbox-gitea-ready "network aiops-sandbox missing"; exit 1
+    fail sandbox-gitea-ready "network mandate-sandbox missing"; exit 1
   fi
 else
   fail sandbox-gitea-ready "see sandbox output below"; tail -30 "$WORK/gitea.log"; exit 1
@@ -362,7 +362,7 @@ fi
 # that the api and the worker mount as their only preset directory (CONN-8).
 pack_presets() {
   local dir tgz name
-  mkdir -p "$WORK/image-presets" "$WORK/tarballs" "$AIOPS_ACCEPT_PRESET_DIR/node_modules"
+  mkdir -p "$WORK/image-presets" "$WORK/tarballs" "$MANDATE_ACCEPT_PRESET_DIR/node_modules"
   compose build api >"$WORK/build.log" 2>&1 || { echo "compose build api failed:"; tail -30 "$WORK/build.log"; return 1; }
   compose run --rm --no-deps --user "$(id -u):$(id -g)" -v "$WORK/image-presets:/out" --entrypoint sh api \
     -c 'cp -R /app/presets/. /out/' >>"$WORK/build.log" 2>&1 || { echo "copy of /app/presets failed:"; tail -30 "$WORK/build.log"; return 1; }
@@ -376,17 +376,17 @@ pack_presets() {
     if [[ ! "$name" =~ ^(@[a-z0-9._-]+/)?[a-z0-9._-]+$ || "/$name/" == */./* || "/$name/" == */../* ]]; then
       echo "unexpected package name in $tgz: $name"; return 1
     fi
-    mkdir -p "$AIOPS_ACCEPT_PRESET_DIR/node_modules/$name"
-    tar -xzf "$tgz" -C "$AIOPS_ACCEPT_PRESET_DIR/node_modules/$name" --strip-components=1 ||
+    mkdir -p "$MANDATE_ACCEPT_PRESET_DIR/node_modules/$name"
+    tar -xzf "$tgz" -C "$MANDATE_ACCEPT_PRESET_DIR/node_modules/$name" --strip-components=1 ||
       { echo "tar -xzf $tgz failed"; return 1; }
   done
 }
 if pack_out="$(pack_presets 2>&1)"; then
-  nm="$AIOPS_ACCEPT_PRESET_DIR/node_modules"
-  gitea_sdk="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).aiops?.sdk??"")}catch{console.log("")}' "$nm/@aiops/gitea-issues/package.json")"
-  if [[ -f "$nm/@aiops/gitea-issues/dist/index.js" && -f "$nm/@aiops/gitea-issues/preset.yaml" &&
-    -f "$nm/@aiops/gitea-issues/spec/gitea.swagger.json" && -n "$gitea_sdk" && -f "$nm/@aiops/magento2-catalog/package.json" ]]; then
-    pass presets-packed "tarballs $(cd "$WORK/tarballs" && ls -- *.tgz | xargs); @aiops/gitea-issues has dist/index.js, preset.yaml, spec/gitea.swagger.json, aiops.sdk $gitea_sdk; @aiops/magento2-catalog present"
+  nm="$MANDATE_ACCEPT_PRESET_DIR/node_modules"
+  gitea_sdk="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).mandate?.sdk??"")}catch{console.log("")}' "$nm/@mandate/gitea-issues/package.json")"
+  if [[ -f "$nm/@mandate/gitea-issues/dist/index.js" && -f "$nm/@mandate/gitea-issues/preset.yaml" &&
+    -f "$nm/@mandate/gitea-issues/spec/gitea.swagger.json" && -n "$gitea_sdk" && -f "$nm/@mandate/magento2-catalog/package.json" ]]; then
+    pass presets-packed "tarballs $(cd "$WORK/tarballs" && ls -- *.tgz | xargs); @mandate/gitea-issues has dist/index.js, preset.yaml, spec/gitea.swagger.json, mandate.sdk $gitea_sdk; @mandate/magento2-catalog present"
   else
     fail presets-packed "tarballs: $(cd "$WORK/tarballs" 2>/dev/null && ls -- *.tgz 2>/dev/null | xargs); extracted: $(cd "$nm" 2>/dev/null && find . -maxdepth 3 | sort | tr '\n' ' ' | head -c 1500)"; exit 1
   fi
@@ -407,11 +407,11 @@ else
 fi
 
 # The api and the worker read presets only from the mounted tarball tree.
-want_dirs=/etc/aiops/presets/node_modules
-api_dirs="$(compose exec -T api printenv AIOPS_PRESET_DIRS 2>&1 || true)"
-worker_dirs="$(compose exec -T worker printenv AIOPS_PRESET_DIRS 2>&1 || true)"
+want_dirs=/etc/mandate/presets/node_modules
+api_dirs="$(compose exec -T api printenv MANDATE_PRESET_DIRS 2>&1 || true)"
+worker_dirs="$(compose exec -T worker printenv MANDATE_PRESET_DIRS 2>&1 || true)"
 if [[ "$api_dirs" == "$want_dirs" && "$worker_dirs" == "$want_dirs" ]]; then
-  pass presets-dir-env "api and worker AIOPS_PRESET_DIRS=$want_dirs"
+  pass presets-dir-env "api and worker MANDATE_PRESET_DIRS=$want_dirs"
 else
   fail presets-dir-env "api: '${api_dirs:0:200}'; worker: '${worker_dirs:0:200}'; want $want_dirs"
 fi
@@ -554,7 +554,7 @@ group_2() {
   local sub plan decide items rollback audit
 
   # 0. The connections are attached (group 1 did it when it ran); the pins are the live ones.
-  if [[ ! -f "$AIOPS_ACCEPT_CONFIG_DIR/mcp.yaml" ]]; then
+  if [[ ! -f "$MANDATE_ACCEPT_CONFIG_DIR/mcp.yaml" ]]; then
     write_mcp
     apply_code=0
     apply="$(apply_config)" || apply_code=$?
@@ -713,21 +713,21 @@ group_3_gitea() {
   started_worker="$(started_at worker)"
 
   # 1. The preset is declared and bound in a new file; diff names it, apply loads it live (CONN-8).
-  write_gitea_config "$AIOPS_ACCEPT_CONFIG_DIR/gitea.yaml"
+  write_gitea_config "$MANDATE_ACCEPT_CONFIG_DIR/gitea.yaml"
   diff_code=0
-  diff="$(cli config diff /etc/aiops/config 2>&1)" || diff_code=$?
+  diff="$(cli config diff /etc/mandate/config 2>&1)" || diff_code=$?
   # `config diff` lists an added preset as `+ preset <id>` without its version (formatDiff), so the
   # version is read from the package the api loads: its only preset directory is the tarball tree.
-  pkg_version="$(compose exec -T api node -e 'console.log(require(process.argv[1]).version)' /etc/aiops/presets/node_modules/@aiops/gitea-issues/package.json 2>&1 || true)"
+  pkg_version="$(compose exec -T api node -e 'console.log(require(process.argv[1]).version)' /etc/mandate/presets/node_modules/@mandate/gitea-issues/package.json 2>&1 || true)"
   grep -qx '+ preset gitea-issues' <<<"$diff" && diff_preset=yes || diff_preset=no
   apply_code=0
   apply="$(apply_config)" || apply_code=$?
   if [[ "$diff_code" == 0 && "$diff_preset" == yes && "$pkg_version" == 1.0.0 && "$apply_code" == 0 ]] &&
     await_listed alice issues.search yes && await_listed alice issues.set_labels yes &&
     [[ "$(started_at api)" == "$started_api" && "$(started_at worker)" == "$started_worker" ]]; then
-    pass gitea-config-apply "config diff → exit 0: $(grep -E '^\+ (preset|connection|operation) ' <<<"$diff" | tr '\n' '|' | head -c 400); api loads @aiops/gitea-issues $pkg_version; config apply → exit 0; alice lists issues.search and issues.set_labels; api started $started_api and worker started $started_worker unchanged"
+    pass gitea-config-apply "config diff → exit 0: $(grep -E '^\+ (preset|connection|operation) ' <<<"$diff" | tr '\n' '|' | head -c 400); api loads @mandate/gitea-issues $pkg_version; config apply → exit 0; alice lists issues.search and issues.set_labels; api started $started_api and worker started $started_worker unchanged"
   else
-    fail gitea-config-apply "diff exit $diff_code: $(tr '\n' '|' <<<"$diff" | head -c 800); api's @aiops/gitea-issues version: ${pkg_version:0:200}; apply exit $apply_code: $(tr '\n' '|' <<<"$apply" | head -c 800); alice lists issues.search: $(lists alice issues.search), issues.set_labels: $(lists alice issues.set_labels); api $started_api → $(started_at api); worker $started_worker → $(started_at worker)"
+    fail gitea-config-apply "diff exit $diff_code: $(tr '\n' '|' <<<"$diff" | head -c 800); api's @mandate/gitea-issues version: ${pkg_version:0:200}; apply exit $apply_code: $(tr '\n' '|' <<<"$apply" | head -c 800); alice lists issues.search: $(lists alice issues.search), issues.set_labels: $(lists alice issues.set_labels); api $started_api → $(started_at api); worker $started_worker → $(started_at worker)"
     return 0
   fi
 
@@ -849,16 +849,16 @@ group_3_gitea() {
 
 # ---- Group 4: a service account writes through human approval (AUTH-4, APR-1, POL-8, AUD-2, CFG-3, POL-7)
 
-# The access token of the service-account client aiops-sa-ci (client_credentials); service-token.mjs
+# The access token of the service-account client mandate-sa-ci (client_credentials); service-token.mjs
 # reads the client secret itself, so it never reaches bash (SEC-3).
-SA_CLIENT=aiops-sa-ci
-sa_token() { node "$REPO/tooling/acceptance/service-token.mjs" "$AIOPS_KEYCLOAK_PUBLIC_URL" "$SA_CLIENT" "$AIOPS_MCP_RESOURCE"; }
+SA_CLIENT=mandate-sa-ci
+sa_token() { node "$REPO/tooling/acceptance/service-token.mjs" "$MANDATE_KEYCLOAK_PUBLIC_URL" "$SA_CLIENT" "$MANDATE_MCP_RESOURCE"; }
 # The service account runs mcp-call.mjs with the given flags. It has no refresh token, so it gets a
 # fresh token before every call and none expires during the run.
 sa_client() {
   local token
   token="$(sa_token 2>&1)" || { echo "{\"tokenError\":$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$token")}"; return 0; }
-  AIOPS_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" "$@" 2>&1 || true
+  MANDATE_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" "$@" 2>&1 || true
 }
 # get_changeset as the service account (the requester) every 2 s until the status matches the regex
 # or the timeout (s) passes; leaves the answer in POLL and the status in POLL_STATUS. Returns 1 on timeout.
@@ -880,11 +880,11 @@ group_4() {
 
   # 1. The service account is configured with its own role: notes.create_note only, always one
   #    content_lead step (CFG-3, POL-7). notes.create_note is bound by group 2's mcp.yaml.
-  if ! grep -q 'id: notes.create_note' "$AIOPS_ACCEPT_CONFIG_DIR/mcp.yaml" 2>/dev/null; then
+  if ! grep -q 'id: notes.create_note' "$MANDATE_ACCEPT_CONFIG_DIR/mcp.yaml" 2>/dev/null; then
     fail sa-config "notes.create_note is not configured: group 4 needs group 2 on the same stack"
     return 0
   fi
-  cat >"$AIOPS_ACCEPT_CONFIG_DIR/service-accounts.yaml" <<YAML
+  cat >"$MANDATE_ACCEPT_CONFIG_DIR/service-accounts.yaml" <<YAML
 version: 1
 roles:
   - id: integration
@@ -906,7 +906,7 @@ YAML
 
   # 2. The client-credentials token names the client and has no session (AUTH-4).
   token="$(sa_token 2>&1)" || { fail sa-token "service-token.mjs: $token"; return 0; }
-  claims="$(AIOPS_MCP_TOKEN="$token" node -e 'try{const p=JSON.parse(Buffer.from(process.env.AIOPS_MCP_TOKEN.split(".")[1],"base64url").toString());console.log(JSON.stringify({azp:p.azp,sid:"sid" in p,aud:p.aud}))}catch{console.log("{}")}')"
+  claims="$(MANDATE_MCP_TOKEN="$token" node -e 'try{const p=JSON.parse(Buffer.from(process.env.MANDATE_MCP_TOKEN.split(".")[1],"base64url").toString());console.log(JSON.stringify({azp:p.azp,sid:"sid" in p,aud:p.aud}))}catch{console.log("{}")}')"
   if [[ "$(json "$claims" '.azp')" == "$SA_CLIENT" && "$(json "$claims" '.sid')" == false ]]; then
     pass sa-token "service-token.mjs → exit 0; payload $claims"
   else
@@ -965,7 +965,7 @@ YAML
   #    a pattern file on a file descriptor and the secret inside service-token.mjs, never in argv.
   logs="$(compose logs --no-color api worker keycloak-setup 2>&1 || true)"
   token_hits="$(grep -cF -f <(printf '%s\n' "$token") <<<"$logs" || true)"
-  secret_hits="$(node "$REPO/tooling/acceptance/service-token.mjs" --count-secret "$AIOPS_KEYCLOAK_PUBLIC_URL" "$SA_CLIENT" <<<"$logs" 2>&1 || true)"
+  secret_hits="$(node "$REPO/tooling/acceptance/service-token.mjs" --count-secret "$MANDATE_KEYCLOAK_PUBLIC_URL" "$SA_CLIENT" <<<"$logs" 2>&1 || true)"
   if [[ -n "$logs" && "$token_hits" == 0 && "$secret_hits" == 0 ]]; then
     pass sa-no-secret "compose logs api worker keycloak-setup ($(wc -l <<<"$logs") lines): lines with the token $token_hits; occurrences of the client secret $secret_hits"
   else
@@ -974,7 +974,7 @@ YAML
 }
 
 # Not GROUPS: bash ignores assignments to its own GROUPS array (the user's group IDs).
-RUN_GROUPS="${AIOPS_ACCEPT9_GROUPS:-1 2 3 4}"
+RUN_GROUPS="${MANDATE_ACCEPT9_GROUPS:-1 2 3 4}"
 for g in $RUN_GROUPS; do
   if declare -F "group_$g" >/dev/null; then
     "group_$g"

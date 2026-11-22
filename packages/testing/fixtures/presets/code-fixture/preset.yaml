@@ -1,5 +1,5 @@
 # Code fixture preset (OPS-5, OPS-6, CONN-8): items with a title, a state and tags, served by
-# installFakeItems in @aiops/testing. fixture.search is a plain HTTP read and the selector of
+# installFakeItems in @mandate/testing. fixture.search is a plain HTTP read and the selector of
 # both manifests; fixture.update writes one PATCH per record; get_many, set_tags, ping and boom
 # are operations of the code module lib/index.js.
 version: 1

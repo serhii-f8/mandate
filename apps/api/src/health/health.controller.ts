@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { Controller, Get, HttpCode, Inject, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { Connection } from '@temporalio/client';
-import { configurationProbe, PRODUCT_VERSION, probeWithin, readinessStatus, type ConfigurationStateSource, type ReadinessReport } from '@aiops/config';
-import type { Database } from '@aiops/db';
+import { configurationProbe, PRODUCT_VERSION, probeWithin, readinessStatus, type ConfigurationStateSource, type ReadinessReport } from '@mandate/config';
+import type { Database } from '@mandate/db';
 import { CONFIGURATION, DATABASE, TEMPORAL } from '../tokens.js';
 import { Public } from '../web/access.js';
 

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Change-set attributes on the activity spans of the Temporal plugin (NFR-11): the change-set ID
  * and the correlation ID its audit rows carry for the activity's phase (EXE-4), so a trace is found
  * by the audit's correlation ID. Nothing else is set (SEC-3).
  */
-import type { ChangeSetRecord } from '@aiops/core';
+import type { ChangeSetRecord } from '@mandate/core';
 import { trace } from '@opentelemetry/api';
 
 export type ActivityPhase = 'prepare' | 'execute' | 'rollback';
@@ -27,10 +27,10 @@ export function phaseCorrelationId(changeset: ChangeSetRecord, phase: ActivityPh
   }
 }
 
-/** Sets `aiops.changeset_id` and the phase's correlation ID on the active span (NFR-11); no-op without one. */
+/** Sets `mandate.changeset_id` and the phase's correlation ID on the active span (NFR-11); no-op without one. */
 export function markActivitySpan(changeset: ChangeSetRecord, phase: ActivityPhase): void {
   trace.getActiveSpan()?.setAttributes({
-    'aiops.changeset_id': changeset.id,
-    'aiops.correlation_id': phaseCorrelationId(changeset, phase),
+    'mandate.changeset_id': changeset.id,
+    'mandate.correlation_id': phaseCorrelationId(changeset, phase),
   });
 }

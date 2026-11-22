@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // @ts-check
 /**
  * Package-boundary rules (CONTRIBUTING.md "Repository layout and boundaries", ADR 0010).
@@ -7,11 +7,11 @@
  * which lints violating samples so a rule that stops matching fails the build.
  */
 
-const apps = { group: ['@aiops/api', '@aiops/api/*', '@aiops/worker', '@aiops/worker/*'], message: 'Packages must not import an app.' };
+const apps = { group: ['@mandate/api', '@mandate/api/*', '@mandate/worker', '@mandate/worker/*'], message: 'Packages must not import an app.' };
 
 /** Every workspace package except the ones listed. */
 function workspaceExcept(/** @type {string[]} */ allowed, /** @type {string} */ message) {
-  return { regex: `^@aiops/(?!(${allowed.join('|')})(/|$))`, message };
+  return { regex: `^@mandate/(?!(${allowed.join('|')})(/|$))`, message };
 }
 
 const ioNames = ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'localStorage', 'sessionStorage', 'indexedDB'];
@@ -80,7 +80,7 @@ export const boundaryRules = [
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [workspaceExcept(['connector-sdk'], 'Adapters depend on @aiops/connector-sdk only.'), noTelemetryInAdapters, noMcpOutsideAdapter] },
+        { patterns: [workspaceExcept(['connector-sdk'], 'Adapters depend on @mandate/connector-sdk only.'), noTelemetryInAdapters, noMcpOutsideAdapter] },
       ],
     },
   },
@@ -91,7 +91,7 @@ export const boundaryRules = [
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [workspaceExcept(['connector-sdk'], 'Adapters depend on @aiops/connector-sdk only.'), noTelemetryInAdapters] },
+        { patterns: [workspaceExcept(['connector-sdk'], 'Adapters depend on @mandate/connector-sdk only.'), noTelemetryInAdapters] },
       ],
     },
   },
@@ -103,7 +103,7 @@ export const boundaryRules = [
         'error',
         {
           patterns: [
-            workspaceExcept(['connector-sdk', 'testing'], 'Adapter tests depend on @aiops/connector-sdk and @aiops/testing only.'),
+            workspaceExcept(['connector-sdk', 'testing'], 'Adapter tests depend on @mandate/connector-sdk and @mandate/testing only.'),
             noTelemetryInAdapters,
           ],
         },
@@ -117,7 +117,7 @@ export const boundaryRules = [
         'error',
         {
           patterns: [
-            workspaceExcept(['core', 'config', 'connector-sdk'], 'packages/upstream depends on @aiops/core, @aiops/config and @aiops/connector-sdk only.'),
+            workspaceExcept(['core', 'config', 'connector-sdk'], 'packages/upstream depends on @mandate/core, @mandate/config and @mandate/connector-sdk only.'),
             noMcpOutsideAdapter,
           ],
         },
@@ -129,7 +129,7 @@ export const boundaryRules = [
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [workspaceExcept(['core', 'config', 'connector-sdk', 'testing'], 'packages/upstream tests may also use @aiops/testing.'), noMcpOutsideAdapter] },
+        { patterns: [workspaceExcept(['core', 'config', 'connector-sdk', 'testing'], 'packages/upstream tests may also use @mandate/testing.'), noMcpOutsideAdapter] },
       ],
     },
   },
@@ -140,7 +140,7 @@ export const boundaryRules = [
   {
     files: ['packages/temporal/src/**/*.ts'],
     rules: {
-      'no-restricted-imports': ['error', { patterns: [workspaceExcept(['core'], 'packages/temporal depends on @aiops/core only.')] }],
+      'no-restricted-imports': ['error', { patterns: [workspaceExcept(['core'], 'packages/temporal depends on @mandate/core only.')] }],
     },
   },
   {
@@ -148,13 +148,13 @@ export const boundaryRules = [
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [workspaceExcept(['connector-sdk', 'config'], 'Presets use only @aiops/connector-sdk and @aiops/config.'), noMcpClient] },
+        { patterns: [workspaceExcept(['connector-sdk', 'config'], 'Presets use only @mandate/connector-sdk and @mandate/config.'), noMcpClient] },
       ],
     },
   },
   {
     // Preset code runs from a preset directory outside the app's node_modules (CONN-8, OPS-5): at run time it
-    // imports only `node:` built-ins and its own relative files, so @aiops/* is imported as types only.
+    // imports only `node:` built-ins and its own relative files, so @mandate/* is imported as types only.
     // Not linted: a relative or file: import that leaves the code directory (`../` out of dist, an absolute
     // file: URL). The src-to-dist mapping makes that inexact; the loader refuses a path outside the package
     // and docs/commands.md states the rule.
@@ -166,9 +166,9 @@ export const boundaryRules = [
         {
           patterns: [
             {
-              group: ['@aiops/*'],
+              group: ['@mandate/*'],
               allowTypeImports: true,
-              message: 'Preset code runs outside the app’s node_modules: import @aiops packages as types only (CONN-8, OPS-5).',
+              message: 'Preset code runs outside the app’s node_modules: import @mandate packages as types only (CONN-8, OPS-5).',
             },
           ],
         },
@@ -185,7 +185,7 @@ export const boundaryRules = [
           patterns: [
             workspaceExcept(
               ['connector-sdk', 'config', 'adapters', 'testing'],
-              'Preset tests use only @aiops/connector-sdk, @aiops/config, @aiops/adapters and @aiops/testing.',
+              'Preset tests use only @mandate/connector-sdk, @mandate/config, @mandate/adapters and @mandate/testing.',
             ),
             noMcpClient,
           ],
@@ -201,7 +201,7 @@ export const boundaryRules = [
         {
           patterns: [
             apps,
-            { group: ['@aiops/db', '@aiops/db/*', '@aiops/adapters', '@aiops/adapters/*'], message: 'Public interfaces stay independent of implementations.' },
+            { group: ['@mandate/db', '@mandate/db/*', '@mandate/adapters', '@mandate/adapters/*'], message: 'Public interfaces stay independent of implementations.' },
             noMcpOutsideAdapter,
           ],
         },
@@ -235,7 +235,7 @@ export const boundaryRules = [
         ...widgetSyntax,
         { selector: 'ImportExpression[source.value=/^@modelcontextprotocol\\//]', message: 'Only packages/widgets/src/widget/ talks to the MCP Apps bridge (UI-1).' },
         { selector: 'ImportExpression[source.value=/(^|\\/)widget(\\/|$)/]', message: 'The library does not import the widget entries (UI-1).' },
-        { selector: 'ImportExpression[source.value=/^@aiops\\/(api|worker)(\\/|$)/]', message: 'Packages must not import an app.' },
+        { selector: 'ImportExpression[source.value=/^@mandate\\/(api|worker)(\\/|$)/]', message: 'Packages must not import an app.' },
       ],
       'no-restricted-imports': [
         'error',
@@ -266,7 +266,7 @@ export const boundaryRules = [
         'error',
         {
           patterns: [
-            { group: ['@aiops/widgets/*', '!@aiops/widgets/styles.css'], message: 'apps/web uses the library, not the widget entries (UI-1).' },
+            { group: ['@mandate/widgets/*', '!@mandate/widgets/styles.css'], message: 'apps/web uses the library, not the widget entries (UI-1).' },
             { group: mcpSdk, message: 'The trusted page talks REST only.' },
           ],
         },
@@ -288,8 +288,8 @@ export const boundaryRules = [
             },
             { group: ['@nestjs/*', 'drizzle-orm', 'drizzle-orm/*', 'pg'], message: 'Workflow code does no I/O; use an activity.' },
             { regex: '^@temporalio/(?!workflow$|common$)', message: 'Workflow code may import only @temporalio/workflow and @temporalio/common.' },
-            // `(/|$)` rejects the package root and every other subpath of @aiops/temporal.
-            workspaceExcept(['temporal/contract'], 'Workflow code may import only @aiops/temporal/contract (it re-exports the core types it needs).'),
+            // `(/|$)` rejects the package root and every other subpath of @mandate/temporal.
+            workspaceExcept(['temporal/contract'], 'Workflow code may import only @mandate/temporal/contract (it re-exports the core types it needs).'),
             noMcpClient,
           ],
         },

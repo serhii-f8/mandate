@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 # Backs up a running Compose installation (NFR-13): the four PostgreSQL databases and the audit
 # archive volume, with a manifest of sizes, SHA-256 sums, the audit chain head and the images.
 # Usage: bash deploy/backup/backup.sh [<out-dir>]   (default backups/<UTC timestamp>)
 # It never copies .env: the master keys, the Temporal payload keys and the passwords are kept
 # elsewhere by the operator. The dumps hold encrypted credentials and personal data; the output
 # directory is created readable by the current user only.
-# api and worker are stopped while the dumps run, so the aiops database and the audit head do not
+# api and worker are stopped while the dumps run, so the mandate database and the audit head do not
 # move; Temporal, Keycloak and PostgreSQL keep running. Every docker call goes through
 # `docker compose` in the repository root, so COMPOSE_PROJECT_NAME, COMPOSE_FILE and .env apply.
 set -euo pipefail
 
-DATABASES=(aiops temporal temporal_visibility keycloak)
-ARCHIVE_DIR=/var/lib/aiops/audit-archive
+DATABASES=(mandate temporal temporal_visibility keycloak)
+ARCHIVE_DIR=/var/lib/mandate/audit-archive
 
 fail() {
   echo "backup: $*" >&2

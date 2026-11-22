@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 # The fake Magento catalog of the restart acceptance (scripts/acceptance/restart.sh): product reads,
 # the async bulk write and its detailed status, with per-SKU submission counts at GET /_control/state,
 # POST /_control/open-polls {n} and POST /_control/reset (packages/testing/src/fake-magento-main.ts).
@@ -14,8 +14,8 @@ WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm fetch
 COPY . .
-RUN pnpm install --offline --frozen-lockfile --filter @aiops/testing...
-RUN pnpm --filter @aiops/testing... build
+RUN pnpm install --offline --frozen-lockfile --filter @mandate/testing...
+RUN pnpm --filter @mandate/testing... build
 ENV PORT=3003
 EXPOSE 3003
 CMD ["node", "packages/testing/dist/fake-magento-main.js"]

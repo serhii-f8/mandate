@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import { strFromU8, unzipSync } from 'fflate';
-import type { ChangeItemRecord } from '@aiops/core';
+import type { ChangeItemRecord } from '@mandate/core';
 import { xlsxChunks } from './xlsx.js';
 
 async function* pagesOf(...pages: (readonly ChangeItemRecord[])[]): AsyncIterable<readonly ChangeItemRecord[]> {

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The direct read path (design part 1 §5, ADR 0017 decision 6): an allowed `read`
  * operation runs from `api` straight through its connection's adapter, as SPEC
  * section 2 says for reads. Writes need change-sets (Phase 4).
  */
-import type { ReadOutcome } from '@aiops/connector-sdk';
+import type { ReadOutcome } from '@mandate/connector-sdk';
 import {
   READ_RESULT_TEXT,
   readErrorResult,
@@ -13,8 +13,8 @@ import {
   type InvocationRequest,
   type InvocationResult,
   type OperationInvoker,
-} from '@aiops/core';
-import { performRead, type ReadDeps } from '@aiops/upstream';
+} from '@mandate/core';
+import { performRead, type ReadDeps } from '@mandate/upstream';
 
 /** The direct path runs only `read` operations bound to GET; anything else goes through a change-set (MCP-4, CS-1). */
 export const NOT_DIRECT_READ = 'only read operations bound to GET run directly';

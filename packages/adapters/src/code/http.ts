@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The guarded HTTP client a preset's code operation gets as `ctx.http` (OPS-5). Every request is
  * relative to the connection's base URL and goes through the connection's own client, so the
@@ -13,7 +13,7 @@ import type {
   ConnectionSettings,
   CredentialSource,
   HttpMethod,
-} from '@aiops/connector-sdk';
+} from '@mandate/connector-sdk';
 import type { ConnectionClient } from '../http/client.js';
 import { FORBIDDEN_HEADERS } from '../http/headers.js';
 import type { HttpRequestSpec } from '../openapi/request.js';

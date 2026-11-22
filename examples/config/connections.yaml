@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../packages/config/schema/aiops-config.v1.json
+# yaml-language-server: $schema=../../packages/config/schema/mandate-config.v1.json
 # Connections to the systems the AI clients work on, and the preset operations they bring.
 # Replace every host ending in .invalid with your own system; nothing here is a secret: a
 # credential_ref only names a credential that is entered later on the trusted credential
@@ -11,8 +11,8 @@ version: 1
 # test; a connection applies it with `preset:`. `version` is a semver range the loaded
 # preset must satisfy (CONN-8).
 presets:
-  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '^1.0.0' }
-  - { id: gitea-issues, package: '@aiops/gitea-issues', version: '^1.0.0' }
+  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '^1.0.0' }
+  - { id: gitea-issues, package: '@mandate/gitea-issues', version: '^1.0.0' }
 
 connections:
   # An openapi connection with the Magento catalog preset (catalog.search_products,
@@ -49,7 +49,7 @@ connections:
 
 # One operation bound to an upstream MCP tool (CONN-1). `pin` is the hash of the tool
 # definition as reviewed; the operation runs only while the live definition still hashes to it.
-# The value below is illustrative: copy the real one from `aiops config diff` against your
+# The value below is illustrative: copy the real one from `mandate config diff` against your
 # upstream. Loading never needs the live tool list.
 operations:
   - id: docs.search

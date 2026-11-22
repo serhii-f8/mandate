@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Columns and cell text of a change-set export (CS-8). The writers in `csv.ts` and `xlsx.ts`
  * apply the per-format cell safety (SEC-5); this module holds the pieces they share.
  */
-import { canonicalJson, compareTargetIds, type ChangeItemRecord, type ChangeSetRepository } from '@aiops/core';
+import { canonicalJson, compareTargetIds, type ChangeItemRecord, type ChangeSetRepository } from '@mandate/core';
 
 export const EXPORT_PAGE = 500;
 export const CELL_LIMIT = 32_767;

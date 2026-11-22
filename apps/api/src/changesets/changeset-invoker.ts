@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * A call of an allowed opaque operation, or of a `write` or `destructive` operation with a manifest,
  * creates a change-set in `preparing` and starts its workflow (EXE-1); the workflow prepares it
@@ -8,7 +8,7 @@
  * any other request waits a bounded time for preparation and answers with the result, or with
  * "being prepared" (MCP-1). Answers carry counts and IDs only (MCP-4, SEC-5).
  */
-import type { LoadedConfiguration } from '@aiops/config';
+import type { LoadedConfiguration } from '@mandate/config';
 import {
   changesetTransitionEvent,
   createChangeSet,
@@ -25,7 +25,7 @@ import {
   type OperationInvoker,
   type TaskRepository,
   type WorkflowStarter,
-} from '@aiops/core';
+} from '@mandate/core';
 import { deriveTaskState } from '../mcp/tasks/task-state.js';
 import { riskNotSupportedResult } from '../upstream/risk-not-supported.js';
 import { expiredDuringPreparationAnswer, preparationErrorAnswer, preparedAnswer, preparingAnswer } from './results.js';

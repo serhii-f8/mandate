@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The worker's HTTP server (NFR-10, NFR-12): `/healthz` (alive), `/readyz` (database, configuration
  * and a running Temporal worker) and `/metrics` (the Prometheus exporter). Only `GET` on exactly
@@ -8,7 +8,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { PRODUCT_VERSION, readinessStatus, type ReadinessReport } from '@aiops/config';
+import { PRODUCT_VERSION, readinessStatus, type ReadinessReport } from '@mandate/config';
 
 export interface WorkerHttpDeps {
   readonly readiness: () => Promise<ReadinessReport>;

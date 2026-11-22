@@ -1,11 +1,11 @@
 {
-  "name": "@aiops-examples/preset-template",
+  "name": "@mandate-examples/preset-template",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Template for a preset: one read, one per-record write, a vendored spec and a contract test.",
   "license": "Apache-2.0",
-  "aiops": {
+  "mandate": {
     "preset": "preset.yaml",
     "sdk": "^1.0.0"
   },
@@ -20,9 +20,9 @@
     "test": "vitest run --project unit --passWithNoTests"
   },
   "devDependencies": {
-    "@aiops/adapters": "workspace:*",
-    "@aiops/config": "workspace:*",
-    "@aiops/connector-sdk": "workspace:*",
-    "@aiops/testing": "workspace:*"
+    "@mandate/adapters": "workspace:*",
+    "@mandate/config": "workspace:*",
+    "@mandate/connector-sdk": "workspace:*",
+    "@mandate/testing": "workspace:*"
   }
 }

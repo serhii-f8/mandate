@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import type { UpstreamMapping } from '@aiops/connector-sdk';
+import type { UpstreamMapping } from '@mandate/connector-sdk';
 import { buildRequest, MappingError } from './request.js';
 
 const base: UpstreamMapping & { method: 'GET'; path: string } = {

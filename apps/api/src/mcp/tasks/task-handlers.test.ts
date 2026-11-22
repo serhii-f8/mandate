@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it, vi } from 'vitest';
 import { ProtocolError } from '@modelcontextprotocol/server';
 import {
@@ -11,8 +11,8 @@ import {
   type ChangeSetStatus,
   type ExecutionProgress,
   type TaskKind,
-} from '@aiops/core';
-import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryTaskRepository } from '@aiops/testing';
+} from '@mandate/core';
+import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryTaskRepository } from '@mandate/testing';
 import { createTaskHandlers, type TaskRequestContext } from './task-handlers.js';
 
 const alice: Caller = { subject: 'alice', groups: [] };
@@ -21,8 +21,8 @@ const CS = '11111111-1111-4111-8111-111111111111';
 const TASK = '22222222-2222-4222-8222-222222222222';
 const UNKNOWN = '33333333-3333-4333-8333-333333333333';
 const NOW = new Date('2026-01-01T12:00:00Z');
-const PUBLIC = new URL('https://aiops.example.test');
-const PAGE = `https://aiops.example.test/app/changesets/${CS}`;
+const PUBLIC = new URL('https://mandate.example.test');
+const PAGE = `https://mandate.example.test/app/changesets/${CS}`;
 const STATS = { total: 25, included: 25, excluded: {}, written: 0, failed: 0, skipped: 0 };
 
 type CancelAnswer = Awaited<ReturnType<ChangeSetExecutor['cancel']>>;

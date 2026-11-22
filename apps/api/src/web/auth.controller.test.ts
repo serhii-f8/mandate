@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import 'reflect-metadata';
 import type { Request, Response } from 'express';
 import pino from 'pino';
 import { describe, expect, it } from 'vitest';
-import type { ApiEnv, ConfigurationHolder } from '@aiops/config';
-import type { AuditEventInput, AuditLog } from '@aiops/core';
-import type { SessionRow } from '@aiops/db';
+import type { ApiEnv, ConfigurationHolder } from '@mandate/config';
+import type { AuditEventInput, AuditLog } from '@mandate/core';
+import type { SessionRow } from '@mandate/db';
 import type { EndpointRateLimiter, LimitCheck, LimitResult } from '../http/rate-limiter.js';
 import type { PageRequest } from './access.js';
 import { AuthController } from './auth.controller.js';
 import type { OidcClient } from './oidc-client.js';
 import type { SessionService } from './session.service.js';
 
-const env = { publicUrl: new URL('https://aiops.example.test'), webClientId: 'aiops-web', sessionMaxAgeSeconds: 600 } as unknown as ApiEnv;
+const env = { publicUrl: new URL('https://mandate.example.test'), webClientId: 'mandate-web', sessionMaxAgeSeconds: 600 } as unknown as ApiEnv;
 
 const session: SessionRow = {
   idHash: 'h',
   subject: 'carol-id',
-  clientId: 'aiops-web',
+  clientId: 'mandate-web',
   groups: [],
   authTime: new Date(),
   csrfToken: 't',
@@ -92,7 +92,7 @@ describe('AUD-1 AUTH-5 page logins and logouts are audited before acting', () =>
     const res = new FakeResponse();
     await controller(failingAudit).callback({ query: { state: 's', code: 'c' }, headers: {} } as unknown as Request, res as unknown as Response);
     expect(res.statusCode).toBe(500);
-    expect(res.headers.get('set-cookie')).toEqual([expect.stringMatching(/^aiops_login=; /)]);
+    expect(res.headers.get('set-cookie')).toEqual([expect.stringMatching(/^mandate_login=; /)]);
   });
 
   it('AUD-1 a failed login is audited, then answered 400', async () => {
@@ -110,7 +110,7 @@ describe('AUD-1 AUTH-5 page logins and logouts are audited before acting', () =>
     const ended: string[] = [];
     const created: string[] = [];
     const oidc = {
-      exchange: () => Promise.resolve({ ok: true, identity: { subject: 'carol-id', clientId: 'aiops-web', groups: [], authTime: new Date() } }),
+      exchange: () => Promise.resolve({ ok: true, identity: { subject: 'carol-id', clientId: 'mandate-web', groups: [], authTime: new Date() } }),
     } as unknown as OidcClient;
     const sessions = {
       consumeLogin: () => Promise.resolve({ stateHash: 'x', codeVerifier: 'v', nonce: 'n', returnTo: '/app/credentials', fresh: true, expiresAt: new Date() }),
@@ -123,17 +123,17 @@ describe('AUD-1 AUTH-5 page logins and logouts are audited before acting', () =>
     const audit: AuditLog = { append: () => Promise.resolve() };
     const auth = new AuthController(env, oidc, sessions, audit, pino({ level: 'silent' }), allowing, configuration);
     const res = new FakeResponse();
-    // https public URL: the session cookie is `__Host-aiops_session`.
-    const req = { query: { state: 's', code: 'c' }, headers: { cookie: 'aiops_login=s; __Host-aiops_session=old-cookie' } } as unknown as Request;
+    // https public URL: the session cookie is `__Host-mandate_session`.
+    const req = { query: { state: 's', code: 'c' }, headers: { cookie: 'mandate_login=s; __Host-mandate_session=old-cookie' } } as unknown as Request;
     await auth.callback(req, res as unknown as Response);
     expect(res.statusCode).toBe(302);
     expect(res.headers.get('location')).toEqual(['/app/credentials']);
     expect(created).toEqual(['new']);
     expect(ended).toEqual(['old-cookie']);
-    expect(res.headers.get('set-cookie')).toEqual([expect.stringMatching(/^aiops_login=; /), expect.stringMatching(/^__Host-aiops_session=new-cookie; /)]);
+    expect(res.headers.get('set-cookie')).toEqual([expect.stringMatching(/^mandate_login=; /), expect.stringMatching(/^__Host-mandate_session=new-cookie; /)]);
 
     ended.length = 0;
-    await auth.callback({ query: { state: 's', code: 'c' }, headers: { cookie: 'aiops_login=s' } } as unknown as Request, new FakeResponse() as unknown as Response);
+    await auth.callback({ query: { state: 's', code: 'c' }, headers: { cookie: 'mandate_login=s' } } as unknown as Request, new FakeResponse() as unknown as Response);
     expect(ended).toEqual([]);
   });
 
@@ -154,7 +154,7 @@ describe('SEC-10 SEC-1 the page login routes are limited per address', () => {
     consumeLogin: () => Promise.reject(new Error('must not read a login')),
   });
   const oidc = { authorizationRequest: () => { throw new Error('must not build a request'); } } as unknown as OidcClient;
-  const req = { query: { state: 's', code: 'c', return_to: '/app/' }, headers: { cookie: 'aiops_login=s' }, ip: '192.0.2.5' } as unknown as Request;
+  const req = { query: { state: 's', code: 'c', return_to: '/app/' }, headers: { cookie: 'mandate_login=s' }, ip: '192.0.2.5' } as unknown as Request;
 
   for (const route of ['login', 'callback'] as const) {
     it(`SEC-10 /auth/${route} over the limit answers 429 with Retry-After and touches no login`, async () => {

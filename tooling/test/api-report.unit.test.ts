@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -43,7 +43,7 @@ describe('NFR-18 api report', () => {
     const dir = fixture();
     const r = sdkReport(dir, '1.2.3');
     expect(sdkReport(dir, '1.2.3')).toBe(r);
-    expect(r.split('\n')[0]).toBe('// @aiops/connector-sdk 1.2.3 public API report — generated, do not edit');
+    expect(r.split('\n')[0]).toBe('// @mandate/connector-sdk 1.2.3 public API report — generated, do not edit');
     expect(headerVersion(r)).toBe('1.2.3');
   });
 
@@ -83,7 +83,7 @@ describe('NFR-18 config schema report', () => {
   const report = () => configReport(schema, '1.2.3');
   interface Doc {
     $id: string;
-    'x-aiops-schema-version': string;
+    'x-mandate-schema-version': string;
     additionalProperties: boolean;
     properties: Record<string, { type?: string; required?: string[] }>;
   }
@@ -104,10 +104,10 @@ describe('NFR-18 config schema report', () => {
     expect(report().endsWith('}\n')).toBe(true);
   });
 
-  it('sets $id and x-aiops-schema-version', () => {
+  it('sets $id and x-mandate-schema-version', () => {
     const j = parsed();
-    expect(j.$id).toBe('https://aiops.invalid/schema/aiops-config.v1.json');
-    expect(j['x-aiops-schema-version']).toBe('1.2.3');
+    expect(j.$id).toBe('https://mandate.invalid/schema/mandate-config.v1.json');
+    expect(j['x-mandate-schema-version']).toBe('1.2.3');
     expect(headerVersion(report())).toBe('1.2.3');
   });
 
@@ -142,22 +142,22 @@ describe('NFR-18 config schema report', () => {
 
 describe('NFR-18 preset format report', () => {
   const doc = z.strictObject({ version: z.literal(1), spec: z.string().min(1).optional() });
-  const aiops = z.strictObject({ sdk: z.string(), preset: z.string().default('preset.yaml') });
+  const mandate = z.strictObject({ sdk: z.string(), preset: z.string().default('preset.yaml') });
   interface Report {
     $id: string;
-    'x-aiops-sdk-version': string;
+    'x-mandate-sdk-version': string;
     $defs: Record<string, { required?: string[]; $schema?: string }>;
   }
 
   it('NFR-18 carries the SDK version and both schemas', () => {
-    const text = presetReport(doc, aiops, '1.2.3');
+    const text = presetReport(doc, mandate, '1.2.3');
     const j = JSON.parse(text) as Report;
-    expect(j.$id).toBe('https://aiops.invalid/schema/aiops-preset.v1.json');
-    expect(j['x-aiops-sdk-version']).toBe('1.2.3');
+    expect(j.$id).toBe('https://mandate.invalid/schema/mandate-preset.v1.json');
+    expect(j['x-mandate-sdk-version']).toBe('1.2.3');
     expect(headerVersion(text)).toBe('1.2.3');
-    expect(Object.keys(j.$defs)).toEqual(['packageJsonAiops', 'presetDocument']);
+    expect(Object.keys(j.$defs)).toEqual(['packageJsonMandate', 'presetDocument']);
     expect(j.$defs.presetDocument?.required).toEqual(['version']);
-    expect(j.$defs.packageJsonAiops?.required).toEqual(['sdk']);
+    expect(j.$defs.packageJsonMandate?.required).toEqual(['sdk']);
     expect(j.$defs.presetDocument?.$schema).toBeUndefined();
   });
 

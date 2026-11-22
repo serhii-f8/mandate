@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { NextFunction, Request, Response } from 'express';
-import type { ConfigurationStateSource } from '@aiops/config';
+import type { ConfigurationStateSource } from '@mandate/config';
 
 /** Reachable in every state, so Compose and the operator can see the process (NFR-10). GET only. */
 const EXEMPT_PATHS: ReadonlySet<string> = new Set(['/healthz', '/readyz', '/metrics']);

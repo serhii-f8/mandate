@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import { parseSecret, type ConnectionSettings, type CredentialSource, type ReadErrorCode } from '@aiops/connector-sdk';
+// Copyright 2026 The Mandate Authors
+import { parseSecret, type ConnectionSettings, type CredentialSource, type ReadErrorCode } from '@mandate/connector-sdk';
 import type { Transport } from './client.js';
 import { clientCredentialsToken, clientSecretBasicValue, HEADER_SAFE, type ClientCredentialsParams } from './oauth.js';
 import { createScrubber, type Scrubber } from './scrub.js';

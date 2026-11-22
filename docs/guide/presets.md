@@ -12,7 +12,7 @@ range; leave it out to accept any version. The highest version that satisfies th
 
 ```yaml
 presets:
-  - { id: gitea-issues, package: '@aiops/gitea-issues', version: '^1.0.0' }
+  - { id: gitea-issues, package: '@mandate/gitea-issues', version: '^1.0.0' }
 connections:
   - id: gitea
     adapter: openapi
@@ -32,20 +32,20 @@ it never grants anything.
 
 ## Where the platform finds presets
 
-The api and worker search the directories in `AIOPS_PRESET_DIRS` (colon-separated, searched in
+The api and worker search the directories in `MANDATE_PRESET_DIRS` (colon-separated, searched in
 order). The Docker images set it to `/app/presets`, which holds the two shipped presets. For your
 own preset, mount a second directory into the `api` and `worker` containers (for example with a
-`docker-compose.override.yml`) and set `AIOPS_PRESET_DIRS` to both directories on both services.
+`docker-compose.override.yml`) and set `MANDATE_PRESET_DIRS` to both directories on both services.
 Each preset is one subdirectory.
 
 To check a configuration together with its presets without starting anything:
 
 ```bash
-pnpm aiops validate <config-dir> --preset-dir examples
+pnpm mandate validate <config-dir> --preset-dir examples
 ```
 
-`--preset-dir` may repeat. `aiops config diff` prints `~ preset <name>` when a preset's version or
-code changed, and `aiops config apply` stores the new revision.
+`--preset-dir` may repeat. `mandate config diff` prints `~ preset <name>` when a preset's version or
+code changed, and `mandate config apply` stores the new revision.
 
 ## Write a preset
 
@@ -54,7 +54,7 @@ Copy `examples/preset-template`. It models a small notes API: a read, `notes.sea
 
 ```text
 examples/preset-template/
-  package.json                    the package and its aiops field
+  package.json                    the package and its mandate field
   preset.yaml                     operations, schemas, mappings, test, manifest
   spec/notes.openapi.json         the vendored OpenAPI 3 spec
   test/contract.unit.test.ts      the contract test
@@ -62,13 +62,13 @@ examples/preset-template/
   test/recordings/write/*.json    recorded writes
 ```
 
-### The `aiops` field
+### The `mandate` field
 
 `package.json` tells the platform which file is the preset and which connector SDK it was written
 for:
 
 ```json
-"aiops": { "preset": "preset.yaml", "sdk": "^1.0.0" }
+"mandate": { "preset": "preset.yaml", "sdk": "^1.0.0" }
 ```
 
 `preset` defaults to `preset.yaml`. `sdk` is a semver range; if the SDK the platform provides does
@@ -132,7 +132,7 @@ key list is in the [Configuration reference](configuration.md).
 ### Code operations
 
 Most operations are declarative. When an upstream cannot be described by a mapping, a preset ships
-a code module, named by `aiops.code` and listed in `preset.yaml` as `upstream: { code: <name> }`.
+a code module, named by `mandate.code` and listed in `preset.yaml` as `upstream: { code: <name> }`.
 `presets/gitea-issues` has three: two reads and `set_labels`, which looks up label IDs because
 Gitea silently drops unknown names.
 
@@ -140,7 +140,7 @@ The module is an ES module in a subdirectory of the package. Its default export 
 code name:
 
 ```ts
-import type { PresetModule } from '@aiops/connector-sdk';
+import type { PresetModule } from '@mandate/connector-sdk';
 
 export default {
   operations: {
@@ -153,7 +153,7 @@ export default {
 The rules a code module follows:
 
 - It is self-contained. It imports only `node:` built-ins and its own files below the code
-  directory, and `@aiops/connector-sdk` as types only. Compile it (`tsc`) so `dist` has no
+  directory, and `@mandate/connector-sdk` as types only. Compile it (`tsc`) so `dist` has no
   dependencies.
 - It never opens a connection itself. Every call goes through `ctx.http.send(...)`, which applies
   the platform's credential, timeout, network guard and retry rules. A response is
@@ -192,10 +192,10 @@ Recordings are JSON files, one per case:
 Record real exchanges from a sandbox, then remove tokens, headers and customer data. Reads go in
 `test/recordings/`, writes in `test/recordings/write/`. The helpers (`startFakeUpstream`,
 `replayRecordings`, `contractRead`, `contractWrite`, `recordingsFreeOf`) come from
-`@aiops/testing`. Run the test of the template with:
+`@mandate/testing`. Run the test of the template with:
 
 ```bash
-pnpm --filter @aiops-examples/preset-template test
+pnpm --filter @mandate-examples/preset-template test
 ```
 
 For a package of your own, run `pnpm --filter <your-package> test`. A preset with code also compiles
@@ -209,11 +209,11 @@ Pack the preset with npm. The tarball holds what `files` lists:
 npm pack
 ```
 
-Extract it into a directory that is on `AIOPS_PRESET_DIRS`, one subdirectory per preset:
+Extract it into a directory that is on `MANDATE_PRESET_DIRS`, one subdirectory per preset:
 
 ```bash
-mkdir -p /srv/aiops-presets/notes
-tar -xzf aiops-examples-preset-template-1.0.0.tgz --strip-components=1 -C /srv/aiops-presets/notes
+mkdir -p /srv/mandate-presets/notes
+tar -xzf mandate-examples-preset-template-1.0.0.tgz --strip-components=1 -C /srv/mandate-presets/notes
 ```
 
 Reference it by its package name and apply the configuration. The running api and worker pick up an
@@ -226,7 +226,7 @@ preset with code, run `config apply`, then restart `api` and `worker`
 ### SDK compatibility
 
 The connector SDK and the configuration schema are public interfaces with their own versions. A
-preset declares the SDK range it works with in `aiops.sdk`. A preset written for `^1.0.0` loads on
+preset declares the SDK range it works with in `mandate.sdk`. A preset written for `^1.0.0` loads on
 any 1.x platform. A preset written for the pre-release SDK (0.6) must be rebuilt, re-tested and
 republished with `^1.0.0`. The policy is on [Versioning](versioning.md).
 

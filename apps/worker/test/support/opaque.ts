@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Opaque change-sets for worker tests (design phase 9 §5): a scripted `OpaqueCaller` that honours
  * the port's contract (pre-flight, `beforeSend`, one send) and counts what it sends, and a prepared
@@ -11,7 +11,7 @@ import {
   type ChangeSetRepository,
   type OpaqueCaller,
   type OpaqueCallOutcome,
-} from '@aiops/core';
+} from '@mandate/core';
 import { createPrepared, type ExecuteOptions } from './changesets.js';
 import { OPAQUE_OPERATION } from './configuration.js';
 

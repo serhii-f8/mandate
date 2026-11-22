@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
-import { GENESIS_HASH, type AuditLog, type ChainHead } from '@aiops/core';
+import { GENESIS_HASH, type AuditLog, type ChainHead } from '@mandate/core';
 import type pg from 'pg';
 import { writeAuditArchive } from './audit-archive.js';
 import { safeInteger, SEAL_BATCH, sealAuditChain } from './audit-chain.js';
@@ -34,7 +34,7 @@ export interface RetentionDeps {
   readonly rateCounter: Pick<PostgresRateCounter, 'prune'>;
   /** `audit.retention_days`; undefined keeps audit rows forever. */
   readonly retentionDays: number | undefined;
-  /** `AIOPS_AUDIT_ARCHIVE_DIR`. */
+  /** `MANDATE_AUDIT_ARCHIVE_DIR`. */
   readonly archiveDir: string | undefined;
   readonly actor: string;
   readonly now: () => Date;
@@ -130,7 +130,7 @@ async function locked(deps: RetentionDeps, client: pg.PoolClient): Promise<Reten
   await guarded('audit retention', async () => {
     await client.query('BEGIN');
     try {
-      await client.query("SELECT set_config('aiops.audit_retention', 'on', true)");
+      await client.query("SELECT set_config('mandate.audit_retention', 'on', true)");
       await client.query('INSERT INTO audit_anchor (chain_pos, hash, archive, sha256, count) VALUES ($1, $2, $3, $4, $5)', [
         String(manifest.last),
         manifest.lastHash,

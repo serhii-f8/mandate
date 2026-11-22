@@ -1,4 +1,4 @@
-# @aiops/gitea-issues
+# @mandate/gitea-issues
 
 Gitea issues preset 1.0.0 (CONN-8, OPS-5, OPS-6).
 The second preset, proving the same connector interfaces carry a different upstream: code reads, a
@@ -8,7 +8,7 @@ code write that verifies label names, declarative writes and a vendored filtered
 
 ```yaml
 presets:
-  - { id: gitea-issues, package: '@aiops/gitea-issues', version: '^1.0.0' }
+  - { id: gitea-issues, package: '@mandate/gitea-issues', version: '^1.0.0' }
 connections:
   - id: gitea
     adapter: openapi
@@ -23,7 +23,7 @@ connections:
 characters), not `token <t>`; the adapter sends `Authorization: Bearer <t>`, which Gitea accepts.
 Scope `write:issue` is enough for every operation, on public and private repositories.
 
-The api finds the package through `AIOPS_PRESET_DIRS`; `aiops validate <dir> --preset-dir presets`
+The api finds the package through `MANDATE_PRESET_DIRS`; `mandate validate <dir> --preset-dir presets`
 checks it from the repository.
 
 ## Operations
@@ -91,12 +91,12 @@ Gitea's `PUT …/labels` silently drops unknown names and ids, so the writer res
 
 `spec/gitea.swagger.json` is `GET /swagger.v1.json` of Gitea 28.3.0 filtered to the five endpoints
 of the preset. `test/recordings/*.json` (reads) and `test/recordings/write/*.json` (writes) are
-`{ "exchanges": [...] }` files of the `RecordedExchange` type of `@aiops/testing`: method, path
+`{ "exchanges": [...] }` files of the `RecordedExchange` type of `@mandate/testing`: method, path
 relative to `/api/v1`, string query values, body, and the response. No header is stored.
 
 Re-record against the sandbox (`bash deploy/sandbox/gitea/up.sh`, seeded):
 
 ```sh
 GITEA_SANDBOX_URL=http://127.0.0.1:4391 GITEA_SANDBOX_TOKEN="$(bash deploy/sandbox/gitea/token.sh)" \
-  pnpm --filter @aiops/gitea-issues record
+  pnpm --filter @mandate/gitea-issues record
 ```

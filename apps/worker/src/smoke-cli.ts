@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Phase 1 smoke check through the payload codec (SEC-4):
  *   node dist/smoke-cli.js <message>
@@ -9,8 +9,8 @@
  * and payload keys. Exit 0 on a completed workflow, 1 on failure, 2 on usage.
  */
 import { randomUUID } from 'node:crypto';
-import { parseWorkerEnv } from '@aiops/config';
-import { clientDataConverter, parseTemporalKeys } from '@aiops/temporal';
+import { parseWorkerEnv } from '@mandate/config';
+import { clientDataConverter, parseTemporalKeys } from '@mandate/temporal';
 import { Client, Connection } from '@temporalio/client';
 import type { smokeWorkflow } from './workflows/smoke.js';
 

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { GENESIS_HASH } from '@aiops/core';
+import { GENESIS_HASH } from '@mandate/core';
 import type pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { startPostgres, type StartedPostgres } from '@aiops/testing';
+import { startPostgres, type StartedPostgres } from '@mandate/testing';
 import { formatArchiveReport, verifyAuditArchive, writeAuditArchive, type ArchiveManifest } from '../../src/audit-archive.js';
 import { sealAuditChain } from '../../src/audit-chain.js';
 import { DrizzleAuditLog } from '../../src/audit-log.js';
@@ -48,7 +48,7 @@ async function freshDatabase(): Promise<Database> {
 }
 
 async function freshDir(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), 'aiops-archive-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'mandate-archive-'));
   dirs.push(dir);
   return dir;
 }

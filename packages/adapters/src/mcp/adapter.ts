@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * MCP tool adapter (CONN-1, CONN-3, CONN-5, CONN-6, SEC-3, SEC-5): lists and calls the tools of an
  * upstream MCP server through the official client over the guarded fetch. The era (stateless
@@ -28,7 +28,7 @@ import {
   type RequestInstrumentation,
   type ToolListOutcome,
   type WriteAdapter,
-} from '@aiops/connector-sdk';
+} from '@mandate/connector-sdk';
 import { Client, ProtocolError, SdkError, SdkErrorCode, SdkHttpError, StreamableHTTPClientTransport, type PriorDiscovery, type Tool } from '@modelcontextprotocol/client';
 import { prepareAuth } from '../http/auth.js';
 import { createTransport, RETRYABLE_STATUS } from '../http/client.js';
@@ -199,7 +199,7 @@ export function createMcpToolAdapter(deps: McpAdapterDeps = {}): McpAdapter {
       }
       const transport = new StreamableHTTPClientTransport(url, { fetch: guarded.fetch, onInsufficientScope: 'throw' });
       const client = new Client(
-        { name: 'aiops-upstream', version: CONNECTOR_SDK_VERSION },
+        { name: 'mandate-upstream', version: CONNECTOR_SDK_VERSION },
         { capabilities: {}, versionNegotiation: { mode: 'auto' }, inputRequired: { autoFulfill: false }, listMaxPages: LIST_MAX_PAGES },
       );
       const prior = priorOf(connection);

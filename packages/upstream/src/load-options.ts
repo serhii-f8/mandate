@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * How `api` and `worker` wire the upstream side: the configuration is always loaded with the
  * adapter's spec resolver and the installed presets, so neither process ever runs on a
  * configuration whose specs or presets were not checked (CONN-2, CFG-2).
  */
-import type { UpstreamResolver } from '@aiops/connector-sdk';
-import type { ApiEnv, LoadedConfiguration, LoadOptions } from '@aiops/config';
+import type { UpstreamResolver } from '@mandate/connector-sdk';
+import type { ApiEnv, LoadedConfiguration, LoadOptions } from '@mandate/config';
 
 /** Load options for start-up and for every SIGHUP reload (the holder keeps them). */
 export function configurationLoadOptions(adapter: { readonly resolver: UpstreamResolver }, env: Pick<ApiEnv, 'presetDirs'>): LoadOptions {

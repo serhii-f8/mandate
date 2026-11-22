@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { ApprovalPlan, ApprovalRecord, NewNotification, Submission } from '../approval/model.js';
 import type { AuditEventInput } from '../audit.js';
 import type { BatchCounts } from './execution.js';

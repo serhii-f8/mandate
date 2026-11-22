@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** Shared test fakes and fixtures. */
 export { InMemoryAuditLog } from './in-memory-audit-log.js';
 export { InMemoryConfigRevisionStore } from './in-memory-config-revision-store.js';

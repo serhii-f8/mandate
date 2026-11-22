@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Approval decisions (design part 1 §6): runs the pure checks of `checkDecision`, records the
  * decision in one repository transaction, wakes the workflow on reject and return, and starts an
  * approved change-set with the requester's submitted identity (POL-6). Every refusal is audited
  * (SEC-1, SEC-11); audit rows never carry the comment text (SEC-3).
  */
-import { executionLimits, type LoadedConfiguration } from '@aiops/config';
+import { executionLimits, type LoadedConfiguration } from '@mandate/config';
 import {
   approvalDecisionEvent,
   approvalRequestedEvent,
@@ -29,7 +29,7 @@ import {
   type DecisionRefusal,
   type DecisionRequest,
   type StartOutcome,
-} from '@aiops/core';
+} from '@mandate/core';
 
 export interface ApprovalServiceDeps {
   repository: ChangeSetRepository;

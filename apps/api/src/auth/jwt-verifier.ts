@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { OAuthError, OAuthErrorCode, type AuthInfo, type OAuthTokenVerifier } from '@modelcontextprotocol/server';
 import { errors, jwtVerify, type JWTVerifyGetKey } from 'jose';
-import { SERVICE_SUBJECT_PREFIX } from '@aiops/core';
+import { SERVICE_SUBJECT_PREFIX } from '@mandate/core';
 
 /** Fixed, value-free reasons recorded in `auth.rejected` events (AUD-1). */
 export const REJECTION_REASONS = ['expired', 'invalid_signature', 'invalid_issuer', 'invalid_audience', 'malformed', 'service_account_mismatch', 'reserved_subject'] as const;

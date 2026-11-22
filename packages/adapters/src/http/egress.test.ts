@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { LookupAddress } from 'node:dns';
 import { describe, expect, it } from 'vitest';
-import type { ConnectionSettings } from '@aiops/connector-sdk';
+import type { ConnectionSettings } from '@mandate/connector-sdk';
 import { createServer } from 'node:http';
 import { request } from 'node:http';
 import type { AddressInfo } from 'node:net';

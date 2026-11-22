@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 FROM php:8.3-apache
 RUN apt-get update && apt-get install -y --no-install-recommends git unzip libfreetype6-dev libjpeg62-turbo-dev libpng-dev libicu-dev libxml2-dev libxslt1-dev libzip-dev libonig-dev libsodium-dev curl ca-certificates mariadb-client \
  && docker-php-ext-configure gd --with-freetype --with-jpeg \

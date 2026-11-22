@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
-import { InMemoryAuditLog, startFakeUpstream, type FakeUpstream } from '@aiops/testing';
-import { loadConfigurationDirectory } from '@aiops/config';
+import type { CredentialHandle, CredentialStatus, CredentialVault } from '@mandate/core';
+import { InMemoryAuditLog, startFakeUpstream, type FakeUpstream } from '@mandate/testing';
+import { loadConfigurationDirectory } from '@mandate/config';
 import { runApiCli, type CliDeps, type CliStore, type StoreInput } from './cli.js';
 
 const DEV_CONFIG = fileURLToPath(new URL('../../../deploy/config', import.meta.url));
@@ -36,7 +36,7 @@ let configDir: string;
 beforeAll(async () => {
   upstream = await startFakeUpstream();
   upstream.route('GET', '/rest/V1/products', () => ({ status: 200, body: { items: [{ sku: 'a' }, { sku: 'b' }], total_count: 2 } }));
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-cli-unit-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-cli-unit-'));
   await cp(FIXTURE_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));
@@ -61,7 +61,7 @@ async function run(argv: string[], env: Record<string, string> = {}, stored = tr
   let audit = new InMemoryAuditLog();
   const storeInputs: StoreInput[] = [];
   const deps: CliDeps = {
-    env: { AIOPS_CONFIG_DIR: configDir, DATABASE_URL: 'postgres://u:p@h/db', AIOPS_MASTER_KEYS: 'x', ...env },
+    env: { MANDATE_CONFIG_DIR: configDir, DATABASE_URL: 'postgres://u:p@h/db', MANDATE_MASTER_KEYS: 'x', ...env },
     openStore: (input) => {
       storeInputs.push(input);
       // Like openStoreDefault: the store's audit log redacts with the keys it is opened with.
@@ -82,7 +82,7 @@ async function run(argv: string[], env: Record<string, string> = {}, stored = tr
   return { code, lines, audit, storeInputs };
 }
 
-describe('CFG-3 aiops validate and test-connection', () => {
+describe('CFG-3 mandate validate and test-connection', () => {
   it('CFG-3 validate of the development configuration exits 0', async () => {
     const { code, lines } = await run(['validate', DEV_CONFIG, '--preset-dir', REPO_PRESETS]);
     // support.lookup_order from configuration, plus the four Magento preset operations (search, get, get by SKU, update content).
@@ -104,7 +104,7 @@ describe('CFG-3 aiops validate and test-connection', () => {
   });
 
   it('CFG-3 CONN-2 validate resolves specs and exits 1 with the located issue', async () => {
-    const broken = await mkdtemp(join(tmpdir(), 'aiops-cli-broken-'));
+    const broken = await mkdtemp(join(tmpdir(), 'mandate-cli-broken-'));
     try {
       await cp(DEV_CONFIG, broken, { recursive: true });
       const file = join(broken, 'connections.yaml');
@@ -162,10 +162,10 @@ describe('CFG-3 aiops validate and test-connection', () => {
     const lines: string[] = [];
     const code = await runApiCli(['test-connection', 'shop'], (line) => lines.push(line), { env: {} });
     expect(code).toBe(2);
-    expect(lines.join('\n')).toMatch(/AIOPS_CONFIG_DIR/);
+    expect(lines.join('\n')).toMatch(/MANDATE_CONFIG_DIR/);
     const lines2: string[] = [];
     const code2 = await runApiCli(['test-connection', 'shop'], (line) => lines2.push(line), {
-      env: { AIOPS_CONFIG_DIR: configDir, DATABASE_URL: 'not-a-url-secret-value', AIOPS_MASTER_KEYS: 'k' },
+      env: { MANDATE_CONFIG_DIR: configDir, DATABASE_URL: 'not-a-url-secret-value', MANDATE_MASTER_KEYS: 'k' },
     });
     expect(code2).toBe(2);
     expect(lines2.join('\n')).toMatch(/DATABASE_URL/);
@@ -222,11 +222,11 @@ operations:
 `;
 
   it('AUD-4 test-connection opens the store with the loaded configuration\'s sensitive fields', async () => {
-    const sensitiveDir = await mkdtemp(join(tmpdir(), 'aiops-cli-sensitive-'));
+    const sensitiveDir = await mkdtemp(join(tmpdir(), 'mandate-cli-sensitive-'));
     try {
       await cp(configDir, sensitiveDir, { recursive: true });
       await writeFile(join(sensitiveDir, 'sensitive.yaml'), SENSITIVE_OPERATIONS);
-      const { code, lines, storeInputs, audit } = await run(['test-connection', 'shop'], { AIOPS_CONFIG_DIR: sensitiveDir });
+      const { code, lines, storeInputs, audit } = await run(['test-connection', 'shop'], { MANDATE_CONFIG_DIR: sensitiveDir });
       expect(lines[0]).toMatch(/^ok /);
       expect(code).toBe(0);
       expect(storeInputs).toHaveLength(1);

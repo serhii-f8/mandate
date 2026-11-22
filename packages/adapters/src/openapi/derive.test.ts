@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import type { CatalogEntry } from '@aiops/connector-sdk';
+import type { CatalogEntry } from '@mandate/connector-sdk';
 import { loadSpec, strictAjv } from '../../test/strict-ajv.js';
 import { deriveCatalog } from './derive.js';
 import { normaliseSpec } from './normalise.js';

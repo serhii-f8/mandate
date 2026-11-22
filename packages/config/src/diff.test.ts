@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,7 +24,7 @@ async function load(dir: string): Promise<LoadedConfiguration> {
 
 /** Loads a temp copy of the valid fixture after `edit` changed its files. */
 async function edited(edit: (file: (name: string, transform: (text: string) => string) => Promise<void>, dir: string) => Promise<void>): Promise<LoadedConfiguration> {
-  const dir = await mkdtemp(join(tmpdir(), 'aiops-diff-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'mandate-diff-test-'));
   dirs.push(dir);
   await cp(VALID_DIR, dir, { recursive: true });
   await edit(async (name, transform) => writeFile(join(dir, name), transform(await readFile(join(dir, name), 'utf8'))), dir);
@@ -142,13 +142,13 @@ describe('CFG-3 configuration diff', () => {
   it('CFG-3 AUTH-4 diff reports service accounts', async () => {
     const withAccount = async (role: string): Promise<LoadedConfiguration> =>
       edited(async (_file, dir) => {
-        await writeFile(join(dir, 'service-accounts.yaml'), `version: 1\nservice_accounts:\n  - { client_id: aiops-sa-ci, role: ${role}, description: CI }\n`);
+        await writeFile(join(dir, 'service-accounts.yaml'), `version: 1\nservice_accounts:\n  - { client_id: mandate-sa-ci, role: ${role}, description: CI }\n`);
       });
     const before = await load(VALID_DIR);
     const added = await withAccount('support_agent');
-    expect(formatDiff(diffConfigurations(before, added))).toEqual(['+ service_account aiops-sa-ci', hashLine(before, added)]);
+    expect(formatDiff(diffConfigurations(before, added))).toEqual(['+ service_account mandate-sa-ci', hashLine(before, added)]);
     const changed = await withAccount('content_manager');
-    expect(formatDiff(diffConfigurations(added, changed))).toEqual(['~ service_account aiops-sa-ci: role', hashLine(added, changed)]);
+    expect(formatDiff(diffConfigurations(added, changed))).toEqual(['~ service_account mandate-sa-ci: role', hashLine(added, changed)]);
     const kinds = diffConfigurations(undefined, added).changes.map((c) => c.kind);
     expect(kinds.lastIndexOf('role')).toBeLessThan(kinds.indexOf('service_account'));
     expect(kinds.indexOf('service_account')).toBeLessThan(kinds.indexOf('setting'));
@@ -164,8 +164,8 @@ describe('CFG-3 configuration diff', () => {
   });
 
   it('CFG-3 CONN-8 a preset version change is a changed preset entity', async () => {
-    const config = await mkdtemp(join(tmpdir(), 'aiops-diff-preset-config-'));
-    const presets = await mkdtemp(join(tmpdir(), 'aiops-diff-presets-'));
+    const config = await mkdtemp(join(tmpdir(), 'mandate-diff-preset-config-'));
+    const presets = await mkdtemp(join(tmpdir(), 'mandate-diff-presets-'));
     dirs.push(config, presets);
     await cp(join(FIXTURES, 'with-preset'), config, { recursive: true });
     await writeFile(join(config, 'config.yaml'), (await readFile(join(config, 'config.yaml'), 'utf8')).replace('version: "0.1.0"', 'version: "^0.1.0"'));
@@ -192,17 +192,17 @@ describe('CFG-3 SEC-10 rate limit diff', () => {
     const withSettings = async (limit: number, perMinute: number): Promise<LoadedConfiguration> =>
       edited(async (_file, dir) => {
         await writeFile(join(dir, 'rate.yaml'), `version: 1\nrate_limits: { mcp_user_per_minute: ${limit} }\n`);
-        await writeFile(join(dir, 'service-accounts.yaml'), `version: 1\nservice_accounts:\n  - { client_id: aiops-sa-ci, role: support_agent, rate_limit_per_minute: ${perMinute} }\n`);
+        await writeFile(join(dir, 'service-accounts.yaml'), `version: 1\nservice_accounts:\n  - { client_id: mandate-sa-ci, role: support_agent, rate_limit_per_minute: ${perMinute} }\n`);
       });
     const before = await withSettings(10, 5);
     const after = await withSettings(20, 6);
     expect(formatDiff(diffConfigurations(before, after))).toEqual([
-      '~ service_account aiops-sa-ci: rateLimitPerMinute',
+      '~ service_account mandate-sa-ci: rateLimitPerMinute',
       '~ setting rate_limits: mcpUserPerMinute',
       hashLine(before, after),
     ]);
     const plain = await load(VALID_DIR);
-    expect(formatDiff(diffConfigurations(plain, before))).toContain('+ service_account aiops-sa-ci');
+    expect(formatDiff(diffConfigurations(plain, before))).toContain('+ service_account mandate-sa-ci');
     expect(formatDiff(diffConfigurations(plain, before))).toContain('~ setting rate_limits: mcpUserPerMinute');
   });
 });

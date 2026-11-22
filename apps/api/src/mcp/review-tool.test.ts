@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import { encodeCursor, type Caller, type ChangeItemRecord } from '@aiops/core';
-import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryExecutor, InMemoryTaskRepository, ScriptedWriter, submitChangeSet } from '@aiops/testing';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
+import { encodeCursor, type Caller, type ChangeItemRecord } from '@mandate/core';
+import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryExecutor, InMemoryTaskRepository, ScriptedWriter, submitChangeSet } from '@mandate/testing';
 import { ApprovalService } from '../approvals/approval-service.js';
 import { changesetDetailWith, itemRow, widgetViewerBlock } from '../approvals/detail.js';
 import type { AuditDetails } from './audited-tool.js';
@@ -88,7 +88,7 @@ if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
 const CONFIG: LoadedConfiguration = loaded.configuration;
 const SNAPSHOT = snapshotOf(CONFIG);
 
-const dave: Caller = { subject: 'dave', groups: ['leads'], clientId: 'aiops-mcp' };
+const dave: Caller = { subject: 'dave', groups: ['leads'], clientId: 'mandate-mcp' };
 const bob: Caller = { subject: 'bob', groups: ['content'] };
 const ivy: Caller = { subject: 'ivy', groups: ['auditors'] };
 const ARGS = { skus: ['a', 'b'], changes: { name: 'New' } };
@@ -131,7 +131,7 @@ async function setup(options: { items?: number; widget?: boolean; after?: (i: nu
     tasks: new InMemoryTaskRepository(),
     audit,
     approvals: new ApprovalService({ repository, executor, audit, newId, now: () => NOW }),
-    publicUrl: new URL('https://aiops.example.test'),
+    publicUrl: new URL('https://mandate.example.test'),
   });
   const reports: AuditDetails[] = [];
   const call = async (caller: Caller, args: Record<string, unknown> = {}): Promise<CallToolResult> => {
@@ -210,7 +210,7 @@ describe('APR-8 review_changeset approver tool', () => {
         changeset: cs,
         approvals,
         ...(operation === undefined ? {} : { operation }),
-        viewer: widgetViewerBlock(cs, approvals, { subject: 'dave', roles: ['lead'], clientId: 'aiops-mcp' }, NOW),
+        viewer: widgetViewerBlock(cs, approvals, { subject: 'dave', roles: ['lead'], clientId: 'mandate-mcp' }, NOW),
         rollback: { available: false },
       }),
     );

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Service accounts end to end over the real MCP transport (AUTH-4, AUTH-1, APR-1, POL-8, AUD-2).
  *
  * Identities (`approval-config` plus `service-accounts.yaml`):
- * - the client `aiops-sa-ci`, a configured service account with role `integration`: it may update
+ * - the client `mandate-sa-ci`, a configured service account with role `integration`: it may update
  *   content of brand acme, always with one `content_lead` approval. Its tokens are client-credentials
  *   tokens (`client_id` equals `azp`, no `sid`).
  * - dave: group `content-leads`, the human approver.
@@ -15,11 +15,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { auditRows, connectClient, modernRequest, rawPost, startApi, startDatabase, text, tokenFor, vaultOf, type RunningApi } from './helpers.js';
 
 const APPROVAL_CONFIG = fileURLToPath(new URL('./fixtures/approval-config', import.meta.url));
-const SERVICE_CLIENT = 'aiops-sa-ci';
+const SERVICE_CLIENT = 'mandate-sa-ci';
 const SERVICE_SUBJECT = `service:${SERVICE_CLIENT}`;
 
 const SERVICE_ACCOUNTS_YAML = `version: 1
@@ -54,7 +54,7 @@ beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
   upstream = await startFakeUpstream();
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-service-accounts-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-service-accounts-e2e-'));
   await cp(APPROVAL_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));
@@ -122,7 +122,7 @@ describe('AUTH-4 service accounts end to end', () => {
     expect(await toolNames(dave)).toContain('decide_changeset');
   });
 
-  it('AUTH-4 POL-8 AUD-2 a call outside the grant is denied and audited with actor service:aiops-sa-ci', async () => {
+  it('AUTH-4 POL-8 AUD-2 a call outside the grant is denied and audited with actor service:mandate-sa-ci', async () => {
     const { body, headers } = modernRequest('tools/call', {
       name: 'shop.retire_content',
       arguments: { brand: 'acme', skus: ['acme-1'], changes: { name: 'Gone' } },

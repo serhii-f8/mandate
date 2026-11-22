@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import { createOpenApiAdapter } from '@aiops/adapters';
-import { loadConfigurationFiles, OPERATION_ID, revisionSummary } from '@aiops/config';
-import { mcpToolHash, type McpToolAdapter, type McpToolDefinition, type ToolListOutcome } from '@aiops/connector-sdk';
-import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
-import { FakeResolver, InMemoryAuditLog, InMemoryConfigRevisionStore } from '@aiops/testing';
+import { createOpenApiAdapter } from '@mandate/adapters';
+import { loadConfigurationFiles, OPERATION_ID, revisionSummary } from '@mandate/config';
+import { mcpToolHash, type McpToolAdapter, type McpToolDefinition, type ToolListOutcome } from '@mandate/connector-sdk';
+import type { CredentialHandle, CredentialStatus, CredentialVault } from '@mandate/core';
+import { FakeResolver, InMemoryAuditLog, InMemoryConfigRevisionStore } from '@mandate/testing';
 import { runApiCli, type CliAdapter, type CliDeps, type CliStore } from './cli.js';
 import { skeletonOperationId } from './mcp-tools-cli.js';
 
 const TOKEN = 'unit-only-mcp-token-0123456789';
-const ENV = { DATABASE_URL: 'postgres://u:p@h/db', AIOPS_MASTER_KEYS: 'unit-only-keys' };
+const ENV = { DATABASE_URL: 'postgres://u:p@h/db', MANDATE_MASTER_KEYS: 'unit-only-keys' };
 const REVIEW_LINE = '# Upstream definition, for operator review only (SEC-6); not shown to clients';
 
 const LOOKUP: McpToolDefinition = {
@@ -124,7 +124,7 @@ async function run(argv: readonly string[], list: ToolListOutcome = LIVE, env: R
   return { code, lines, lists, secrets };
 }
 
-describe('CONN-4 SEC-6 aiops mcp tools', () => {
+describe('CONN-4 SEC-6 mandate mcp tools', () => {
   it('CONN-4 lists every tool sorted by name with its hash, bound operation and pin state, then the counts', async () => {
     const result = await run(['mcp', 'tools', 'tools']);
     expect(result.lines).toEqual([
@@ -223,7 +223,7 @@ describe('CONN-4 SEC-6 aiops mcp tools', () => {
     expect(unknown.lines).toEqual(['connection nope is not defined in the active revision']);
     expect(unknown.code).toBe(2);
     const noKeys = await run(['mcp', 'tools', 'tools'], LIVE, { DATABASE_URL: ENV.DATABASE_URL });
-    expect(noKeys.lines).toEqual(['Invalid environment: AIOPS_MASTER_KEYS: is required']);
+    expect(noKeys.lines).toEqual(['Invalid environment: MANDATE_MASTER_KEYS: is required']);
     expect(noKeys.code).toBe(2);
     for (const argv of [
       ['mcp', 'tools'],
@@ -234,8 +234,8 @@ describe('CONN-4 SEC-6 aiops mcp tools', () => {
       ['mcp', 'tools', 'tools', '--show', 'lookup', '--show', 'echo'],
     ]) {
       const usage = await run(argv);
-      expect(usage.lines[0]).toMatch(/^usage: aiops /);
-      expect(usage.lines.join('\n')).toContain('aiops mcp tools <connection> [--show <tool>]');
+      expect(usage.lines[0]).toMatch(/^usage: mandate /);
+      expect(usage.lines.join('\n')).toContain('mandate mcp tools <connection> [--show <tool>]');
       expect(usage.code).toBe(2);
     }
     for (const r of [openapi, unknown, noKeys]) expect(r.lists).toEqual([]);

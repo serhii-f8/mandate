@@ -14,7 +14,7 @@ Keycloak login once and then calls tools with the user's token.
 | Client | How |
 | --- | --- |
 | Claude (claude.ai, Claude Desktop) | Add a custom connector with the MCP URL |
-| ChatGPT | Add the MCP server with OAuth and the pre-registered client `aiops-mcp` |
+| ChatGPT | Add the MCP server with OAuth and the pre-registered client `mandate-mcp` |
 | Scripts and CI | A [service account](service-accounts.md) with the client-credentials grant |
 | Local testing | The reference terminal client in `tooling/acceptance/` |
 
@@ -111,8 +111,8 @@ Administration is done with files and a command line, not an admin panel.
 the difference and apply it as a new revision. The running processes follow within seconds:
 
 ```bash
-docker compose exec -T api node dist/cli.js config diff /etc/aiops/config
-docker compose exec -T api node dist/cli.js config apply /etc/aiops/config --actor <your name>
+docker compose exec -T api node dist/cli.js config diff /etc/mandate/config
+docker compose exec -T api node dist/cli.js config apply /etc/mandate/config --actor <your name>
 docker compose exec -T api node dist/cli.js config explain --operation <operation> --groups <group> --args '<json>'
 ```
 
@@ -129,7 +129,7 @@ again. The same page tests the connection:
 **Audit.** Every login, policy decision, tool call, approval, batch and configuration change is in
 the audit log at `/app/audit`, for roles with `view_audit`. The log can be filtered by actor,
 action, change-set, correlation ID, time and outcome, and exported as JSON Lines. Rows are hash
-chained; `aiops audit verify` checks the chain.
+chained; `mandate audit verify` checks the chain.
 
 ![Audit log with filters and the hash chain position of each row](images/audit.png)
 

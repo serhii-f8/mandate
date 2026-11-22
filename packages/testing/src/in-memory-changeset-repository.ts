@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type {
   ApprovalPlan,
   ApprovalRecord,
@@ -22,7 +22,7 @@ import type {
   RollbackCounts,
   RollbackItemOutcome,
   Submission,
-} from '@aiops/core';
+} from '@mandate/core';
 import {
   changesetTransitionEvent,
   compareTargetIds,
@@ -31,7 +31,7 @@ import {
   isExpiryDue,
   rollbackFromFinished,
   rollbackWindowOpen,
-} from '@aiops/core';
+} from '@mandate/core';
 import { createHash, randomUUID } from 'node:crypto';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
 import { InMemoryNotificationOutbox } from './in-memory-notification-outbox.js';

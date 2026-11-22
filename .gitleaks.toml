@@ -1,7 +1,7 @@
 # Secret scanning configuration (gitleaks). Run: bash scripts/secret-scan.sh
 # The allowlist names development-only fakes that look like keys. Never add a real secret here:
 # rotate it and remove it from history instead.
-title = "AI Operations Layer"
+title = "Mandate"
 
 [extend]
 useDefault = true

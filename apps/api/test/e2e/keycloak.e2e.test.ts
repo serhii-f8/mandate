@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -7,16 +7,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { decodeJwt } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CookieJar, loginWithPkce, pageLogin, registerClient, startKeycloak, type LoginResult, type StartedKeycloak, type StartedPostgres } from '@aiops/testing';
+import { CookieJar, loginWithPkce, pageLogin, registerClient, startKeycloak, type LoginResult, type StartedKeycloak, type StartedPostgres } from '@mandate/testing';
 import { auditRows, connectClient, FIXTURE_CONFIG, freePort, modernRequest, rawPost, startApi, startDatabase, type RunningApi } from './helpers.js';
 
 /** Built-in tools every authenticated user sees (MCP-8). */
 const BUILTIN_NAMES = ['ping', 'list_my_operations', 'get_changeset', 'cancel_changeset', 'submit_for_approval', 'exclude_changeset_items', 'rollback_changeset'];
 const PASSWORD = 'dev-only-password';
 const LOOPBACK = 'http://localhost:33418/callback';
-const SERVICE_CLIENT = 'aiops-sa-ci';
+const SERVICE_CLIENT = 'mandate-sa-ci';
 /** Service-account clients the bootstrap creates in every run of this file (AUTH-4). */
-const SERVICE_ACCOUNTS = { AIOPS_KEYCLOAK_SERVICE_ACCOUNTS: SERVICE_CLIENT };
+const SERVICE_ACCOUNTS = { MANDATE_KEYCLOAK_SERVICE_ACCOUNTS: SERVICE_CLIENT };
 /** Role `integration` for the service account, added to a copy of the fixture configuration. */
 const SERVICE_ACCOUNTS_YAML = `version: 1
 roles:
@@ -46,20 +46,20 @@ const login = (clientId: string, username: string, extra: Partial<Parameters<typ
 
 beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-keycloak-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-keycloak-e2e-'));
   await cp(FIXTURE_CONFIG, configDir, { recursive: true });
   await writeFile(join(configDir, 'service-accounts.yaml'), SERVICE_ACCOUNTS_YAML);
   const port = await freePort();
   resource = `http://127.0.0.1:${String(port)}/mcp`;
 
   // A CIMD document served from the test process; Keycloak fetches it over plain
-  // HTTP because the test sets AIOPS_CIMD_ALLOW_HTTP (the shipped default is false).
+  // HTTP because the test sets MANDATE_CIMD_ALLOW_HTTP (the shipped default is false).
   cimdServer = createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(
       JSON.stringify({
         client_id: cimdClientId,
-        client_name: 'aiops test CIMD client',
+        client_name: 'mandate test CIMD client',
         redirect_uris: [LOOPBACK],
         grant_types: ['authorization_code', 'refresh_token'],
         response_types: ['code'],
@@ -71,7 +71,7 @@ beforeAll(async () => {
   cimdClientId = `http://host.docker.internal:${String((cimdServer.address() as AddressInfo).port)}/client.json`;
 
   keycloak = await startKeycloak({ mcpResource: resource, publicUrl: `http://127.0.0.1:${String(port)}` });
-  await keycloak.bootstrap({ AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
+  await keycloak.bootstrap({ MANDATE_CIMD_ALLOW_HTTP: 'true', MANDATE_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
   api = await startApi(databaseUrl, { issuer: keycloak, port, resource, configDir });
 }, 300_000);
 
@@ -87,14 +87,14 @@ afterAll(async () => {
 
 describe('AUTH-8 bundled realm registration policy', () => {
   it('AUTH-8 the pre-registered client gets a token for exactly the MCP resource, with groups', async () => {
-    const claims = decodeJwt(tokenOf(await login('aiops-mcp', 'alice')));
+    const claims = decodeJwt(tokenOf(await login('mandate-mcp', 'alice')));
     expect([claims.aud].flat()).toEqual([resource]);
     expect([...(claims.groups as string[])].sort()).toEqual(['content', 'content-leads']);
-    expect(claims.azp).toBe('aiops-mcp');
+    expect(claims.azp).toBe('mandate-mcp');
   });
 
   it('APR-1 the development realm has dave in content-leads', async () => {
-    const claims = decodeJwt(tokenOf(await login('aiops-mcp', 'dave')));
+    const claims = decodeJwt(tokenOf(await login('mandate-mcp', 'dave')));
     expect(claims.groups).toEqual(['content-leads']);
   });
 
@@ -109,7 +109,7 @@ describe('AUTH-8 bundled realm registration policy', () => {
   });
 
   it('AUTH-8 PKCE S256 is required for pre-registered and CIMD clients', async () => {
-    for (const clientId of ['aiops-mcp', cimdClientId]) {
+    for (const clientId of ['mandate-mcp', cimdClientId]) {
       for (const pkce of ['none', 'plain'] as const) {
         const result = await login(clientId, 'alice', { pkce });
         expect(result, `${clientId} ${pkce}`).toEqual({ error: expect.stringMatching(/^invalid_request/) as unknown });
@@ -118,14 +118,14 @@ describe('AUTH-8 bundled realm registration policy', () => {
   });
 
   it('AUTH-8 a refresh token is issued when the client asks for offline_access', async () => {
-    const result = await login('aiops-mcp', 'alice', { scope: 'openid offline_access' });
+    const result = await login('mandate-mcp', 'alice', { scope: 'openid offline_access' });
     if ('error' in result) throw new Error(result.error);
     expect(result.refreshToken).toBeDefined();
     expect(result.scope).toContain('offline_access');
   });
 
   it('AUTH-8 the DCR switch admits listed redirect hosts only, enforces PKCE, and switches back off', async () => {
-    const on = await keycloak.bootstrap({ AIOPS_DCR: 'on', AIOPS_DCR_REDIRECT_HOSTS: 'localhost', AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
+    const on = await keycloak.bootstrap({ MANDATE_DCR: 'on', MANDATE_DCR_REDIRECT_HOSTS: 'localhost', MANDATE_CIMD_ALLOW_HTTP: 'true', MANDATE_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
     expect(on).toContain('dcr=on');
     const registered = await registerClient(keycloak.baseUrl, [LOOPBACK]);
     expect(registered.status).toBe(201);
@@ -135,9 +135,9 @@ describe('AUTH-8 bundled realm registration policy', () => {
     expect(await login(clientId, 'alice', { pkce: 'none' })).toEqual({ error: expect.stringMatching(/^invalid_request/) as unknown });
 
     // Idempotent, and back to the default.
-    const off = await keycloak.bootstrap({ AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
+    const off = await keycloak.bootstrap({ MANDATE_CIMD_ALLOW_HTTP: 'true', MANDATE_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
     expect(off).toContain('dcr=off');
-    await keycloak.bootstrap({ AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
+    await keycloak.bootstrap({ MANDATE_CIMD_ALLOW_HTTP: 'true', MANDATE_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
     expect((await registerClient(keycloak.baseUrl, [LOOPBACK])).status).toBe(403);
   });
 });
@@ -149,10 +149,10 @@ describe('AUTH-4 service accounts with real Keycloak tokens', () => {
     return result.accessToken;
   };
 
-  it('AUTH-4 bootstrap creates aiops-sa-ci idempotently and keeps its secret', async () => {
+  it('AUTH-4 bootstrap creates mandate-sa-ci idempotently and keeps its secret', async () => {
     // The secret is compared, never printed (SEC-3).
     const before = await keycloak.clientSecret(SERVICE_CLIENT);
-    const summary = await keycloak.bootstrap({ AIOPS_CIMD_ALLOW_HTTP: 'true', AIOPS_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
+    const summary = await keycloak.bootstrap({ MANDATE_CIMD_ALLOW_HTTP: 'true', MANDATE_CIMD_CLIENT_DOMAINS: 'host.docker.internal', ...SERVICE_ACCOUNTS });
     expect(summary).toContain('service_accounts=1');
     expect(summary).not.toContain(before);
     expect((await keycloak.clientSecret(SERVICE_CLIENT)) === before).toBe(true);
@@ -191,8 +191,8 @@ describe('AUTH-4 service accounts with real Keycloak tokens', () => {
 
 describe('AUTH-1 AUTH-3 real Keycloak tokens at the api', () => {
   it('AUTH-3 alice (content) and bob (support) see different tool lists', async () => {
-    const alice = await connectClient({ era: 'modern', baseUrls: [api.url], token: tokenOf(await login('aiops-mcp', 'alice')) });
-    const bob = await connectClient({ era: 'modern', baseUrls: [api.url], token: tokenOf(await login('aiops-mcp', 'bob')) });
+    const alice = await connectClient({ era: 'modern', baseUrls: [api.url], token: tokenOf(await login('mandate-mcp', 'alice')) });
+    const bob = await connectClient({ era: 'modern', baseUrls: [api.url], token: tokenOf(await login('mandate-mcp', 'bob')) });
     expect((await alice.listTools()).tools.map((t) => t.name)).toEqual([...BUILTIN_NAMES, 'catalog.search_products']);
     expect((await bob.listTools()).tools.map((t) => t.name)).toEqual([...BUILTIN_NAMES, 'support.lookup_order']);
     await alice.close();
@@ -200,14 +200,14 @@ describe('AUTH-1 AUTH-3 real Keycloak tokens at the api', () => {
   });
 
   it('AUTH-1 a token requested without resource still carries the MCP audience from the mapper', async () => {
-    const token = tokenOf(await login('aiops-mcp', 'alice', { resource: undefined }));
+    const token = tokenOf(await login('mandate-mcp', 'alice', { resource: undefined }));
     expect([decodeJwt(token).aud].flat()).toContain(resource);
     const { body, headers } = modernRequest('tools/list');
     expect((await rawPost(api.url, body, { ...headers, authorization: `Bearer ${token}` })).status).toBe(200);
   });
 
   it('AUTH-1 a token whose payload was changed is refused', async () => {
-    const [header, payload, signature] = tokenOf(await login('aiops-mcp', 'bob')).split('.');
+    const [header, payload, signature] = tokenOf(await login('mandate-mcp', 'bob')).split('.');
     const claims = JSON.parse(Buffer.from(payload ?? '', 'base64url').toString()) as Record<string, unknown>;
     const forged = `${header ?? ''}.${Buffer.from(JSON.stringify({ ...claims, groups: ['content'] })).toString('base64url')}.${signature ?? ''}`;
     const { body, headers } = modernRequest('tools/list');
@@ -215,7 +215,7 @@ describe('AUTH-1 AUTH-3 real Keycloak tokens at the api', () => {
   });
 });
 
-describe('AUTH-5 login through aiops-web in the shipped realm', () => {
+describe('AUTH-5 login through mandate-web in the shipped realm', () => {
   interface PageSession {
     subject: string;
     username?: string;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { KeyProvider } from './keyring.js';
 
@@ -24,9 +24,9 @@ const DATA_KEY_BYTES = 32;
 const NONCE_BYTES = 12;
 const TAG_BYTES = 16;
 
-const valueAad = (ref: string, scheme: string): Buffer => Buffer.from(`aiops:credential:v1:${ref}:${scheme}`, 'utf8');
+const valueAad = (ref: string, scheme: string): Buffer => Buffer.from(`mandate:credential:v1:${ref}:${scheme}`, 'utf8');
 const keyAad = (ref: string, keyVersion: number): Buffer =>
-  Buffer.from(`aiops:dek:v1:${ref}:${String(keyVersion)}`, 'utf8');
+  Buffer.from(`mandate:dek:v1:${ref}:${String(keyVersion)}`, 'utf8');
 
 function encrypt(key: Buffer, aad: Buffer, plaintext: Buffer): { ciphertext: Buffer; nonce: Buffer } {
   const nonce = randomBytes(NONCE_BYTES);

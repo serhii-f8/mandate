@@ -138,12 +138,12 @@ whose parents' ranges admit no patched version.
   are included" by default), `withoutTargetInfo`; the 0.57.2 `PrometheusSerializer.js` emits
   `target_info` and no scope labels.
 - Experiment (scratch scripts, a `MeterProvider` with one counter scraped over HTTP): 0.57.2 with
-  1.30.1 and `new Resource({ 'service.name': 'aiops-worker' })` ->
-  `target_info{service_name="aiops-worker",telemetry_sdk_language="nodejs",telemetry_sdk_name="opentelemetry",telemetry_sdk_version="1.30.1"} 1`
-  and `aiops_probe_total 1`; 0.223.0 with 2.12.0, `withoutScopeInfo: true` and
+  1.30.1 and `new Resource({ 'service.name': 'mandate-worker' })` ->
+  `target_info{service_name="mandate-worker",telemetry_sdk_language="nodejs",telemetry_sdk_name="opentelemetry",telemetry_sdk_version="1.30.1"} 1`
+  and `mandate_probe_total 1`; 0.223.0 with 2.12.0, `withoutScopeInfo: true` and
   `defaultResource().merge(resourceFromAttributes(...))` -> the same two lines with
   `telemetry_sdk_version="2.12.0"`. Without the merge, 2.x printed
-  `target_info{service_name="aiops-worker"} 1`.
+  `target_info{service_name="mandate-worker"} 1`.
   `sdk-metrics@2.12.0` `MeterProvider.js` uses `options?.resource ?? defaultResource()`;
   `sdk-trace-base@1.30.1` `BasicTracerProvider.js` did `Resource.default().merge(this.resource)`.
   The api and worker unit tests now match the full `target_info` line and the span resource's

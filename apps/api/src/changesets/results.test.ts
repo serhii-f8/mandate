@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import { EMPTY_STATS, encodeCursor, type ChangeSetRecord } from '@aiops/core';
+import { EMPTY_STATS, encodeCursor, type ChangeSetRecord } from '@mandate/core';
 import { executionAnswer, preparedAnswer, executionSummaryText, expiredDuringPreparationAnswer, preparationErrorAnswer, preparingAnswer, toCallToolResult } from './results.js';
 
 const stats = { ...EMPTY_STATS, total: 3, included: 3, written: 2, failed: 0, skipped: 1 };

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Pin state of MCP-backed operations, held per process (CONN-4; design phase 9 §3, ADR 0051).
  * Seeded from the load-time tool list, refreshed every `pin_check_seconds` per connection and
@@ -17,9 +17,9 @@ import {
   type McpOperationBinding,
   type PinEvaluation,
   type PinState,
-} from '@aiops/config';
-import type { ConnectionSettings, McpToolAdapter, ToolListOutcome } from '@aiops/connector-sdk';
-import type { AuditLog, CredentialVault } from '@aiops/core';
+} from '@mandate/config';
+import type { ConnectionSettings, McpToolAdapter, ToolListOutcome } from '@mandate/connector-sdk';
+import type { AuditLog, CredentialVault } from '@mandate/core';
 import { connectionCredential } from './read.js';
 
 /** Lists the tools of one `mcp` connection; the credential is the lister's business. */

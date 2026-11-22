@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** Keys whose values are censored wherever the paths below reach them (SEC-3). */
 const SENSITIVE_KEYS = ['password', 'secret', 'token', 'client_secret', 'authorization', 'access_token', 'refresh_token', 'id_token'] as const;
 

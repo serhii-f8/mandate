@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * CFG-5: secrets never appear in configuration files. Strict schemas reject
  * unknown keys almost everywhere; this scan also covers the open objects

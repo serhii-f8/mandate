@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { ReadOutcome } from '@aiops/connector-sdk';
+// Copyright 2026 The Mandate Authors
+import type { ReadOutcome } from '@mandate/connector-sdk';
 import type { Scrubber } from '../http/scrub.js';
 
 /** The fixed message of a tool result with `isError: true`; the upstream's own text is never copied (SEC-5). */

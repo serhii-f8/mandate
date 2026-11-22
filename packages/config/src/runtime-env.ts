@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Process environment of `api` and `worker`, parsed at the boundary (CONTRIBUTING.md:
  * external input is parsed with a schema). Errors name the variable and the
  * reason, never the value, because values can be secrets (SEC-3).
  */
-import { POLL_MAX_MS } from '@aiops/core';
+import { POLL_MAX_MS } from '@mandate/core';
 import { z } from 'zod';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -33,13 +33,13 @@ export interface ApiEnv {
   readonly oidcAuthorizationUrl: URL;
   /** Token endpoint the api calls (may be an internal URL). */
   readonly oidcTokenUrl: URL;
-  /** Raw `AIOPS_MASTER_KEYS`; parsed at api start-up with `parseMasterKeys` (SEC-2). */
+  /** Raw `MANDATE_MASTER_KEYS`; parsed at api start-up with `parseMasterKeys` (SEC-2). */
   readonly masterKeys: string;
   readonly sessionMaxAgeSeconds: number;
   readonly freshAuthSeconds: number;
   /** Directory of the built web bundle, when the api serves it. */
   readonly webDir?: string;
-  /** Directory of the widget bundles (`AIOPS_WIDGET_DIR`); the development location when unset. */
+  /** Directory of the widget bundles (`MANDATE_WIDGET_DIR`); the development location when unset. */
   readonly widgetDir?: string;
   /** Directories of presets (colon-separated in the environment). */
   readonly presetDirs: readonly string[];
@@ -47,21 +47,21 @@ export interface ApiEnv {
   readonly temporalAddress: string;
   readonly temporalNamespace: string;
   readonly taskQueue: string;
-  /** Raw `AIOPS_TEMPORAL_KEYS`; parsed at api start-up with `parseTemporalKeys` (SEC-4). */
+  /** Raw `MANDATE_TEMPORAL_KEYS`; parsed at api start-up with `parseTemporalKeys` (SEC-4). */
   readonly temporalKeys: string;
   /** How long a write call without Tasks waits for its preparation, in ms (MCP-7). */
   readonly prepareWaitMs: number;
-  /** Absolute directory of audit retention archives (`AIOPS_AUDIT_ARCHIVE_DIR`, AUD-7); unset keeps rows. */
+  /** Absolute directory of audit retention archives (`MANDATE_AUDIT_ARCHIVE_DIR`, AUD-7); unset keeps rows. */
   readonly auditArchiveDir?: string;
   /** OTLP/HTTP collector base URL (`OTEL_EXPORTER_OTLP_ENDPOINT`); unset disables export (NFR-11). */
   readonly otlpEndpoint?: URL;
   /** Port of the Prometheus metrics listener; 0 picks a free port (NFR-12). */
   readonly metricsPort: number;
-  /** Proxy hops in front of the api whose `X-Forwarded-For` is trusted (`AIOPS_TRUST_PROXY`, 0..10); 0 trusts none (SEC-10). */
+  /** Proxy hops in front of the api whose `X-Forwarded-For` is trusted (`MANDATE_TRUST_PROXY`, 0..10); 0 trusts none (SEC-10). */
   readonly trustProxy: number;
 }
 
-/** Activity timeouts and retries of the operation workflow (same shape as `ActivityTuning` of `@aiops/temporal`). */
+/** Activity timeouts and retries of the operation workflow (same shape as `ActivityTuning` of `@mandate/temporal`). */
 export interface WorkerActivityTuning {
   /** Start-to-close of one preparation attempt, the ceiling of a whole preparation (NFR-7). */
   readonly prepareTimeoutMs: number;
@@ -82,9 +82,9 @@ export interface WorkerEnv {
   readonly configDir: string;
   /** Directories of presets (colon-separated in the environment). */
   readonly presetDirs: readonly string[];
-  /** Raw `AIOPS_MASTER_KEYS`; parsed at worker start-up with `parseMasterKeys` (SEC-2). */
+  /** Raw `MANDATE_MASTER_KEYS`; parsed at worker start-up with `parseMasterKeys` (SEC-2). */
   readonly masterKeys: string;
-  /** Raw `AIOPS_TEMPORAL_KEYS`; parsed at worker start-up with `parseTemporalKeys` (SEC-4). */
+  /** Raw `MANDATE_TEMPORAL_KEYS`; parsed at worker start-up with `parseTemporalKeys` (SEC-4). */
   readonly temporalKeys: string;
   readonly activityTuning: WorkerActivityTuning;
   /** `smtp://host:port` or `smtps://host:port` of the mail relay (NTF-1); without it e-mail notifications fail with `channel_unconfigured`. */
@@ -182,30 +182,30 @@ const apiSchema = z.object({
     .transform((v) => v.split(',').map((h) => h.trim()).filter((h) => h.length > 0))
     .refine((hosts) => hosts.length > 0, { message: 'must list at least one host' }),
   LOG_LEVEL: logLevel,
-  AIOPS_CONFIG_DIR: z.string().trim().min(1),
-  AIOPS_MCP_RESOURCE: httpUrl.refine((v) => !v.includes('#'), { message: 'must not contain a fragment' }),
+  MANDATE_CONFIG_DIR: z.string().trim().min(1),
+  MANDATE_MCP_RESOURCE: httpUrl.refine((v) => !v.includes('#'), { message: 'must not contain a fragment' }),
   OIDC_ISSUER: httpUrl,
   OIDC_JWKS_URL: httpUrl,
-  AIOPS_PUBLIC_URL: originUrl,
-  OIDC_WEB_CLIENT_ID: nonEmpty('aiops-web'),
+  MANDATE_PUBLIC_URL: originUrl,
+  OIDC_WEB_CLIENT_ID: nonEmpty('mandate-web'),
   OIDC_WEB_CLIENT_SECRET: z.string().min(1),
   OIDC_AUTHORIZATION_URL: httpUrl.optional(),
   OIDC_TOKEN_URL: httpUrl.optional(),
-  AIOPS_MASTER_KEYS: z.string().trim().min(1),
-  AIOPS_SESSION_MAX_AGE_SECONDS: z.coerce.number().int().min(1).default(28_800),
-  AIOPS_FRESH_AUTH_SECONDS: z.coerce.number().int().min(1).default(300),
-  AIOPS_WEB_DIR: z.string().trim().min(1).optional(),
-  AIOPS_WIDGET_DIR: z.string().trim().min(1).optional(),
-  AIOPS_PRESET_DIRS: presetDirs,
+  MANDATE_MASTER_KEYS: z.string().trim().min(1),
+  MANDATE_SESSION_MAX_AGE_SECONDS: z.coerce.number().int().min(1).default(28_800),
+  MANDATE_FRESH_AUTH_SECONDS: z.coerce.number().int().min(1).default(300),
+  MANDATE_WEB_DIR: z.string().trim().min(1).optional(),
+  MANDATE_WIDGET_DIR: z.string().trim().min(1).optional(),
+  MANDATE_PRESET_DIRS: presetDirs,
   TEMPORAL_ADDRESS: nonEmpty('localhost:7233'),
   TEMPORAL_NAMESPACE: nonEmpty('default'),
-  TEMPORAL_TASK_QUEUE: nonEmpty('aiops-operations'),
-  AIOPS_TEMPORAL_KEYS: z.string().trim().min(1),
-  AIOPS_PREPARE_WAIT_MS: z.coerce.number().int().min(0).max(300_000).default(20_000),
-  AIOPS_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
+  TEMPORAL_TASK_QUEUE: nonEmpty('mandate-operations'),
+  MANDATE_TEMPORAL_KEYS: z.string().trim().min(1),
+  MANDATE_PREPARE_WAIT_MS: z.coerce.number().int().min(0).max(300_000).default(20_000),
+  MANDATE_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: otlpEndpoint,
-  AIOPS_METRICS_PORT: portOrZero(9464),
-  AIOPS_TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
+  MANDATE_METRICS_PORT: portOrZero(9464),
+  MANDATE_TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
 });
 
 /**
@@ -214,55 +214,55 @@ const apiSchema = z.object({
  */
 const HEARTBEAT_MARGIN_MS = 5_000;
 const MIN_BATCH_HEARTBEAT_MS = POLL_MAX_MS + HEARTBEAT_MARGIN_MS;
-/** The fixed heartbeat timeout of `prepare` (`PREPARE_HEARTBEAT_MS` of `@aiops/temporal`). */
+/** The fixed heartbeat timeout of `prepare` (`PREPARE_HEARTBEAT_MS` of `@mandate/temporal`). */
 const PREPARE_HEARTBEAT_MS = 60_000;
 
 const workerSchema = z.object({
   TEMPORAL_ADDRESS: nonEmpty('localhost:7233'),
   TEMPORAL_NAMESPACE: nonEmpty('default'),
-  TEMPORAL_TASK_QUEUE: nonEmpty('aiops-operations'),
+  TEMPORAL_TASK_QUEUE: nonEmpty('mandate-operations'),
   LOG_LEVEL: logLevel,
   DATABASE_URL: postgresUrl,
-  AIOPS_CONFIG_DIR: z.string().trim().min(1),
-  AIOPS_PRESET_DIRS: presetDirs,
-  AIOPS_MASTER_KEYS: z.string().trim().min(1),
-  AIOPS_TEMPORAL_KEYS: z.string().trim().min(1),
-  AIOPS_PREPARE_TIMEOUT_MS: positiveInt(3_600_000),
-  AIOPS_BATCH_HEARTBEAT_MS: positiveInt(30_000),
-  AIOPS_BATCH_TIMEOUT_MS: positiveInt(900_000),
-  AIOPS_BATCH_MAX_ATTEMPTS: positiveInt(10),
-  AIOPS_RETRY_INITIAL_MS: positiveInt(1_000),
-  AIOPS_RETRY_MAX_MS: positiveInt(30_000),
-  AIOPS_SMTP_URL: smtpUrl.optional(),
-  AIOPS_MAIL_FROM: mailAddress.default('aiops@localhost'),
-  AIOPS_PUBLIC_URL: originUrl.default('http://localhost:8400'),
-  AIOPS_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
+  MANDATE_CONFIG_DIR: z.string().trim().min(1),
+  MANDATE_PRESET_DIRS: presetDirs,
+  MANDATE_MASTER_KEYS: z.string().trim().min(1),
+  MANDATE_TEMPORAL_KEYS: z.string().trim().min(1),
+  MANDATE_PREPARE_TIMEOUT_MS: positiveInt(3_600_000),
+  MANDATE_BATCH_HEARTBEAT_MS: positiveInt(30_000),
+  MANDATE_BATCH_TIMEOUT_MS: positiveInt(900_000),
+  MANDATE_BATCH_MAX_ATTEMPTS: positiveInt(10),
+  MANDATE_RETRY_INITIAL_MS: positiveInt(1_000),
+  MANDATE_RETRY_MAX_MS: positiveInt(30_000),
+  MANDATE_SMTP_URL: smtpUrl.optional(),
+  MANDATE_MAIL_FROM: mailAddress.default('mandate@localhost'),
+  MANDATE_PUBLIC_URL: originUrl.default('http://localhost:8400'),
+  MANDATE_AUDIT_ARCHIVE_DIR: z.string().startsWith('/', { message: 'must be an absolute path' }).optional(),
   OTEL_EXPORTER_OTLP_ENDPOINT: otlpEndpoint,
-  AIOPS_WORKER_HTTP_PORT: portOrZero(8081),
+  MANDATE_WORKER_HTTP_PORT: portOrZero(8081),
 }).superRefine((e, ctx) => {
   // Cross-field checks run only once every field parsed; the messages name variables, never values (SEC-3).
-  if (e.AIOPS_RETRY_INITIAL_MS > e.AIOPS_RETRY_MAX_MS) {
-    ctx.addIssue({ code: 'custom', path: ['AIOPS_RETRY_INITIAL_MS'], message: 'must not exceed AIOPS_RETRY_MAX_MS' });
+  if (e.MANDATE_RETRY_INITIAL_MS > e.MANDATE_RETRY_MAX_MS) {
+    ctx.addIssue({ code: 'custom', path: ['MANDATE_RETRY_INITIAL_MS'], message: 'must not exceed MANDATE_RETRY_MAX_MS' });
   }
   // A preparation ceiling within the heartbeat timeout would end a healthy preparation first.
-  if (e.AIOPS_PREPARE_TIMEOUT_MS <= PREPARE_HEARTBEAT_MS) {
+  if (e.MANDATE_PREPARE_TIMEOUT_MS <= PREPARE_HEARTBEAT_MS) {
     ctx.addIssue({
       code: 'custom',
-      path: ['AIOPS_PREPARE_TIMEOUT_MS'],
+      path: ['MANDATE_PREPARE_TIMEOUT_MS'],
       message: `must be greater than ${String(PREPARE_HEARTBEAT_MS)} (the preparation heartbeat timeout)`,
     });
   }
   // A shorter one could time a healthy batch out between two status polls, and its retry would resubmit.
-  if (e.AIOPS_BATCH_HEARTBEAT_MS <= MIN_BATCH_HEARTBEAT_MS) {
+  if (e.MANDATE_BATCH_HEARTBEAT_MS <= MIN_BATCH_HEARTBEAT_MS) {
     ctx.addIssue({
       code: 'custom',
-      path: ['AIOPS_BATCH_HEARTBEAT_MS'],
+      path: ['MANDATE_BATCH_HEARTBEAT_MS'],
       message: `must be greater than ${String(MIN_BATCH_HEARTBEAT_MS)} (the longest status poll pause plus a margin)`,
     });
   }
   // A heartbeat timeout at or above the start-to-close timeout would never notice a lost worker first.
-  if (e.AIOPS_BATCH_HEARTBEAT_MS >= e.AIOPS_BATCH_TIMEOUT_MS) {
-    ctx.addIssue({ code: 'custom', path: ['AIOPS_BATCH_HEARTBEAT_MS'], message: 'must be less than AIOPS_BATCH_TIMEOUT_MS' });
+  if (e.MANDATE_BATCH_HEARTBEAT_MS >= e.MANDATE_BATCH_TIMEOUT_MS) {
+    ctx.addIssue({ code: 'custom', path: ['MANDATE_BATCH_HEARTBEAT_MS'], message: 'must be less than MANDATE_BATCH_TIMEOUT_MS' });
   }
 });
 
@@ -290,30 +290,30 @@ export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
     port: e.API_PORT,
     allowedHosts: e.API_ALLOWED_HOSTS,
     logLevel: e.LOG_LEVEL,
-    configDir: e.AIOPS_CONFIG_DIR,
-    mcpResource: new URL(e.AIOPS_MCP_RESOURCE),
+    configDir: e.MANDATE_CONFIG_DIR,
+    mcpResource: new URL(e.MANDATE_MCP_RESOURCE),
     oidcIssuer: e.OIDC_ISSUER,
     oidcJwksUrl: new URL(e.OIDC_JWKS_URL),
-    publicUrl: new URL(e.AIOPS_PUBLIC_URL),
+    publicUrl: new URL(e.MANDATE_PUBLIC_URL),
     webClientId: e.OIDC_WEB_CLIENT_ID,
     webClientSecret: e.OIDC_WEB_CLIENT_SECRET,
     oidcAuthorizationUrl: new URL(e.OIDC_AUTHORIZATION_URL ?? `${issuerBase}/protocol/openid-connect/auth`),
     oidcTokenUrl: new URL(e.OIDC_TOKEN_URL ?? `${issuerBase}/protocol/openid-connect/token`),
-    masterKeys: e.AIOPS_MASTER_KEYS,
-    sessionMaxAgeSeconds: e.AIOPS_SESSION_MAX_AGE_SECONDS,
-    freshAuthSeconds: e.AIOPS_FRESH_AUTH_SECONDS,
-    ...(e.AIOPS_WEB_DIR === undefined ? {} : { webDir: e.AIOPS_WEB_DIR }),
-    ...(e.AIOPS_WIDGET_DIR === undefined ? {} : { widgetDir: e.AIOPS_WIDGET_DIR }),
-    presetDirs: e.AIOPS_PRESET_DIRS,
+    masterKeys: e.MANDATE_MASTER_KEYS,
+    sessionMaxAgeSeconds: e.MANDATE_SESSION_MAX_AGE_SECONDS,
+    freshAuthSeconds: e.MANDATE_FRESH_AUTH_SECONDS,
+    ...(e.MANDATE_WEB_DIR === undefined ? {} : { webDir: e.MANDATE_WEB_DIR }),
+    ...(e.MANDATE_WIDGET_DIR === undefined ? {} : { widgetDir: e.MANDATE_WIDGET_DIR }),
+    presetDirs: e.MANDATE_PRESET_DIRS,
     temporalAddress: e.TEMPORAL_ADDRESS,
     temporalNamespace: e.TEMPORAL_NAMESPACE,
     taskQueue: e.TEMPORAL_TASK_QUEUE,
-    temporalKeys: e.AIOPS_TEMPORAL_KEYS,
-    prepareWaitMs: e.AIOPS_PREPARE_WAIT_MS,
-    ...(e.AIOPS_AUDIT_ARCHIVE_DIR === undefined ? {} : { auditArchiveDir: e.AIOPS_AUDIT_ARCHIVE_DIR }),
+    temporalKeys: e.MANDATE_TEMPORAL_KEYS,
+    prepareWaitMs: e.MANDATE_PREPARE_WAIT_MS,
+    ...(e.MANDATE_AUDIT_ARCHIVE_DIR === undefined ? {} : { auditArchiveDir: e.MANDATE_AUDIT_ARCHIVE_DIR }),
     ...(e.OTEL_EXPORTER_OTLP_ENDPOINT === undefined ? {} : { otlpEndpoint: new URL(e.OTEL_EXPORTER_OTLP_ENDPOINT) }),
-    metricsPort: e.AIOPS_METRICS_PORT,
-    trustProxy: e.AIOPS_TRUST_PROXY,
+    metricsPort: e.MANDATE_METRICS_PORT,
+    trustProxy: e.MANDATE_TRUST_PROXY,
   };
 }
 
@@ -325,23 +325,23 @@ export function parseWorkerEnv(env: NodeJS.ProcessEnv): WorkerEnv {
     taskQueue: e.TEMPORAL_TASK_QUEUE,
     logLevel: e.LOG_LEVEL,
     databaseUrl: e.DATABASE_URL,
-    configDir: e.AIOPS_CONFIG_DIR,
-    presetDirs: e.AIOPS_PRESET_DIRS,
-    masterKeys: e.AIOPS_MASTER_KEYS,
-    temporalKeys: e.AIOPS_TEMPORAL_KEYS,
+    configDir: e.MANDATE_CONFIG_DIR,
+    presetDirs: e.MANDATE_PRESET_DIRS,
+    masterKeys: e.MANDATE_MASTER_KEYS,
+    temporalKeys: e.MANDATE_TEMPORAL_KEYS,
     activityTuning: {
-      prepareTimeoutMs: e.AIOPS_PREPARE_TIMEOUT_MS,
-      batchHeartbeatMs: e.AIOPS_BATCH_HEARTBEAT_MS,
-      batchTimeoutMs: e.AIOPS_BATCH_TIMEOUT_MS,
-      batchMaxAttempts: e.AIOPS_BATCH_MAX_ATTEMPTS,
-      retryInitialMs: e.AIOPS_RETRY_INITIAL_MS,
-      retryMaxMs: e.AIOPS_RETRY_MAX_MS,
+      prepareTimeoutMs: e.MANDATE_PREPARE_TIMEOUT_MS,
+      batchHeartbeatMs: e.MANDATE_BATCH_HEARTBEAT_MS,
+      batchTimeoutMs: e.MANDATE_BATCH_TIMEOUT_MS,
+      batchMaxAttempts: e.MANDATE_BATCH_MAX_ATTEMPTS,
+      retryInitialMs: e.MANDATE_RETRY_INITIAL_MS,
+      retryMaxMs: e.MANDATE_RETRY_MAX_MS,
     },
-    ...(e.AIOPS_SMTP_URL === undefined ? {} : { smtpUrl: e.AIOPS_SMTP_URL }),
-    mailFrom: e.AIOPS_MAIL_FROM,
-    publicUrl: new URL(e.AIOPS_PUBLIC_URL),
-    ...(e.AIOPS_AUDIT_ARCHIVE_DIR === undefined ? {} : { auditArchiveDir: e.AIOPS_AUDIT_ARCHIVE_DIR }),
+    ...(e.MANDATE_SMTP_URL === undefined ? {} : { smtpUrl: e.MANDATE_SMTP_URL }),
+    mailFrom: e.MANDATE_MAIL_FROM,
+    publicUrl: new URL(e.MANDATE_PUBLIC_URL),
+    ...(e.MANDATE_AUDIT_ARCHIVE_DIR === undefined ? {} : { auditArchiveDir: e.MANDATE_AUDIT_ARCHIVE_DIR }),
     ...(e.OTEL_EXPORTER_OTLP_ENDPOINT === undefined ? {} : { otlpEndpoint: new URL(e.OTEL_EXPORTER_OTLP_ENDPOINT) }),
-    httpPort: e.AIOPS_WORKER_HTTP_PORT,
+    httpPort: e.MANDATE_WORKER_HTTP_PORT,
   };
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
-import { DrizzleAuditLog, PostgresRateCounter, runAuditRetention, sealAuditChain, verifyAuditChain } from '@aiops/db';
+import { DrizzleAuditLog, PostgresRateCounter, runAuditRetention, sealAuditChain, verifyAuditChain } from '@mandate/db';
 import type { Logger } from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createAuditJobs } from '../../src/audit-jobs.js';

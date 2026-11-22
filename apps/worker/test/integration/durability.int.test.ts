@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Durability of `changesetWorkflow` on a real Temporal test server and PostgreSQL: a worker that
  * dies mid-batch, two workers sharing a queue, and continue-as-new over a large change-set.
  */
-import { CHANGESET_WORKFLOW, WAKE_SIGNAL } from '@aiops/temporal';
-import { ScriptedWriter } from '@aiops/testing';
+import { CHANGESET_WORKFLOW, WAKE_SIGNAL } from '@mandate/temporal';
+import { ScriptedWriter } from '@mandate/testing';
 import type { WorkflowExecutionInfo, WorkflowHandle } from '@temporalio/client';
 import { NativeConnection } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

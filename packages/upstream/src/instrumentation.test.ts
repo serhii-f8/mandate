@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { context, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import {
@@ -78,7 +78,7 @@ describe('upstream instrumentation', () => {
     expect(ok?.attributes).toEqual({
       'http.request.method': 'GET',
       'server.address': 'shop.example',
-      'aiops.connection': 'magento',
+      'mandate.connection': 'magento',
       'http.response.status_code': 200,
     });
     expect(ok?.status.code).toBe(SpanStatusCode.UNSET);
@@ -87,7 +87,7 @@ describe('upstream instrumentation', () => {
     expect(timeout?.attributes).toEqual({
       'http.request.method': 'PUT',
       'server.address': 'shop.example',
-      'aiops.connection': 'magento',
+      'mandate.connection': 'magento',
       'error.type': 'timeout',
     });
     expect(timeout?.status.code).toBe(SpanStatusCode.ERROR);
@@ -95,7 +95,7 @@ describe('upstream instrumentation', () => {
     expect(unavailable?.attributes).toEqual({
       'http.request.method': 'GET',
       'server.address': 'shop.example',
-      'aiops.connection': 'magento',
+      'mandate.connection': 'magento',
       'http.response.status_code': 503,
       'error.type': '503',
     });
@@ -104,7 +104,7 @@ describe('upstream instrumentation', () => {
     expect(notFound?.attributes).toEqual({
       'http.request.method': 'GET',
       'server.address': 'shop.example',
-      'aiops.connection': 'magento',
+      'mandate.connection': 'magento',
       'http.response.status_code': 404,
       'error.type': '404',
     });
@@ -138,11 +138,11 @@ describe('upstream instrumentation', () => {
     span.end({ status: 503 });
 
     expect(spans.getFinishedSpans()).toHaveLength(1);
-    const counter = await metric('aiops_upstream_requests_total');
+    const counter = await metric('mandate_upstream_requests_total');
     expect((counter?.dataPoints ?? []).map((p) => ({ attributes: p.attributes, value: p.value }))).toEqual([
       { attributes: { connection: 'magento', outcome: 'ok' }, value: 1 },
     ]);
-    const histogram = (await metric('aiops_upstream_request_duration_seconds')) as HistogramMetricData | undefined;
+    const histogram = (await metric('mandate_upstream_request_duration_seconds')) as HistogramMetricData | undefined;
     expect(histogram?.dataPoints.map((p) => p.value.count)).toEqual([1]);
   });
 
@@ -162,7 +162,7 @@ describe('upstream instrumentation', () => {
     inst.start({ connection: 'magento', method: 'GET', host: 'shop.example' }).end({ status: 200 });
     inst.start({ connection: 'magento', method: 'GET', host: 'shop.example' }).end({ status: 503 });
 
-    const counter = await metric('aiops_upstream_requests_total');
+    const counter = await metric('mandate_upstream_requests_total');
     expect(counter?.dataPointType).toBe(DataPointType.SUM);
     const points = (counter?.dataPoints ?? []).map((p) => ({ attributes: p.attributes, value: p.value }));
     expect(points).toHaveLength(2);
@@ -173,7 +173,7 @@ describe('upstream instrumentation', () => {
       ]),
     );
 
-    const histogram = (await metric('aiops_upstream_request_duration_seconds')) as HistogramMetricData | undefined;
+    const histogram = (await metric('mandate_upstream_request_duration_seconds')) as HistogramMetricData | undefined;
     expect(histogram?.dataPointType).toBe(DataPointType.HISTOGRAM);
     expect(histogram?.descriptor.unit).toBe('s');
     expect(histogram?.dataPoints).toHaveLength(1);

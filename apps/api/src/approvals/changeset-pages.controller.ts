@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { Body, Controller, Get, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import type { ConfigurationHolder } from '@aiops/config';
+import type { ConfigurationHolder } from '@mandate/config';
 import {
   canView,
   type ApprovalRecord,
@@ -13,7 +13,7 @@ import {
   type ChangeSetRecord,
   type ChangeSetRepository,
   type StartOutcome,
-} from '@aiops/core';
+} from '@mandate/core';
 import { rollbackBlock } from '../changesets/rollback.js';
 import { progressOf } from '../mcp/changeset-tools.js';
 import { snapshotOf } from '../mcp/tool-pipeline.js';

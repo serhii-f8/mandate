@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { useState, type ReactElement } from 'react';
 import { Notice } from '../components/Notice.js';
 import { openPage, type WidgetApp } from './bridge.js';

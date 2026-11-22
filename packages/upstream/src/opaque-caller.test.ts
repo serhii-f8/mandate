@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import { loadConfigurationSources, type LoadedConfiguration, type PinEvaluation } from '@aiops/config';
+import { loadConfigurationSources, type LoadedConfiguration, type PinEvaluation } from '@mandate/config';
 import {
   mcpToolHash,
   type BulkStatusOutcome,
@@ -14,8 +14,8 @@ import {
   type UpstreamResolver,
   type WriteAdapter,
   type WriteErrorCode,
-} from '@aiops/connector-sdk';
-import type { CredentialHandle, CredentialStatus, CredentialVault, OpaqueNotSentCode } from '@aiops/core';
+} from '@mandate/connector-sdk';
+import type { CredentialHandle, CredentialStatus, CredentialVault, OpaqueNotSentCode } from '@mandate/core';
 import { createOpaqueCaller, type OpaqueCallerDeps } from './opaque-caller.js';
 import { verifyPinNow, type ToolLister } from './pin-monitor.js';
 import type { UpstreamCallLog } from './read.js';

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Seeds the Magento sandbox for the Phase 3 acceptance and the preset contract recordings
 // (design part 1 §6). Idempotent: safe to run again; existing data is updated in place.
 //   node deploy/sandbox/magento/seed.mjs [base-url]     # default http://127.0.0.1:4390

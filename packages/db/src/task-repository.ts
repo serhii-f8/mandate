@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { and, eq } from 'drizzle-orm';
-import { isTaskId, type TaskRecord, type TaskRepository } from '@aiops/core';
+import { isTaskId, type TaskRecord, type TaskRepository } from '@mandate/core';
 import type { Db } from './client.js';
 import { guarded } from './errors.js';
 import { mcpTask } from './schema.js';

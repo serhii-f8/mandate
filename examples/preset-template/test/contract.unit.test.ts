@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Contract test of the preset template (NFR-17, CONN-8). The preset is loaded the way the api loads
  * it, with the OpenAPI adapter's resolver over the vendored spec; recordings pin the request the
@@ -9,10 +9,10 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createOpenApiAdapter } from '@aiops/adapters';
-import { loadConfigurationSources, type HttpOperationBinding, type LoadedConfiguration } from '@aiops/config';
-import type { ConnectionSettings } from '@aiops/connector-sdk';
-import { contractRead, contractWrite, presetConnectionYaml, recordingsFreeOf, replayRecordings, startFakeUpstream, type FakeUpstream } from '@aiops/testing';
+import { createOpenApiAdapter } from '@mandate/adapters';
+import { loadConfigurationSources, type HttpOperationBinding, type LoadedConfiguration } from '@mandate/config';
+import type { ConnectionSettings } from '@mandate/connector-sdk';
+import { contractRead, contractWrite, presetConnectionYaml, recordingsFreeOf, replayRecordings, startFakeUpstream, type FakeUpstream } from '@mandate/testing';
 
 const PRESET_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RECORDINGS = join(PRESET_DIR, 'test', 'recordings');
@@ -31,7 +31,7 @@ const READ_CASES: readonly ReadCase[] = [
 async function loadPreset(baseUrl: string): Promise<LoadedConfiguration> {
   const config = presetConnectionYaml({
     presetId: 'notes',
-    package: '@aiops-examples/preset-template',
+    package: '@mandate-examples/preset-template',
     version: '1.0.0',
     connectionId: 'notes',
     baseUrl,

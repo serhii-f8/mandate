@@ -10,12 +10,12 @@ Four things carry a version, and two of them are public interfaces with a writte
 | Artifact | Version | Where you see it | Public contract |
 | --- | --- | --- | --- |
 | Product (`api`, `worker`, images) | 1.0.0 | `version` field of `GET /healthz`; image label `org.opencontainers.image.version` | The behaviour this guide describes |
-| Connector SDK (`@aiops/connector-sdk`) | 1.0.0 | package version; `CONNECTOR_SDK_VERSION` | `packages/connector-sdk/api-report.d.ts`; the preset format in `packages/config/schema/aiops-preset.v1.json` |
-| Configuration schema | 1.0.0 | `CONFIG_SCHEMA_VERSION`; the `version: 1` line of every YAML file is its major | `packages/config/schema/aiops-config.v1.json` |
-| Presets (`@aiops/magento2-catalog`, `@aiops/gitea-issues`) | 1.0.0 | package version | Each preset's `aiops.sdk` range |
+| Connector SDK (`@mandate/connector-sdk`) | 1.0.0 | package version; `CONNECTOR_SDK_VERSION` | `packages/connector-sdk/api-report.d.ts`; the preset format in `packages/config/schema/mandate-preset.v1.json` |
+| Configuration schema | 1.0.0 | `CONFIG_SCHEMA_VERSION`; the `version: 1` line of every YAML file is its major | `packages/config/schema/mandate-config.v1.json` |
+| Presets (`@mandate/magento2-catalog`, `@mandate/gitea-issues`) | 1.0.0 | package version | Each preset's `mandate.sdk` range |
 
 ```bash
-curl -fsS "http://localhost:${AIOPS_API_PORT:-8400}/healthz"
+curl -fsS "http://localhost:${MANDATE_API_PORT:-8400}/healthz"
 ```
 
 The answer is `{"ok":true,"version":"1.0.0"}`. The worker answers the same on its health port.
@@ -37,13 +37,13 @@ The contracts are committed as generated files, so a change to them shows up in 
 
 - `packages/connector-sdk/api-report.d.ts`: every declaration reachable from the SDK entry, with
   comments removed. Its first line names the SDK version.
-- `packages/config/schema/aiops-config.v1.json`: the JSON Schema of the root configuration object. It
-  carries `x-aiops-schema-version`. Editors can use it for completion and validation: start a YAML file
+- `packages/config/schema/mandate-config.v1.json`: the JSON Schema of the root configuration object. It
+  carries `x-mandate-schema-version`. Editors can use it for completion and validation: start a YAML file
   with `# yaml-language-server: $schema=...` pointing at it.
-- `packages/config/schema/aiops-preset.v1.json`: the preset format, which presets depend on as much as
+- `packages/config/schema/mandate-preset.v1.json`: the preset format, which presets depend on as much as
   on the SDK code. `$defs.presetDocument` is the JSON Schema of a preset file (`preset.yaml`) and
-  `$defs.packageJsonAiops` that of the `aiops` block of a preset's `package.json`. It is versioned with
-  the connector SDK, so it carries `x-aiops-sdk-version`, and a preset's `aiops.sdk` range covers it.
+  `$defs.packageJsonMandate` that of the `mandate` block of a preset's `package.json`. It is versioned with
+  the connector SDK, so it carries `x-mandate-sdk-version`, and a preset's `mandate.sdk` range covers it.
 
 CI regenerates all three and fails when a file is stale (`--check`). A semver gate then compares each
 report with the one at the merge base of the branch and `main` (on `main` itself, with the first parent
@@ -98,7 +98,7 @@ next minor of that major.
 A preset package declares the SDK range it was built for in its `package.json`:
 
 ```json
-{ "aiops": { "sdk": "^1.0.0" } }
+{ "mandate": { "sdk": "^1.0.0" } }
 ```
 
 When the configuration loader loads a preset it checks the SDK version of the running platform against

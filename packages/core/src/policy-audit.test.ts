@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import { policyDecisionAuditEvent } from './policy-audit.js';
 
@@ -10,7 +10,7 @@ describe('POL-8 decision audit event', () => {
     expect(
       policyDecisionAuditEvent({
         id,
-        caller: { subject: 'alice', clientId: 'aiops-mcp', groups: ['content'] },
+        caller: { subject: 'alice', clientId: 'mandate-mcp', groups: ['content'] },
         tool: 'catalog.search_products',
         decision: { effect: 'allow', rule: 'role:content_manager/grant:own-brands', roles: ['content_manager'] },
         correlationId: 'c1',
@@ -18,7 +18,7 @@ describe('POL-8 decision audit event', () => {
     ).toEqual({
       id,
       actor: 'alice',
-      clientId: 'aiops-mcp',
+      clientId: 'mandate-mcp',
       action: 'policy.decision',
       subject: 'catalog.search_products',
       decision: 'allow',

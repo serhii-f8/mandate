@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { CatalogEntry, HttpMethod, SpecIssue, TemplateValue, ToolListOutcome, UpstreamResolver } from '@aiops/connector-sdk';
+// Copyright 2026 The Mandate Authors
+import type { CatalogEntry, HttpMethod, SpecIssue, TemplateValue, ToolListOutcome, UpstreamResolver } from '@mandate/connector-sdk';
 
 type ResolveInput = Parameters<UpstreamResolver['resolveSpec']>[0];
 type ResolveToolsInput = Parameters<NonNullable<UpstreamResolver['resolveTools']>>[0];

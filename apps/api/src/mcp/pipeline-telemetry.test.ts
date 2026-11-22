@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import {
   AggregationTemporality,
@@ -53,15 +53,15 @@ describe('NFR-11 NFR-12 pipeline telemetry', () => {
     const [ok, failed] = finished;
     expect(ok?.name).toBe('mcp.tool_call');
     expect(ok?.kind).toBe(SpanKind.INTERNAL);
-    expect(ok?.attributes).toEqual({ 'aiops.tool': 'ping', 'aiops.correlation_id': 'corr-1' });
+    expect(ok?.attributes).toEqual({ 'mandate.tool': 'ping', 'mandate.correlation_id': 'corr-1' });
     expect(ok?.status.code).toBe(SpanStatusCode.UNSET);
     // The error message never becomes span content (SEC-3).
-    expect(failed?.attributes).toEqual({ 'aiops.tool': '_unknown', 'aiops.correlation_id': 'corr-2' });
+    expect(failed?.attributes).toEqual({ 'mandate.tool': '_unknown', 'mandate.correlation_id': 'corr-2' });
     expect(failed?.status).toEqual({ code: SpanStatusCode.ERROR });
     expect(failed?.events).toEqual([]);
   });
 
-  it('NFR-12 counts land on aiops_tool_calls_total and aiops_policy_denials_total', async () => {
+  it('NFR-12 counts land on mandate_tool_calls_total and mandate_policy_denials_total', async () => {
     const t = telemetry();
     t.countToolCall('ping', 'ok');
     t.countToolCall('ping', 'ok');
@@ -71,7 +71,7 @@ describe('NFR-11 NFR-12 pipeline telemetry', () => {
     t.countDenial('limit_exceeded');
     t.countDenial('limit_exceeded');
 
-    const calls = await metric('aiops_tool_calls_total');
+    const calls = await metric('mandate_tool_calls_total');
     expect(calls?.dataPoints.map((p) => ({ attributes: p.attributes, value: p.value }))).toEqual(
       expect.arrayContaining([
         { attributes: { tool: 'ping', outcome: 'ok' }, value: 2 },
@@ -80,7 +80,7 @@ describe('NFR-11 NFR-12 pipeline telemetry', () => {
       ]),
     );
     expect(calls?.dataPoints).toHaveLength(3);
-    const denials = await metric('aiops_policy_denials_total');
+    const denials = await metric('mandate_policy_denials_total');
     expect(denials?.dataPoints.map((p) => ({ attributes: p.attributes, value: p.value }))).toEqual(
       expect.arrayContaining([
         { attributes: { reason: 'unknown_tool' }, value: 1 },

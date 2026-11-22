@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Records the vendored spec and the contract-test responses from a Gitea sandbox (NFR-17).
 // Needs GITEA_SANDBOX_URL (e.g. http://127.0.0.1:4391) and GITEA_SANDBOX_TOKEN
 // (bash deploy/sandbox/gitea/token.sh).
-//   pnpm --filter @aiops/gitea-issues record
+//   pnpm --filter @mandate/gitea-issues record
 // Writes spec/gitea.swagger.json (GET /swagger.v1.json filtered to the five preset endpoints and
 // the definitions, parameters and responses they reference), test/recordings/<case>.json from
 // test/cases.json and test/recordings/write/<case>.json from test/write-cases.json. Each file is
 // { "exchanges": [ { request: {method, path, query?, body?}, response: {status, body} } ] } with
-// the path relative to /api/v1, the type RecordedExchange of @aiops/testing. No request or
+// the path relative to /api/v1, the type RecordedExchange of @mandate/testing. No request or
 // response header is ever written and the token is never printed. The write cases change only
 // issue 30 of acme/website; each is followed by a restore to the seeded title, state and labels
 // (and deletion of the comment it created).

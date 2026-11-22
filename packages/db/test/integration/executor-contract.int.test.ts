@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { asc } from 'drizzle-orm';
 import { afterAll, beforeAll } from 'vitest';
-import { EMPTY_STATS, type AuditEventInput, type ChangeSetRecord } from '@aiops/core';
+import { EMPTY_STATS, type AuditEventInput, type ChangeSetRecord } from '@mandate/core';
 import {
   describeExecutorContract,
   describeRollbackRun,
@@ -12,7 +12,7 @@ import {
   ScriptedWriter,
   startPostgres,
   type StartedPostgres,
-} from '@aiops/testing';
+} from '@mandate/testing';
 import { PostgresChangeSetRepository } from '../../src/changeset-repository.js';
 import { createDb, type Database } from '../../src/client.js';
 import { runMigrations } from '../../src/migrate.js';

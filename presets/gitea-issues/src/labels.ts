@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Code writer `set_labels` (OPS-5, OPS-6). Gitea's `PUT …/issues/{n}/labels` drops unknown names
  * and ids with a 200, so a declarative mapping would report a partial write as success. This
@@ -9,7 +9,7 @@
  * verify read marks a partial write as drift. Upstream content is data (SEC-5): only label ids and
  * names are read from it.
  */
-import type { CodeArgs, CodeContext, CodeHttpResponse, RecordOutcome, WriteRecord } from '@aiops/connector-sdk';
+import type { CodeArgs, CodeContext, CodeHttpResponse, RecordOutcome, WriteRecord } from '@mandate/connector-sdk';
 import { repoPath } from './issue.js';
 
 /** Gitea's `max_response_items`: a shorter page is the last one. */

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { parseTemporalKeys, workerDataConverter } from '@aiops/temporal';
+import { parseTemporalKeys, workerDataConverter } from '@mandate/temporal';
 import type { DataConverter } from '@temporalio/common';
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { Worker } from '@temporalio/worker';
@@ -192,7 +192,7 @@ describe('EXE-10 workflow replay gate', () => {
   it.each(fixtures)('EXE-10 NFR-11 replays $type/$name with the OpenTelemetry plugin installed', async ({ type, path, name }) => {
     const history: unknown = JSON.parse(readFileSync(path, 'utf8'));
     const dataConverter = converterFor(type);
-    const plugins = [createTracingPlugin({ spanProcessor: new SimpleSpanProcessor(exporter), serviceName: 'aiops-worker' })];
+    const plugins = [createTracingPlugin({ spanProcessor: new SimpleSpanProcessor(exporter), serviceName: 'mandate-worker' })];
     await expect(
       Worker.runReplayHistory(
         { workflowsPath, bundlerOptions: workflowBundlerOptions(), plugins, ...(dataConverter === undefined ? {} : { dataConverter }) },
@@ -207,7 +207,7 @@ describe('EXE-10 workflow replay gate', () => {
     const own = new InMemorySpanExporter();
     const fixture = fixtures.find((f) => f.type === 'changesetWorkflow' && f.name === 'completed.json');
     if (fixture === undefined) throw new Error('fixture changesetWorkflow/completed.json missing');
-    const plugins = [createTracingPlugin({ spanProcessor: new SimpleSpanProcessor(own), serviceName: 'aiops-worker' })];
+    const plugins = [createTracingPlugin({ spanProcessor: new SimpleSpanProcessor(own), serviceName: 'mandate-worker' })];
     await Worker.runReplayHistory(
       { workflowsPath, bundlerOptions: workflowBundlerOptions(), plugins, dataConverter: workerDataConverter(parseTemporalKeys(TEST_TEMPORAL_KEYS)) },
       JSON.parse(readFileSync(fixture.path, 'utf8')) as unknown,

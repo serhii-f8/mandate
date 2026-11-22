@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * `review_changeset` (APR-5, APR-8; design part 1 §8): the approver's view of a change-set in chat,
  * opened by the approval widget. The answer is the page detail built from storage by the same
@@ -9,8 +9,8 @@
  * The text carries IDs, counts, statuses, roles and the hash only (SEC-5).
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
-import { createSchemaCompiler, type LoadedConfiguration } from '@aiops/config';
-import { callerKind, canView, currentStep, encodeCursor, rolesOf, type ApprovalRecord, type Approver, type Caller, type ChangeSetRecord, type ItemStatus } from '@aiops/core';
+import { createSchemaCompiler, type LoadedConfiguration } from '@mandate/config';
+import { callerKind, canView, currentStep, encodeCursor, rolesOf, type ApprovalRecord, type Approver, type Caller, type ChangeSetRecord, type ItemStatus } from '@mandate/core';
 import { changesetDetailWith, itemRow, widgetViewerBlock, type ViewerBlock } from '../approvals/detail.js';
 import { decodeCursor, newSeed } from '../approvals/page-query.js';
 import { rollbackBlock } from '../changesets/rollback.js';

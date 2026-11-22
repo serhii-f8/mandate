@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // License header rules (NFR-18 release hygiene): which files carry the header, and how to add it.
 
 const SLASH_EXT = ['.ts', '.tsx', '.js', '.mjs', '.cjs'];
@@ -33,7 +33,7 @@ export function needsHeader(path) {
 
 function headerOf(path) {
   const c = commentPrefix(path);
-  return `${c} SPDX-License-Identifier: Apache-2.0\n${c} Copyright 2026 The AI Operations Layer Authors\n`;
+  return `${c} SPDX-License-Identifier: Apache-2.0\n${c} Copyright 2026 The Mandate Authors\n`;
 }
 
 // Splits a leading shebang line (kept with its newline) from the rest.

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { ExecutionGuard } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import type { ExecutionGuard } from '@mandate/core';
 
 /**
  * Execution guard that lets every change-set run. The executor contract harness uses it: its

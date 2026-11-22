@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import {
   context,
   defaultTextMapSetter,
@@ -15,12 +15,12 @@ import type {
   RequestAttemptEnd,
   RequestInstrumentation,
   RequestSpan,
-} from '@aiops/connector-sdk';
+} from '@mandate/connector-sdk';
 
 export interface UpstreamInstrumentationDeps {
   /** From the app's MeterProvider. */
   readonly meter: Meter;
-  /** Default `trace.getTracer('aiops-upstream')`. */
+  /** Default `trace.getTracer('mandate-upstream')`. */
   readonly tracer?: Tracer;
 }
 
@@ -57,13 +57,13 @@ function attemptErrorType(end: RequestAttemptEnd): string | undefined {
  * fixed error code: never a path, query, header, credential or item value (SEC-3).
  */
 export function createUpstreamInstrumentation(deps: UpstreamInstrumentationDeps): RequestInstrumentation {
-  const tracer = deps.tracer ?? trace.getTracer('aiops-upstream');
+  const tracer = deps.tracer ?? trace.getTracer('mandate-upstream');
   // Explicit, independent of the global propagator: only traceparent/tracestate, no baggage (ruling R-prop).
   const propagator = new W3CTraceContextPropagator();
-  const requests = deps.meter.createCounter('aiops_upstream_requests_total', {
+  const requests = deps.meter.createCounter('mandate_upstream_requests_total', {
     description: 'Upstream request attempts per connection and outcome.',
   });
-  const duration = deps.meter.createHistogram('aiops_upstream_request_duration_seconds', {
+  const duration = deps.meter.createHistogram('mandate_upstream_request_duration_seconds', {
     description: 'Duration of upstream request attempts per connection.',
     unit: 's',
     advice: { explicitBucketBoundaries: UPSTREAM_DURATION_BUCKETS },
@@ -77,7 +77,7 @@ export function createUpstreamInstrumentation(deps: UpstreamInstrumentationDeps)
         attributes: {
           'http.request.method': attempt.method,
           'server.address': attempt.host,
-          'aiops.connection': attempt.connection,
+          'mandate.connection': attempt.connection,
         },
       });
       const headers: Record<string, string> = {};

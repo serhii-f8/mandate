@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
@@ -17,9 +17,9 @@ afterAll(async () => {
 
 describe('test issuer', () => {
   it('signs tokens that verify against its JWKS over HTTP', async () => {
-    const token = await issuer.token({ sub: 'alice', groups: ['content'], aud: 'http://127.0.0.1:1/mcp', azp: 'aiops-mcp' });
+    const token = await issuer.token({ sub: 'alice', groups: ['content'], aud: 'http://127.0.0.1:1/mcp', azp: 'mandate-mcp' });
     const { payload } = await jwtVerify(token, createRemoteJWKSet(new URL(issuer.jwksUrl)), { issuer: issuer.issuer });
-    expect(payload).toMatchObject({ sub: 'alice', groups: ['content'], aud: 'http://127.0.0.1:1/mcp', azp: 'aiops-mcp' });
+    expect(payload).toMatchObject({ sub: 'alice', groups: ['content'], aud: 'http://127.0.0.1:1/mcp', azp: 'mandate-mcp' });
   });
 
   it('AUTH-4 the test issuer writes sid and client_id when given', async () => {

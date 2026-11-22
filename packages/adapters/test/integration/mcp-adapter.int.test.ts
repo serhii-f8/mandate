@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import { mcpToolHash, type ConnectionSettings, type CredentialSource, type McpToolDefinition } from '@aiops/connector-sdk';
-import { startFakeMcpServer, type FakeMcpServer, type FakeMcpTool, type RecordedMcpRequest } from '@aiops/testing';
+// Copyright 2026 The Mandate Authors
+import { mcpToolHash, type ConnectionSettings, type CredentialSource, type McpToolDefinition } from '@mandate/connector-sdk';
+import { startFakeMcpServer, type FakeMcpServer, type FakeMcpTool, type RecordedMcpRequest } from '@mandate/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { semaphoreFor } from '../../src/http/semaphore.js';
 import { createMcpToolAdapter } from '../../src/mcp/adapter.js';

@@ -1,5 +1,5 @@
 {
-  "name": "@aiops/testing",
+  "name": "@mandate/testing",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
   "license": "Apache-2.0",
   "exports": {
     ".": {
-      "@aiops/source": "./src/index.ts",
+      "@mandate/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
@@ -25,8 +25,8 @@
     "@modelcontextprotocol/client": "2.4.0"
   },
   "dependencies": {
-    "@aiops/connector-sdk": "workspace:*",
-    "@aiops/core": "workspace:*",
+    "@mandate/connector-sdk": "workspace:*",
+    "@mandate/core": "workspace:*",
     "@modelcontextprotocol/node": "2.1.2",
     "@modelcontextprotocol/server": "2.4.0",
     "@testcontainers/postgresql": "12.2.1",

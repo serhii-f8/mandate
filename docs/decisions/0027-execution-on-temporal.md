@@ -35,7 +35,7 @@ open the Magento write mapping, drift detection and the executor's cancel semant
 10. **Limits accounting:** per role; per user with the allowing role's values. Daily window:
     calendar day; rolling 24 h. Calls per minute: audit table counts; a bucket table.
 11. **Codec placement:** in `apps/worker` (api would import an app); `packages/core` (no
-    Temporal there); a new package `@aiops/temporal`.
+    Temporal there); a new package `@mandate/temporal`.
 
 ## Decision
 
@@ -61,7 +61,7 @@ open the Magento write mapping, drift detection and the executor's cancel semant
    change-set `prepared`. Phase 5's behaviour is thereby a subset of the final POL-5 behaviour,
    never an unapproved write that Phase 6 would forbid. The development role
    `content_manager` sets `approval: { required: never }`.
-7. **Bounded wait** (`AIOPS_PREPARE_WAIT_MS`, default 20 s): small change-sets answer exactly as
+7. **Bounded wait** (`MANDATE_PREPARE_WAIT_MS`, default 20 s): small change-sets answer exactly as
    in Phase 4; large ones answer `preparing` with the change-set ID to follow with
    `get_changeset`. This is MCP-7's "immediate result carrying the change-set ID" with a short
    grace period; MCP-7 is reworded accordingly. 2025-era clients cannot declare the extension
@@ -76,7 +76,7 @@ open the Magento write mapping, drift detection and the executor's cancel semant
    (per-record writes, key mapping, code operations).
 10. **Per user, with the allowing role's values; rolling 24 h; a `rate_bucket` table** with
     fixed one-minute buckets (one upsert per call, works across `api` instances).
-11. **`@aiops/temporal`** with a pure `contract` subpath for workflow code.
+11. **`@mandate/temporal`** with a pure `contract` subpath for workflow code.
 
 Also: a failed batch's retry policy is bounded (10 attempts); exhausting it finishes the
 change-set `failed/writer_error`. `changesets.failure_threshold` (default 0.5) stops
@@ -162,7 +162,7 @@ loads a plain converter with `loadDataConverter`, which reads only `payloadConve
 receives an already loaded converter (`isLoadedDataConverter`,
 `@temporalio/client/lib/base-client.js:30-31`). So the field was ignored, and the
 observation stands for the reason that matters: the worker writes workflow failures and
-needs `failureConverterPath`. `@aiops/temporal`'s `clientDataConverter` therefore returns a
+needs `failureConverterPath`. `@mandate/temporal`'s `clientDataConverter` therefore returns a
 `LoadedDataConverter` with the encoding failure converter; a unit test proves the client
 uses it.
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** Curated operations and manifests for Magento 2 catalog content (preset `preset.yaml`, CONN-8 first cut). */
 import { fileURLToPath } from 'node:url';
 

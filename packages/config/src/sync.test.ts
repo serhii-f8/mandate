@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { fileURLToPath } from 'node:url';
-import type { ConfigListener, ConfigListenerHandlers } from '@aiops/core';
-import { InMemoryAuditLog, InMemoryConfigRevisionStore } from '@aiops/testing';
+import type { ConfigListener, ConfigListenerHandlers } from '@mandate/core';
+import { InMemoryAuditLog, InMemoryConfigRevisionStore } from '@mandate/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigurationHolder, type ConfigurationLogger, type LoadTrigger, type RefreshResult } from './holder.js';
 import type { ConfigIssue } from './issues.js';

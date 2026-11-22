@@ -44,10 +44,10 @@ j. The webhook sender reuses `assertEgressAllowed` and `createGuardedLookup` wit
    `ConnectionSettings` (`baseUrl` = the URL, `extraHosts: []`). It does not use
    `createTransport`, because that refuses non-JSON 2xx bodies and Slack answers `text/plain`
    `ok`.
-k. The tests use an in-process SMTP sink in `@aiops/testing` instead of an SMTP server
+k. The tests use an in-process SMTP sink in `@mandate/testing` instead of an SMTP server
    dependency.
-l. In the worker `AIOPS_PUBLIC_URL` defaults to `http://localhost:8400` and `AIOPS_MAIL_FROM` to
-   `aiops@localhost`.
+l. In the worker `MANDATE_PUBLIC_URL` defaults to `http://localhost:8400` and `MANDATE_MAIL_FROM` to
+   `mandate@localhost`.
 m. `credentialRefs` entries gain `notifications: string[]`.
 n. Mailpit lookups by change-set ID in the acceptance scripts do not use the search endpoint; see
    Verified. The fallback is used: list `/api/v1/messages` and fetch each message body.

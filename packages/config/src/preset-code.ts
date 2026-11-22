@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Preset code modules (OPS-5, CONN-8, CFG-4; Phase 9 presets design): the ES module named by
- * `aiops.code`, the directory tree it lives in, and the digest of that tree, which is part of
+ * `mandate.code`, the directory tree it lives in, and the digest of that tree, which is part of
  * the configuration hash. The module is imported once per tree digest; a changed tree under an
  * entry this process already imported is refused until restart, because Node caches the
  * module's relative imports by URL and would run stale code.
  *
- * Every issue names `<package>/package.json` at `aiops.code` and never a path or an error
+ * Every issue names `<package>/package.json` at `mandate.code` and never a path or an error
  * message of the module: import failures report only the error's `ERR_*` code.
  */
 import { createHash } from 'node:crypto';
 import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parsePresetModule, type PresetModule } from '@aiops/connector-sdk';
+import { parsePresetModule, type PresetModule } from '@mandate/connector-sdk';
 import type { ConfigIssue } from './issues.js';
 
 export interface LoadedPresetCode {
@@ -32,7 +32,7 @@ export interface PresetCodeInput {
   readonly packageName: string;
   /** The preset package directory. */
   readonly dir: string;
-  /** `aiops.code`: a relative path to an ES module in a subdirectory of the package. */
+  /** `mandate.code`: a relative path to an ES module in a subdirectory of the package. */
   readonly code: string;
   readonly importModule?: ImportModule;
 }
@@ -55,7 +55,7 @@ export function resetPresetCodeImports(): void {
 const nativeImport: ImportModule = (url) => import(/* @vite-ignore */ url);
 
 export async function loadPresetCode(input: PresetCodeInput): Promise<PresetCodeResult> {
-  const fail = (message: string): PresetCodeResult => ({ ok: false, issues: [{ file: `${input.packageName}/package.json`, path: 'aiops.code', message }] });
+  const fail = (message: string): PresetCodeResult => ({ ok: false, issues: [{ file: `${input.packageName}/package.json`, path: 'mandate.code', message }] });
   const placement = 'must be a path inside a subdirectory of the preset';
 
   // The logical path first: relative, inside the package, below its root.
@@ -86,7 +86,7 @@ export async function loadPresetCode(input: PresetCodeInput): Promise<PresetCode
 
   let namespace: unknown;
   try {
-    namespace = await (input.importModule ?? nativeImport)(`${pathToFileURL(realEntry).href}?aiops-code=${digest}`);
+    namespace = await (input.importModule ?? nativeImport)(`${pathToFileURL(realEntry).href}?mandate-code=${digest}`);
   } catch (error) {
     return fail(`cannot be imported (${errorCode(error)})`);
   }

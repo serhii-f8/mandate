@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * A stand-in OAuth authorization server for tests: an RS256 key pair whose JWKS
  * is served over HTTP on 127.0.0.1, a signer for access tokens with any claims, and
@@ -28,7 +28,7 @@ export interface TestTokenClaims {
 }
 
 /** The confidential page client the test issuer knows (matches the api e2e environment). */
-export const TEST_WEB_CLIENT_ID = 'aiops-web';
+export const TEST_WEB_CLIENT_ID = 'mandate-web';
 export const TEST_WEB_CLIENT_SECRET = 'test-only-web-client-secret';
 
 /** The user the authorization endpoint approves without a form. */

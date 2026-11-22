@@ -27,7 +27,7 @@ not concern the system and is omitted.
    - A retried preparation that finds items from an earlier attempt fails
      `preparation_interrupted` instead of producing a silently short change-set.
    - The versioned-key parser moves to `core`; `configurationLoadOptions` and
-     `assertFullyChecked` move to `@aiops/upstream`; `PrepareDeps.repository` narrows to a
+     `assertFullyChecked` move to `@mandate/upstream`; `PrepareDeps.repository` narrows to a
      `PreparationRepository` subset.
    - A Temporal start failure marks the change-set `failed/executor_unavailable` and throws
      `ExecutorUnavailable`; `progress` queries the workflow only while `executing`.
@@ -48,7 +48,7 @@ not concern the system and is omitted.
    - A status 4xx keeps `http_status`; only the submit maps 4xx to `rejected`.
    - Write recordings change only GLOBEX `meta_keyword` (and one failing `url_key`), keeping
      the ACME data of the Phase 3/4 acceptance intact; `up.sh` restarts the consumer when
-     `AIOPS_RESTART_CONSUMER=1`.
+     `MANDATE_RESTART_CONSUMER=1`.
 
 ## Consequences
 

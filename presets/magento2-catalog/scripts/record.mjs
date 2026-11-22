@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Records the vendored spec and the contract-test responses from a Magento sandbox
 // (NFR-17 first cut, design part 1 §6). Needs MAGENTO_SANDBOX_URL (e.g. http://127.0.0.1:4390)
 // and MAGENTO_SANDBOX_TOKEN (bash deploy/sandbox/magento/token.sh).
-//   pnpm --filter @aiops/magento2-catalog record
+//   pnpm --filter @mandate/magento2-catalog record
 // Writes spec/magento2-catalog.swagger.json and test/recordings/<case>.json. The requests are
 // the hand-written ones of test/cases.json, independent of preset.yaml, so the contract test
 // checks the preset against them. Then it runs the write cases of test/write-cases.json

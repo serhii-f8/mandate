@@ -1,6 +1,6 @@
 # Architecture
 
-This page explains how the AI Operations Layer is put together: the processes, what each one owns,
+This page explains how Mandate is put together: the processes, what each one owns,
 how a read and a write travel through them, and where the safety properties are enforced. Read it
 before you operate the server in production or change its code.
 
@@ -22,7 +22,7 @@ flowchart LR
     C3[Terminal or custom MCP client]
     C4[Service account]
   end
-  subgraph platform [AI Operations Layer]
+  subgraph platform [Mandate]
     API[api<br/>MCP endpoint, policy,<br/>change-sets, trusted pages]
     W[worker<br/>Temporal workflows<br/>and activities]
     PG[(PostgreSQL<br/>config, vault,<br/>change-sets, audit)]
@@ -48,7 +48,7 @@ flowchart LR
 
 | Component | Kind | What it owns |
 | --- | --- | --- |
-| `api` | Process (NestJS) | The MCP endpoint `POST /mcp`, token verification, the tool list per caller, policy checks, change-set creation, the REST API and the static bundle of the trusted pages, the widget resources, the `aiops` command line |
+| `api` | Process (NestJS) | The MCP endpoint `POST /mcp`, token verification, the tool list per caller, policy checks, change-set creation, the REST API and the static bundle of the trusted pages, the widget resources, the `mandate` command line |
 | `worker` | Process (Temporal worker) | One workflow per change-set; activities that read current values, compute the diff, write batches, roll back, seal the audit chain and send notifications |
 | `web` | Static bundle served by `api` | Trusted pages: approvals, change-set detail, credentials, audit |
 | PostgreSQL | Infrastructure | Configuration revisions, encrypted credentials, change-sets and their items, approvals, the audit log, page sessions, rate counters |
@@ -154,8 +154,8 @@ three ways:
 | Code | A function in a preset package | Reads and per-record writes for APIs that do not fit a manifest |
 
 A **preset** is a versioned package of curated operations for one system. Two ship with the
-repository: `@aiops/magento2-catalog` (search, read and bulk content updates of Magento 2
-products) and `@aiops/gitea-issues` (search, field updates, labels and comments on Gitea issues).
+repository: `@mandate/magento2-catalog` (search, read and bulk content updates of Magento 2
+products) and `@mandate/gitea-issues` (search, field updates, labels and comments on Gitea issues).
 Presets use only the public connector SDK, so adding one needs no change to the server. See
 [Presets](presets.md) and [MCP upstreams](mcp-upstreams.md).
 
@@ -178,7 +178,7 @@ for destructive operations.
 | Default deny | The policy engine in `packages/core`; the tool list is built per caller |
 | The model is not trusted | No model call anywhere in the server; upstream content is treated as data |
 | Immutable change-sets, append-only audit and approvals | PostgreSQL triggers, in addition to the code |
-| Tamper-evident audit | A hash chain sealed by the worker; `aiops audit verify` checks it |
+| Tamper-evident audit | A hash chain sealed by the worker; `mandate audit verify` checks it |
 | Credentials never leave the platform | AES-256-GCM envelope encryption in PostgreSQL; opened per call; scrubbed from logs, audit, tool results, workflow history and notifications; Temporal payloads are encrypted |
 | The user's token is never forwarded upstream | Adapters authenticate with the connection's credential only |
 | Egress control | Adapters call only the hosts a connection declares; private ranges are blocked and redirects are not followed |

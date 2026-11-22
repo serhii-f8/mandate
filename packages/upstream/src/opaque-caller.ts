@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The worker implementation of the core `OpaqueCaller` port (design phase 9 §5): one upstream
  * call of an opaque operation through the connection's `WriteAdapter.callOnce`, or for a code
@@ -8,9 +8,9 @@
  * `not_sent` without calling the adapter. The credential is opened only inside the adapter
  * (SEC-2); each call logs identifiers, method, status and timing only, never arguments (SEC-3).
  */
-import type { LoadedConfiguration, PinEvaluation } from '@aiops/config';
-import type { CallOutcome, CallTarget, CodeAdapter, ConnectionSettings, CodeCallOperation, CodeCallResult, WriteAdapter, WriteErrorCode } from '@aiops/connector-sdk';
-import { isOpaque, type CredentialVault, type OpaqueCaller, type OpaqueCallOutcome, type OpaqueNotSentCode } from '@aiops/core';
+import type { LoadedConfiguration, PinEvaluation } from '@mandate/config';
+import type { CallOutcome, CallTarget, CodeAdapter, ConnectionSettings, CodeCallOperation, CodeCallResult, WriteAdapter, WriteErrorCode } from '@mandate/connector-sdk';
+import { isOpaque, type CredentialVault, type OpaqueCaller, type OpaqueCallOutcome, type OpaqueNotSentCode } from '@mandate/core';
 import { connectionCredential, type UpstreamCallLog } from './read.js';
 
 export interface OpaqueCallerDeps {

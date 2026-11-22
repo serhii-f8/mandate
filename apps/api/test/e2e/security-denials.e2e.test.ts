@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Denial suite, part 1 (SEC-11): argument validation, grant, scope and field denials over the real
  * MCP transport. Every test asserts the answer, the audit rows the path really writes, and that
@@ -15,8 +15,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
-import { InMemoryExecutor, pageLogin, ScriptedWriter, startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { createDb, PostgresChangeSetRepository, type Database } from '@mandate/db';
+import { InMemoryExecutor, pageLogin, ScriptedWriter, startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { auditRows, modernRequest, rawPost, reloadConfiguration, startApi, startDatabase, tokenFor, vaultOf, type AuditRow, type RunningApi } from './helpers.js';
 
 const SECURITY_CONFIG = fileURLToPath(new URL('./fixtures/security-config', import.meta.url));
@@ -39,7 +39,7 @@ beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
   upstream = await startFakeUpstream();
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-security-denials-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-security-denials-e2e-'));
   await cp(SECURITY_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));

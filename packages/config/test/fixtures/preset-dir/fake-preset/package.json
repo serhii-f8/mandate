@@ -1,5 +1,5 @@
 {
-  "name": "@aiops/fake-preset",
+  "name": "@mandate/fake-preset",
   "version": "0.1.0",
   "private": true,
   "description": "Test preset for the configuration loader."

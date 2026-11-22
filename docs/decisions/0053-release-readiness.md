@@ -32,7 +32,7 @@ Found in the code before deciding:
   server (NFR-15). Preset contract tests run against recordings in `pnpm test` (NFR-17). No MCP
   conformance suite runs (NFR-16). Restarts are tested only for a killed worker (Phase 5
   `durability.int.test.ts`, `phase-5.sh`), and not in hosted CI (NFR-1).
-- The `@aiops/connector-sdk` package version is `0.0.0`, while `CONNECTOR_SDK_VERSION` is `0.6.0`.
+- The `@mandate/connector-sdk` package version is `0.0.0`, while `CONNECTOR_SDK_VERSION` is `0.6.0`.
   The configuration schema is versioned only by the YAML literal `version: 1`. No public API
   snapshot exists.
 
@@ -100,7 +100,7 @@ Found in the code before deciding:
    - Before the `auth.rejected` audit row, the `web_login` row, or the redirect is written, the
      request is counted under `anon:<address>`. Over the limit it gets 429, and nothing more is
      written than the one `rate.limited` row per window.
-   - The address is Express `req.ip` under `trust proxy` = `AIOPS_TRUST_PROXY` (hop count 0-10,
+   - The address is Express `req.ip` under `trust proxy` = `MANDATE_TRUST_PROXY` (hop count 0-10,
      default 0: the socket address).
    - IPv4-mapped IPv6 addresses are reduced to IPv4. Other IPv6 addresses are keyed by their /64
      prefix, so rotating within a prefix gains nothing.
@@ -164,9 +164,9 @@ Found in the code before deciding:
      known gap.
 10. **1.0.0 at release** (option 10b):
     - product `1.0.0` (root `package.json`, image label);
-    - `@aiops/connector-sdk` `1.0.0` (package version equals `CONNECTOR_SDK_VERSION`);
+    - `@mandate/connector-sdk` `1.0.0` (package version equals `CONNECTOR_SDK_VERSION`);
     - configuration schema `1.0.0` (`CONFIG_SCHEMA_VERSION`, major = the YAML `version` literal);
-    - both presets `1.0.0`, with `aiops.sdk: ^1.0.0`.
+    - both presets `1.0.0`, with `mandate.sdk: ^1.0.0`.
 
     Every preset version range in the repository (dev configuration, fixtures, acceptance
     generators) is updated together with the versions, so the earlier acceptance scripts keep
@@ -174,7 +174,7 @@ Found in the code before deciding:
 11. **Committed surface reports and a semver gate** (option 11b):
     - `packages/connector-sdk/api-report.d.ts`: declarations reachable from the package entry,
       comments stripped, files sorted;
-    - `packages/config/schema/aiops-config.v1.json`: Zod 4 `z.toJSONSchema`. Verified 2026-11-20 in
+    - `packages/config/schema/mandate-config.v1.json`: Zod 4 `z.toJSONSchema`. Verified 2026-11-20 in
       `packages/config` with zod 4.6.7: a strict object exports draft 2020-12 with
       `additionalProperties: false`.
 
@@ -185,7 +185,7 @@ Found in the code before deciding:
     *Amended later: lines are keyed by context, narrowing additions count as breaking, and a third
     report covers the preset format.*
 12. **SPDX headers** (option 12b): `SPDX-License-Identifier: Apache-2.0` and
-    `Copyright 2026 The AI Operations Layer Authors`.
+    `Copyright 2026 The Mandate Authors`.
     - Covered files: tracked `.ts`, `.tsx`, `.js`, `.mjs`, `.cjs`, `.sh` and `Dockerfile` sources.
       The header goes after a shebang line.
     - Excluded: committed migrations (never edited on `main`), `spikes/`, recordings, workflow

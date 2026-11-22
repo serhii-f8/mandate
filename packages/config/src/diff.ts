@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import { canonicalJson } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import { canonicalJson } from '@mandate/core';
 import type { LoadedConfiguration } from './load.js';
 
 export type EntityKind = 'connection' | 'operation' | 'role' | 'service_account' | 'notification' | 'preset' | 'disabled' | 'setting';
@@ -121,7 +121,7 @@ export function diffConfigurations(before: LoadedConfiguration | undefined, afte
   return { previousHash: before?.hash ?? null, hash: after.hash, changes };
 }
 
-/** Output lines of `aiops config diff`. */
+/** Output lines of `mandate config diff`. */
 export function formatDiff(diff: ConfigDiff): readonly string[] {
   if (diff.previousHash === diff.hash) return ['No changes'];
   const lines = diff.changes.map((c) =>

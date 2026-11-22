@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Preset code and per-record writes end to end (design phase 9 §4, §6; OPS-5, OPS-6, EXE-4,
  * NFR-2): a real `changesetWorkflow` on Temporal and PostgreSQL prepares and executes change-sets
@@ -7,12 +7,12 @@
  * `createRollbackWriterFor` and `createUpstreamReader` over `createAdapters()`.
  */
 import { randomUUID } from 'node:crypto';
-import { createAdapters, createOpenApiAdapter } from '@aiops/adapters';
-import type { LoadedConfiguration } from '@aiops/config';
-import type { ReadAdapter, WriteAdapter } from '@aiops/connector-sdk';
-import { createChangeSet, ManifestBatchWriter, ROLLBACK_REQUEST_MARGIN_MS, UnsupportedWriter, type ChangeItemRecord } from '@aiops/core';
-import { installFakeItems, startFakeUpstream, type FakeItem, type FakeItems, type FakeUpstream } from '@aiops/testing';
-import { createUpstreamReader } from '@aiops/upstream';
+import { createAdapters, createOpenApiAdapter } from '@mandate/adapters';
+import type { LoadedConfiguration } from '@mandate/config';
+import type { ReadAdapter, WriteAdapter } from '@mandate/connector-sdk';
+import { createChangeSet, ManifestBatchWriter, ROLLBACK_REQUEST_MARGIN_MS, UnsupportedWriter, type ChangeItemRecord } from '@mandate/core';
+import { installFakeItems, startFakeUpstream, type FakeItem, type FakeItems, type FakeUpstream } from '@mandate/testing';
+import { createUpstreamReader } from '@mandate/upstream';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { executionSettings } from '../../src/activities/settings.js';
 import { createRollbackWriterFor, createWriterFor } from '../../src/writers.js';

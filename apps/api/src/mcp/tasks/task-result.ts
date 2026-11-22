@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** The answer of a tool call that may create a task (MCP-7). */
 import type { CallToolResult } from '@modelcontextprotocol/server';
-import type { TaskRecord } from '@aiops/core';
+import type { TaskRecord } from '@mandate/core';
 
 export const TASK_POLL_INTERVAL_MS = 2000;
 

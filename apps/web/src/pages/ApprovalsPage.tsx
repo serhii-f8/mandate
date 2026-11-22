@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { createApi, toLogin, Unauthenticated, type ApprovalQueue } from '../api.js';
 import { ApprovalsView } from '../views/ApprovalsView.js';

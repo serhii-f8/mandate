@@ -4,9 +4,9 @@
 #   GITEA_SANDBOX_TOKEN=<token> node deploy/sandbox/gitea/seed.mjs   # org acme, repos, labels, issues
 #   bash deploy/sandbox/gitea/token.sh [scopes]           # prints a fresh admin token
 #   bash deploy/sandbox/gitea/down.sh                     # stop (add -v to drop the data)
-# The container joins the external network `aiops-sandbox` as `gitea-sandbox`, so an api
+# The container joins the external network `mandate-sandbox` as `gitea-sandbox`, so an api
 # container on that network reaches http://gitea-sandbox:3000/api/v1.
-name: aiops-gitea-sandbox
+name: mandate-gitea-sandbox
 services:
   gitea:
     image: gitea/gitea:28.3.0
@@ -17,7 +17,7 @@ services:
       GITEA__server__DISABLE_SSH: "true"
       GITEA__service__DISABLE_REGISTRATION: "true"
     ports:
-      - "127.0.0.1:${AIOPS_GITEA_PORT:-4391}:3000"
+      - "127.0.0.1:${MANDATE_GITEA_PORT:-4391}:3000"
     volumes:
       - gitea-data:/data
     healthcheck:
@@ -26,11 +26,11 @@ services:
       retries: 40
     networks:
       default: {}
-      aiops-sandbox:
+      mandate-sandbox:
         aliases: [gitea-sandbox]
     restart: unless-stopped
 networks:
-  aiops-sandbox:
+  mandate-sandbox:
     external: true
 volumes:
   gitea-data:

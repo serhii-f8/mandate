@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * `submit_for_approval` (MCP-8; design part 1 §5): re-checks policy for a prepared or approved
  * change-set with the caller's current identity and configuration (POL-6). A prepared one starts
@@ -9,8 +9,8 @@
  * `tool.call` details. Answers carry counts and IDs only (SEC-5).
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
-import { createSchemaCompiler } from '@aiops/config';
-import { TASK_TTL_MS, type ApprovalPlan, type ChangeSetRecord, type StartOutcome } from '@aiops/core';
+import { createSchemaCompiler } from '@mandate/config';
+import { TASK_TTL_MS, type ApprovalPlan, type ChangeSetRecord, type StartOutcome } from '@mandate/core';
 import { pageLink } from '../changesets/links.js';
 import { SUBMIT_TOOL, SubmitService, type SubmitOutcome } from '../changesets/submit-service.js';
 import { AUDIT_UNAVAILABLE } from './audited-tool.js';

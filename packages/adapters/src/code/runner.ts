@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Runs a preset's code operations (OPS-5): each invocation gets a fresh `ctx` with the guarded
  * HTTP client of its connection, an abort signal and a deadline. The code's result is copied as
@@ -16,7 +16,7 @@ import type {
   CredentialSource,
   ReadOutcome,
   RecordOutcome,
-} from '@aiops/connector-sdk';
+} from '@mandate/connector-sdk';
 import type { ConnectionClient } from '../http/client.js';
 import { createScrubber } from '../http/scrub.js';
 import { MappingError } from '../openapi/request.js';

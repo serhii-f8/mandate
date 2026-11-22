@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { LoadedConfiguration } from '@aiops/config';
-import { isOpaque } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import type { LoadedConfiguration } from '@mandate/config';
+import { isOpaque } from '@mandate/core';
 import { ApplicationFailure } from '@temporalio/common';
 
 /** How one execution and its rollback run, from the worker's current configuration (EXE-3, EXE-5, EXE-8, EXE-9). */

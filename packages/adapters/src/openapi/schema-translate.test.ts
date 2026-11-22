@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import type { SpecIssue } from '@aiops/connector-sdk';
+import type { SpecIssue } from '@mandate/connector-sdk';
 import { strictAjv } from '../../test/strict-ajv.js';
 import { MAX_REF_DEPTH, toJsonSchema2020 } from './schema-translate.js';
 

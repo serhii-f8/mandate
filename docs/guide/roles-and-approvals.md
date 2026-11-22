@@ -13,7 +13,7 @@ runs an active **revision** stored in PostgreSQL. Changing the configuration alw
 steps:
 
 1. Edit the files in your working copy (`my-config/`, mounted into the containers at
-   `/etc/aiops/config`).
+   `/etc/mandate/config`).
 2. `config diff` compares the files with the active revision and lists what would change.
 3. `config apply` validates the files and stores them as the new active revision. Every apply is
    audited with the actor you name. The running `api` and `worker` follow the new revision within
@@ -125,7 +125,7 @@ See what would change:
 
 <!-- doc-test: role -->
 ```bash
-docker compose exec -T api node dist/cli.js config diff /etc/aiops/config
+docker compose exec -T api node dist/cli.js config diff /etc/mandate/config
 ```
 
 The output lists the added role and the role that lost its mapping, then the old and new
@@ -141,7 +141,7 @@ Apply it:
 
 <!-- doc-test: role -->
 ```bash
-docker compose exec -T api node dist/cli.js config apply /etc/aiops/config --actor guide
+docker compose exec -T api node dist/cli.js config apply /etc/mandate/config --actor guide
 ```
 
 If the files are invalid, `config apply` prints the errors, exits with 1, and the active revision
@@ -178,7 +178,7 @@ a content lead, who cannot approve her own changes), and dave approves.
 On a real installation you manage people in the Keycloak admin console:
 
 1. Open the admin console (`http://localhost:8480/admin` in development) and switch to the realm
-   `aiops`.
+   `mandate`.
 2. **Groups > Create group**: create a group per team, named as in `role_mapping` (for example
    `content` and `content-leads`).
 3. **Users > Add user**: enter the username and email, then on the **Credentials** tab set a

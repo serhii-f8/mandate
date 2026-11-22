@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { StrictMode, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ApprovalsPage } from './pages/ApprovalsPage.js';
@@ -9,7 +9,7 @@ import { CredentialsPage } from './pages/CredentialsPage.js';
 import { IndexPage } from './pages/IndexPage.js';
 import { route, type Route } from './routes.js';
 import '@fontsource-variable/public-sans/wght.css';
-import '@aiops/widgets/styles.css';
+import '@mandate/widgets/styles.css';
 import './styles.css';
 
 // The api serves index.html for every path under /app/; the path picks the page (UI-2, no router library).
@@ -42,7 +42,7 @@ function Shell(): ReactElement {
     <>
       <header className="masthead">
         <a className="brand" href="/app/">
-          AI Operations
+          Mandate
         </a>
         <nav aria-label="Pages">
           <a href="/app/approvals" {...(r.kind === 'approvals' ? { 'aria-current': 'page' as const } : {})}>

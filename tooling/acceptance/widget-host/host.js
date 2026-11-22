@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Browser side of the reference host: an AppBridge around one sandboxed iframe. Calls leave
 // through functions that widget-host.mjs exposes (Node holds the token, so no CORS here).
 import { AppBridge, PostMessageTransport } from '@modelcontextprotocol/ext-apps/app-bridge';
@@ -10,21 +10,21 @@ window.__host = { state: 'starting' };
 async function main() {
   const bridge = new AppBridge(
     null,
-    { name: 'aiops-reference-host', version: '1.0.0' },
+    { name: 'mandate-reference-host', version: '1.0.0' },
     { openLinks: {}, serverTools: {}, updateModelContext: { text: {} } },
     { hostContext: { theme: 'light', displayMode: 'inline', styles: { variables: HOST_THEME } } },
   );
-  bridge.oncalltool = (params) => window.aiopsCallTool(params);
+  bridge.oncalltool = (params) => window.mandateCallTool(params);
   bridge.onopenlink = async ({ url }) => {
-    await window.aiopsOpenLink(url);
+    await window.mandateOpenLink(url);
     return {};
   };
   bridge.onupdatemodelcontext = async (params) => {
-    await window.aiopsModelContext(params);
+    await window.mandateModelContext(params);
     return {};
   };
   bridge.addEventListener('initialized', () => {
-    window.aiopsTrigger()
+    window.mandateTrigger()
       .then(async ({ arguments: args, result }) => {
         await bridge.sendToolInput({ arguments: args });
         await bridge.sendToolResult(result);

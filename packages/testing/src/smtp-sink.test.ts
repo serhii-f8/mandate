@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { connect, type Socket } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startSmtpSink, type SmtpSink } from './smtp-sink.js';
@@ -55,7 +55,7 @@ class RawClient {
 }
 
 async function deliver(client: RawClient, body: string): Promise<string> {
-  expect(await client.send('MAIL FROM:<aiops@localhost>')).toMatch(/^250/);
+  expect(await client.send('MAIL FROM:<mandate@localhost>')).toMatch(/^250/);
   expect(await client.send('RCPT TO:<leads@example.test>')).toMatch(/^250/);
   expect(await client.send('RCPT TO:<ops@example.test>')).toMatch(/^250/);
   expect(await client.send('DATA')).toMatch(/^354/);
@@ -85,7 +85,7 @@ describe('smtp sink', () => {
     expect(await deliver(client, 'Subject: one\r\n\r\nfirst body\r\n..dot-stuffed')).toMatch(/^250/);
     expect(sink.messages).toHaveLength(1);
     expect(sink.messages[0]).toEqual({
-      from: 'aiops@localhost',
+      from: 'mandate@localhost',
       to: ['leads@example.test', 'ops@example.test'],
       data: 'Subject: one\r\n\r\nfirst body\r\n.dot-stuffed',
     });

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
- * `aiops config explain`: a dry policy evaluation against a loaded configuration (POL-7).
+ * `mandate config explain`: a dry policy evaluation against a loaded configuration (POL-7).
  * Arguments are checked against the operation's input schema first, as on a real call
  * (MCP-3); an allowed write states the approval it would need (POL-5). Pure: no I/O.
  */
-import { createSchemaCompiler, pinStateOf, type LoadedConfiguration, type PinState } from '@aiops/config';
-import { allowingRole, approvalRequirement, createPolicyEngine, isOpaque, serviceSubject, type ApprovalRequirement, type PolicyDecision } from '@aiops/core';
+import { createSchemaCompiler, pinStateOf, type LoadedConfiguration, type PinState } from '@mandate/config';
+import { allowingRole, approvalRequirement, createPolicyEngine, isOpaque, serviceSubject, type ApprovalRequirement, type PolicyDecision } from '@mandate/core';
 
 export interface ExplainInput {
   readonly operationId: string;

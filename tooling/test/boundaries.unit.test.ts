@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
 import tseslint from 'typescript-eslint';
@@ -48,8 +48,8 @@ describe('package boundaries (CONTRIBUTING.md repository layout and boundaries)'
       'drizzle-orm',
       'drizzle-orm/pg-core',
       'pg',
-      '@aiops/db',
-      '@aiops/adapters',
+      '@mandate/db',
+      '@mandate/adapters',
       '@modelcontextprotocol/server',
       'node:http',
       'undici',
@@ -63,8 +63,8 @@ describe('package boundaries (CONTRIBUTING.md repository layout and boundaries)'
   });
 
   it('adapters depend on the connector SDK only', async () => {
-    expect(await restrictedImportErrors('packages/adapters/src/probe.ts', '@aiops/core')).toBe(1);
-    expect(await restrictedImportErrors('packages/adapters/src/probe.ts', '@aiops/connector-sdk')).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/src/probe.ts', '@mandate/core')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/src/probe.ts', '@mandate/connector-sdk')).toBe(0);
   });
 
   it('NFR-11 adapters and their tests import no OpenTelemetry package', async () => {
@@ -74,10 +74,10 @@ describe('package boundaries (CONTRIBUTING.md repository layout and boundaries)'
   });
 
   it('adapter tests may also use the shared fakes, production code may not', async () => {
-    expect(await restrictedImportErrors('packages/adapters/src/probe.ts', '@aiops/testing')).toBe(1);
-    expect(await restrictedImportErrors('packages/adapters/src/http/probe.test.ts', '@aiops/testing')).toBe(0);
-    expect(await restrictedImportErrors('packages/adapters/src/http/probe.test.ts', '@aiops/core')).toBe(1);
-    expect(await restrictedImportErrors('packages/adapters/test/probe.ts', '@aiops/testing')).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/src/probe.ts', '@mandate/testing')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/src/http/probe.test.ts', '@mandate/testing')).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/src/http/probe.test.ts', '@mandate/core')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/test/probe.ts', '@mandate/testing')).toBe(0);
   });
 
   it('CONN-1 the MCP client is imported only under packages/adapters/src/mcp/', async () => {
@@ -93,13 +93,13 @@ describe('package boundaries (CONTRIBUTING.md repository layout and boundaries)'
     }
     expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', sdk)).toBe(0);
     expect(await restrictedImportErrors('packages/adapters/test/integration/probe.ts', sdk)).toBe(0);
-    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', '@aiops/core')).toBe(1);
-    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', '@aiops/testing')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', '@mandate/core')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', '@mandate/testing')).toBe(1);
     expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.ts', '@opentelemetry/api')).toBe(1);
     // Ruling F19: MCP adapter tests keep the shared fakes, and the SDK.
-    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', '@aiops/testing')).toBe(0);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', '@mandate/testing')).toBe(0);
     expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', sdk)).toBe(0);
-    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', '@aiops/core')).toBe(1);
+    expect(await restrictedImportErrors('packages/adapters/src/mcp/probe.test.ts', '@mandate/core')).toBe(1);
   });
 
   it('CONN-1 the apps, the presets and packages/upstream never import the MCP client, statically or dynamically', async () => {
@@ -130,55 +130,55 @@ describe('package boundaries (CONTRIBUTING.md repository layout and boundaries)'
     expect(await ruleErrors('apps/web/src/probe.tsx', 'export const e = <div dangerouslySetInnerHTML={{ __html: "" }} />;\n', 'no-restricted-syntax')).toBe(1);
   });
 
-  it('CONN-8 OPS-5 preset src imports @aiops packages as types only', async () => {
+  it('CONN-8 OPS-5 preset src imports @mandate packages as types only', async () => {
     const rule = '@typescript-eslint/no-restricted-imports';
     const file = 'presets/magento2-catalog/src/probe.ts';
-    expect(await ruleErrors(file, "import { CONNECTOR_SDK_VERSION } from '@aiops/connector-sdk';\nexport const v: unknown = CONNECTOR_SDK_VERSION;\n", rule)).toBe(1);
-    expect(await ruleErrors(file, "import type { PresetModule } from '@aiops/connector-sdk';\nexport type P = PresetModule;\n", rule)).toBe(0);
+    expect(await ruleErrors(file, "import { CONNECTOR_SDK_VERSION } from '@mandate/connector-sdk';\nexport const v: unknown = CONNECTOR_SDK_VERSION;\n", rule)).toBe(1);
+    expect(await ruleErrors(file, "import type { PresetModule } from '@mandate/connector-sdk';\nexport type P = PresetModule;\n", rule)).toBe(0);
     // Tests run in the workspace and may import values.
     const test = 'presets/magento2-catalog/src/probe.test.ts';
-    expect(await ruleErrors(test, "import { CONNECTOR_SDK_VERSION } from '@aiops/connector-sdk';\nexport const v: unknown = CONNECTOR_SDK_VERSION;\n", rule)).toBe(0);
+    expect(await ruleErrors(test, "import { CONNECTOR_SDK_VERSION } from '@mandate/connector-sdk';\nexport const v: unknown = CONNECTOR_SDK_VERSION;\n", rule)).toBe(0);
   });
 
   it('presets use only the connector SDK and the configuration schema', async () => {
-    expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@aiops/core')).toBe(1);
-    expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@aiops/config')).toBe(0);
-    expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@aiops/connector-sdk')).toBe(0);
-    expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@aiops/adapters')).toBe(1);
-    expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@aiops/testing')).toBe(1);
+    expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@mandate/core')).toBe(1);
+    expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@mandate/config')).toBe(0);
+    expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@mandate/connector-sdk')).toBe(0);
+    expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@mandate/adapters')).toBe(1);
+    expect(await restrictedImportErrors('presets/magento2-catalog/src/probe.ts', '@mandate/testing')).toBe(1);
   });
 
   it('NFR-17 preset contract tests may also use the adapters and the shared fakes, nothing else', async () => {
     for (const file of ['presets/magento2-catalog/test/probe.unit.test.ts', 'presets/magento2-catalog/src/probe.test.ts']) {
-      expect(await restrictedImportErrors(file, '@aiops/adapters')).toBe(0);
-      expect(await restrictedImportErrors(file, '@aiops/testing')).toBe(0);
-      expect(await restrictedImportErrors(file, '@aiops/config')).toBe(0);
-      expect(await restrictedImportErrors(file, '@aiops/core')).toBe(1);
-      expect(await restrictedImportErrors(file, '@aiops/db')).toBe(1);
-      expect(await restrictedImportErrors(file, '@aiops/api')).toBe(1);
+      expect(await restrictedImportErrors(file, '@mandate/adapters')).toBe(0);
+      expect(await restrictedImportErrors(file, '@mandate/testing')).toBe(0);
+      expect(await restrictedImportErrors(file, '@mandate/config')).toBe(0);
+      expect(await restrictedImportErrors(file, '@mandate/core')).toBe(1);
+      expect(await restrictedImportErrors(file, '@mandate/db')).toBe(1);
+      expect(await restrictedImportErrors(file, '@mandate/api')).toBe(1);
     }
   });
 
   it('EXE-1 packages/upstream depends on core, config and the connector SDK only', async () => {
-    for (const spec of ['@aiops/db', '@aiops/adapters', '@aiops/api']) {
+    for (const spec of ['@mandate/db', '@mandate/adapters', '@mandate/api']) {
       expect(await restrictedImportErrors('packages/upstream/src/probe.ts', spec)).toBe(1);
     }
-    for (const spec of ['@aiops/core', '@aiops/config', '@aiops/connector-sdk']) {
+    for (const spec of ['@mandate/core', '@mandate/config', '@mandate/connector-sdk']) {
       expect(await restrictedImportErrors('packages/upstream/src/probe.ts', spec)).toBe(0);
     }
-    expect(await restrictedImportErrors('packages/upstream/src/probe.test.ts', '@aiops/testing')).toBe(0);
-    expect(await restrictedImportErrors('packages/upstream/src/probe.ts', '@aiops/testing')).toBe(1);
+    expect(await restrictedImportErrors('packages/upstream/src/probe.test.ts', '@mandate/testing')).toBe(0);
+    expect(await restrictedImportErrors('packages/upstream/src/probe.ts', '@mandate/testing')).toBe(1);
   });
 
   it('SEC-4 packages/temporal imports core only', async () => {
-    for (const spec of ['@aiops/db', '@aiops/config', '@aiops/upstream', '@aiops/api']) {
+    for (const spec of ['@mandate/db', '@mandate/config', '@mandate/upstream', '@mandate/api']) {
       expect(await restrictedImportErrors('packages/temporal/src/probe.ts', spec)).toBe(1);
     }
-    expect(await restrictedImportErrors('packages/temporal/src/probe.ts', '@aiops/core')).toBe(0);
+    expect(await restrictedImportErrors('packages/temporal/src/probe.ts', '@mandate/core')).toBe(0);
   });
 
   describe('Temporal workflow code stays deterministic (EXE-10)', () => {
-    it.each(['node:fs', 'fs', '@aiops/db', '@nestjs/common', 'drizzle-orm', '@aiops/adapters', '@aiops/core'])(
+    it.each(['node:fs', 'fs', '@mandate/db', '@nestjs/common', 'drizzle-orm', '@mandate/adapters', '@mandate/core'])(
       'rejects an import of %s',
       async (specifier) => {
         expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', specifier)).toBe(1);
@@ -189,18 +189,18 @@ describe('package boundaries (CONTRIBUTING.md repository layout and boundaries)'
       expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@temporalio/workflow')).toBe(0);
     });
 
-    it('EXE-10 workflow code may import @aiops/temporal/contract but not @aiops/temporal', async () => {
-      expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@aiops/temporal/contract')).toBe(0);
-      expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@aiops/temporal')).toBe(1);
-      expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@aiops/temporal/codec')).toBe(1);
-      expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@aiops/temporal/contract-extra')).toBe(1);
+    it('EXE-10 workflow code may import @mandate/temporal/contract but not @mandate/temporal', async () => {
+      expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@mandate/temporal/contract')).toBe(0);
+      expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@mandate/temporal')).toBe(1);
+      expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@mandate/temporal/codec')).toBe(1);
+      expect(await restrictedImportErrors('apps/worker/src/workflows/probe.ts', '@mandate/temporal/contract-extra')).toBe(1);
     });
   });
 
   it('packages never import an app', async () => {
-    expect(await restrictedImportErrors('packages/db/src/probe.ts', '@aiops/api')).toBe(1);
-    expect(await restrictedImportErrors('packages/config/src/probe.ts', '@aiops/worker')).toBe(1);
-    expect(await restrictedImportErrors('packages/widgets/src/views/Probe.tsx', '@aiops/api')).toBe(1);
+    expect(await restrictedImportErrors('packages/db/src/probe.ts', '@mandate/api')).toBe(1);
+    expect(await restrictedImportErrors('packages/config/src/probe.ts', '@mandate/worker')).toBe(1);
+    expect(await restrictedImportErrors('packages/widgets/src/views/Probe.tsx', '@mandate/api')).toBe(1);
   });
 
   describe('widgets (UI-1, SEC-1, SEC-5)', () => {
@@ -216,11 +216,11 @@ describe('package boundaries (CONTRIBUTING.md repository layout and boundaries)'
       expect(await restrictedImportErrors('packages/widgets/src/views/Probe.tsx', '../widget/bridge.js')).toBe(1);
     });
 
-    it('UI-1 apps/web imports @aiops/widgets and its stylesheet, not its widget entries', async () => {
+    it('UI-1 apps/web imports @mandate/widgets and its stylesheet, not its widget entries', async () => {
       const file = 'apps/web/src/pages/Probe.tsx';
-      expect(await restrictedImportErrors(file, '@aiops/widgets')).toBe(0);
-      expect(await restrictedImportErrors(file, '@aiops/widgets/styles.css')).toBe(0);
-      expect(await restrictedImportErrors(file, '@aiops/widgets/widget/bridge')).toBe(1);
+      expect(await restrictedImportErrors(file, '@mandate/widgets')).toBe(0);
+      expect(await restrictedImportErrors(file, '@mandate/widgets/styles.css')).toBe(0);
+      expect(await restrictedImportErrors(file, '@mandate/widgets/widget/bridge')).toBe(1);
       expect(await restrictedImportErrors(file, '@modelcontextprotocol/ext-apps')).toBe(1);
     });
 
@@ -245,7 +245,7 @@ describe('package boundaries (CONTRIBUTING.md repository layout and boundaries)'
 
     it('UI-1 the library does not reach the bridge or the MCP SDK through a dynamic import', async () => {
       for (const file of ['packages/widgets/src/views/Probe.tsx', 'packages/widgets/src/test-fixtures.ts']) {
-        for (const spec of ['../widget/bridge.js', '@modelcontextprotocol/ext-apps', '@aiops/api']) {
+        for (const spec of ['../widget/bridge.js', '@modelcontextprotocol/ext-apps', '@mandate/api']) {
           expect(await ruleErrors(file, `export const m = import('${spec}');\n`, 'no-restricted-syntax'), `${file}: ${spec}`).toBe(1);
         }
         expect(await ruleErrors(file, "export const m = import('../model.js');\n", 'no-restricted-syntax')).toBe(0);

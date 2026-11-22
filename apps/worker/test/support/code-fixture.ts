@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
- * The code fixture preset of `@aiops/testing` as the worker loads it (OPS-5, OPS-6): connection
+ * The code fixture preset of `@mandate/testing` as the worker loads it (OPS-5, OPS-6): connection
  * `items` at a fake upstream served by `installFakeItems`, a fake bearer token, and the role
  * `editor` (group `editors`, no approval) granted `fixture.update`, `fixture.set_tags`,
  * `fixture.ping` and any extra grants. Each load copies the fixture into a new temporary preset
@@ -10,9 +10,9 @@
 import { cp, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { UpstreamResolver } from '@aiops/connector-sdk';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import { CODE_FIXTURE_PRESET_DIR } from '@aiops/testing';
+import type { UpstreamResolver } from '@mandate/connector-sdk';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
+import { CODE_FIXTURE_PRESET_DIR } from '@mandate/testing';
 import { MemoryVault } from './magento.js';
 
 export const CODE_FIXTURE_GROUP = 'editors';
@@ -31,7 +31,7 @@ function sources(baseUrl: string, maxConcurrency: number, grants: readonly strin
       file: 'connections.yaml',
       text: `version: 1
 presets:
-  - { id: fixture, package: "@aiops/code-fixture-preset" }
+  - { id: fixture, package: "@mandate/code-fixture-preset" }
 connections:
   - id: items
     adapter: openapi
@@ -72,7 +72,7 @@ export async function loadCodeFixture(
     readonly grants?: readonly string[];
   } = {},
 ): Promise<LoadedConfiguration> {
-  const presets = await mkdtemp(join(tmpdir(), 'aiops-worker-code-presets-'));
+  const presets = await mkdtemp(join(tmpdir(), 'mandate-worker-code-presets-'));
   try {
     await cp(CODE_FIXTURE_PRESET_DIR, join(presets, 'code-fixture'), { recursive: true });
     const all = [...sources(baseUrl, opts.maxConcurrency ?? 2, [...FIXTURE_GRANTS, ...(opts.grants ?? [])]), ...(opts.extra ?? [])];

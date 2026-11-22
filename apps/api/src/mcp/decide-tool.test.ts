@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import { approvalRequirement, ExecutorUnavailable, type Caller, type ChangeSetExecutor, type StartRequest } from '@aiops/core';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
+import { approvalRequirement, ExecutorUnavailable, type Caller, type ChangeSetExecutor, type StartRequest } from '@mandate/core';
 import {
   InMemoryAuditLog,
   InMemoryChangeSetRepository,
@@ -12,7 +12,7 @@ import {
   recordApproval,
   ScriptedWriter,
   submitChangeSet,
-} from '@aiops/testing';
+} from '@mandate/testing';
 import { ApprovalService } from '../approvals/approval-service.js';
 import { callerFromAuthInfo } from '../auth/caller-from-auth.js';
 import type { AuditDetails } from './audited-tool.js';
@@ -100,7 +100,7 @@ if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
 const CONFIG: LoadedConfiguration = loaded.configuration;
 const SNAPSHOT = snapshotOf(CONFIG);
 
-const bob: Caller = callerFromAuthInfo({ token: '', clientId: 'aiops-mcp', scopes: [], extra: { sub: 'bob', groups: ['leads'], auth_time: AUTH_TIME } });
+const bob: Caller = callerFromAuthInfo({ token: '', clientId: 'mandate-mcp', scopes: [], extra: { sub: 'bob', groups: ['leads'], auth_time: AUTH_TIME } });
 const carol: Caller = { subject: 'carol', groups: ['brands'] };
 
 /** Delegates to the in-memory executor unless made unavailable. */
@@ -165,7 +165,7 @@ async function setup(options: { steps?: readonly string[]; widget?: boolean } = 
     tasks: new InMemoryTaskRepository(),
     audit,
     approvals,
-    publicUrl: new URL('https://aiops.example.test'),
+    publicUrl: new URL('https://mandate.example.test'),
   });
   const reports: AuditDetails[] = [];
   const call = async (caller: Caller, args: Record<string, unknown> = {}): Promise<CallToolResult> => {
@@ -228,7 +228,7 @@ describe('APR-8 decide_changeset widget tool', () => {
       role: 'lead',
       decision: 'approved',
       channel: 'widget',
-      clientId: 'aiops-mcp',
+      clientId: 'mandate-mcp',
       authTime: new Date(AUTH_TIME * 1000),
       correlationId: 'corr-w',
     });

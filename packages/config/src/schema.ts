@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Schema of one configuration document (CFG-1, ADR 0015). Every object is strict:
  * an unknown key is an error, so typos and pasted secrets do not pass silently.

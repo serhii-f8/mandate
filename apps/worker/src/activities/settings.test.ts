@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { ApplicationFailure } from '@temporalio/common';
 import { describe, expect, it } from 'vitest';
 import { OPAQUE_OPERATION, testConfiguration, WRITE_OPERATION } from '../../test/support/configuration.js';

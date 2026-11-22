@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash } from 'node:crypto';
-import type { LoginRow, PostgresSessionStore, SessionRow } from '@aiops/db';
+import type { LoginRow, PostgresSessionStore, SessionRow } from '@mandate/db';
 import { randomToken, type OidcIdentity } from './oidc-client.js';
 
-export const SESSION_COOKIE = 'aiops_session';
+export const SESSION_COOKIE = 'mandate_session';
 /**
  * The session cookie's name on https: the `__Host-` prefix makes the browser refuse it
  * unless it is Secure, has Path=/ and no Domain, so a sibling host cannot plant or shadow it.
@@ -19,7 +19,7 @@ export function sessionCookieValue(header: string | undefined, secure: boolean):
   return value === '' ? undefined : value;
 }
 /** Binds a login's state to the browser that started it (login CSRF, SEC-8). */
-export const LOGIN_COOKIE = 'aiops_login';
+export const LOGIN_COOKIE = 'mandate_login';
 /** Login state lives 10 minutes (design §4). */
 const LOGIN_TTL_SECONDS = 600;
 const LOGIN_TTL_MS = LOGIN_TTL_SECONDS * 1000;
@@ -43,7 +43,7 @@ export function parseCookies(header: string | undefined): Map<string, string> {
 
 /**
  * `Set-Cookie` for the session: HttpOnly, SameSite=Strict, Path=/, no Domain; on https
- * Secure and named `__Host-aiops_session` (design §4).
+ * Secure and named `__Host-mandate_session` (design §4).
  */
 export function sessionCookie(value: string, maxAgeSeconds: number, secure: boolean): string {
   return `${sessionCookieName(secure)}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${String(maxAgeSeconds)}${secure ? '; Secure' : ''}`;

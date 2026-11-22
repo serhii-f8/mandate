@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The contract between `changesetWorkflow` and its starters and activities (EXE-1, EXE-2).
- * Imported by workflow code through `@aiops/temporal/contract`: it must stay pure, with
+ * Imported by workflow code through `@mandate/temporal/contract`: it must stay pure, with
  * type-only imports, so the workflow bundle pulls in nothing non-deterministic (EXE-10).
- * Workflow code imports the core types it needs from here, never from `@aiops/core`.
+ * Workflow code imports the core types it needs from here, never from `@mandate/core`.
  */
-import type { ChangeSetStatus, FinishOutcome, RollbackCounts, RollbackOutcome } from '@aiops/core';
+import type { ChangeSetStatus, FinishOutcome, RollbackCounts, RollbackOutcome } from '@mandate/core';
 
-export type { ChangeSetStatus, FinishOutcome, RollbackCounts, RollbackOutcome } from '@aiops/core';
+export type { ChangeSetStatus, FinishOutcome, RollbackCounts, RollbackOutcome } from '@mandate/core';
 
 export const CHANGESET_WORKFLOW = 'changesetWorkflow';
-export const DEFAULT_TASK_QUEUE = 'aiops-operations';
+export const DEFAULT_TASK_QUEUE = 'mandate-operations';
 export const WAKE_SIGNAL = 'wake';
 export const PROGRESS_QUERY = 'progress';
 export const PREPARE_MAX_ATTEMPTS = 5;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 # Restart acceptance (NFR-1, NFR-2, NFR-4, EXE-4, AUD-5; design phase-10-release-quality §3.2) against
 # the fake Magento catalog of packages/testing on the Compose network (`fake-magento`, 1600 products
 # RST-0001..RST-1600, brand `restart`, meta_keyword `seed`):
@@ -32,7 +32,7 @@
 # 1-100, api 101-400, worker 401-700, postgres 701-1000, temporal 1001-1300, pending 1301-1400 and
 # 1401-1500. The fake is never reset between groups; the exactly-once check compares every SKU with
 # the seed plus the values of the groups prepared so far (P11).
-# AIOPS_RESTART_GROUPS selects the groups (default "baseline api worker postgres temporal pending");
+# MANDATE_RESTART_GROUPS selects the groups (default "baseline api worker postgres temporal pending");
 # a selected group that is not defined is a FAIL `restart-groups` (ADR 0043), checked before any
 # Docker work.
 # Tests the committed HEAD (a fresh clone sees only commits), with a Compose override that mounts the
@@ -57,7 +57,7 @@ result() {
 }
 
 WORK="$(mktemp -d)"
-PROJECT="aiops-restart-$$"
+PROJECT="mandate-restart-$$"
 # The fake bearer value carol enters; never a real credential.
 FAKE_TOKEN="restart-fake-token"
 SEED_VALUE="seed"
@@ -67,16 +67,16 @@ BRAND="restart"
 # Six distinct free ports in one call: every socket stays open until all are allocated, so two
 # separate calls cannot be handed the same port.
 free_ports() { node -e "const n=Number(process.argv[1]),net=require('net'),ss=[];(function next(){if(ss.length===n){console.log(ss.map(s=>s.address().port).join(' '));ss.forEach(s=>s.close());return}const s=net.createServer();ss.push(s);s.listen(0,'127.0.0.1',next)})()" "$1"; }
-read -r AIOPS_API_PORT AIOPS_KEYCLOAK_PORT AIOPS_TEMPORAL_PORT AIOPS_POSTGRES_PORT AIOPS_MAILPIT_PORT AIOPS_FAKE_MAGENTO_PORT <<<"$(free_ports 6)"
-export AIOPS_API_PORT AIOPS_KEYCLOAK_PORT AIOPS_TEMPORAL_PORT AIOPS_POSTGRES_PORT AIOPS_MAILPIT_PORT AIOPS_FAKE_MAGENTO_PORT
-export AIOPS_KEYCLOAK_PUBLIC_URL="http://localhost:${AIOPS_KEYCLOAK_PORT}"
-export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
-export AIOPS_PUBLIC_URL="http://localhost:${AIOPS_API_PORT}"
-export AIOPS_ACCEPT_CONFIG_DIR="$WORK/config"
-MCP="http://127.0.0.1:${AIOPS_API_PORT}/mcp"
-API="$AIOPS_PUBLIC_URL"
-MAILPIT="http://127.0.0.1:${AIOPS_MAILPIT_PORT}"
-FAKE="http://127.0.0.1:${AIOPS_FAKE_MAGENTO_PORT}"
+read -r MANDATE_API_PORT MANDATE_KEYCLOAK_PORT MANDATE_TEMPORAL_PORT MANDATE_POSTGRES_PORT MANDATE_MAILPIT_PORT MANDATE_FAKE_MAGENTO_PORT <<<"$(free_ports 6)"
+export MANDATE_API_PORT MANDATE_KEYCLOAK_PORT MANDATE_TEMPORAL_PORT MANDATE_POSTGRES_PORT MANDATE_MAILPIT_PORT MANDATE_FAKE_MAGENTO_PORT
+export MANDATE_KEYCLOAK_PUBLIC_URL="http://localhost:${MANDATE_KEYCLOAK_PORT}"
+export MANDATE_MCP_RESOURCE="http://localhost:${MANDATE_API_PORT}/mcp"
+export MANDATE_PUBLIC_URL="http://localhost:${MANDATE_API_PORT}"
+export MANDATE_ACCEPT_CONFIG_DIR="$WORK/config"
+MCP="http://127.0.0.1:${MANDATE_API_PORT}/mcp"
+API="$MANDATE_PUBLIC_URL"
+MAILPIT="http://127.0.0.1:${MANDATE_MAILPIT_PORT}"
+FAKE="http://127.0.0.1:${MANDATE_FAKE_MAGENTO_PORT}"
 # Per change-set records the helpers keep across subshells: $STATE/<id>.hash, and $STATE/ranges with
 # one "<first> <count> <value>" line per prepared range.
 STATE="$WORK/state"
@@ -86,22 +86,22 @@ mkdir -p "$STATE"
 compose() { docker compose -p "$PROJECT" -f compose.yaml -f scripts/acceptance/restart.compose.yaml "$@"; }
 
 cleanup() {
-  (cd "$WORK/aiops" 2>/dev/null && compose down -v --remove-orphans >/dev/null 2>&1) || true
+  (cd "$WORK/mandate" 2>/dev/null && compose down -v --remove-orphans >/dev/null 2>&1) || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
 
 json() { node -e "try{const v=JSON.parse(process.argv[1])$2;console.log(v===undefined?'':typeof v==='string'?v:JSON.stringify(v))}catch{console.log('')}" "$1"; }
-login() { node "$REPO/tooling/acceptance/login.mjs" "$AIOPS_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$AIOPS_MCP_RESOURCE"; }
+login() { node "$REPO/tooling/acceptance/login.mjs" "$MANDATE_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$MANDATE_MCP_RESOURCE"; }
 page_login() { node "$REPO/tooling/acceptance/page-login.mjs" "$API" "$1" dev-only-password "${2:-/app/approvals}"; }
-page_api() { AIOPS_PAGE_COOKIE="$1" node "$REPO/tooling/acceptance/page-api.mjs" "$API" "${@:2}"; }
+page_api() { MANDATE_PAGE_COOKIE="$1" node "$REPO/tooling/acceptance/page-api.mjs" "$API" "${@:2}"; }
 # A user calls a tool; the user logs in again before every call, so no token expires during the run.
 user_mcp() {
   local token
   token="$(login "$1" 2>&1)" || { echo "{\"loginError\":$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$token")}"; return 0; }
-  AIOPS_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --tool "$2" --args "$3" 2>&1 || true
+  MANDATE_MCP_TOKEN="$token" node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --tool "$2" --args "$3" 2>&1 || true
 }
-psql_q() { compose exec -T postgres psql -U aiops -d aiops -tAc "$1"; }
+psql_q() { compose exec -T postgres psql -U mandate -d mandate -tAc "$1"; }
 # running SVC: the number of running containers of SVC; prints `?` and returns 1 when `compose ps`
 # itself fails, so a failing Docker call never reads as 0 running.
 running() {
@@ -264,7 +264,7 @@ check_exactly_once() {
 # check_common ID HASH ITEMS BATCHES [USER]: the change-set (read as USER, default alice) is
 # `completed` with the prepared hash, it has ITEMS items, every one `written` (CS-7 `already_applied`
 # included), BATCHES change_batch rows, every one done, as many `changeset.batch` audit rows, and
-# `aiops audit verify` exits 0 (AUD-5). Prints a one-line summary; returns 1 with the details when
+# `mandate audit verify` exits 0 (AUD-5). Prints a one-line summary; returns 1 with the details when
 # any part differs.
 check_common() {
   local id="$1" hash="$2" want_items="$3" want_batches="$4" user="${5:-alice}" answer status now_hash items batches audit_rows verify code=0
@@ -344,7 +344,7 @@ kill_svc() {
 }
 
 # listeners: backends of the configuration LISTEN connection (CFG-3; one per api and worker process).
-listeners() { psql_q "select count(*) from pg_stat_activity where application_name = 'aiops-config-listener'" 2>/dev/null | tr -d ' ' || true; }
+listeners() { psql_q "select count(*) from pg_stat_activity where application_name = 'mandate-config-listener'" 2>/dev/null | tr -d ' ' || true; }
 
 # loops_recovered BEFORE: after a PostgreSQL restart, waits (60 s) until the LISTEN connections are
 # back to BEFORE and the sealer has sealed every audit row (`audit verify` reports unsealed=0), so the
@@ -535,7 +535,7 @@ group_pending() {
 
 # ---- Group selection: every selected group must be defined (ADR 0043), before any Docker work ----
 # Not GROUPS: bash ignores assignments to its own GROUPS array (the user's group IDs).
-RUN_GROUPS="${AIOPS_RESTART_GROUPS:-baseline api worker postgres temporal pending}"
+RUN_GROUPS="${MANDATE_RESTART_GROUPS:-baseline api worker postgres temporal pending}"
 unknown=""
 for g in $RUN_GROUPS; do
   declare -F "group_$g" >/dev/null || unknown+="$g "
@@ -548,11 +548,11 @@ fi
 
 # ---- Setup ----------------------------------------------------------------------------------------
 
-echo "# Restart acceptance of ${SHA:0:12} (project $PROJECT, api port $AIOPS_API_PORT, fake Magento port $AIOPS_FAKE_MAGENTO_PORT, groups: $RUN_GROUPS)"
+echo "# Restart acceptance of ${SHA:0:12} (project $PROJECT, api port $MANDATE_API_PORT, fake Magento port $MANDATE_FAKE_MAGENTO_PORT, groups: $RUN_GROUPS)"
 
-git clone --quiet --no-local --no-checkout "$REPO" "$WORK/aiops"
-git -C "$WORK/aiops" checkout --quiet --detach "$SHA"
-cd "$WORK/aiops"
+git clone --quiet --no-local --no-checkout "$REPO" "$WORK/mandate"
+git -C "$WORK/mandate" checkout --quiet --detach "$SHA"
+cd "$WORK/mandate"
 
 # The restart configuration, generated (not deploy/config): the preset at the version the clone
 # ships (ruling P9), roles for alice (no approval), the gated support user (bob, one content_lead
@@ -561,11 +561,11 @@ cd "$WORK/aiops"
 # restart (NTF-3).
 PRESET_VERSION="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).version)' presets/magento2-catalog/package.json)"
 [[ "$PRESET_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { fail acceptance-config "preset version '$PRESET_VERSION'"; result; }
-mkdir -p "$AIOPS_ACCEPT_CONFIG_DIR"
-cat >"$AIOPS_ACCEPT_CONFIG_DIR/connections.yaml" <<YAML
+mkdir -p "$MANDATE_ACCEPT_CONFIG_DIR"
+cat >"$MANDATE_ACCEPT_CONFIG_DIR/connections.yaml" <<YAML
 version: 1
 presets:
-  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '$PRESET_VERSION' }
+  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '$PRESET_VERSION' }
 connections:
   - id: magento
     adapter: openapi
@@ -575,7 +575,7 @@ connections:
     preset: magento-catalog
     allow_private_network: true
 YAML
-cat >"$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml" <<'YAML'
+cat >"$MANDATE_ACCEPT_CONFIG_DIR/roles.yaml" <<'YAML'
 version: 1
 notifications:
   - { id: content-leads-mail, kind: email, to: [content-leads@example.test] }
@@ -604,7 +604,7 @@ role_mapping:
   - { group: admins, roles: [restart_admin] }
 YAML
 # 100 items per workflow run: continue-as-new happens within a 300-SKU run.
-cat >"$AIOPS_ACCEPT_CONFIG_DIR/settings.yaml" <<'YAML'
+cat >"$MANDATE_ACCEPT_CONFIG_DIR/settings.yaml" <<'YAML'
 version: 1
 changesets: { items_per_workflow_run: 100 }
 rate_limits: { mcp_user_per_minute: 6000, unauthenticated_per_minute: 6000 }
@@ -617,7 +617,7 @@ if compose up -d --build --wait >"$WORK/up.log" 2>&1; then
   FAKE_HEALTH="$(docker inspect -f '{{.State.Health.Status}}' "$(compose ps -q fake-magento)")"
   FAKE_PRODUCTS="$(node -e 'try{console.log(Object.keys(JSON.parse(process.argv[1]).skus).length)}catch{console.log("")}' "$(fake_state)")"
   if [[ "$WORKERS" == 2 && "$FAKE_HEALTH" == healthy && "$FAKE_PRODUCTS" == "$PRODUCTS" && "$MAILPIT_OK" == ok ]]; then
-    pass stack-healthy "docker compose up -d --build --wait; running workers: $WORKERS; fake-magento $FAKE_HEALTH with $FAKE_PRODUCTS products; Mailpit API $MAILPIT_OK; preset @aiops/magento2-catalog $PRESET_VERSION"
+    pass stack-healthy "docker compose up -d --build --wait; running workers: $WORKERS; fake-magento $FAKE_HEALTH with $FAKE_PRODUCTS products; Mailpit API $MAILPIT_OK; preset @mandate/magento2-catalog $PRESET_VERSION"
   else
     fail stack-healthy "running workers: $WORKERS; fake-magento: $FAKE_HEALTH, products '$FAKE_PRODUCTS'; Mailpit API $MAILPIT_OK"; compose ps -a; result
   fi

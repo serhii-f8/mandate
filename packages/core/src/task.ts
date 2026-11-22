@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** MCP Tasks (MCP-7): the task row only binds a task ID to its owner; state is derived from the change-set. */
 export type TaskKind = 'prepare' | 'execute';
 

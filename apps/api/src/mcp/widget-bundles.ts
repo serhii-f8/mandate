@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,8 +10,8 @@ export type WidgetKind = 'changeset' | 'approval';
 export const UI_MIME_TYPE = 'text/html;profile=mcp-app';
 
 export const WIDGET_RESOURCES: Readonly<Record<WidgetKind, { uri: string; file: string; name: string; title: string }>> = {
-  changeset: { uri: 'ui://aiops/changeset.html', file: 'changeset.html', name: 'changeset', title: 'Change-set' },
-  approval: { uri: 'ui://aiops/approval.html', file: 'approval.html', name: 'approval', title: 'Approval' },
+  changeset: { uri: 'ui://mandate/changeset.html', file: 'changeset.html', name: 'changeset', title: 'Change-set' },
+  approval: { uri: 'ui://mandate/approval.html', file: 'approval.html', name: 'approval', title: 'Approval' },
 };
 
 const KINDS: readonly WidgetKind[] = ['changeset', 'approval'];
@@ -54,7 +54,7 @@ export class WidgetBundles implements WidgetCatalog {
         html = undefined; // missing or unreadable: the same text fallback
       }
       if (html === undefined || html.length === 0) {
-        warn(`widget bundle missing; ${uri} is not served (set AIOPS_WIDGET_DIR or run pnpm --filter @aiops/widgets build:widgets)`, { file: path });
+        warn(`widget bundle missing; ${uri} is not served (set MANDATE_WIDGET_DIR or run pnpm --filter @mandate/widgets build:widgets)`, { file: path });
         continue;
       }
       resources.push({ kind, uri, name, title, html });

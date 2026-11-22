@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
-import type { LoadedConfiguration, NotificationConfig } from '@aiops/config';
-import { renderNotification, type ChangeSetRecord, type NewNotification, type NotificationOutbox, type NotificationRow } from '@aiops/core';
-import { InMemoryChangeSetRepository, recordApproval, submitChangeSet } from '@aiops/testing';
+import type { LoadedConfiguration, NotificationConfig } from '@mandate/config';
+import { renderNotification, type ChangeSetRecord, type NewNotification, type NotificationOutbox, type NotificationRow } from '@mandate/core';
+import { InMemoryChangeSetRepository, recordApproval, submitChangeSet } from '@mandate/testing';
 import type { Logger } from 'pino';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrepared } from '../../test/support/changesets.js';
@@ -11,7 +11,7 @@ import { testConfiguration, WRITE_OPERATION } from '../../test/support/configura
 import { createNotificationDispatcher, type DispatcherDeps } from './dispatcher.js';
 import type { EmailSender, SendOutcome, WebhookSender, WebhookTarget } from './senders.js';
 
-const PUBLIC_URL = 'http://aiops.example.test';
+const PUBLIC_URL = 'http://mandate.example.test';
 const RECIPIENT = 'ops-team@example.test';
 const OPERATION_TITLE = 'Update product content';
 

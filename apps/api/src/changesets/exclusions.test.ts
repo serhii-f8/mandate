@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import type { Caller, WorkflowStarter } from '@aiops/core';
-import { InMemoryAuditLog, InMemoryChangeSetRepository } from '@aiops/testing';
+import type { Caller, WorkflowStarter } from '@mandate/core';
+import { InMemoryAuditLog, InMemoryChangeSetRepository } from '@mandate/testing';
 import { excludeItems } from './exclusions.js';
 
 const SOURCE = '11111111-1111-4111-8111-111111111111';
 const HASH = `sha256:${'a'.repeat(64)}`;
 const NOW = new Date('2026-11-17T10:00:00.000Z');
-const alice: Caller = { subject: 'alice', clientId: 'aiops-mcp', groups: ['content'] };
+const alice: Caller = { subject: 'alice', clientId: 'mandate-mcp', groups: ['content'] };
 
 class RecordingStarter implements WorkflowStarter {
   readonly started: string[] = [];

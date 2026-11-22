@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The executor contract (EXE-11) against `TemporalExecutor`: the same cases as the in-memory
  * executor, run through `changesetWorkflow` on a real worker. The contract's change-sets carry a
@@ -9,9 +9,9 @@
  */
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
-import { EMPTY_STATS, ExecutorUnavailable, type AuditEventInput, type ChangeSetRecord } from '@aiops/core';
-import { clientDataConverter, parseTemporalKeys, TemporalExecutor } from '@aiops/temporal';
-import { allowAllGuard, describeExecutorContract, EXECUTOR_CONTRACT_HASH, ScriptedWriter } from '@aiops/testing';
+import { EMPTY_STATS, ExecutorUnavailable, type AuditEventInput, type ChangeSetRecord } from '@mandate/core';
+import { clientDataConverter, parseTemporalKeys, TemporalExecutor } from '@mandate/temporal';
+import { allowAllGuard, describeExecutorContract, EXECUTOR_CONTRACT_HASH, ScriptedWriter } from '@mandate/testing';
 import { Client, Connection, ServiceError, type WorkflowClientInterceptor } from '@temporalio/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPrepared, targetIds } from '../support/changesets.js';

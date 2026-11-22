@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Records `changesetWorkflow` history fixtures for the replay gate (ADR 0006, EXE-10):
- *   pnpm --filter @aiops/worker record-history <scenario>
+ *   pnpm --filter @mandate/worker record-history <scenario>
  * Runs the scenario with the CURRENT code on the Temporal test server and a Testcontainers
  * PostgreSQL (the integration harness), with payloads encrypted under the fixed test key
  * (TEST_TEMPORAL_KEYS, never a real key), and writes
@@ -27,9 +27,9 @@ import {
   ROLLBACK_REQUEST_MARGIN_MS,
   rollbackRequestEvents,
   type UpstreamReader,
-} from '@aiops/core';
-import { CHANGESET_WORKFLOW, PROGRESS_QUERY, WAKE_SIGNAL, type WorkflowProgress } from '@aiops/temporal';
-import { recordApproval, ScriptedWriter } from '@aiops/testing';
+} from '@mandate/core';
+import { CHANGESET_WORKFLOW, PROGRESS_QUERY, WAKE_SIGNAL, type WorkflowProgress } from '@mandate/temporal';
+import { recordApproval, ScriptedWriter } from '@mandate/testing';
 import { trace } from '@opentelemetry/api';
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
@@ -76,7 +76,7 @@ const catalogReader: UpstreamReader = {
  * would put the recording machine's name into the committed histories (identities and sticky
  * task queue names); identity is not replay-relevant.
  */
-const RECORDER_IDENTITY = 'aiops-recorder';
+const RECORDER_IDENTITY = 'mandate-recorder';
 
 const args = process.argv.slice(2);
 const force = args.includes('--force');
@@ -85,7 +85,7 @@ const traced = args.includes('--traced');
 const spans = new InMemorySpanExporter();
 
 async function withWorker<T>(infra: Infra, opts: TestWorkerOptions, fn: (worker: TestWorker) => Promise<T>): Promise<T> {
-  const plugins = traced ? { plugins: [createTracingPlugin({ spanProcessor: new SimpleSpanProcessor(spans), serviceName: 'aiops-worker' })] } : {};
+  const plugins = traced ? { plugins: [createTracingPlugin({ spanProcessor: new SimpleSpanProcessor(spans), serviceName: 'mandate-worker' })] } : {};
   const worker = await startTestWorker(infra, { ...opts, ...plugins, identity: RECORDER_IDENTITY });
   try {
     return await fn(worker);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { AuditEventModel, AuditFilters } from '@aiops/widgets';
+// Copyright 2026 The Mandate Authors
+import type { AuditEventModel, AuditFilters } from '@mandate/widgets';
 import type { ConnectionTestReport, CredentialRow, SaveResult } from './views/CredentialsView.js';
 
 export interface Session {

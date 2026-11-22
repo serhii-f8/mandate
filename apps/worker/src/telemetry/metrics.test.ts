@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { ChangeSetStatus } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import type { ChangeSetStatus } from '@mandate/core';
 import { ApplicationFailure } from '@temporalio/common';
 import {
   AggregationTemporality,
@@ -38,7 +38,7 @@ describe('NFR-12 worker metrics', () => {
   }
 
   async function gauge(): Promise<Record<string, number>> {
-    const points = ((await metric('aiops_changesets'))?.dataPoints ?? []) as DataPoint<number>[];
+    const points = ((await metric('mandate_changesets'))?.dataPoints ?? []) as DataPoint<number>[];
     return Object.fromEntries(points.map((p) => [String(p.attributes.status), p.value]));
   }
 
@@ -47,7 +47,7 @@ describe('NFR-12 worker metrics', () => {
     expect(new Set(CHANGESET_STATUSES).size).toBe(CHANGESET_STATUSES.length);
   });
 
-  it('NFR-12 aiops_changesets reports every status, 0 when absent', async () => {
+  it('NFR-12 mandate_changesets reports every status, 0 when absent', async () => {
     registerChangeSetGauge(provider.getMeter('t'), () => Promise.resolve(new Map([['prepared', 2], ['completed', 1]])));
     const values = await gauge();
     expect(Object.keys(values).sort()).toEqual([...CHANGESET_STATUSES].sort());
@@ -150,7 +150,7 @@ describe('NFR-12 worker metrics', () => {
     await expect(wrapped.rollbackBatch('c', 0)).rejects.toBe(writer);
     await expect(wrapped.echo('x')).resolves.toBe('x');
 
-    const data = await metric('aiops_batch_duration_seconds');
+    const data = await metric('mandate_batch_duration_seconds');
     const points = (data?.dataPoints ?? []) as DataPoint<Histogram>[];
     const byLabel = Object.fromEntries(
       points.map((p) => [`${String(p.attributes.phase)}/${String(p.attributes.outcome)}`, p.value]),

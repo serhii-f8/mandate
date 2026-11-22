@@ -1,4 +1,4 @@
-# AI Operations Layer: instructions for AI coding assistants
+# Mandate: instructions for AI coding assistants
 
 This file is read by Claude Code and similar assistants when they work in this repository. Human
 contributors: the same rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -145,6 +145,6 @@ Run from the repository root. pnpm comes from the `packageManager` field through
 | Install | `pnpm install` (CI: `pnpm install --frozen-lockfile`) |
 | Build / type-check / lint | `pnpm build` / `pnpm typecheck` / `pnpm lint` |
 | Unit / integration / end-to-end tests | `pnpm test` / `pnpm test:int` / `pnpm test:e2e` |
-| One package / one file | `pnpm --filter @aiops/<pkg> test`; `cd <pkg> && pnpm exec vitest run --project <unit\|integration\|e2e> <path>` |
+| One package / one file | `pnpm --filter @mandate/<pkg> test`; `cd <pkg> && pnpm exec vitest run --project <unit\|integration\|e2e> <path>` |
 | Everything CI runs | `bash scripts/ci.sh` |
 | Local stack | `docker compose up -d --build --wait` (see [docs/guide/installation.md](docs/guide/installation.md)) |

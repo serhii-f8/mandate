@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { AuditEventInput, AuditLog, ConfigRevision, ConfigRevisionStore } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import type { AuditEventInput, AuditLog, ConfigRevision, ConfigRevisionStore } from '@mandate/core';
 import { formatIssue, type ConfigIssue } from './issues.js';
 import { loadConfigurationDirectory, type LoadedConfiguration, type LoadOptions } from './load.js';
 import { loadConfigurationFiles, revisionFilesOf, revisionSummary } from './revision-files.js';
@@ -54,7 +54,7 @@ export interface ConfigurationLogger {
 
 export interface RevisionHolderOptions {
   readonly store: ConfigRevisionStore;
-  /** AIOPS_CONFIG_DIR: bootstraps an empty table; afterwards only compared (files differ hint). */
+  /** MANDATE_CONFIG_DIR: bootstraps an empty table; afterwards only compared (files differ hint). */
   readonly fallbackDir: string;
   readonly load: LoadOptions;
   readonly audit: AuditLog;

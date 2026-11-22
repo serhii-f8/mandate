@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 export type Route = { kind: 'index' } | { kind: 'credentials' } | { kind: 'approvals' } | { kind: 'audit' } | { kind: 'changeset'; id: string } | { kind: 'not_found' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

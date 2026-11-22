@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../changeset/canonical.js';
 
 /** Format tag hashed into every sealed audit row (AUD-3). Changing it breaks every existing chain. */
-export const AUDIT_CHAIN_FORMAT = 'aiops.audit.v1';
+export const AUDIT_CHAIN_FORMAT = 'mandate.audit.v1';
 
 /** `prev` of the first row of a chain. */
 export const GENESIS_HASH = `sha256:${'0'.repeat(64)}`;

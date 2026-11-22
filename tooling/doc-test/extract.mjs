@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Doc-test extraction (NFR-9): marked command blocks of the public guide, by section.
 
 const MARK = /^<!-- doc-test: (\S+) -->\s*$/;

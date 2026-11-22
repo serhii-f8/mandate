@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { parseVersionedKeys, type VersionedKeys } from '@aiops/core';
+import { parseVersionedKeys, type VersionedKeys } from '@mandate/core';
 import type { Payload, PayloadCodec } from '@temporalio/common';
 // CommonJS package: only the default export is visible from ESM (verified with node 22.20).
 import proto from '@temporalio/proto';
@@ -26,9 +26,9 @@ const VERSION_PATTERN = /^[1-9][0-9]{0,8}$/;
 const utf8 = new TextEncoder();
 const fromUtf8 = new TextDecoder();
 
-/** Parses `AIOPS_TEMPORAL_KEYS` (same format as `AIOPS_MASTER_KEYS`). */
+/** Parses `MANDATE_TEMPORAL_KEYS` (same format as `MANDATE_MASTER_KEYS`). */
 export function parseTemporalKeys(raw: string): VersionedKeys {
-  return parseVersionedKeys(raw, 'AIOPS_TEMPORAL_KEYS');
+  return parseVersionedKeys(raw, 'MANDATE_TEMPORAL_KEYS');
 }
 
 function encryptOne(keys: VersionedKeys, payload: Payload): Payload {

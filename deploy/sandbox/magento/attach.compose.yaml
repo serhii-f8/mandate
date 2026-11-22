@@ -7,14 +7,14 @@ services:
   api:
     networks: [default, sandbox]
     volumes:
-      - ./my-config:/etc/aiops/config:ro
+      - ./my-config:/etc/mandate/config:ro
   # Preparation and execution run in the worker (ADR 0027): it reads and writes the sandbox.
   worker:
     networks: [default, sandbox]
     volumes:
-      - ./my-config:/etc/aiops/config:ro
+      - ./my-config:/etc/mandate/config:ro
 
 networks:
   sandbox:
     external: true
-    name: aiops-sandbox
+    name: mandate-sandbox

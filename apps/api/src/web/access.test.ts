@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import 'reflect-metadata';
 import { HttpException, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it } from 'vitest';
-import type { SessionRow } from '@aiops/db';
+import type { SessionRow } from '@mandate/db';
 import { PageAccess, PageAccessGuard, pageDenial, Public, type PageRequest } from './access.js';
 import { hashToken } from './session.service.js';
 
-const ORIGIN = 'https://aiops.example.test';
+const ORIGIN = 'https://mandate.example.test';
 const NOW = Date.parse('2026-11-16T12:00:00Z');
 const COOKIE = 'cookie-value-1';
 
@@ -17,7 +17,7 @@ function session(overrides: Partial<SessionRow> = {}): SessionRow {
     idHash: hashToken(COOKIE),
     subject: 'carol-id',
     username: 'carol',
-    clientId: 'aiops-web',
+    clientId: 'mandate-web',
     groups: ['admins'],
     authTime: new Date(NOW - 60_000),
     csrfToken: 'csrf-token-1',
@@ -101,11 +101,11 @@ async function outcome(g: PageAccessGuard, cls: abstract new () => unknown, meth
 }
 
 // ORIGIN is https, so the session cookie carries the `__Host-` prefix.
-const withCookie = (extra: Record<string, string> = {}): FakeRequest => ({ headers: { cookie: `other=1; __Host-aiops_session=${COOKIE}`, ...extra } });
+const withCookie = (extra: Record<string, string> = {}): FakeRequest => ({ headers: { cookie: `other=1; __Host-mandate_session=${COOKIE}`, ...extra } });
 
 describe('AUTH-5 SEC-8 the guard reads the session cookie of the public URL scheme', () => {
-  it('AUTH-5 on https only __Host-aiops_session counts; on http only aiops_session', async () => {
-    expect(await outcome(guard(), PagesController, 'read', { headers: { cookie: `aiops_session=${COOKIE}` } })).toEqual({ status: 401, body: { error: 'unauthenticated' } });
+  it('AUTH-5 on https only __Host-mandate_session counts; on http only mandate_session', async () => {
+    expect(await outcome(guard(), PagesController, 'read', { headers: { cookie: `mandate_session=${COOKIE}` } })).toEqual({ status: 401, body: { error: 'unauthenticated' } });
     expect(await outcome(guard(), PagesController, 'read', withCookie())).toBe(true);
     const plain = new PageAccessGuard(
       new Reflector(),
@@ -113,8 +113,8 @@ describe('AUTH-5 SEC-8 the guard reads the session cookie of the public URL sche
       () => [],
       { publicOrigin: 'http://localhost:8400', freshAuthSeconds: 300, now: () => NOW },
     );
-    expect(await outcome(plain, PagesController, 'read', { headers: { cookie: `aiops_session=${COOKIE}` } })).toBe(true);
-    expect(await outcome(plain, PagesController, 'read', { headers: { cookie: `__Host-aiops_session=${COOKIE}` } })).toEqual({ status: 401, body: { error: 'unauthenticated' } });
+    expect(await outcome(plain, PagesController, 'read', { headers: { cookie: `mandate_session=${COOKIE}` } })).toBe(true);
+    expect(await outcome(plain, PagesController, 'read', { headers: { cookie: `__Host-mandate_session=${COOKIE}` } })).toEqual({ status: 401, body: { error: 'unauthenticated' } });
   });
 });
 
@@ -135,7 +135,7 @@ describe('SEC-1 every page route is authorized', () => {
 
   it('SEC-1 answers 401 without a cookie, with an unknown cookie, or with an expired session', async () => {
     expect(await outcome(guard(), PagesController, 'read', { headers: {} })).toEqual({ status: 401, body: { error: 'unauthenticated' } });
-    expect(await outcome(guard(), PagesController, 'read', { headers: { cookie: 'aiops_session=nope' } })).toEqual({ status: 401, body: { error: 'unauthenticated' } });
+    expect(await outcome(guard(), PagesController, 'read', { headers: { cookie: 'mandate_session=nope' } })).toEqual({ status: 401, body: { error: 'unauthenticated' } });
     expect(await outcome(guard(null), PagesController, 'read', withCookie())).toEqual({ status: 401, body: { error: 'unauthenticated' } });
   });
 
@@ -159,7 +159,7 @@ describe('SEC-8 CSRF and fresh session on page mutations', () => {
     ['a token of another length', { origin: ORIGIN, 'x-csrf-token': 'x' }],
     ['no Origin', { 'x-csrf-token': 'csrf-token-1' }],
     ['another Origin', { origin: 'https://evil.example.test', 'x-csrf-token': 'csrf-token-1' }],
-    ['an Origin with another port', { origin: 'https://aiops.example.test:8443', 'x-csrf-token': 'csrf-token-1' }],
+    ['an Origin with another port', { origin: 'https://mandate.example.test:8443', 'x-csrf-token': 'csrf-token-1' }],
   ])('SEC-8 refuses a mutation with %s', async (_name, headers) => {
     expect(await outcome(guard(), PagesController, 'change', withCookie(headers))).toEqual({ status: 403, body: { error: 'csrf' } });
   });

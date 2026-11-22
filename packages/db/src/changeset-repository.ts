@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, sql, type SQL } from 'drizzle-orm';
 import type { PgUpdateSetSource } from 'drizzle-orm/pg-core';
@@ -26,7 +26,7 @@ import type {
   RollbackItemOutcome,
   RollbackItemStatus,
   Submission,
-} from '@aiops/core';
+} from '@mandate/core';
 import {
   changesetTransitionEvent,
   EMPTY_STATS,
@@ -34,7 +34,7 @@ import {
   isExpiryDue,
   rollbackFromFinished,
   rollbackWindowOpen,
-} from '@aiops/core';
+} from '@mandate/core';
 import { DrizzleAuditLog } from './audit-log.js';
 import { guarded, isUniqueViolation } from './errors.js';
 import type { Db, DbExecutor } from './client.js';

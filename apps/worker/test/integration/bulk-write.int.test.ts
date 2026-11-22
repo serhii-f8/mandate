@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Bulk writes end to end (EXE-4, CS-7, NFR-2; design part 2): a real `changesetWorkflow` prepares
  * a change-set through the Magento preset 1.0.0 against the fake catalog, then executes it with
@@ -8,11 +8,11 @@
  * The worker runs on the real clock, so a batch takes about 2.5 s (1 s + 1.5 s polls).
  */
 import { randomUUID } from 'node:crypto';
-import { createOpenApiAdapter } from '@aiops/adapters';
-import type { LoadedConfiguration } from '@aiops/config';
-import { createChangeSet, type ChangeItemRecord } from '@aiops/core';
-import { installFakeMagentoCatalog, startFakeUpstream, type FakeMagentoCatalog, type FakeUpstream } from '@aiops/testing';
-import { createUpstreamReader } from '@aiops/upstream';
+import { createOpenApiAdapter } from '@mandate/adapters';
+import type { LoadedConfiguration } from '@mandate/config';
+import { createChangeSet, type ChangeItemRecord } from '@mandate/core';
+import { installFakeMagentoCatalog, startFakeUpstream, type FakeMagentoCatalog, type FakeUpstream } from '@mandate/testing';
+import { createUpstreamReader } from '@mandate/upstream';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createWriterFor } from '../../src/writers.js';
 import { startInfrastructure, startTestWorker, type Infra, type TestWorker } from '../support/harness.js';

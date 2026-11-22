@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Composite adapter (CONN-1, SEC-7): one object the api, worker and CLI use for every
  * connection. Each method dispatches on `ConnectionSettings.kind`: OpenAPI connections (the
@@ -27,7 +27,7 @@ import type {
   UpstreamResolver,
   WriteAdapter,
   WriteFailure,
-} from '@aiops/connector-sdk';
+} from '@mandate/connector-sdk';
 import type { CodeRunnerDeps } from './code/runner.js';
 import { createMcpToolAdapter } from './mcp/adapter.js';
 import { createOpenApiAdapter } from './openapi/adapter.js';

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import type { LoadedConfiguration } from '@aiops/config';
-import type { Caller, ChangeSetRecord, ItemOutcome, OperationDefinition, PolicyDecision, PolicyEngine, RollbackStrategy } from '@aiops/core';
-import { InMemoryChangeSetRepository } from '@aiops/testing';
+import type { LoadedConfiguration } from '@mandate/config';
+import type { Caller, ChangeSetRecord, ItemOutcome, OperationDefinition, PolicyDecision, PolicyEngine, RollbackStrategy } from '@mandate/core';
+import { InMemoryChangeSetRepository } from '@mandate/testing';
 import type { Snapshot } from '../mcp/tool-pipeline.js';
 import { eligibilityDeps, rollbackBlock } from './rollback.js';
 

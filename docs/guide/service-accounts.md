@@ -7,13 +7,13 @@ person's.
 
 ## Create the client in Keycloak
 
-The bundled Keycloak creates one confidential client for each ID in `AIOPS_KEYCLOAK_SERVICE_ACCOUNTS`
-(comma-separated) when the stack starts. The development default is `aiops-sa-ci`. The client has
+The bundled Keycloak creates one confidential client for each ID in `MANDATE_KEYCLOAK_SERVICE_ACCOUNTS`
+(comma-separated) when the stack starts. The development default is `mandate-sa-ci`. The client has
 the client credentials grant only: no browser login, no password grant. Keycloak generates its
 secret.
 
 ```bash
-AIOPS_KEYCLOAK_SERVICE_ACCOUNTS=aiops-sa-ci,nightly-sync
+MANDATE_KEYCLOAK_SERVICE_ACCOUNTS=mandate-sa-ci,nightly-sync
 ```
 
 Set the variable in `.env` and run `docker compose up -d` again, which runs the setup job; it is
@@ -30,11 +30,11 @@ the access token in a variable and prints nothing. The secret reaches curl on st
 with `ps`:
 
 ```bash
-ACCESS_TOKEN="$(printf '%s' "$CLIENT_SECRET" | curl -s -X POST "$KEYCLOAK_URL/realms/aiops/protocol/openid-connect/token" \
+ACCESS_TOKEN="$(printf '%s' "$CLIENT_SECRET" | curl -s -X POST "$KEYCLOAK_URL/realms/mandate/protocol/openid-connect/token" \
   -d grant_type=client_credentials \
   -d client_id=nightly-sync \
   --data-urlencode client_secret@- \
-  -d resource="$AIOPS_MCP_RESOURCE" \
+  -d resource="$MANDATE_MCP_RESOURCE" \
   | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>process.stdout.write(JSON.parse(d).access_token??""))')"
 test -n "$ACCESS_TOKEN"
 ```

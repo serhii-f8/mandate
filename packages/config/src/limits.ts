@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { ExecutionLimits } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import type { ExecutionLimits } from '@mandate/core';
 import type { LoadedConfiguration } from './load.js';
 
 /**

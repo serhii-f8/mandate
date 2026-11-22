@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The outcome of one MCP `tools/call` sent at most once (EXE-4, NFR-2, ruling F7), codes only
  * (SEC-3, SEC-5): the result's content, `structuredContent` and `_meta` are never read, and no
  * upstream text reaches the outcome. Only a definite answer reads `refused`; anything that may
  * have been applied is `unknown`, the fail-safe class.
  */
-import type { CallOutcome } from '@aiops/connector-sdk';
+import type { CallOutcome } from '@mandate/connector-sdk';
 import { InsufficientScopeError, ProtocolError, ProtocolErrorCode, SdkError, SdkErrorCode, SdkHttpError } from '@modelcontextprotocol/client';
 import { GuardedFetchError } from '../http/guarded-fetch.js';
 

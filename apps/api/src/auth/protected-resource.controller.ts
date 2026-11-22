@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { Controller, Get, Inject, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import type { ApiEnv } from '@aiops/config';
+import type { ApiEnv } from '@mandate/config';
 import { API_ENV } from '../tokens.js';
 import { Public } from '../web/access.js';
 
@@ -21,7 +21,7 @@ export function protectedResourceMetadata(env: ApiEnv): ProtectedResourceMetadat
     authorization_servers: [env.oidcIssuer],
     scopes_supported: ['mcp:tools'],
     bearer_methods_supported: ['header'],
-    resource_name: 'AI Operations Layer',
+    resource_name: 'Mandate',
   };
 }
 

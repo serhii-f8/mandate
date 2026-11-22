@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The change-set detail answer of the trusted pages (design part 2 §4), its `viewer` block and the
  * page start check (part 1 §6 "Starting an approved change-set"). Everything comes from storage
@@ -25,7 +25,7 @@ import {
   type ItemStatus,
   type OperationDefinition,
   type RiskClass,
-} from '@aiops/core';
+} from '@mandate/core';
 import type { RollbackBlock } from '../changesets/rollback.js';
 
 export interface PageViewer {
@@ -34,7 +34,7 @@ export interface PageViewer {
   roles: readonly string[];
   clientId: string;
   authTime: Date;
-  /** `now − auth_time ≤ AIOPS_FRESH_AUTH_SECONDS` (SEC-8). */
+  /** `now − auth_time ≤ MANDATE_FRESH_AUTH_SECONDS` (SEC-8). */
   fresh: boolean;
 }
 

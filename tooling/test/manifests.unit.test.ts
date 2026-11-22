@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -24,6 +24,6 @@ describe('package manifests (CONTRIBUTING.md package boundaries)', () => {
 
   it('packages/adapters depends on no workspace package except the connector SDK', () => {
     const deps = Object.keys(manifest('packages/adapters/package.json').dependencies ?? {});
-    expect(deps.filter((d) => d.startsWith('@aiops/') && d !== '@aiops/connector-sdk')).toEqual([]);
+    expect(deps.filter((d) => d.startsWith('@mandate/') && d !== '@mandate/connector-sdk')).toEqual([]);
   });
 });

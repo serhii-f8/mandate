@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Semver gate over the public surface reports (NFR-18). Pure functions; no process access.
 import { headerVersion } from './api-report-lib.mjs';
 
@@ -17,9 +17,9 @@ export function versionOf(report, kind) {
 }
 
 const VERSION_LINES = [
-  /^\/\/ @aiops\/connector-sdk \S+ public API report/,
+  /^\/\/ @mandate\/connector-sdk \S+ public API report/,
   /^export declare const CONNECTOR_SDK_VERSION = ".*";?$/,
-  /^\s*"x-aiops-(schema|sdk)-version":/,
+  /^\s*"x-mandate-(schema|sdk)-version":/,
 ];
 
 /**

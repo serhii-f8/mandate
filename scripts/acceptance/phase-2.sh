@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 # Phase 2 acceptance (specification section 7):
 #   1. two users in different groups see different tool lists
 #   2. an out-of-scope call is denied
@@ -16,20 +16,20 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SHA="$(git -C "$REPO" rev-parse HEAD)"
 WORK="$(mktemp -d)"
-PROJECT="aiops-accept2-$$"
+PROJECT="mandate-accept2-$$"
 FAILED=0
 
 free_port() { node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})"; }
-export AIOPS_API_PORT="$(free_port)" AIOPS_KEYCLOAK_PORT="$(free_port)" AIOPS_TEMPORAL_PORT="$(free_port)" AIOPS_POSTGRES_PORT="$(free_port)"
-export AIOPS_MAILPIT_PORT="$(free_port)"  # Compose runs Mailpit since Phase 6; a fixed port breaks parallel runs
-export AIOPS_KEYCLOAK_PUBLIC_URL="http://localhost:${AIOPS_KEYCLOAK_PORT}"
-export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
-MCP="http://127.0.0.1:${AIOPS_API_PORT}/mcp"
+export MANDATE_API_PORT="$(free_port)" MANDATE_KEYCLOAK_PORT="$(free_port)" MANDATE_TEMPORAL_PORT="$(free_port)" MANDATE_POSTGRES_PORT="$(free_port)"
+export MANDATE_MAILPIT_PORT="$(free_port)"  # Compose runs Mailpit since Phase 6; a fixed port breaks parallel runs
+export MANDATE_KEYCLOAK_PUBLIC_URL="http://localhost:${MANDATE_KEYCLOAK_PORT}"
+export MANDATE_MCP_RESOURCE="http://localhost:${MANDATE_API_PORT}/mcp"
+MCP="http://127.0.0.1:${MANDATE_API_PORT}/mcp"
 
 compose() { docker compose -p "$PROJECT" "$@"; }
 
 cleanup() {
-  (cd "$WORK/aiops" 2>/dev/null && compose down -v --remove-orphans >/dev/null 2>&1) || true
+  (cd "$WORK/mandate" 2>/dev/null && compose down -v --remove-orphans >/dev/null 2>&1) || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -37,14 +37,14 @@ trap cleanup EXIT
 pass() { echo "PASS $1${2:+ — $2}"; }
 fail() { echo "FAIL $1${2:+ — $2}"; FAILED=1; }
 json() { node -e "try{const v=JSON.parse(process.argv[1])$2;console.log(typeof v==='string'?v:JSON.stringify(v))}catch{console.log('')}" "$1"; }
-login() { node "$REPO/tooling/acceptance/login.mjs" "$AIOPS_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$AIOPS_MCP_RESOURCE"; }
+login() { node "$REPO/tooling/acceptance/login.mjs" "$MANDATE_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$MANDATE_MCP_RESOURCE"; }
 mcp() { node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" "$@"; }
-psql_q() { compose exec -T postgres psql -U aiops -d aiops -tAc "$1"; }
+psql_q() { compose exec -T postgres psql -U mandate -d mandate -tAc "$1"; }
 
-echo "# Phase 2 acceptance of ${SHA:0:12} (project $PROJECT, api port $AIOPS_API_PORT)"
-git clone --quiet --no-local --no-checkout "$REPO" "$WORK/aiops"
-git -C "$WORK/aiops" checkout --quiet --detach "$SHA"
-cd "$WORK/aiops"
+echo "# Phase 2 acceptance of ${SHA:0:12} (project $PROJECT, api port $MANDATE_API_PORT)"
+git clone --quiet --no-local --no-checkout "$REPO" "$WORK/mandate"
+git -C "$WORK/mandate" checkout --quiet --detach "$SHA"
+cd "$WORK/mandate"
 
 # 0. One command from a fresh clone (the bootstrap runs as keycloak-setup).
 if compose up -d --build --wait >"$WORK/up.log" 2>&1; then
@@ -55,7 +55,7 @@ fi
 
 # The endpoint is a protected resource (AUTH-2).
 HDRS="$(curl -s -o /dev/null -D - -X POST -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' "$MCP" || true)"
-if grep -q '^HTTP/1.1 401' <<<"$HDRS" && grep -qi 'resource_metadata="http://localhost:'"$AIOPS_API_PORT"'/.well-known/oauth-protected-resource/mcp"' <<<"$HDRS"; then
+if grep -q '^HTTP/1.1 401' <<<"$HDRS" && grep -qi 'resource_metadata="http://localhost:'"$MANDATE_API_PORT"'/.well-known/oauth-protected-resource/mcp"' <<<"$HDRS"; then
   pass unauthenticated-401 "$(grep -i '^www-authenticate' <<<"$HDRS" | tr -d '\r')"
 else
   fail unauthenticated-401 "$HDRS"
@@ -103,8 +103,8 @@ sed -i 's/      - operation: support.lookup_order/      - operation: support.loo
 set +e
 # The configuration applies the Magento preset: without it a grant could name a preset operation,
 # so the check needs the preset directory of the clone (Phase 3).
-OUT="$(compose run --rm --no-deps -T -v "$WORK/broken:/etc/aiops/config:ro" -v "$PWD/presets:/etc/aiops/presets:ro" --entrypoint node api \
-  node_modules/@aiops/config/dist/cli.js validate /etc/aiops/config --preset-dir /etc/aiops/presets 2>&1)"
+OUT="$(compose run --rm --no-deps -T -v "$WORK/broken:/etc/mandate/config:ro" -v "$PWD/presets:/etc/mandate/presets:ro" --entrypoint node api \
+  node_modules/@mandate/config/dist/cli.js validate /etc/mandate/config --preset-dir /etc/mandate/presets 2>&1)"
 CODE=$?
 set -e
 if [[ "$CODE" == 1 ]] && grep -q '^roles.yaml:[0-9]*:[0-9]* roles\[1\]\.grants\[0\]\.operation: ' <<<"$OUT"; then

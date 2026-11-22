@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Change-sets prepared by their own workflow, shared by the integration tests and the history
  * recorder (`scripts/record-history.ts`).
  */
 import { randomUUID } from 'node:crypto';
-import { createChangeSet, type ChangeSetRecord } from '@aiops/core';
-import { PROGRESS_QUERY, type WorkflowProgress } from '@aiops/temporal';
-import { submitChangeSet } from '@aiops/testing';
+import { createChangeSet, type ChangeSetRecord } from '@mandate/core';
+import { PROGRESS_QUERY, type WorkflowProgress } from '@mandate/temporal';
+import { submitChangeSet } from '@mandate/testing';
 import { createPreparing } from './changesets.js';
 import { APPROVING_GROUP, EDITOR_GROUP, WRITE_OPERATION } from './configuration.js';
 import type { Infra, TestWorker } from './harness.js';

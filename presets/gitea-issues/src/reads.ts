@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Code reads `search_issues` and `get_issues` (OPS-5, OPS-6). Code, not a declarative read,
  * because labels arrive as objects but are compared as names. Errors name the response code and
  * status only, never upstream text (SEC-3, SEC-5).
  */
-import type { CodeContext, CodeHttpResponse, CodeReadResult, WriteRecord } from '@aiops/connector-sdk';
+import type { CodeContext, CodeHttpResponse, CodeReadResult, WriteRecord } from '@mandate/connector-sdk';
 import { parseGetManyArgs, parseSearchArgs } from './args.js';
 import { type GiteaIssue, isPullRequest, repoPath, toIssue } from './issue.js';
 

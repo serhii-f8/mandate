@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { ItemRowModel } from './model.js';
 
 /** Text shown for a value: strings as they are, undefined empty, anything else as JSON. */

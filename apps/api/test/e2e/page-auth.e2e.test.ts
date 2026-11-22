@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash } from 'node:crypto';
 import { Writable } from 'node:stream';
 import { METHOD_METADATA } from '@nestjs/common/constants.js';
 import { DiscoveryService, MetadataScanner, ModulesContainer, Reflector } from '@nestjs/core';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { pageLogin, startTestIssuer, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { pageLogin, startTestIssuer, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { createLogger } from '../../src/logger.js';
 import { routeAccess } from '../../src/web/access.js';
 import { auditRows, startApi, startDatabase, type RunningApi } from './helpers.js';
@@ -56,7 +56,7 @@ async function query<T extends pg.QueryResultRow>(sql: string, params: unknown[]
 
 const get = (url: string, headers: Record<string, string> = {}): Promise<Response> => fetch(url, { redirect: 'manual', headers });
 
-/** The `aiops_login` cookie each `/auth/login` set, by state. */
+/** The `mandate_login` cookie each `/auth/login` set, by state. */
 const loginCookies = new Map<string, string>();
 /** The raw `Set-Cookie` of the last `/auth/login`. */
 let lastLoginSetCookie = '';
@@ -69,19 +69,19 @@ async function startLogin(api: RunningApi, params = 'return_to=/app/'): Promise<
   const state = location.searchParams.get('state') ?? '';
   secrets.add(state);
   secrets.add(location.searchParams.get('nonce') ?? '');
-  lastLoginSetCookie = response.headers.getSetCookie().find((c) => c.startsWith('aiops_login=')) ?? '';
+  lastLoginSetCookie = response.headers.getSetCookie().find((c) => c.startsWith('mandate_login=')) ?? '';
   loginCookies.set(state, lastLoginSetCookie.split(';')[0] ?? '');
   return location;
 }
 
-/** Follows the callback like the browser that started the login: with its `aiops_login` cookie unless `cookie` is given. */
+/** Follows the callback like the browser that started the login: with its `mandate_login` cookie unless `cookie` is given. */
 function complete(callback: URL, cookie?: string): Promise<Response> {
   const sent = cookie ?? loginCookies.get(callback.searchParams.get('state') ?? '') ?? '';
   return get(callback.toString(), sent === '' ? {} : { cookie: sent });
 }
 
 /** The callback always clears the login cookie on its own path. */
-const LOGIN_CLEARED = /^aiops_login=; (?=.*Path=\/auth\/callback)(?=.*Max-Age=0)/;
+const LOGIN_CLEARED = /^mandate_login=; (?=.*Path=\/auth\/callback)(?=.*Max-Age=0)/;
 
 /** The issuer's answer: the callback URL on the api. */
 async function authorize(location: URL): Promise<URL> {
@@ -93,9 +93,9 @@ async function authorize(location: URL): Promise<URL> {
 }
 
 function sessionCookieOf(response: Response): string {
-  const header = response.headers.getSetCookie().find((c) => c.startsWith('aiops_session=')) ?? '';
+  const header = response.headers.getSetCookie().find((c) => c.startsWith('mandate_session=')) ?? '';
   const value = header.split(';')[0] ?? '';
-  secrets.add(value.slice('aiops_session='.length));
+  secrets.add(value.slice('mandate_session='.length));
   return value;
 }
 
@@ -110,7 +110,7 @@ describe('AUTH-5 pages log in through the identity provider', () => {
     const q = location.searchParams;
     expect(Object.fromEntries([...q].filter(([k]) => !['state', 'nonce', 'code_challenge'].includes(k)))).toEqual({
       response_type: 'code',
-      client_id: 'aiops-web',
+      client_id: 'mandate-web',
       redirect_uri: `${a.url}/auth/callback`,
       scope: 'openid',
       code_challenge_method: 'S256',
@@ -129,13 +129,13 @@ describe('AUTH-5 pages log in through the identity provider', () => {
     expect(response.status).toBe(302);
     expect(response.headers.get('location')).toBe('/app/credentials');
     expect(response.headers.getSetCookie()).toEqual(expect.arrayContaining([expect.stringMatching(LOGIN_CLEARED)]));
-    const setCookie = response.headers.getSetCookie().find((c) => c.startsWith('aiops_session=')) ?? '';
+    const setCookie = response.headers.getSetCookie().find((c) => c.startsWith('mandate_session=')) ?? '';
     expect(setCookie).toMatch(/; HttpOnly/);
     expect(setCookie).toMatch(/; SameSite=Strict/);
     expect(setCookie).toMatch(/; Path=\//);
     expect(setCookie).not.toMatch(/Secure/); // the e2e public URL is http
     const cookie = sessionCookieOf(response);
-    expect(cookie.length).toBeGreaterThan('aiops_session='.length + 40);
+    expect(cookie.length).toBeGreaterThan('mandate_session='.length + 40);
 
     const last = issuer.tokenRequests.at(-1);
     expect(last?.authorization).toMatch(/^Basic /);
@@ -158,9 +158,9 @@ describe('AUTH-5 pages log in through the identity provider', () => {
     secrets.add(String(body.csrfToken));
 
     const rows = await loginRows(response.headers.get('x-correlation-id'));
-    expect(rows).toEqual([expect.objectContaining({ actor: 'carol-id', client_id: 'aiops-web', outcome: 'ok', details: { fresh: false } })]);
+    expect(rows).toEqual([expect.objectContaining({ actor: 'carol-id', client_id: 'mandate-web', outcome: 'ok', details: { fresh: false } })]);
     // Only the hash of the cookie is stored.
-    const stored = await query<{ id_hash: string }>('select id_hash from web_session where id_hash = $1', [sha256(cookie.slice('aiops_session='.length))]);
+    const stored = await query<{ id_hash: string }>('select id_hash from web_session where id_hash = $1', [sha256(cookie.slice('mandate_session='.length))]);
     expect(stored).toHaveLength(1);
   });
 
@@ -177,7 +177,7 @@ describe('AUTH-5 pages log in through the identity provider', () => {
 
   it.each([
     ['a wrong nonce', { nonce: 'another-nonce' }],
-    ['another audience', { aud: 'aiops-mcp' }],
+    ['another audience', { aud: 'mandate-mcp' }],
     ['another issuer', { iss: 'http://127.0.0.1:1/realms/evil' }],
     ['no auth_time', { omitAuthTime: true }],
     ['an unpublished key', { unpublishedKey: true }],
@@ -217,7 +217,7 @@ describe('AUTH-5 pages log in through the identity provider', () => {
   it('SEC-8 /auth/login binds the state to the browser with a Lax cookie scoped to the callback', async () => {
     const location = await startLogin(a);
     const state = location.searchParams.get('state') ?? '';
-    expect(lastLoginSetCookie.split(';')[0]).toBe(`aiops_login=${state}`);
+    expect(lastLoginSetCookie.split(';')[0]).toBe(`mandate_login=${state}`);
     expect(lastLoginSetCookie).toMatch(/; HttpOnly/);
     expect(lastLoginSetCookie).toMatch(/; SameSite=Lax/);
     expect(lastLoginSetCookie).toMatch(/; Path=\/auth\/callback/);
@@ -243,7 +243,7 @@ describe('AUTH-5 pages log in through the identity provider', () => {
     const victimCookie = lastLoginSetCookie.split(';')[0] ?? '';
     const response = await complete(attacker, victimCookie);
     expect(response.status).toBe(400);
-    expect(response.headers.getSetCookie().some((c) => c.startsWith('aiops_session='))).toBe(false);
+    expect(response.headers.getSetCookie().some((c) => c.startsWith('mandate_session='))).toBe(false);
     expect(await loginRows(response.headers.get('x-correlation-id'))).toEqual([expect.objectContaining({ details: { reason: 'state_unknown' } })]);
   });
 
@@ -291,7 +291,7 @@ describe('AUTH-5 pages log in through the identity provider', () => {
       const { cookie } = await pageLogin(a.url, 'carol', 'unused');
       const session = (await (await get(`${a.url}/api/v1/session`, { cookie })).json()) as { authTime: string; fresh: boolean };
       expect(Date.parse(session.authTime)).toBe(authTime * 1000);
-      // SEC-8: older than AIOPS_FRESH_AUTH_SECONDS, so the page knows to re-authenticate before a credential change.
+      // SEC-8: older than MANDATE_FRESH_AUTH_SECONDS, so the page knows to re-authenticate before a credential change.
       expect(session.fresh).toBe(false);
     } finally {
       issuer.setLoginUser(CAROL);
@@ -305,10 +305,10 @@ describe('AUTH-5 pages log in through the identity provider', () => {
     expect((await fetch(`${a.url}/auth/logout`, { method: 'POST', headers: { cookie, origin } })).status).toBe(403);
     const response = await fetch(`${a.url}/auth/logout`, { method: 'POST', headers: { cookie, origin, 'x-csrf-token': csrfToken } });
     expect(response.status).toBe(204);
-    expect(response.headers.getSetCookie()).toEqual([expect.stringMatching(/^aiops_session=; .*Max-Age=0/)]);
+    expect(response.headers.getSetCookie()).toEqual([expect.stringMatching(/^mandate_session=; .*Max-Age=0/)]);
     expect((await get(`${a.url}/api/v1/session`, { cookie })).status).toBe(401);
     expect(await auditRows(databaseUrl, "action = 'auth.logout' and correlation_id = $1", [response.headers.get('x-correlation-id')])).toEqual([
-      expect.objectContaining({ actor: 'carol-id', client_id: 'aiops-web', outcome: 'ok' }),
+      expect.objectContaining({ actor: 'carol-id', client_id: 'mandate-web', outcome: 'ok' }),
     ]);
     const loggedOut = await get(`${a.url}/auth/logged-out`);
     expect(loggedOut.status).toBe(200);
@@ -357,7 +357,7 @@ describe('SEC-1 every page route is authorized', () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: 'unauthenticated' });
     expect(response.headers.get('x-correlation-id')).toMatch(/^[0-9a-f-]{36}$/);
-    expect((await get(`${a.url}/api/v1/session`, { cookie: 'aiops_session=forged' })).status).toBe(401);
+    expect((await get(`${a.url}/api/v1/session`, { cookie: 'mandate_session=forged' })).status).toBe(401);
   });
 
   it('SEC-1 public routes still answer without a session', async () => {
@@ -370,7 +370,7 @@ describe('AUTH-5 expired login state and sessions are purged', () => {
   it('AUTH-5 the first /auth/login of an instance removes expired web_login and web_session rows', async () => {
     await query("insert into web_login (state_hash, code_verifier, nonce, return_to, fresh, expires_at) values ('expired-login', 'v', 'n', '/app/', false, now() - interval '1 minute')");
     await query(
-      "insert into web_session (id_hash, subject, client_id, groups, auth_time, csrf_token, expires_at) values ('expired-session', 's', 'aiops-web', '[]', now(), 'c', now() - interval '1 minute')",
+      "insert into web_session (id_hash, subject, client_id, groups, auth_time, csrf_token, expires_at) values ('expired-session', 's', 'mandate-web', '[]', now(), 'c', now() - interval '1 minute')",
     );
     // Instance b has not served /auth/login yet, so its first one purges.
     await startLogin(b);

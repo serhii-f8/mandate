@@ -5,14 +5,14 @@ operations, roles and limits. Environment variables describe how the `api` and `
 run: ports, database, keys. This page lists every key and variable with its type, default and
 bounds. The values come from the schema in `packages/config/src/schema.ts` and from
 `packages/config/src/runtime-env.ts`; a machine-readable JSON Schema is published at
-`packages/config/schema/aiops-config.v1.json`.
+`packages/config/schema/mandate-config.v1.json`.
 
 For the workflow (check, apply, revisions) see [Roles and approvals](roles-and-approvals.md). For
 production values see [Production hardening](production.md).
 
 ## YAML files
 
-- A configuration is a directory (`AIOPS_CONFIG_DIR`) of `.yaml` files. Each file is one document
+- A configuration is a directory (`MANDATE_CONFIG_DIR`) of `.yaml` files. Each file is one document
   and must start with `version: 1`.
 - Every object is strict: an unknown key is an error, so a typo or a pasted secret does not pass
   silently. Only `input_schema` and the `args` of a connection test are open objects.
@@ -263,7 +263,7 @@ Applied after presets.
 
 | Key | Type | Default | Bounds / notes |
 | --- | --- | --- | --- |
-| `retention_days` | integer | none (keep forever) | 1-36500; needs `AIOPS_AUDIT_ARCHIVE_DIR` to run |
+| `retention_days` | integer | none (keep forever) | 1-36500; needs `MANDATE_AUDIT_ARCHIVE_DIR` to run |
 
 ### `rate_limits`
 
@@ -276,7 +276,7 @@ whole number from 1 to 100000. Absent keys take the defaults.
 | `mcp_service_account_per_minute` | 600 | Each service account (see `rate_limit_per_minute` to override) |
 | `unauthenticated_per_minute` | 60 | Requests without a valid token, per client address |
 
-The client address comes from `X-Forwarded-For` only as far as `AIOPS_TRUST_PROXY` allows.
+The client address comes from `X-Forwarded-For` only as far as `MANDATE_TRUST_PROXY` allows.
 
 ```yaml
 rate_limits:
@@ -288,7 +288,7 @@ rate_limits:
 
 Variables are parsed at start. An invalid value stops the process and the error names the variable
 and the reason, never the value. `.env.example` holds development defaults for Compose; Compose
-passes them to the containers, sometimes under another name (for example `AIOPS_WEB_CLIENT_SECRET`
+passes them to the containers, sometimes under another name (for example `MANDATE_WEB_CLIENT_SECRET`
 becomes `OIDC_WEB_CLIENT_SECRET`).
 
 ### `api`
@@ -299,32 +299,32 @@ becomes `OIDC_WEB_CLIENT_SECRET`).
 | `API_PORT` | 8080 | 1-65535 |
 | `API_ALLOWED_HOSTS` | `localhost,127.0.0.1` | Comma-separated Host and Origin names accepted on MCP requests |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
-| `AIOPS_CONFIG_DIR` | required | Directory of YAML files |
-| `AIOPS_MCP_RESOURCE` | required | Canonical URL of the MCP endpoint; token audience; no fragment |
+| `MANDATE_CONFIG_DIR` | required | Directory of YAML files |
+| `MANDATE_MCP_RESOURCE` | required | Canonical URL of the MCP endpoint; token audience; no fragment |
 | `OIDC_ISSUER` | required | Expected `iss` of access tokens |
 | `OIDC_JWKS_URL` | required | Where the api fetches signing keys; may be an internal URL |
-| `AIOPS_PUBLIC_URL` | required | Origin without path, query or fragment; base of page and callback URLs |
-| `OIDC_WEB_CLIENT_ID` | `aiops-web` | Client of the trusted-page login |
+| `MANDATE_PUBLIC_URL` | required | Origin without path, query or fragment; base of page and callback URLs |
+| `OIDC_WEB_CLIENT_ID` | `mandate-web` | Client of the trusted-page login |
 | `OIDC_WEB_CLIENT_SECRET` | required | Secret of that client |
 | `OIDC_AUTHORIZATION_URL` | `<issuer>/protocol/openid-connect/auth` | Browser-facing |
 | `OIDC_TOKEN_URL` | `<issuer>/protocol/openid-connect/token` | Called by the api; may be internal |
-| `AIOPS_MASTER_KEYS` | required | Credential vault keys, `<id>:<base64 of 32 bytes>`, comma-separated |
-| `AIOPS_SESSION_MAX_AGE_SECONDS` | 28800 | At least 1 |
-| `AIOPS_FRESH_AUTH_SECONDS` | 300 | At least 1; how recent a login must be to store a credential |
-| `AIOPS_WEB_DIR` | none | Directory of the built web bundle |
-| `AIOPS_WIDGET_DIR` | development location | Directory of the widget bundles |
-| `AIOPS_PRESET_DIRS` | none | Colon-separated preset directories |
+| `MANDATE_MASTER_KEYS` | required | Credential vault keys, `<id>:<base64 of 32 bytes>`, comma-separated |
+| `MANDATE_SESSION_MAX_AGE_SECONDS` | 28800 | At least 1 |
+| `MANDATE_FRESH_AUTH_SECONDS` | 300 | At least 1; how recent a login must be to store a credential |
+| `MANDATE_WEB_DIR` | none | Directory of the built web bundle |
+| `MANDATE_WIDGET_DIR` | development location | Directory of the widget bundles |
+| `MANDATE_PRESET_DIRS` | none | Colon-separated preset directories |
 | `TEMPORAL_ADDRESS` | `localhost:7233` | |
 | `TEMPORAL_NAMESPACE` | `default` | |
-| `TEMPORAL_TASK_QUEUE` | `aiops-operations` | |
-| `AIOPS_TEMPORAL_KEYS` | required | Payload encryption keys, `<version>:<base64 of 32 bytes>`; the highest version encrypts |
-| `AIOPS_PREPARE_WAIT_MS` | 20000 | 0-300000; how long a write call without Tasks waits for its preparation |
-| `AIOPS_AUDIT_ARCHIVE_DIR` | none | Absolute path; unset keeps audit rows |
+| `TEMPORAL_TASK_QUEUE` | `mandate-operations` | |
+| `MANDATE_TEMPORAL_KEYS` | required | Payload encryption keys, `<version>:<base64 of 32 bytes>`; the highest version encrypts |
+| `MANDATE_PREPARE_WAIT_MS` | 20000 | 0-300000; how long a write call without Tasks waits for its preparation |
+| `MANDATE_AUDIT_ARCHIVE_DIR` | none | Absolute path; unset keeps audit rows |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | none | OTLP/HTTP collector URL; empty or unset disables trace export |
-| `AIOPS_METRICS_PORT` | 9464 | 0-65535; 0 picks a free port; a blank value means the default |
-| `AIOPS_TRUST_PROXY` | 0 | 0-10 |
+| `MANDATE_METRICS_PORT` | 9464 | 0-65535; 0 picks a free port; a blank value means the default |
+| `MANDATE_TRUST_PROXY` | 0 | 0-10 |
 
-`AIOPS_TRUST_PROXY` (SEC-10) is the number of proxy hops in front of the api whose
+`MANDATE_TRUST_PROXY` (SEC-10) is the number of proxy hops in front of the api whose
 `X-Forwarded-For` is trusted when the api works out the client address for rate limits. 0 trusts
 none, so the address is the socket peer. Set 1 behind one reverse proxy. Never set more hops than
 you run: with too high a value a client can send its own `X-Forwarded-For` and choose the address
@@ -336,31 +336,31 @@ the limiter sees.
 | --- | --- | --- |
 | `DATABASE_URL` | required | As for the api |
 | `LOG_LEVEL` | `info` | |
-| `AIOPS_CONFIG_DIR` | required | The worker loads the same configuration |
-| `AIOPS_PRESET_DIRS` | none | |
-| `AIOPS_MASTER_KEYS` | required | Same keys as the api |
-| `AIOPS_TEMPORAL_KEYS` | required | Same keys as the api |
+| `MANDATE_CONFIG_DIR` | required | The worker loads the same configuration |
+| `MANDATE_PRESET_DIRS` | none | |
+| `MANDATE_MASTER_KEYS` | required | Same keys as the api |
+| `MANDATE_TEMPORAL_KEYS` | required | Same keys as the api |
 | `TEMPORAL_ADDRESS` | `localhost:7233` | |
 | `TEMPORAL_NAMESPACE` | `default` | |
-| `TEMPORAL_TASK_QUEUE` | `aiops-operations` | |
-| `AIOPS_PREPARE_TIMEOUT_MS` | 3600000 | Positive integer; must be greater than 60000 |
-| `AIOPS_BATCH_HEARTBEAT_MS` | 30000 | Positive integer; must be greater than 10000 and less than `AIOPS_BATCH_TIMEOUT_MS` |
-| `AIOPS_BATCH_TIMEOUT_MS` | 900000 | Positive integer |
-| `AIOPS_BATCH_MAX_ATTEMPTS` | 10 | Positive integer |
-| `AIOPS_RETRY_INITIAL_MS` | 1000 | Positive integer; must not exceed `AIOPS_RETRY_MAX_MS` |
-| `AIOPS_RETRY_MAX_MS` | 30000 | Positive integer |
-| `AIOPS_SMTP_URL` | none | `smtp://host:port` or `smtps://host:port`; without it e-mail notifications fail with `channel_unconfigured` |
-| `AIOPS_MAIL_FROM` | `aiops@localhost` | Sender address, up to 254 characters |
-| `AIOPS_PUBLIC_URL` | `http://localhost:8400` | Origin; base of links in notifications |
-| `AIOPS_AUDIT_ARCHIVE_DIR` | none | Absolute path; without it retention refuses with `archive_unavailable` |
+| `TEMPORAL_TASK_QUEUE` | `mandate-operations` | |
+| `MANDATE_PREPARE_TIMEOUT_MS` | 3600000 | Positive integer; must be greater than 60000 |
+| `MANDATE_BATCH_HEARTBEAT_MS` | 30000 | Positive integer; must be greater than 10000 and less than `MANDATE_BATCH_TIMEOUT_MS` |
+| `MANDATE_BATCH_TIMEOUT_MS` | 900000 | Positive integer |
+| `MANDATE_BATCH_MAX_ATTEMPTS` | 10 | Positive integer |
+| `MANDATE_RETRY_INITIAL_MS` | 1000 | Positive integer; must not exceed `MANDATE_RETRY_MAX_MS` |
+| `MANDATE_RETRY_MAX_MS` | 30000 | Positive integer |
+| `MANDATE_SMTP_URL` | none | `smtp://host:port` or `smtps://host:port`; without it e-mail notifications fail with `channel_unconfigured` |
+| `MANDATE_MAIL_FROM` | `mandate@localhost` | Sender address, up to 254 characters |
+| `MANDATE_PUBLIC_URL` | `http://localhost:8400` | Origin; base of links in notifications |
+| `MANDATE_AUDIT_ARCHIVE_DIR` | none | Absolute path; without it retention refuses with `archive_unavailable` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | none | As for the api |
-| `AIOPS_WORKER_HTTP_PORT` | 8081 | 0-65535; health (`/healthz`, `/readyz`) and metrics; blank means the default |
+| `MANDATE_WORKER_HTTP_PORT` | 8081 | 0-65535; health (`/healthz`, `/readyz`) and metrics; blank means the default |
 
 Set the tuning variables only with a value; an empty one is rejected.
 
 ### Compose-only variables
 
 `.env.example` also sets variables that only Compose and the bootstrap read, such as the host ports
-(`AIOPS_API_PORT`, `AIOPS_KEYCLOAK_PORT`), the database passwords, `AIOPS_CIMD_CLIENT_DOMAINS`,
-`AIOPS_DCR` and `AIOPS_KEYCLOAK_SERVICE_ACCOUNTS`. They are development defaults with fake values;
+(`MANDATE_API_PORT`, `MANDATE_KEYCLOAK_PORT`), the database passwords, `MANDATE_CIMD_CLIENT_DOMAINS`,
+`MANDATE_DCR` and `MANDATE_KEYCLOAK_SERVICE_ACCOUNTS`. They are development defaults with fake values;
 replace every secret for a real installation (see [Production hardening](production.md)).

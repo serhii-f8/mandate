@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { CodeAdapter, ConnectionSettings, RecordSendOutcome, RecordWriteAdapter, UpstreamMapping } from '@aiops/connector-sdk';
+// Copyright 2026 The Mandate Authors
+import type { CodeAdapter, ConnectionSettings, RecordSendOutcome, RecordWriteAdapter, UpstreamMapping } from '@mandate/connector-sdk';
 import { describe, expect, it } from 'vitest';
 import { contractWrite } from './preset-contract.js';
 

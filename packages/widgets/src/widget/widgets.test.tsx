@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { App } from '@modelcontextprotocol/ext-apps';
 import { isCallToolResult, type CallToolResult } from '@modelcontextprotocol/client';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -16,7 +16,7 @@ import preparing from './fixtures/preparing.json' with { type: 'json' };
 import denied from './fixtures/review-changeset-widget-denied.json' with { type: 'json' };
 
 const A = '0b6f0c2e-8a51-4c2b-9d0e-6f1a2b3c4d5e';
-const PAGE_A = `https://aiops.example.test/app/changesets/${A}`;
+const PAGE_A = `https://mandate.example.test/app/changesets/${A}`;
 
 afterEach(() => {
   cleanup();

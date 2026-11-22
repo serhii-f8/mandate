@@ -30,7 +30,7 @@ login again.
 <!-- doc-test: bulk -->
 ```bash
 export DEV_PASSWORD=dev-only-password
-ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${AIOPS_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${AIOPS_API_PORT:-8400}/mcp")"
+ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${MANDATE_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${MANDATE_API_PORT:-8400}/mcp")"
 ```
 
 List the tools alice has. The list is built from her roles: `catalog.search_products` and
@@ -39,7 +39,7 @@ List the tools alice has. The list is built from her roles: `catalog.search_prod
 
 <!-- doc-test: bulk -->
 ```bash
-AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --list
+MANDATE_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${MANDATE_API_PORT:-8400}/mcp" --list
 ```
 
 ## Prepare the change
@@ -60,7 +60,7 @@ the change-set ID.
 
 <!-- doc-test: bulk -->
 ```bash
-PREPARED="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool catalog.update_content --args "{\"brand\":\"acme\",\"name_like\":\"%\",\"changes\":{\"meta_keyword\":\"$NEW_KEYWORD\"}}")"
+PREPARED="$(MANDATE_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${MANDATE_API_PORT:-8400}/mcp" --tool catalog.update_content --args "{\"brand\":\"acme\",\"name_like\":\"%\",\"changes\":{\"meta_keyword\":\"$NEW_KEYWORD\"}}")"
 node -p 'JSON.parse(process.argv[1]).content[0]' "$PREPARED"
 export CHANGESET_ID="$(node -p 'const r = JSON.parse(process.argv[1]).structuredContent; r.changeset?.id ?? r.changesetId' "$PREPARED")"
 ```
@@ -72,7 +72,7 @@ by ID and hash.
 <!-- doc-test: bulk -->
 ```bash
 for i in $(seq 1 60); do
-  CHANGESET="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$CHANGESET_ID\"}")"
+  CHANGESET="$(MANDATE_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${MANDATE_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$CHANGESET_ID\"}")"
   STATUS="$(node -p 'JSON.parse(process.argv[1]).structuredContent.changeset.status' "$CHANGESET")"
   test "$STATUS" != preparing && break
   sleep 2
@@ -89,7 +89,7 @@ it needs an approval.
 
 <!-- doc-test: bulk -->
 ```bash
-SUBMITTED="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool submit_for_approval --args "{\"changeset_id\":\"$CHANGESET_ID\",\"hash\":\"$CHANGESET_HASH\"}")"
+SUBMITTED="$(MANDATE_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${MANDATE_API_PORT:-8400}/mcp" --tool submit_for_approval --args "{\"changeset_id\":\"$CHANGESET_ID\",\"hash\":\"$CHANGESET_HASH\"}")"
 node -p 'JSON.parse(process.argv[1]).text' "$SUBMITTED"
 test "$(node -p 'JSON.parse(process.argv[1]).structuredContent.status' "$SUBMITTED")" = pending_approval
 ```
@@ -115,10 +115,10 @@ change-set the page shows, check its hash, and approve with that hash and item c
 
 <!-- doc-test: bulk -->
 ```bash
-DAVE_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${AIOPS_API_PORT:-8400}" dave "$DEV_PASSWORD" "/app/changesets/$CHANGESET_ID")"
-VIEW="$(AIOPS_PAGE_COOKIE="$DAVE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" changeset "$CHANGESET_ID")"
+DAVE_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${MANDATE_API_PORT:-8400}" dave "$DEV_PASSWORD" "/app/changesets/$CHANGESET_ID")"
+VIEW="$(MANDATE_PAGE_COOKIE="$DAVE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${MANDATE_API_PORT:-8400}" changeset "$CHANGESET_ID")"
 test "$(node -p 'JSON.parse(process.argv[1]).body.hash' "$VIEW")" = "$CHANGESET_HASH"
-DECIDED="$(AIOPS_PAGE_COOKIE="$DAVE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" decide "$CHANGESET_ID" approve "$CHANGESET_HASH" "$(node -p 'JSON.parse(process.argv[1]).body.stats.included' "$VIEW")")"
+DECIDED="$(MANDATE_PAGE_COOKIE="$DAVE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${MANDATE_API_PORT:-8400}" decide "$CHANGESET_ID" approve "$CHANGESET_HASH" "$(node -p 'JSON.parse(process.argv[1]).body.stats.included' "$VIEW")")"
 echo "$DECIDED"
 test "$(node -p 'JSON.parse(process.argv[1]).status' "$DECIDED")" = 200
 ```
@@ -133,9 +133,9 @@ from the start of the page may have expired.
 
 <!-- doc-test: bulk -->
 ```bash
-ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${AIOPS_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${AIOPS_API_PORT:-8400}/mcp")"
+ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${MANDATE_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${MANDATE_API_PORT:-8400}/mcp")"
 for i in $(seq 1 120); do
-  CHANGESET="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$CHANGESET_ID\"}")"
+  CHANGESET="$(MANDATE_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${MANDATE_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$CHANGESET_ID\"}")"
   STATUS="$(node -p 'JSON.parse(process.argv[1]).structuredContent.changeset.status' "$CHANGESET")"
   case "$STATUS" in completed|completed_with_errors|failed|cancelled|expired|rolled_back) break ;; esac
   sleep 2
@@ -153,7 +153,7 @@ the token does not show in the process list.
 <!-- doc-test: bulk -->
 ```bash
 export MAGENTO_TOKEN="$(bash deploy/sandbox/magento/token.sh)"
-PRODUCTS="$(printf 'authorization: Bearer %s\n' "$MAGENTO_TOKEN" | curl -fsS -g -H @- "http://127.0.0.1:${AIOPS_MAGENTO_PORT:-4390}/rest/all/V1/products?searchCriteria[filter_groups][0][filters][0][field]=brand&searchCriteria[filter_groups][0][filters][0][value]=acme&searchCriteria[filter_groups][0][filters][0][condition_type]=eq")"
+PRODUCTS="$(printf 'authorization: Bearer %s\n' "$MAGENTO_TOKEN" | curl -fsS -g -H @- "http://127.0.0.1:${MANDATE_MAGENTO_PORT:-4390}/rest/all/V1/products?searchCriteria[filter_groups][0][filters][0][field]=brand&searchCriteria[filter_groups][0][filters][0][value]=acme&searchCriteria[filter_groups][0][filters][0][condition_type]=eq")"
 node -p 'JSON.parse(process.argv[1]).items.map((p) => p.sku + ": " + p.custom_attributes.find((a) => a.attribute_code === "meta_keyword")?.value).join("\n")' "$PRODUCTS"
 test "$(node -p 'JSON.parse(process.argv[1]).items.filter((p) => p.custom_attributes.some((a) => a.attribute_code === "meta_keyword" && a.value === process.argv[2])).length' "$PRODUCTS" "$NEW_KEYWORD")" -eq 3
 ```
@@ -166,7 +166,7 @@ depends on it.
 
 A completed change-set can be rolled back to the values recorded before the write. The rollback is
 confirmed on the trusted page by the requester, who must have logged in within the last five minutes
-(`AIOPS_FRESH_AUTH_SECONDS`, 300 by default); an older page session is asked to log in again:
+(`MANDATE_FRESH_AUTH_SECONDS`, 300 by default); an older page session is asked to log in again:
 
 1. Open `http://localhost:8400/app/changesets/<change-set ID>` as alice.
 2. Choose **Roll back 3 items**. The rollback starts at once, without a second confirmation: the
@@ -182,19 +182,19 @@ rollback with the hash, and follow the change-set to `rolled_back`.
 
 <!-- doc-test: rollback -->
 ```bash
-ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${AIOPS_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${AIOPS_API_PORT:-8400}/mcp")"
+ALICE_TOKEN="$(node tooling/acceptance/login.mjs "http://localhost:${MANDATE_KEYCLOAK_PORT:-8480}" alice "$DEV_PASSWORD" "http://localhost:${MANDATE_API_PORT:-8400}/mcp")"
 for i in $(seq 1 30); do
-  OFFER="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool rollback_changeset --args "{\"changeset_id\":\"$CHANGESET_ID\",\"hash\":\"$CHANGESET_HASH\"}")"
+  OFFER="$(MANDATE_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${MANDATE_API_PORT:-8400}/mcp" --tool rollback_changeset --args "{\"changeset_id\":\"$CHANGESET_ID\",\"hash\":\"$CHANGESET_HASH\"}")"
   test "$(node -p 'JSON.parse(process.argv[1]).structuredContent.rollback.available' "$OFFER")" = true && break
   sleep 2
 done
 node -p 'JSON.stringify(JSON.parse(process.argv[1]).structuredContent.rollback)' "$OFFER"
-ALICE_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${AIOPS_API_PORT:-8400}" alice "$DEV_PASSWORD" "/app/changesets/$CHANGESET_ID")"
-ROLLBACK="$(AIOPS_PAGE_COOKIE="$ALICE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${AIOPS_API_PORT:-8400}" rollback "$CHANGESET_ID" "$CHANGESET_HASH")"
+ALICE_COOKIE="$(node tooling/acceptance/page-login.mjs "http://localhost:${MANDATE_API_PORT:-8400}" alice "$DEV_PASSWORD" "/app/changesets/$CHANGESET_ID")"
+ROLLBACK="$(MANDATE_PAGE_COOKIE="$ALICE_COOKIE" node tooling/acceptance/page-api.mjs "http://localhost:${MANDATE_API_PORT:-8400}" rollback "$CHANGESET_ID" "$CHANGESET_HASH")"
 echo "$ROLLBACK"
 test "$(node -p 'JSON.parse(process.argv[1]).status' "$ROLLBACK")" = 200
 for i in $(seq 1 120); do
-  CHANGESET="$(AIOPS_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${AIOPS_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$CHANGESET_ID\"}")"
+  CHANGESET="$(MANDATE_MCP_TOKEN="$ALICE_TOKEN" node tooling/acceptance/mcp-call.mjs "http://localhost:${MANDATE_API_PORT:-8400}/mcp" --tool get_changeset --args "{\"changeset_id\":\"$CHANGESET_ID\"}")"
   STATUS="$(node -p 'JSON.parse(process.argv[1]).structuredContent.changeset.status' "$CHANGESET")"
   case "$STATUS" in rolled_back|failed) break ;; esac
   sleep 2
@@ -210,14 +210,14 @@ The products have their earlier keywords again: run the query of
 
 The terminal client stands in for an AI client. A real one needs to reach the MCP endpoint and
 Keycloak over public HTTPS: run the stack behind a TLS proxy or a tunnel with a real host name, and
-set `AIOPS_KEYCLOAK_PUBLIC_URL`, `AIOPS_MCP_RESOURCE` and `AIOPS_PUBLIC_URL` to the public URLs (see
+set `MANDATE_KEYCLOAK_PUBLIC_URL`, `MANDATE_MCP_RESOURCE` and `MANDATE_PUBLIC_URL` to the public URLs (see
 [Production hardening](production.md)).
 
 - **Claude** (claude.ai, Claude Desktop): add a custom connector with the MCP URL, for example
   `https://ops.example.com/mcp`. Claude registers itself with its client metadata document (CIMD),
   which the bundled realm trusts for `claude.ai`.
 - **ChatGPT**: add the MCP server with Authentication **OAuth** (not "OAuth or no
-  authentication"), registration method **User-Defined OAuth Client**, client ID `aiops-mcp`, no
+  authentication"), registration method **User-Defined OAuth Client**, client ID `mandate-mcp`, no
   client secret, token endpoint auth method `none`. Its automatic registration fails against the
   bundled realm.
 
@@ -227,7 +227,7 @@ above.
 ### Background
 
 - [ADR 0004](../decisions/0004-authorization-and-client-registration.md): how clients register
-  (a pre-registered public client `aiops-mcp`, CIMD for `claude.ai`; dynamic registration off by
+  (a pre-registered public client `mandate-mcp`, CIMD for `claude.ai`; dynamic registration off by
   default) and how tokens are bound to the MCP URL.
 - [ADR 0009](../decisions/0009-offline-access-and-observed-client-registration.md): what the manual
   checks with claude.ai and ChatGPT found, including the exact ChatGPT settings and why claude.ai

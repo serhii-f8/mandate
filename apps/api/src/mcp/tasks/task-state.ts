@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** Task status derived from the change-set on every read (MCP-7, design §4). */
-import type { ChangeSetRecord, TaskKind } from '@aiops/core';
+import type { ChangeSetRecord, TaskKind } from '@mandate/core';
 
 export interface TaskState {
   readonly status: 'working' | 'completed' | 'cancelled';

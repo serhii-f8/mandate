@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Query-string and body parsing for the approval page routes (NFR-8, APR-5, SEC-8). Only a string
  * query value is accepted: an array means a repeated parameter and is refused. Cursors are opaque
@@ -7,7 +7,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { decodeCursor as decodeCanonicalCursor, type DecisionRequest, type ItemStatus } from '@aiops/core';
+import { decodeCursor as decodeCanonicalCursor, type DecisionRequest, type ItemStatus } from '@mandate/core';
 
 export const CHANGESET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

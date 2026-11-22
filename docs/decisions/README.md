@@ -7,7 +7,7 @@ checked against a library, a protocol or a running system.
 
 Numbers are stable and are never reused. Numbers missing from this list belong to records about the
 internal development process, which are not published. A new decision takes the next free number
-after the highest one ever used (0061), a file `NNNN-short-title.md` and a row here.
+after the highest one in this list, a file `NNNN-short-title.md` and a row here.
 
 Requirements cited in the records (`MCP-1`, `POL-3`, `NFR-18`) are defined in the
 [specification](../SPEC.md).
@@ -57,3 +57,4 @@ Requirements cited in the records (`MCP-1`, `POL-3`, `NFR-18`) are defined in th
 | [0056](0056-conformance-baseline-2025-11-25-legacy.md) | Conformance baseline for 2025-11-25 on the stateless legacy path | 2026-11-20 |
 | [0059](0059-documentation-acceptance-by-clean-clone-walkthrough.md) | Acceptance of the public guide by clean-clone walkthroughs | 2026-11-21 |
 | [0060](0060-visual-design-of-pages-and-widgets.md) | Visual design of the trusted pages and widgets | 2026-11-21 |
+| [0062](0062-project-name-mandate.md) | The project is named Mandate | 2026-11-22 |

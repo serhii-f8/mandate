@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Doc-test runner (NFR-9): runs the marked blocks of docs/guide/ per section in bash.
 // Usage: node tooling/doc-test/run.mjs <repo-dir> <section>...
 import { spawnSync } from 'node:child_process';

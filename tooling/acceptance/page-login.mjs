@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Logs a development user in to the api's trusted pages like a browser (AUTH-5):
 // GET /auth/login → Keycloak login form (posted) → /auth/callback → the return path.
 // Redirects are followed by hand with one cookie jar per host name (ports share cookies, as
-// in browsers), so the api's `aiops_login` cookie travels from /auth/login to /auth/callback.
-// Prints the session cookie, ready for a Cookie header: `aiops_session=…`.
+// in browsers), so the api's `mandate_login` cookie travels from /auth/login to /auth/callback.
+// Prints the session cookie, ready for a Cookie header: `mandate_session=…`.
 // Usage: node tooling/acceptance/page-login.mjs <api-base-url> <username> <password> [return-to]
 // The password is a visibly fake development default; never pass a real one on argv.
 
@@ -69,6 +69,6 @@ for (let i = 0; i < 20 && landedAt === undefined; i++) {
   response = await request(url, { username, password, credentialId: '' });
 }
 if (landedAt === undefined) throw new Error('page login: too many redirects');
-const session = jar.get(api.hostname)?.get('aiops_session');
+const session = jar.get(api.hostname)?.get('mandate_session');
 if (session === undefined) throw new Error('page login: no session cookie was set');
-console.log(`aiops_session=${session}`);
+console.log(`mandate_session=${session}`);

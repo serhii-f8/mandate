@@ -1,5 +1,5 @@
 {
-  "name": "@aiops/adapters",
+  "name": "@mandate/adapters",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
   "license": "Apache-2.0",
   "exports": {
     ".": {
-      "@aiops/source": "./src/index.ts",
+      "@mandate/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
@@ -23,10 +23,10 @@
     "test:int": "vitest run --project integration"
   },
   "devDependencies": {
-    "@aiops/testing": "workspace:*"
+    "@mandate/testing": "workspace:*"
   },
   "dependencies": {
-    "@aiops/connector-sdk": "workspace:*",
+    "@mandate/connector-sdk": "workspace:*",
     "@modelcontextprotocol/client": "2.4.0",
     "@seriousme/openapi-schema-validator": "2.12.0",
     "ajv": "8.20.0",

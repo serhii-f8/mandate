@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { InvocationRequest, InvocationResult, OperationInvoker } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import type { InvocationRequest, InvocationResult, OperationInvoker } from '@mandate/core';
 
 /** Records every invocation and answers `ran <operation id>`; set `failWith` to reject instead. */
 export class FakeInvoker implements OperationInvoker {

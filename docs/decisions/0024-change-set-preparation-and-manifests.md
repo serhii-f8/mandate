@@ -50,7 +50,7 @@ implementation (EXE-11). Temporal operation workflows are Phase 5, so SPEC secti
    items store no values). The reader validates arguments with the read operation's own
    validator and refuses anything but a GET read (CS-1 in code).
 6. **Every item, with status and reason**, in canonical JSON (RFC 8785 style), items in
-   code-point order of `target_id`, format tag `aiops.changeset.v1`, `sha256:<hex>`.
+   code-point order of `target_id`, format tag `mandate.changeset.v1`, `sha256:<hex>`.
 7. **Add `preparing → failed` and `executing → cancelled`** to SPEC section 4. Reusing
    `cancelled` for a failed preparation would hide errors; reusing `failed` for EXE-7
    would report a deliberate stop as an error. The full transition table lives in core now.

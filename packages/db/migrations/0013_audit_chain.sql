@@ -20,7 +20,7 @@ CREATE OR REPLACE FUNCTION audit_event_append_only() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'UPDATE'
-    AND current_setting('aiops.audit_seal', true) = 'on'
+    AND current_setting('mandate.audit_seal', true) = 'on'
     AND OLD.chain_pos IS NULL AND OLD.prev_hash IS NULL AND OLD.hash IS NULL
     AND NEW.chain_pos IS NOT NULL AND NEW.prev_hash IS NOT NULL AND NEW.hash IS NOT NULL
     AND (NEW.seq, NEW.id, NEW.ts, NEW.actor, NEW.client_id, NEW.action, NEW.subject, NEW.decision,
@@ -32,7 +32,7 @@ BEGIN
     RETURN NEW;
   END IF;
   IF TG_OP = 'DELETE'
-    AND current_setting('aiops.audit_retention', true) = 'on'
+    AND current_setting('mandate.audit_retention', true) = 'on'
     AND OLD.chain_pos IS NOT NULL
     AND OLD.chain_pos <= (SELECT max(chain_pos) FROM audit_anchor)
   THEN

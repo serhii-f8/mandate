@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
- * Tests of the preset contract helpers of @aiops/testing (NFR-17). They live here, not in
- * packages/testing: the helpers need the real adapter and loader, and @aiops/adapters and
- * @aiops/config dev-depend on @aiops/testing (a cycle). The fixture is the code fixture preset.
+ * Tests of the preset contract helpers of @mandate/testing (NFR-17). They live here, not in
+ * packages/testing: the helpers need the real adapter and loader, and @mandate/adapters and
+ * @mandate/config dev-depend on @mandate/testing (a cycle). The fixture is the code fixture preset.
  */
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createOpenApiAdapter } from '@aiops/adapters';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import type { ConnectionSettings } from '@aiops/connector-sdk';
+import { createOpenApiAdapter } from '@mandate/adapters';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
+import type { ConnectionSettings } from '@mandate/connector-sdk';
 import {
   CODE_FIXTURE_PRESET_DIR,
   contractRead,
@@ -21,12 +21,12 @@ import {
   replayRecordings,
   startFakeUpstream,
   type FakeUpstream,
-} from '@aiops/testing';
+} from '@mandate/testing';
 
 const adapter = createOpenApiAdapter();
 
 async function recordingsDir(files: Record<string, unknown>): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'aiops-recordings-'));
+  const dir = await mkdtemp(join(tmpdir(), 'mandate-recordings-'));
   for (const [name, content] of Object.entries(files)) {
     await mkdir(dirname(join(dir, name)), { recursive: true });
     await writeFile(join(dir, name), JSON.stringify(content));
@@ -42,7 +42,7 @@ describe('NFR-17 preset contract helpers', () => {
     up = await startFakeUpstream();
     const yaml = presetConnectionYaml({
       presetId: 'fixture',
-      package: '@aiops/code-fixture-preset',
+      package: '@mandate/code-fixture-preset',
       connectionId: 'items',
       baseUrl: up.url,
     });
@@ -175,7 +175,7 @@ describe('NFR-17 preset contract helpers', () => {
   });
 
   it('NFR-17 SEC-3 recordingsFreeOf fails when the directory holds no recording', async () => {
-    const empty = await mkdtemp(join(tmpdir(), 'aiops-empty-'));
+    const empty = await mkdtemp(join(tmpdir(), 'mandate-empty-'));
     await expect(recordingsFreeOf(empty, ['x'])).rejects.toThrow(/no recording files/);
   });
 });

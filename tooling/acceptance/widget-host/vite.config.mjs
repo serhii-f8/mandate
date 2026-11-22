@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Single-file build of the host page: tooling/acceptance/widget-host/dist/index.html.
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

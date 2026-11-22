@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * A Tasks-aware test client (MCP-7), as spike 1 proved it (ADR 0003, spikes/1-mcp-sdk/check.mjs):
  * `@modelcontextprotocol/client` 2.4.0 rejects `resultType: "task"`, so ext-tasks 0.2.3 sends
@@ -16,7 +16,7 @@ import {
 } from '@modelcontextprotocol/ext-tasks/client';
 import { MODERN } from './helpers.js';
 
-const CLIENT_INFO = { name: 'aiops-e2e', version: '1.0.0' };
+const CLIENT_INFO = { name: 'mandate-e2e', version: '1.0.0' };
 
 /** One request the raw dispatcher sent, with the instance that answered it. */
 export interface WireEntry {
@@ -92,7 +92,7 @@ export function rawDispatchFor(options: TaskSessionOptions): RawClientDispatch {
 export function taskSession(client: Client, options: TaskSessionOptions): TaskEnabledSession {
   return createTaskSessionFromClient(client, {
     // One logical endpoint served by every instance.
-    endpointId: 'aiops-e2e',
+    endpointId: 'mandate-e2e',
     rawDispatch: rawDispatchFor(options),
     v2RequestFraming: { protocolVersion: MODERN, clientInfo: CLIENT_INFO, clientCapabilities: {} },
   });

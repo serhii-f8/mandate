@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * A test-only `CodeContext` that answers `ctx.http.send` from recorded exchanges, in order.
  * A request that differs from the next exchange (method, path, query, body), an extra call or a
@@ -11,8 +11,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import type { CodeContext, CodeHttpRequest, CodeHttpResponse, ReadErrorCode } from '@aiops/connector-sdk';
-import type { RecordedExchange } from '@aiops/testing';
+import type { CodeContext, CodeHttpRequest, CodeHttpResponse, ReadErrorCode } from '@mandate/connector-sdk';
+import type { RecordedExchange } from '@mandate/testing';
 
 /** A recorded exchange, or one whose answer is a transport code (`timeout`, `network`, `busy`, …). */
 export type ReplayExchange =

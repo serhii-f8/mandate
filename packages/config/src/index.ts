@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** Configuration schemas, loader, validation and CLI. */
 export { EnvError, parseApiEnv, parseWorkerEnv, type ApiEnv, type EnvIssue, type LogLevel, type WorkerEnv } from './runtime-env.js';
 export { CONFIG_SCHEMA_VERSION } from './schema-version.js';
@@ -45,7 +45,7 @@ export {
   type OperationBinding,
   type LoadResult,
 } from './load.js';
-export { presetAiopsSchema } from './preset-package.js';
+export { presetMandateSchema } from './preset-package.js';
 export { presetDocumentSchema, resolvePreset, type LoadedPreset, type PresetEntryLocation, type PresetResult } from './presets.js';
 export { changesetsSchema, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN, DEFAULT_ROLLBACK_WINDOW_HOURS, manifestSchema, toManifestDefinition, type ManifestConfig } from './manifest.js';
 export { PLACEHOLDER_SCHEMA, type CodeOperationBinding, type HttpOperationBinding, type McpOperationBinding } from './registry.js';

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
   ApprovalView,
@@ -11,7 +11,7 @@ import {
   type ApprovalViewModel,
   type ChangeSetActions,
   type ChangeSetViewModel,
-} from '@aiops/widgets';
+} from '@mandate/widgets';
 import { toApprovalModel, toChangeSetModel, toItemsPage } from '../adapters.js';
 import { createApi, loginUrl, NotFound, toLogin, Unauthenticated, type DecideOutcome, type ItemsPage, type Session } from '../api.js';
 import { changesetPath } from '../routes.js';

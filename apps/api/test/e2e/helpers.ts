@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,14 +10,14 @@ import pg from 'pg';
 import { Client, StreamableHTTPClientTransport, type FetchLike } from '@modelcontextprotocol/client';
 import type { INestApplication } from '@nestjs/common';
 import type { Logger } from 'pino';
-import { createAdapters, type OpenApiAdapter } from '@aiops/adapters';
-import { ConfigurationHolder, type ApiEnv } from '@aiops/config';
-import type { ChangeSetExecutor, CredentialVault, OperationInvoker, RateCounter, WorkflowStarter } from '@aiops/core';
-import { createDb, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, runMigrations } from '@aiops/db';
-import { InMemoryExecutor, ScriptedWriter, startPostgres, TEST_WEB_CLIENT_SECRET, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { createAdapters, type OpenApiAdapter } from '@mandate/adapters';
+import { ConfigurationHolder, type ApiEnv } from '@mandate/config';
+import type { ChangeSetExecutor, CredentialVault, OperationInvoker, RateCounter, WorkflowStarter } from '@mandate/core';
+import { createDb, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, runMigrations } from '@mandate/db';
+import { InMemoryExecutor, ScriptedWriter, startPostgres, TEST_WEB_CLIENT_SECRET, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { createApp } from '../../src/app.js';
 import { CONFIGURATION, CREDENTIAL_VAULT } from '../../src/tokens.js';
-import { configurationLoadOptions, createUpstreamReader } from '@aiops/upstream';
+import { configurationLoadOptions, createUpstreamReader } from '@mandate/upstream';
 import { InProcessStarter } from './in-process-starter.js';
 
 export const MODERN = '2026-07-28';
@@ -67,9 +67,9 @@ export interface StartApiOptions {
   readonly logger?: Logger;
   /** The upstream adapter; a fresh `testAdapters(logger)` by default. */
   readonly adapter?: OpenApiAdapter;
-  /** Directory of the web bundle to serve under /app/ (`AIOPS_WEB_DIR`). */
+  /** Directory of the web bundle to serve under /app/ (`MANDATE_WEB_DIR`). */
   readonly webDir?: string;
-  /** Directory of the widget bundles (`AIOPS_WIDGET_DIR`); a directory that never exists by default. */
+  /** Directory of the widget bundles (`MANDATE_WIDGET_DIR`); a directory that never exists by default. */
   readonly widgetDir?: string;
   /** The executor; an `InMemoryExecutor` with a `ScriptedWriter` (batches of 100) by default. */
   readonly executor?: ChangeSetExecutor;
@@ -77,13 +77,13 @@ export interface StartApiOptions {
   readonly starter?: 'in-process' | WorkflowStarter;
   /** Delay before the in-process starter prepares (ms). */
   readonly prepareDelayMs?: number;
-  /** `AIOPS_PREPARE_WAIT_MS`; 20000 by default, as in production. */
+  /** `MANDATE_PREPARE_WAIT_MS`; 20000 by default, as in production. */
   readonly prepareWaitMs?: number;
   /** The configuration holder, e.g. one backed by revisions (CFG-4); a directory holder on `configDir` by default. */
   readonly configuration?: ConfigurationHolder;
-  /** `AIOPS_PRESET_DIRS`; none by default. */
+  /** `MANDATE_PRESET_DIRS`; none by default. */
   readonly presetDirs?: readonly string[];
-  /** `AIOPS_TRUST_PROXY`; 0 (trust no proxy) by default, as in production. */
+  /** `MANDATE_TRUST_PROXY`; 0 (trust no proxy) by default, as in production. */
   readonly trustProxy?: number;
   /** Wall-clock time of the rate limits (SEC-10, POL-4); the real clock by default. */
   readonly wallClock?: () => Date;
@@ -111,7 +111,7 @@ export function testApiEnv(
     oidcIssuer: options.issuer.issuer,
     oidcJwksUrl: new URL(options.issuer.jwksUrl),
     publicUrl: new URL(`http://127.0.0.1:${String(port)}`),
-    webClientId: 'aiops-web',
+    webClientId: 'mandate-web',
     webClientSecret: TEST_WEB_CLIENT_SECRET,
     oidcAuthorizationUrl: new URL(`${options.issuer.issuer}/protocol/openid-connect/auth`),
     oidcTokenUrl: new URL(`${options.issuer.issuer}/protocol/openid-connect/token`),
@@ -119,11 +119,11 @@ export function testApiEnv(
     sessionMaxAgeSeconds: 28_800,
     freshAuthSeconds: 300,
     ...(options.webDir === undefined ? {} : { webDir: options.webDir }),
-    widgetDir: options.widgetDir ?? join(tmpdir(), 'aiops-e2e-no-widgets'),
+    widgetDir: options.widgetDir ?? join(tmpdir(), 'mandate-e2e-no-widgets'),
     presetDirs: [...(options.presetDirs ?? [])],
     temporalAddress: 'localhost:7233',
     temporalNamespace: 'default',
-    taskQueue: 'aiops-operations',
+    taskQueue: 'mandate-operations',
     temporalKeys: TEST_TEMPORAL_KEYS,
     prepareWaitMs: options.prepareWaitMs ?? 20_000,
     metricsPort: 0,
@@ -227,7 +227,7 @@ export function reloadConfiguration(api: RunningApi): ReturnType<ConfigurationHo
 
 /** A token for the api's resource, as Keycloak would issue it for the pre-registered client. */
 export function tokenFor(issuer: TestIssuer, api: RunningApi, sub: string, groups: string[]): Promise<string> {
-  return issuer.token({ sub, groups, aud: api.resource, azp: 'aiops-mcp' });
+  return issuer.token({ sub, groups, aud: api.resource, azp: 'mandate-mcp' });
 }
 
 export interface ClientOptions {
@@ -255,7 +255,7 @@ export async function connectClient(options: ClientOptions): Promise<Client> {
     return response;
   };
   const client = new Client(
-    { name: 'aiops-e2e', version: '1.0.0' },
+    { name: 'mandate-e2e', version: '1.0.0' },
     options.era === 'modern' ? { versionNegotiation: { mode: { pin: MODERN } } } : {},
   );
   const first = options.baseUrls[0] ?? '';

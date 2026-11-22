@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import { AUDIT_CHAIN_FORMAT, auditRowHash, checkLink, GENESIS_HASH, type ChainRow, type SealedChainRow } from './chain.js';
 
-const H1 = 'sha256:4aab69f9e45ece22e5139da9bc15b0aca186a69a79be028424afa63d0fb32a2e';
-const H2 = 'sha256:4e9d6431583c0dc5a77a1451499063aed576b74dd87aff5713599a2f77a23ec2';
+const H1 = 'sha256:ffc0fcb65bfde9ec590b25d095a4ac249beb4948667dd0bbd6778b5ae7f0d0e2';
+const H2 = 'sha256:2e5fb57c266db1b424351d8b36fadfaadaad2736a8502f22b8e200bd3184a3d2';
 
 const row1: ChainRow = {
   pos: 1,
@@ -89,6 +89,6 @@ describe('AUD-3 AUD-5 audit hash chain', () => {
 
   it('NFR-14 GENESIS_HASH is sha256 and 64 zeros', () => {
     expect(GENESIS_HASH).toBe(`sha256:${'0'.repeat(64)}`);
-    expect(AUDIT_CHAIN_FORMAT).toBe('aiops.audit.v1');
+    expect(AUDIT_CHAIN_FORMAT).toBe('mandate.audit.v1');
   });
 });

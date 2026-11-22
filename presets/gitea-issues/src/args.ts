@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Hand-written narrowing of the code reads' arguments (OPS-5). The input schema already ran, but
  * Ajv applies no defaults (F13) and the connection test passes declared arguments unchecked, so

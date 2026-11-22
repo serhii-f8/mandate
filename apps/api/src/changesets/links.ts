@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The fallback link to the change-set page (MCP-6): every result that refers to a change-set the
  * caller may see names its page, so clients without MCP Apps widgets still reach it. Applied after

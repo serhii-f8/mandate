@@ -26,7 +26,7 @@ tool of the server is known but disabled: it is not offered and cannot be called
 
 ## List the tools
 
-`aiops mcp tools` lists the connection's tools live, with the stored credential:
+`mandate mcp tools` lists the connection's tools live, with the stored credential:
 
 ```bash
 docker compose exec -T api node dist/cli.js mcp tools tools
@@ -88,7 +88,7 @@ a call whose last check is older than a minute. Only `ok` operations are offered
 | `missing` | The server no longer lists the tool. |
 | `unverified` | No list has succeeded yet, or the last success is too old. |
 | `schema_invalid` | The hash matches but the derived input schema does not compile. |
-| `unreferenced` | No operation uses the tool (only shown by `aiops mcp tools`). |
+| `unreferenced` | No operation uses the tool (only shown by `mandate mcp tools`). |
 
 A call to an operation that is not `ok` is refused after the policy check, with `upstream_changed`
 (`changed`, `missing`) or `upstream_unavailable` (`unverified`), and the refusal is audited.
@@ -110,8 +110,8 @@ enable it:
 4. Run `config diff`, then `config apply`.
 
 ```bash
-docker compose exec -T api node dist/cli.js config diff /etc/aiops/config
-docker compose exec -T api node dist/cli.js config apply /etc/aiops/config --actor you
+docker compose exec -T api node dist/cli.js config diff /etc/mandate/config
+docker compose exec -T api node dist/cli.js config apply /etc/mandate/config --actor you
 ```
 
 The pin monitor sees the applied revision within seconds, and the operation returns to `ok` with no

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { context, propagation, trace } from '@opentelemetry/api';
@@ -57,7 +57,7 @@ describe('NFR-11 worker tracing', () => {
     }
   });
 
-  it('NFR-11 registered, activity-side spans carry service.name aiops-worker, only W3C context propagates, and the OTLP endpoint receives them', async () => {
+  it('NFR-11 registered, activity-side spans carry service.name mandate-worker, only W3C context propagates, and the OTLP endpoint receives them', async () => {
     const posts: string[] = [];
     const sink = createServer((req, res) => {
       posts.push(`${req.method ?? ''} ${req.url ?? ''}`);
@@ -79,7 +79,7 @@ describe('NFR-11 worker tracing', () => {
         span.end();
       });
       const [span] = memory.getFinishedSpans();
-      expect(span?.resource.attributes).toMatchObject({ 'service.name': 'aiops-worker', 'telemetry.sdk.language': 'nodejs', 'telemetry.sdk.name': 'opentelemetry' });
+      expect(span?.resource.attributes).toMatchObject({ 'service.name': 'mandate-worker', 'telemetry.sdk.language': 'nodejs', 'telemetry.sdk.name': 'opentelemetry' });
     } finally {
       // Shutdown flushes the batch processor to the endpoint.
       await telemetry.shutdown();
@@ -96,12 +96,12 @@ describe('NFR-12 worker metrics', () => {
     const server = createServer(telemetry.metricsHandler);
     const port = await listen(server);
     try {
-      telemetry.meter.createCounter('aiops_probe_total').add(2, { phase: 'execute' });
+      telemetry.meter.createCounter('mandate_probe_total').add(2, { phase: 'execute' });
       const res = await get(port, '/metrics');
       expect(res.status).toBe(200);
-      expect(res.body).toContain('aiops_probe_total{phase="execute"} 2');
+      expect(res.body).toContain('mandate_probe_total{phase="execute"} 2');
       // As with 0.57: the resource is the SDK default merged with service.name (ADR 0054).
-      expect(res.body).toMatch(/^target_info\{service_name="aiops-worker",telemetry_sdk_language="nodejs",telemetry_sdk_name="opentelemetry",telemetry_sdk_version="[^"]+"\} 1$/m);
+      expect(res.body).toMatch(/^target_info\{service_name="mandate-worker",telemetry_sdk_language="nodejs",telemetry_sdk_name="opentelemetry",telemetry_sdk_version="[^"]+"\} 1$/m);
     } finally {
       await close(server);
       await telemetry.shutdown();

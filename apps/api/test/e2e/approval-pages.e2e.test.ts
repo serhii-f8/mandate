@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
-import { pageLogin, recordApproval, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@aiops/testing';
+import { createDb, PostgresChangeSetRepository, type Database } from '@mandate/db';
+import { pageLogin, recordApproval, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@mandate/testing';
 import { seedExecuted, seedPending, seedPrepared } from './approval-seed.js';
 import { startApi, startDatabase, type RunningApi } from './helpers.js';
 
@@ -43,7 +43,7 @@ beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
   // A stand-in bundle: the e2e does not depend on the web build.
-  webDir = await mkdtemp(join(tmpdir(), 'aiops-web-e2e-'));
+  webDir = await mkdtemp(join(tmpdir(), 'mandate-web-e2e-'));
   await mkdir(join(webDir, 'assets'));
   await writeFile(join(webDir, 'index.html'), '<!doctype html><title>Approvals</title><div id="root"></div>');
   a = await startApi(databaseUrl, { issuer, configDir: CONFIG, webDir });

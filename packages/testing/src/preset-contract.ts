@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -20,7 +20,7 @@ import {
   type UpstreamMapping,
   type WriteFailure,
   type WriteRecord,
-} from '@aiops/connector-sdk';
+} from '@mandate/connector-sdk';
 import type { FakeUpstream, RecordedRequest } from './fake-upstream.js';
 
 /** One recorded request and the response it got (NFR-17). */

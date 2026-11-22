@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Real Keycloak for tests (AUTH-8): the shipped realm file, the shipped bootstrap
  * script, and an authorization-code + PKCE login that posts the login form like a
@@ -14,7 +14,7 @@ import { TEST_WEB_CLIENT_SECRET } from './test-issuer.js';
 
 export const KEYCLOAK_IMAGE = 'quay.io/keycloak/keycloak:26.8.2';
 const REPO = new URL('../../../', import.meta.url);
-const REALM_FILE = fileURLToPath(new URL('deploy/keycloak/realm-aiops.json', REPO));
+const REALM_FILE = fileURLToPath(new URL('deploy/keycloak/realm-mandate.json', REPO));
 const BOOTSTRAP = fileURLToPath(new URL('deploy/keycloak/bootstrap.mjs', REPO));
 const ADMIN_PASSWORD = 'dev-only-test-admin-password';
 const run = promisify(execFile);
@@ -37,9 +37,9 @@ export interface StartedKeycloak {
 
 export interface StartKeycloakOptions {
   readonly mcpResource: string;
-  /** Origin of the api's pages; `aiops-web` redirects to `${publicUrl}/auth/callback`. Default `http://localhost:8400`. */
+  /** Origin of the api's pages; `mandate-web` redirects to `${publicUrl}/auth/callback`. Default `http://localhost:8400`. */
   readonly publicUrl?: string;
-  /** Secret of `aiops-web`; default the e2e api's (`TEST_WEB_CLIENT_SECRET`). */
+  /** Secret of `mandate-web`; default the e2e api's (`TEST_WEB_CLIENT_SECRET`). */
   readonly webClientSecret?: string;
 }
 
@@ -51,18 +51,18 @@ export async function startKeycloak(options: StartKeycloakOptions): Promise<Star
       KC_BOOTSTRAP_ADMIN_PASSWORD: ADMIN_PASSWORD,
       MCP_RESOURCE: options.mcpResource,
       // Substituted into the realm file at import (ADR 0019).
-      AIOPS_PUBLIC_URL: options.publicUrl ?? 'http://localhost:8400',
-      AIOPS_WEB_CLIENT_SECRET: options.webClientSecret ?? TEST_WEB_CLIENT_SECRET,
+      MANDATE_PUBLIC_URL: options.publicUrl ?? 'http://localhost:8400',
+      MANDATE_WEB_CLIENT_SECRET: options.webClientSecret ?? TEST_WEB_CLIENT_SECRET,
     })
-    .withCopyFilesToContainer([{ source: REALM_FILE, target: '/opt/keycloak/data/import/realm-aiops.json' }])
+    .withCopyFilesToContainer([{ source: REALM_FILE, target: '/opt/keycloak/data/import/realm-mandate.json' }])
     // CIMD documents served by the test process are fetched from inside the container.
     .withExtraHosts([{ host: 'host.docker.internal', ipAddress: 'host-gateway' }])
     .withExposedPorts(8080)
-    .withWaitStrategy(Wait.forHttp('/realms/aiops/.well-known/openid-configuration', 8080).forStatusCode(200))
+    .withWaitStrategy(Wait.forHttp('/realms/mandate/.well-known/openid-configuration', 8080).forStatusCode(200))
     .withStartupTimeout(240_000)
     .start();
   const baseUrl = `http://localhost:${String(container.getMappedPort(8080))}`;
-  const issuer = `${baseUrl}/realms/aiops`;
+  const issuer = `${baseUrl}/realms/mandate`;
   const adminToken = async (): Promise<string> => {
     const r = await fetch(`${baseUrl}/realms/master/protocol/openid-connect/token`, {
       method: 'POST',
@@ -71,7 +71,7 @@ export async function startKeycloak(options: StartKeycloakOptions): Promise<Star
     if (!r.ok) throw new Error(`admin token request failed: ${String(r.status)}`);
     return ((await r.json()) as { access_token: string }).access_token;
   };
-  const adminClients = `${baseUrl}/admin/realms/aiops/clients`;
+  const adminClients = `${baseUrl}/admin/realms/mandate/clients`;
   const clients = async (clientId: string, token?: string): Promise<Record<string, unknown>[]> => {
     const headers = { authorization: `Bearer ${token ?? (await adminToken())}` };
     const r = await fetch(`${adminClients}?${new URLSearchParams({ clientId, search: 'false' }).toString()}`, { headers });
@@ -97,7 +97,7 @@ export async function startKeycloak(options: StartKeycloakOptions): Promise<Star
           KEYCLOAK_URL: baseUrl,
           KEYCLOAK_ADMIN_USER: 'admin',
           KEYCLOAK_ADMIN_PASSWORD: ADMIN_PASSWORD,
-          AIOPS_MCP_RESOURCE: options.mcpResource,
+          MANDATE_MCP_RESOURCE: options.mcpResource,
           ...env,
         },
       });
@@ -186,9 +186,9 @@ export interface LoginOptions {
 
 export type LoginResult = { readonly accessToken: string; readonly refreshToken?: string; readonly scope?: string } | { readonly error: string };
 
-/** Authorization code flow against the `aiops` realm, login and consent forms included. */
+/** Authorization code flow against the `mandate` realm, login and consent forms included. */
 export async function loginWithPkce(options: LoginOptions): Promise<LoginResult> {
-  const realm = `${options.baseUrl}/realms/aiops/protocol/openid-connect`;
+  const realm = `${options.baseUrl}/realms/mandate/protocol/openid-connect`;
   const verifier = b64url(randomBytes(32));
   const pkce = options.pkce ?? 'S256';
   const state = b64url(randomBytes(16));
@@ -242,11 +242,11 @@ export async function loginWithPkce(options: LoginOptions): Promise<LoginResult>
 
 /** Anonymous Dynamic Client Registration (RFC 7591) of a public client. */
 export async function registerClient(baseUrl: string, redirectUris: string[]): Promise<{ status: number; clientId?: string }> {
-  const response = await fetch(`${baseUrl}/realms/aiops/clients-registrations/openid-connect`, {
+  const response = await fetch(`${baseUrl}/realms/mandate/clients-registrations/openid-connect`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      client_name: 'aiops test DCR client',
+      client_name: 'mandate test DCR client',
       redirect_uris: redirectUris,
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
@@ -294,7 +294,7 @@ export interface PageLoginOptions {
 }
 
 export interface PageLoginResult {
-  /** Ready for a `Cookie` header: `aiops_session=…`. */
+  /** Ready for a `Cookie` header: `mandate_session=…`. */
   readonly cookie: string;
   readonly csrfToken: string;
   /** Whether the IdP showed a login form (Keycloak); the test issuer never does. */
@@ -306,7 +306,7 @@ export interface PageLoginResult {
 /**
  * Logs in to the api's trusted pages like a browser (AUTH-5): `/auth/login` → IdP
  * (posting Keycloak's login form when it appears) → `/auth/callback` → the return path.
- * The jar carries the api's `aiops_login` cookie from `/auth/login` to `/auth/callback`
+ * The jar carries the api's `mandate_login` cookie from `/auth/login` to `/auth/callback`
  * (login state bound to the browser, SEC-8). Then reads the CSRF token from `GET /api/v1/session`.
  */
 export async function pageLogin(apiBaseUrl: string, username: string, password: string, options: PageLoginOptions = {}): Promise<PageLoginResult> {
@@ -349,9 +349,9 @@ export async function pageLogin(apiBaseUrl: string, username: string, password: 
   }
   if (landedAt === undefined) throw new Error('page login: too many redirects');
 
-  const value = jar.get(api, 'aiops_session');
+  const value = jar.get(api, 'mandate_session');
   if (value === undefined) throw new Error('page login: no session cookie was set');
-  const cookie = `aiops_session=${value}`;
+  const cookie = `mandate_session=${value}`;
   const session = await fetch(new URL('/api/v1/session', api), { headers: { cookie } });
   const body = (await session.json()) as { csrfToken?: string };
   if (!session.ok || body.csrfToken === undefined) throw new Error(`page login: GET /api/v1/session answered ${String(session.status)}`);

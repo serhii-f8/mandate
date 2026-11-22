@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * `POST /api/v1/changesets/:id/rollback` end to end (EXE-8, SEC-8, SEC-1, POL-6, AUD-1, SEC-11,
  * UI-4): the trusted page is the only place a rollback starts. PostgreSQL repository, the in-memory
@@ -10,8 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
-import { InMemoryExecutor, pageLogin, ScriptedWriter, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@aiops/testing';
+import { createDb, PostgresChangeSetRepository, type Database } from '@mandate/db';
+import { InMemoryExecutor, pageLogin, ScriptedWriter, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@mandate/testing';
 import { seedExecuted, type Seeded } from './approval-seed.js';
 import { auditRows, startApi, startDatabase, type RunningApi } from './helpers.js';
 import { ToggleExecutor } from './toggle-executor.js';
@@ -54,7 +54,7 @@ interface Answer {
 beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
-  webDir = await mkdtemp(join(tmpdir(), 'aiops-web-e2e-'));
+  webDir = await mkdtemp(join(tmpdir(), 'mandate-web-e2e-'));
   await mkdir(join(webDir, 'assets'));
   await writeFile(join(webDir, 'index.html'), '<!doctype html><title>Approvals</title><div id="root"></div>');
   seedDb = createDb(databaseUrl, { onError: () => undefined });
@@ -129,7 +129,7 @@ describe('EXE-8 SEC-8 page rollback', () => {
     await executor.inner.settled(seeded.id);
     const after = await repo.get(seeded.id);
     expect(after?.status).toBe('rolled_back');
-    expect(after?.rollbackRequest).toMatchObject({ actor: ALICE.sub, clientId: 'aiops-web', correlationId: answer.correlationId });
+    expect(after?.rollbackRequest).toMatchObject({ actor: ALICE.sub, clientId: 'mandate-web', correlationId: answer.correlationId });
     const items = await repo.itemsPage(seeded.id, { limit: 100 });
     expect(items.map((i) => i.rollbackStatus)).toEqual(['restored', 'restored', 'restored']);
   });
@@ -240,7 +240,7 @@ describe('AUD-1 SEC-11 page rollback is audited once', () => {
     if (success === undefined) throw new Error('the success case did not run');
     const ok = await auditRows(databaseUrl, "correlation_id = $1 and changeset_id = $2 and action in ('changeset.rollback', 'changeset.transition')", [success.correlationId, success.id]);
     expect(ok.filter((r) => r.action === 'changeset.rollback').map((r) => ({ outcome: r.outcome, actor: r.actor, client: r.client_id, details: r.details }))).toEqual([
-      { outcome: 'ok', actor: ALICE.sub, client: 'aiops-web', details: { channel: 'page', count: 3 } },
+      { outcome: 'ok', actor: ALICE.sub, client: 'mandate-web', details: { channel: 'page', count: 3 } },
     ]);
     expect(ok.filter((r) => r.action === 'changeset.transition').map((r) => ({ actor: r.actor, details: r.details }))[0]).toMatchObject({
       actor: ALICE.sub,

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import {
   approvalRequestedEvent,
@@ -11,7 +11,7 @@ import {
   type ChangeItemRecord,
   type ChangeSetRepository,
   type ChangeSetStatus,
-} from '@aiops/core';
+} from '@mandate/core';
 
 /** A change-set seeded straight into `pending_approval`, as the submit path would leave it. */
 export interface Seeded {
@@ -61,7 +61,7 @@ async function prepare(repo: ChangeSetRepository, o: PrepareOptions, correlation
       operation: OPERATION,
       connection: 'shop',
       requester: o.requester,
-      clientId: 'aiops-mcp',
+      clientId: 'mandate-mcp',
       args: ARGS,
       configHash: 'seeded',
       correlationId,
@@ -126,7 +126,7 @@ export async function seedPending(
     submission: {
       actor: o.requester,
       groups: o.groups,
-      clientId: 'aiops-mcp',
+      clientId: 'mandate-mcp',
       correlationId,
       at,
       role: o.role,
@@ -161,7 +161,7 @@ export async function seedExecuted(repo: ChangeSetRepository, o: ExecutedOptions
   const seeded = await prepare(repo, { requester: o.requester, items: o.items }, correlationId);
   const { id, hash } = seeded;
   const changeset = { id, operation: OPERATION };
-  const request = { actor: o.requester, groups: ['content'], clientId: 'aiops-mcp', correlationId };
+  const request = { actor: o.requester, groups: ['content'], clientId: 'mandate-mcp', correlationId };
   const started = await repo.startExecution({
     changesetId: id,
     expectedHash: hash,

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
@@ -10,9 +10,9 @@ import { createMcpHandler, type McpHttpHandler } from '@modelcontextprotocol/ser
 import { trace } from '@opentelemetry/api';
 import { createRemoteJWKSet, type JWTVerifyGetKey } from 'jose';
 import type { Logger } from 'pino';
-import { createAdapters } from '@aiops/adapters';
-import type { McpToolAdapter, ReadAdapter } from '@aiops/connector-sdk';
-import { ConfigurationUnavailableError, createSchemaCompiler, type ApiEnv, type ConfigurationHolder } from '@aiops/config';
+import { createAdapters } from '@mandate/adapters';
+import type { McpToolAdapter, ReadAdapter } from '@mandate/connector-sdk';
+import { ConfigurationUnavailableError, createSchemaCompiler, type ApiEnv, type ConfigurationHolder } from '@mandate/config';
 import {
   changesetKind,
   rolesOf,
@@ -24,10 +24,10 @@ import {
   type RateCounter,
   type TaskRepository,
   type WorkflowStarter,
-} from '@aiops/core';
-import { parseTemporalKeys, TemporalExecutor, TemporalWorkflowStarter } from '@aiops/temporal';
+} from '@mandate/core';
+import { parseTemporalKeys, TemporalExecutor, TemporalWorkflowStarter } from '@mandate/temporal';
 import type { Client, Connection } from '@temporalio/client';
-import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresAuditReader, PostgresChangeSetRepository, PostgresCredentialVault, PostgresRateCounter, PostgresSessionStore, PostgresTaskRepository, type Database } from '@aiops/db';
+import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresAuditReader, PostgresChangeSetRepository, PostgresCredentialVault, PostgresRateCounter, PostgresSessionStore, PostgresTaskRepository, type Database } from '@mandate/db';
 import { createBearerGate } from './auth/bearer-gate.js';
 import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
@@ -81,7 +81,7 @@ import { createApiTemporalClient } from './temporal-client.js';
 import type { ApiTelemetry } from './telemetry.js';
 import { ConnectionTestService } from './upstream/connection-test.js';
 import { operationInvokers, type OperationInvokersBase } from './upstream/operation-router.js';
-import { assertFullyChecked, PinMonitor, vaultToolLister, type UpstreamToolView } from '@aiops/upstream';
+import { assertFullyChecked, PinMonitor, vaultToolLister, type UpstreamToolView } from '@mandate/upstream';
 import { PageAccessGuard, type PageChecks } from './web/access.js';
 import { AuthController, SessionController } from './web/auth.controller.js';
 import { ConnectionsController } from './web/connections.controller.js';
@@ -103,7 +103,7 @@ export interface AppOverrides {
   readonly adapter?: ReadAdapter & Partial<McpToolAdapter>;
   /** Pin states of MCP-backed operations; replaces the pin monitor (none is built). */
   readonly upstreamTools?: UpstreamToolView;
-  /** Credential store; defaults to `PostgresCredentialVault` under `AIOPS_MASTER_KEYS`. */
+  /** Credential store; defaults to `PostgresCredentialVault` under `MANDATE_MASTER_KEYS`. */
   readonly vault?: CredentialVault;
   /** Signing keys; defaults to the remote JWKS at `OIDC_JWKS_URL`. */
   readonly jwks?: JWTVerifyGetKey;
@@ -246,7 +246,7 @@ class AppModule {
         { provide: LOGGER, useValue: logger },
         { provide: CONFIGURATION, useValue: configuration },
         { provide: ON_SHUTDOWN, useValue: overrides.onShutdown ?? null },
-        { provide: TRACER, useValue: telemetry?.tracer ?? trace.getTracer('aiops-api') },
+        { provide: TRACER, useValue: telemetry?.tracer ?? trace.getTracer('mandate-api') },
         { provide: TELEMETRY, useValue: telemetry ?? null },
         { provide: BEARER_GATE, useValue: createBearerGate({ verifier, resource: env.mcpResource }) },
         {

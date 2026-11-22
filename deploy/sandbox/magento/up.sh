@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 # Brings the Mage-OS sandbox up (idempotent). First run: composer download + setup:install.
 # Prints "SANDBOX UP <seconds>" when the REST API answers. Development only.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 START=$(date +%s)
-PORT="${AIOPS_MAGENTO_PORT:-4390}"
-docker network inspect aiops-sandbox >/dev/null 2>&1 || docker network create aiops-sandbox >/dev/null
-DC=(docker compose -p aiops-magento-sandbox)
+PORT="${MANDATE_MAGENTO_PORT:-4390}"
+docker network inspect mandate-sandbox >/dev/null 2>&1 || docker network create mandate-sandbox >/dev/null
+DC=(docker compose -p mandate-magento-sandbox)
 # Without this, BuildKit's default provenance attestation gives every build a new image ID on
 # the containerd image store, so each run recreated `web` and killed the bulk consumer.
 export BUILDX_NO_DEFAULT_ATTESTATIONS=1
@@ -37,7 +37,7 @@ fi
 "${DC[@]}" exec -T web bash -c 'chown -R www-data:www-data /var/www/html/var /var/www/html/generated /var/www/html/pub /var/www/html/app/etc'
 # The bulk consumer applies POST /async/bulk/... requests (ADR 0007, spike 5). Exactly one runs:
 # re-running this script never starts a second one. A consumer started before an attribute
-# schema change (the seeded `brand` attribute) has stale metadata: AIOPS_RESTART_CONSUMER=1
+# schema change (the seeded `brand` attribute) has stale metadata: MANDATE_RESTART_CONSUMER=1
 # restarts it.
 CONSUMER_SCAN='for f in /proc/[0-9]*/cmdline; do printf "%s " "${f//[^0-9]/}"; tr "\0" " " <"$f" 2>/dev/null; echo; done | grep "[q]ueue:consumers:start async.operations.all"'
 consumer_running() { "${DC[@]}" exec -T web bash -c "${CONSUMER_SCAN} >/dev/null"; }
@@ -48,7 +48,7 @@ start_consumer() {
   exit 1
 }
 if consumer_running; then
-  if [[ "${AIOPS_RESTART_CONSUMER:-}" == 1 ]]; then
+  if [[ "${MANDATE_RESTART_CONSUMER:-}" == 1 ]]; then
     "${DC[@]}" exec -T web bash -c "${CONSUMER_SCAN} | while read -r pid _; do kill \"\$pid\"; done"
     for _ in $(seq 1 30); do consumer_running || break; sleep 1; done
     if consumer_running; then echo "CONSUMER async.operations.all did not stop" >&2; exit 1; fi

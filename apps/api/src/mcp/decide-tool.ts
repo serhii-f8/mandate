@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * `decide_changeset` (APR-8; design part 1 §8): the widget's decision on the current approval step.
  * Listed only to holders of a step role of some role whose approval allows the widget, and published
@@ -8,8 +8,8 @@
  * or step-up change-sets included) is refused there (SEC-8). Answers carry IDs and statuses only (SEC-5).
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
-import { createSchemaCompiler, type LoadedConfiguration } from '@aiops/config';
-import { callerKind, rolesOf, type Approver, type Caller, type DecisionRequest } from '@aiops/core';
+import { createSchemaCompiler, type LoadedConfiguration } from '@mandate/config';
+import { callerKind, rolesOf, type Approver, type Caller, type DecisionRequest } from '@mandate/core';
 import type { DecideResult } from '../approvals/approval-service.js';
 import { DECISION_REFUSAL_TEXT } from '../approvals/texts.js';
 import type { BuiltinToolDeps } from './builtin-tools.js';

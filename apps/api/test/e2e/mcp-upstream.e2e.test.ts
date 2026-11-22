@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * MCP-backed operations end to end (CONN-1, CONN-4, SEC-5, SEC-6, MCP-3, POL-1, POL-2): a real
  * api on real PostgreSQL in front of a fake MCP server whose tool list the test changes.
@@ -10,9 +10,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Client } from '@modelcontextprotocol/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mcpToolHash, type McpToolDefinition } from '@aiops/connector-sdk';
-import { READ_RESULT_TEXT } from '@aiops/core';
-import { startFakeMcpServer, startTestIssuer, type FakeMcpServer, type FakeMcpTool, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { mcpToolHash, type McpToolDefinition } from '@mandate/connector-sdk';
+import { READ_RESULT_TEXT } from '@mandate/core';
+import { startFakeMcpServer, startTestIssuer, type FakeMcpServer, type FakeMcpTool, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { auditRows, connectClient, freePort, reloadConfiguration, startApi, startDatabase, tokenFor, type RunningApi } from './helpers.js';
 
 const MCP_CONFIG = fileURLToPath(new URL('./fixtures/mcp-config', import.meta.url));
@@ -72,7 +72,7 @@ let bob: string;
 
 /** Copies the fixture into a fresh directory with the placeholders replaced. */
 async function configFor(mcpUrl: string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'aiops-mcp-e2e-'));
+  const dir = await mkdtemp(join(tmpdir(), 'mandate-mcp-e2e-'));
   await cp(MCP_CONFIG, dir, { recursive: true });
   const connections = join(dir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__MCP_URL__', mcpUrl));

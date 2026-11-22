@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Submission of a prepared or approved change-set (MCP-8; design part 1 §5), shared by
  * `submit_for_approval` and the change-set page. Re-checks policy with the caller's current identity
@@ -8,7 +8,7 @@
  * approved one starts with the identity it was submitted under. The caller maps the outcome to its
  * own answer; texts and audit details stay with the channel.
  */
-import { executionLimits } from '@aiops/config';
+import { executionLimits } from '@mandate/config';
 import {
   allowingRole,
   approvalRequestedEvent,
@@ -27,7 +27,7 @@ import {
   type PolicyDecision,
   type StartOutcome,
   type Submission,
-} from '@aiops/core';
+} from '@mandate/core';
 import type { ApprovalService } from '../approvals/approval-service.js';
 import { load } from '../mcp/changeset-tools.js';
 import { recordDecision } from '../mcp/policy-answers.js';

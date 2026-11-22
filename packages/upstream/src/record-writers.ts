@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The worker implementations of the core `DirectWriter` port (design phase 9 §4): a per-record
  * write binding sends one request per record (OPS-6), a code write binding hands the records to
  * the preset's code module (OPS-5). The credential is opened only inside the adapter (SEC-2);
  * each request logs identifiers, method, status and timing only, never records (SEC-3).
  */
-import { recordOutcomeOf, type CodeAdapter, type CodeWriteDirection, type CodeWriteOperation, type RecordSendOutcome, type RecordWriteAdapter } from '@aiops/connector-sdk';
-import type { LoadedConfiguration } from '@aiops/config';
-import type { CredentialVault, DirectRecordState, DirectWriter } from '@aiops/core';
+import { recordOutcomeOf, type CodeAdapter, type CodeWriteDirection, type CodeWriteOperation, type RecordSendOutcome, type RecordWriteAdapter } from '@mandate/connector-sdk';
+import type { LoadedConfiguration } from '@mandate/config';
+import type { CredentialVault, DirectRecordState, DirectWriter } from '@mandate/core';
 import { connectionCredential, type UpstreamCallLog } from './read.js';
 
 export interface DirectWriterDeps {

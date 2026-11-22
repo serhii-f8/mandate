@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * OpenTelemetry for the api (NFR-11, NFR-12): a tracer provider that exports over OTLP/HTTP only
  * when an endpoint is configured, and a meter provider whose Prometheus exporter is served by a
@@ -17,7 +17,7 @@ import { BatchSpanProcessor, type SpanProcessor } from '@opentelemetry/sdk-trace
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 
 export interface TelemetryOptions {
-  readonly serviceName: 'aiops-api';
+  readonly serviceName: 'mandate-api';
   /** Unset: spans are created but never exported (no default localhost:4318). */
   readonly otlpEndpoint?: URL;
   /** Tests pass an in-memory processor; it is added beside the OTLP one. */

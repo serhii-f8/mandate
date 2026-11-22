@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { CallToolResult } from '@modelcontextprotocol/client';
 import { POLLED_STATUSES, type ChangeSetViewModel } from '../model.js';

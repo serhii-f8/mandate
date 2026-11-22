@@ -48,5 +48,5 @@ defeat the policy on the read path, although each component was correct alone:
 
 Tests in `packages/adapters/src/openapi/response.test.ts`,
 `packages/config/src/registry.test.ts` (titles with POL-2, POL-3, MCP-4) and
-`apps/api/src/upstream/read-invoker.test.ts`; `pnpm aiops validate deploy/config
+`apps/api/src/upstream/read-invoker.test.ts`; `pnpm mandate validate deploy/config
 --preset-dir presets` exits 0 (2026-11-17).

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Configuration revisions as file maps (CFG-4). `revisionFilesOf` collects the files a
  * revision stores; `loadConfigurationFiles` loads such a map through the unchanged
@@ -9,7 +9,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
-import type { ConfigRevisionSummary } from '@aiops/core';
+import type { ConfigRevisionSummary } from '@mandate/core';
 import type { ConfigIssue } from './issues.js';
 import { loadConfigurationDirectory, type LoadedConfiguration, type LoadOptions, type LoadResult } from './load.js';
 import { isSpecUrl } from './upstream-schema.js';
@@ -58,7 +58,7 @@ export function revisionSummary(configuration: LoadedConfiguration): ConfigRevis
 export async function loadConfigurationFiles(files: Readonly<Record<string, string>>, options: LoadOptions = {}): Promise<LoadResult> {
   const entries = Object.entries(files);
   if (!validKeys(entries.map(([key]) => key))) return { ok: false, issues: [INVALID_PATH] };
-  const dir = await mkdtemp(join(tmpdir(), 'aiops-revision-'));
+  const dir = await mkdtemp(join(tmpdir(), 'mandate-revision-'));
   try {
     for (const [key, text] of entries) {
       const segments = key.split('/');

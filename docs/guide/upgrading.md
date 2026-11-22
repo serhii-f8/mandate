@@ -23,8 +23,8 @@ docker compose up -d --wait
 Then check the version and readiness:
 
 ```bash
-curl -fsS "http://localhost:${AIOPS_API_PORT:-8400}/healthz"
-curl -fsS "http://localhost:${AIOPS_API_PORT:-8400}/readyz"
+curl -fsS "http://localhost:${MANDATE_API_PORT:-8400}/healthz"
+curl -fsS "http://localhost:${MANDATE_API_PORT:-8400}/readyz"
 ```
 
 `/healthz` answers with the product `version`. `/readyz` answers 200 when the database is reachable
@@ -35,8 +35,8 @@ and a configuration is active.
 After every upgrade, re-run `config apply` on your configuration directory:
 
 ```bash
-docker compose exec -T api node dist/cli.js config diff /etc/aiops/config
-docker compose exec -T api node dist/cli.js config apply /etc/aiops/config --actor upgrade
+docker compose exec -T api node dist/cli.js config diff /etc/mandate/config
+docker compose exec -T api node dist/cli.js config apply /etc/mandate/config --actor upgrade
 ```
 
 The active configuration revision is stored in PostgreSQL together with a hash that covers the files
@@ -62,7 +62,7 @@ Two rules for you:
 
 - Never send a signal or terminate a workflow from the Temporal CLI or UI. Payloads are encrypted, and
   plaintext input makes the workflow impossible to replay.
-- Keep `AIOPS_TEMPORAL_KEYS` and `AIOPS_MASTER_KEYS` the same across the upgrade, and never remove a
+- Keep `MANDATE_TEMPORAL_KEYS` and `MANDATE_MASTER_KEYS` the same across the upgrade, and never remove a
   key that open workflows or stored credentials still use.
 
 ## Upgrading to 1.0.0

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The api's production execution wiring, with Temporal unreachable: no executor or starter
  * override, the real `TemporalExecutor` / `TemporalWorkflowStarter` on a lazy connection
@@ -12,10 +12,10 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SpanKind } from '@opentelemetry/api';
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { createOpenApiAdapter } from '@aiops/adapters';
-import { ConfigurationHolder, type ApiEnv } from '@aiops/config';
-import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@aiops/testing';
-import { configurationLoadOptions } from '@aiops/upstream';
+import { createOpenApiAdapter } from '@mandate/adapters';
+import { ConfigurationHolder, type ApiEnv } from '@mandate/config';
+import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@mandate/testing';
+import { configurationLoadOptions } from '@mandate/upstream';
 import { createApp } from '../../src/app.js';
 import { startApiTelemetry } from '../../src/telemetry.js';
 import { auditRows, connectClient, freePort, startDatabase, testApiEnv, text } from './helpers.js';
@@ -32,7 +32,7 @@ let configDir: string;
 beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-temporal-wiring-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-temporal-wiring-e2e-'));
   await cp(CHANGESET_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   // The upstream is never called: the call fails at the workflow start.
@@ -62,7 +62,7 @@ describe('MCP-7 EXE-11 production Temporal wiring while Temporal is down', () =>
       const url = `http://127.0.0.1:${String(port)}`;
       expect((await fetch(`${url}/readyz`)).status).toBe(200);
 
-      const token = await issuer.token({ sub: 'alice-id', groups: ['content'], aud: env.mcpResource.href, azp: 'aiops-mcp' });
+      const token = await issuer.token({ sub: 'alice-id', groups: ['content'], aud: env.mcpResource.href, azp: 'mandate-mcp' });
       let correlationId = '';
       const client = await connectClient({
         era: 'modern',
@@ -102,12 +102,12 @@ describe('MCP-7 EXE-11 production Temporal wiring while Temporal is down', () =>
     const { adapter, configuration } = await load(env);
     const exporter = new InMemorySpanExporter();
     // register: true installs the context manager, so the active span crosses the SDK's node handler.
-    const telemetry = startApiTelemetry({ serviceName: 'aiops-api', spanProcessor: new SimpleSpanProcessor(exporter), register: true });
+    const telemetry = startApiTelemetry({ serviceName: 'mandate-api', spanProcessor: new SimpleSpanProcessor(exporter), register: true });
     const app = await createApp({ env, configuration, telemetry, overrides: { adapter } });
     let closed = false;
     try {
       await app.listen(port, '127.0.0.1');
-      const token = await issuer.token({ sub: 'alice-id', groups: ['content'], aud: env.mcpResource.href, azp: 'aiops-mcp' });
+      const token = await issuer.token({ sub: 'alice-id', groups: ['content'], aud: env.mcpResource.href, azp: 'mandate-mcp' });
       const correlationIds: string[] = [];
       const client = await connectClient({
         era: 'modern',
@@ -131,20 +131,20 @@ describe('MCP-7 EXE-11 production Temporal wiring while Temporal is down', () =>
       expect(toolCalls).toHaveLength(1);
       const toolCall = toolCalls[0];
       if (toolCall === undefined) throw new Error('no mcp.tool_call span');
-      const correlationId = toolCall.attributes['aiops.correlation_id'];
+      const correlationId = toolCall.attributes['mandate.correlation_id'];
       // The tool call's correlation ID is the one a response carried (the client may send more than tools/call).
       expect(correlationIds).toContain(correlationId);
-      const requests = spans.filter((s) => s.name === 'mcp.request' && s.attributes['aiops.correlation_id'] === correlationId);
+      const requests = spans.filter((s) => s.name === 'mcp.request' && s.attributes['mandate.correlation_id'] === correlationId);
       expect(requests).toHaveLength(1);
       const request = requests[0];
       if (request === undefined) throw new Error('no mcp.request span');
       // Ended (finished spans only are exported), a server span, the correlation ID its only attribute.
       expect(request.kind).toBe(SpanKind.SERVER);
       expect(request.ended).toBe(true);
-      expect(request.attributes).toEqual({ 'aiops.correlation_id': correlationId });
+      expect(request.attributes).toEqual({ 'mandate.correlation_id': correlationId });
       expect(toolCall.spanContext().traceId).toBe(request.spanContext().traceId);
       expect(toolCall.parentSpanContext?.spanId).toBe(request.spanContext().spanId);
-      expect(toolCall.attributes).toMatchObject({ 'aiops.tool': 'ping', 'aiops.correlation_id': correlationId });
+      expect(toolCall.attributes).toMatchObject({ 'mandate.tool': 'ping', 'mandate.correlation_id': correlationId });
       // SEC-3: no attribute of any span carries the bearer token.
       for (const span of spans) {
         for (const value of Object.values(span.attributes)) expect(String(value)).not.toContain(token);
@@ -157,7 +157,7 @@ describe('MCP-7 EXE-11 production Temporal wiring while Temporal is down', () =>
     }
   }, 120_000);
 
-  it('SEC-4 a malformed AIOPS_TEMPORAL_KEYS stops the start, named without the value', async () => {
+  it('SEC-4 a malformed MANDATE_TEMPORAL_KEYS stops the start, named without the value', async () => {
     const port = await freePort();
     const env: ApiEnv = { ...testApiEnv(databaseUrl, port, { issuer, configDir }), temporalAddress: UNREACHABLE, temporalKeys: 'garbage' };
     const { adapter, configuration } = await load(env);
@@ -169,7 +169,7 @@ describe('MCP-7 EXE-11 production Temporal wiring while Temporal is down', () =>
       (e: unknown) => e,
     );
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain('AIOPS_TEMPORAL_KEYS');
+    expect((error as Error).message).toContain('MANDATE_TEMPORAL_KEYS');
     expect((error as Error).message).not.toContain('garbage');
   });
 });

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { ProtocolError, type CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
-import { READ_RESULT_TEXT, type AuditEventInput, type Caller, type DenyReason, type OperationDefinition, type PolicyDecision, type RateCounter, type InvocationRequest, type InvocationResult, type OperationInvoker } from '@aiops/core';
-import { createSchemaCompiler, loadConfigurationSources, type LoadedConfiguration, type PinEvaluation } from '@aiops/config';
-import type { UpstreamToolView } from '@aiops/upstream';
+import { READ_RESULT_TEXT, type AuditEventInput, type Caller, type DenyReason, type OperationDefinition, type PolicyDecision, type RateCounter, type InvocationRequest, type InvocationResult, type OperationInvoker } from '@mandate/core';
+import { createSchemaCompiler, loadConfigurationSources, type LoadedConfiguration, type PinEvaluation } from '@mandate/config';
+import type { UpstreamToolView } from '@mandate/upstream';
 import {
   FakeInvoker,
   InMemoryAuditLog,
@@ -14,7 +14,7 @@ import {
   InMemoryRateCounter,
   InMemoryTaskRepository,
   ScriptedWriter,
-} from '@aiops/testing';
+} from '@mandate/testing';
 import { ApprovalService } from '../approvals/approval-service.js';
 import { OperationRouter } from '../upstream/operation-router.js';
 import { callerFromAuthInfo } from '../auth/caller-from-auth.js';
@@ -81,8 +81,8 @@ function configuration(): LoadedConfiguration {
 }
 
 const TOKEN = 'eyJhbGciOiJSUzI1NiJ9.do-not-leak-this-token.sig';
-const alice: Caller = callerFromAuthInfo({ token: TOKEN, clientId: 'aiops-mcp', scopes: [], extra: { sub: 'alice-id', groups: ['content'] } });
-const bob: Caller = { subject: 'bob-id', clientId: 'aiops-mcp', groups: ['support'] };
+const alice: Caller = callerFromAuthInfo({ token: TOKEN, clientId: 'mandate-mcp', scopes: [], extra: { sub: 'alice-id', groups: ['content'] } });
+const bob: Caller = { subject: 'bob-id', clientId: 'mandate-mcp', groups: ['support'] };
 
 function setup() {
   const audit = new InMemoryAuditLog();
@@ -99,7 +99,7 @@ function setup() {
     rateCounter: new InMemoryRateCounter(),
     wallClock: () => new Date('2026-11-17T12:00:30.000Z'),
     widgets: WidgetBundles.empty(),
-    publicUrl: new URL('https://aiops.example.test'),
+    publicUrl: new URL('https://mandate.example.test'),
   };
   const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot(), tasks: false });
   return { audit, invoker, deps, req };
@@ -122,7 +122,7 @@ describe('MCP-2 per-user tool list', () => {
     expect(search?.inputSchema).toEqual(configuration().policy.operations[0]?.inputSchema);
     expect(search?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
     expect((await listTools(deps, req(bob))).map((t) => t.name)).toEqual(['ping', 'support.lookup_order']);
-    expect(audit.events[0]).toMatchObject({ action: 'tools.list', actor: 'alice-id', clientId: 'aiops-mcp', outcome: 'ok', details: { count: 2 } });
+    expect(audit.events[0]).toMatchObject({ action: 'tools.list', actor: 'alice-id', clientId: 'mandate-mcp', outcome: 'ok', details: { count: 2 } });
   });
 });
 
@@ -265,7 +265,7 @@ function setupWith(config: LoadedConfiguration, invoker: OperationInvoker) {
     now: () => 0,    rateCounter: new InMemoryRateCounter(),
     wallClock: () => new Date(0),
     widgets: WidgetBundles.empty(),
-    publicUrl: new URL('https://aiops.example.test'),
+    publicUrl: new URL('https://mandate.example.test'),
   };
   const req = (caller: Caller): PipelineRequest => ({ caller, correlationId: 'corr-1', snapshot: deps.snapshot(), tasks: false });
   return { audit, deps, req };
@@ -354,7 +354,7 @@ describe('SEC-1 POL-2 the operation runs under the snapshot the decision used', 
       rateCounter: new InMemoryRateCounter(),
       wallClock: () => new Date(0),
       widgets: WidgetBundles.empty(),
-      publicUrl: new URL('https://aiops.example.test'),
+      publicUrl: new URL('https://mandate.example.test'),
     };
     const req: PipelineRequest = { caller: alice, correlationId: 'corr-9', snapshot: deps.snapshot(), tasks: false };
     current = OVERRIDDEN; // a reload lands while the request is in flight
@@ -588,13 +588,13 @@ function widgetSetup() {
     tasks: new InMemoryTaskRepository(),
     audit,
     approvals,
-    publicUrl: new URL('https://aiops.example.test'),
+    publicUrl: new URL('https://mandate.example.test'),
   };
   return { audit, repository, toolDeps, deps: { ...deps, builtins: [pingTool, decideChangesetTool(toolDeps)] }, req };
 }
 
-const dave: Caller = { subject: 'dave-id', clientId: 'aiops-mcp', groups: ['leads'] };
-const erin: Caller = { subject: 'erin-id', clientId: 'aiops-mcp', groups: ['auditors'] };
+const dave: Caller = { subject: 'dave-id', clientId: 'mandate-mcp', groups: ['leads'] };
+const erin: Caller = { subject: 'erin-id', clientId: 'mandate-mcp', groups: ['auditors'] };
 const DECIDE_ARGS = {
   changeset_id: '11111111-1111-4111-8111-111111111111',
   decision: 'approve',
@@ -635,7 +635,7 @@ describe('APR-8 MCP-2 decide_changeset visibility', () => {
   });
 });
 
-const URIS: Readonly<Record<WidgetKind, string>> = { changeset: 'ui://aiops/changeset.html', approval: 'ui://aiops/approval.html' };
+const URIS: Readonly<Record<WidgetKind, string>> = { changeset: 'ui://mandate/changeset.html', approval: 'ui://mandate/approval.html' };
 
 function catalog(missing?: WidgetKind): WidgetCatalog {
   return { list: () => [], read: () => undefined, uriFor: (k: WidgetKind) => (k === missing ? undefined : URIS[k]) };
@@ -665,7 +665,7 @@ const widgetTool = (name: string, widget?: WidgetKind): BuiltinTool => ({
 });
 
 describe('MCP-5 tools link their widget', () => {
-  it('MCP-5 a write operation with a manifest links ui://aiops/changeset.html under _meta.ui.resourceUri and ui/resourceUri', async () => {
+  it('MCP-5 a write operation with a manifest links ui://mandate/changeset.html under _meta.ui.resourceUri and ui/resourceUri', async () => {
     const write = operation('shop.update', 'write', true);
     const destructive = operation('shop.retire', 'destructive', true);
     expect(linksChangeset(write) && linksChangeset(destructive)).toBe(true);
@@ -674,7 +674,7 @@ describe('MCP-5 tools link their widget', () => {
     expect(tools.map((t) => t._meta)).toEqual([LINKED, LINKED]);
   });
 
-  it('MCP-5 an opaque operation tool links ui://aiops/changeset.html', async () => {
+  it('MCP-5 an opaque operation tool links ui://mandate/changeset.html', async () => {
     const opaque = operation('shop.post_note', 'write_opaque', false);
     const destructive = operation('shop.purge', 'destructive', false);
     expect([opaque, destructive].map(linksChangeset)).toEqual([true, true]);
@@ -714,7 +714,7 @@ describe('MCP-5 tools link their widget', () => {
 
 describe('MCP-6 change-set results link the page', () => {
   const ID = '11111111-1111-4111-8111-111111111111';
-  const PAGE = `https://aiops.example.test/app/changesets/${ID}`;
+  const PAGE = `https://mandate.example.test/app/changesets/${ID}`;
   const answering = (name: string, widget?: WidgetKind): BuiltinTool => ({
     ...widgetTool(name, widget),
     handler: () => Promise.resolve({ content: [{ type: 'text', text: `${name} done.` }], structuredContent: { changesetId: ID } }),

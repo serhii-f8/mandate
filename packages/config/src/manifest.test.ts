@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { rm } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadCodeFixture, presetWithoutUpdate } from '../test/code-fixture.js';

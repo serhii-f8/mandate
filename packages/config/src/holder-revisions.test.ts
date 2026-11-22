@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { UpstreamResolver } from '@aiops/connector-sdk';
-import type { AuditEventInput, ConfigRevision } from '@aiops/core';
-import { InMemoryAuditLog, InMemoryConfigRevisionStore } from '@aiops/testing';
+import type { UpstreamResolver } from '@mandate/connector-sdk';
+import type { AuditEventInput, ConfigRevision } from '@mandate/core';
+import { InMemoryAuditLog, InMemoryConfigRevisionStore } from '@mandate/testing';
 import { ConfigurationHolder, ConfigurationUnavailableError, type ConfigurationLogger, type RevisionHolderOptions } from './holder.js';
 import { loadConfigurationDirectory } from './load.js';
 import { revisionFilesOf, revisionSummary } from './revision-files.js';
@@ -94,7 +94,7 @@ let store: FlakyStore;
 let logger: RecordingLogger;
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'aiops-holder-rev-'));
+  dir = await mkdtemp(join(tmpdir(), 'mandate-holder-rev-'));
   await cp(VALID_DIR, dir, { recursive: true });
   audit = new InMemoryAuditLog();
   store = new FlakyStore(new InMemoryAuditLog());
@@ -115,7 +115,7 @@ function loads(): AuditEventInput[] {
 
 /** Files of the fixture directory with `file` (default `roles.yaml`) replaced, and their computed hash. */
 async function filesWith(roles: string | undefined, file = 'roles.yaml'): Promise<{ files: Record<string, string>; hash: string | undefined }> {
-  const copy = await mkdtemp(join(tmpdir(), 'aiops-holder-rev-src-'));
+  const copy = await mkdtemp(join(tmpdir(), 'mandate-holder-rev-src-'));
   try {
     await cp(VALID_DIR, copy, { recursive: true });
     if (roles !== undefined) await writeFile(join(copy, file), roles);
@@ -155,11 +155,11 @@ async function dirHash(): Promise<string> {
 
 describe('CFG-4 AUD-1 configuration from revisions', () => {
   it('AUD-1 CONN-8 config.load details name the loaded presets and versions', async () => {
-    const presetConfig = await mkdtemp(join(tmpdir(), 'aiops-holder-rev-preset-'));
+    const presetConfig = await mkdtemp(join(tmpdir(), 'mandate-holder-rev-preset-'));
     try {
       await cp(join(FIXTURES, 'with-preset'), presetConfig, { recursive: true });
       await ConfigurationHolder.fromRevisions(options({ fallbackDir: presetConfig, load: { presetDirs: [join(FIXTURES, 'preset-dir')] } }));
-      expect(loads().map((e) => [e.outcome, e.details.presets])).toEqual([['ok', [{ id: 'fake', package: '@aiops/fake-preset', version: '0.1.0' }]]]);
+      expect(loads().map((e) => [e.outcome, e.details.presets])).toEqual([['ok', [{ id: 'fake', package: '@mandate/fake-preset', version: '0.1.0' }]]]);
     } finally {
       await rm(presetConfig, { recursive: true });
     }

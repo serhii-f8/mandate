@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { ResourceNotFoundError } from '@modelcontextprotocol/server';
 import { UI_MIME_TYPE, type WidgetCatalog } from './widget-bundles.js';
 

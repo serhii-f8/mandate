@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { AuthInfo } from '@modelcontextprotocol/server';
-import { serviceSubject, type Caller } from '@aiops/core';
+import { serviceSubject, type Caller } from '@mandate/core';
 
 const MAX_GROUPS = 256;
 const MAX_GROUP_LENGTH = 255;

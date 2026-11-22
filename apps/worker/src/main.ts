@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import { parseWorkerEnv } from '@aiops/config';
+// Copyright 2026 The Mandate Authors
+import { parseWorkerEnv } from '@mandate/config';
 import { createWorkerLogger } from './logger.js';
 import { startWorkerRuntime } from './runtime.js';
 import { startWorkerTelemetry } from './telemetry/telemetry.js';

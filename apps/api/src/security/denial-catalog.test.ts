@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { DenyReason, LimitName, StartRefusal } from '@aiops/core';
+import type { DenyReason, LimitName, StartRefusal } from '@mandate/core';
 import { describe, expect, it } from 'vitest';
 import { DENIAL_PATHS } from '../../test/security/denial-catalog.js';
 

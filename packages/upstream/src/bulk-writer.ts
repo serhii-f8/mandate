@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The worker implementation of the core `BulkWriter` port (design part 2 §4): one change-set's
  * bulk submit and status calls through the connection's `WriteAdapter` (OPS-6). The credential is
  * opened only inside the adapter (SEC-2); results keep only what the batch writer decides on, and
  * each call logs identifiers, method, status and timing only, never records or batch content (SEC-3).
  */
-import type { WriteAdapter, WriteFailure } from '@aiops/connector-sdk';
-import type { LoadedConfiguration } from '@aiops/config';
-import type { BulkWriter, CredentialVault } from '@aiops/core';
+import type { WriteAdapter, WriteFailure } from '@mandate/connector-sdk';
+import type { LoadedConfiguration } from '@mandate/config';
+import type { BulkWriter, CredentialVault } from '@mandate/core';
 import { connectionCredential, type UpstreamCallLog } from './read.js';
 
 export interface BulkWriterDeps {

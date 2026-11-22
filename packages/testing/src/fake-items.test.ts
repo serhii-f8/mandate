@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -79,8 +79,8 @@ describe('OPS-5 OPS-6 fake items upstream', () => {
   });
 
   it('CONN-8 CODE_FIXTURE_PRESET_DIR is the code fixture package', async () => {
-    const pkg = JSON.parse(await readFile(join(CODE_FIXTURE_PRESET_DIR, 'package.json'), 'utf8')) as { name: string; aiops: { code: string } };
-    expect(pkg.name).toBe('@aiops/code-fixture-preset');
-    expect(pkg.aiops.code).toBe('lib/index.js');
+    const pkg = JSON.parse(await readFile(join(CODE_FIXTURE_PRESET_DIR, 'package.json'), 'utf8')) as { name: string; mandate: { code: string } };
+    expect(pkg.name).toBe('@mandate/code-fixture-preset');
+    expect(pkg.mandate.code).toBe('lib/index.js');
   });
 });

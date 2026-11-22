@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { execFile } from 'node:child_process';
 import { createServer, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -32,8 +32,8 @@ async function firstRequestHeaders(argv: string[], env: Record<string, string>):
 }
 
 describe('SEC-3 mcp-call.mjs bearer token', () => {
-  it('SEC-3 reads the token from AIOPS_MCP_TOKEN, so it never has to appear in argv', async () => {
-    const headers = await firstRequestHeaders(['--list'], { AIOPS_MCP_TOKEN: 'env-token-fake' });
+  it('SEC-3 reads the token from MANDATE_MCP_TOKEN, so it never has to appear in argv', async () => {
+    const headers = await firstRequestHeaders(['--list'], { MANDATE_MCP_TOKEN: 'env-token-fake' });
     expect(headers.authorization).toBe('Bearer env-token-fake');
   });
 

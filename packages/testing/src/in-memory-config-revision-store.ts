@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type {
   ApplyRevisionResult,
   AuditEventInput,
@@ -8,7 +8,7 @@ import type {
   ConfigRevision,
   ConfigRevisionStore,
   NewConfigRevision,
-} from '@aiops/core';
+} from '@mandate/core';
 import type { InMemoryAuditLog } from './in-memory-audit-log.js';
 
 /**

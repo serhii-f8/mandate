@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
- * Loads the code fixture preset of `@aiops/testing` through the real loader (OPS-5). Each call
+ * Loads the code fixture preset of `@mandate/testing` through the real loader (OPS-5). Each call
  * copies the fixture into a new temporary preset directory, so the process-wide code-import
  * cache never sees a changed tree under the same entry path.
  */
 import { cp, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CODE_FIXTURE_PRESET_DIR } from '@aiops/testing';
+import { CODE_FIXTURE_PRESET_DIR } from '@mandate/testing';
 import { loadConfigurationDirectory, type LoadResult } from '../src/load.js';
 
-export const FIXTURE_PACKAGE = '@aiops/code-fixture-preset';
+export const FIXTURE_PACKAGE = '@mandate/code-fixture-preset';
 /** The file name preset issues carry. */
 export const FIXTURE_PRESET_FILE = `${FIXTURE_PACKAGE}/preset.yaml`;
 
@@ -64,7 +64,7 @@ export interface CodeFixtureLoad {
 
 /** Loads a configuration that binds a fresh copy of the fixture; created directories are pushed to `dirs`. */
 export async function loadCodeFixture(dirs: string[], options: CodeFixtureLoad = {}): Promise<LoadResult> {
-  const presets = await mkdtemp(join(tmpdir(), 'aiops-code-fixture-presets-'));
+  const presets = await mkdtemp(join(tmpdir(), 'mandate-code-fixture-presets-'));
   dirs.push(presets);
   const dir = join(presets, 'code-fixture');
   await cp(CODE_FIXTURE_PRESET_DIR, dir, { recursive: true });
@@ -73,7 +73,7 @@ export async function loadCodeFixture(dirs: string[], options: CodeFixtureLoad =
     const json = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')) as Record<string, unknown>;
     await writeFile(join(dir, 'package.json'), JSON.stringify(options.packageJson(json)));
   }
-  const config = await mkdtemp(join(tmpdir(), 'aiops-code-fixture-config-'));
+  const config = await mkdtemp(join(tmpdir(), 'mandate-code-fixture-config-'));
   dirs.push(config);
   for (const [file, text] of Object.entries({ 'config.yaml': FIXTURE_CONFIG, ...options.config })) await writeFile(join(config, file), text);
   return loadConfigurationDirectory(config, { presetDirs: [presets] });

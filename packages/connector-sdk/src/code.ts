@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { HttpMethod } from './mapping.js';
 import type { ReadErrorCode } from './read.js';
 import type { RecordSendOutcome } from './write.js';

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import { redactAuditDetails, type AuditEventInput, type AuditLog } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import { redactAuditDetails, type AuditEventInput, type AuditLog } from '@mandate/core';
 
 const NO_KEYS: ReadonlySet<string> = new Set();
 

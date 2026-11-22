@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Spec loading (CONN-2, ADR 0018 decisions 1 and 2): structural validation with
  * `@seriousme/openapi-schema-validator`, then our own normaliser that reads Swagger 2.0
@@ -9,7 +9,7 @@
  * Issues name the JSON pointer of the problem, never a value from the document (SEC-3).
  */
 import { Validator } from '@seriousme/openapi-schema-validator';
-import type { HttpMethod, SpecIssue } from '@aiops/connector-sdk';
+import type { HttpMethod, SpecIssue } from '@mandate/connector-sdk';
 import { isPlainObject, pushIssue, refToPath, toJsonSchema2020, type TranslateContext } from './schema-translate.js';
 
 export interface NormalisedParameter {

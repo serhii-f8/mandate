@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The Magento catalog preset 1.0.0 as the worker loads it (specs resolved, presets loaded), bound
  * to connection `magento` at a fake catalog's `/rest/all`, plus a memory credential vault holding a
  * fake bearer token. Shared by the writer unit test and the bulk-write integration test.
  */
 import { resolve } from 'node:path';
-import { createOpenApiAdapter } from '@aiops/adapters';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import type { CredentialHandle, CredentialStatus, CredentialVault } from '@aiops/core';
-import { PRESET_DIR } from '@aiops/magento2-catalog';
+import { createOpenApiAdapter } from '@mandate/adapters';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
+import type { CredentialHandle, CredentialStatus, CredentialVault } from '@mandate/core';
+import { PRESET_DIR } from '@mandate/magento2-catalog';
 
 export const MAGENTO_BASE_PATH = '/rest/all';
 export const MAGENTO_CREDENTIAL_REF = 'magento-token';
@@ -25,7 +25,7 @@ export async function loadMagentoPreset(
   const connections = [
     'version: 1',
     'presets:',
-    "  - { id: magento-catalog, package: '@aiops/magento2-catalog', version: '1.0.0' }",
+    "  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '1.0.0' }",
     'connections:',
     '  - id: magento',
     '    adapter: openapi',

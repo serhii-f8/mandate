@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import { createOpenApiAdapter } from '@aiops/adapters';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import type { ReadAdapter, ReadOutcome } from '@aiops/connector-sdk';
-import { READ_RESULT_TEXT, type Caller, type CredentialHandle, type CredentialStatus, type CredentialVault, type OperationDefinition } from '@aiops/core';
-import type { UpstreamCallLog } from '@aiops/upstream';
+import { createOpenApiAdapter } from '@mandate/adapters';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
+import type { ReadAdapter, ReadOutcome } from '@mandate/connector-sdk';
+import { READ_RESULT_TEXT, type Caller, type CredentialHandle, type CredentialStatus, type CredentialVault, type OperationDefinition } from '@mandate/core';
+import type { UpstreamCallLog } from '@mandate/upstream';
 import { DirectReadInvoker, NOT_DIRECT_READ, type DirectReadInvokerDeps } from './read-invoker.js';
 
 /** One invoker per (configuration, correlation ID), as `operationInvokers` builds them behind the router. */
@@ -61,7 +61,7 @@ function op(id: string): OperationDefinition {
   return found;
 }
 
-const caller: Caller = { subject: 'alice-id', clientId: 'aiops-mcp', groups: ['content'] };
+const caller: Caller = { subject: 'alice-id', clientId: 'mandate-mcp', groups: ['content'] };
 const ARGS = { brand: 'acme', fields: ['sku'] };
 
 class MemoryVault implements CredentialVault {

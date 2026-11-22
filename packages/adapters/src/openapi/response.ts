@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { ResponseMapping } from '@aiops/connector-sdk';
+// Copyright 2026 The Mandate Authors
+import type { ResponseMapping } from '@mandate/connector-sdk';
 import { MappingError } from './request.js';
 
 const MAX_STRING = 4000;

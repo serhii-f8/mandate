@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { assertEgressAllowed, createGuardedLookup, EgressDeniedError, type Resolver } from '@aiops/adapters';
-import { parseSecret, type ConnectionSettings } from '@aiops/connector-sdk';
-import type { CredentialVault, NotificationError } from '@aiops/core';
+import { assertEgressAllowed, createGuardedLookup, EgressDeniedError, type Resolver } from '@mandate/adapters';
+import { parseSecret, type ConnectionSettings } from '@mandate/connector-sdk';
+import type { CredentialVault, NotificationError } from '@mandate/core';
 import type { SendOutcome, WebhookSender, WebhookTarget } from './senders.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;

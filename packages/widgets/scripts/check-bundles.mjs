@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 // Checks the widget bundles (UI-1, UI-6): each is one HTML document of at most 600 KB that loads
 // nothing from an address. `url(` and `@import` are CSS loading, so they are checked inside <style>
 // blocks only; zod's `.url(` is inside every correct script (ADR 0036 ruling F1).

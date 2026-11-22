@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import type { Response } from 'express';
-import type { AuditEventInput } from '@aiops/core';
-import { InMemoryAuditLog } from '@aiops/testing';
+import type { AuditEventInput } from '@mandate/core';
+import { InMemoryAuditLog } from '@mandate/testing';
 import { pageRefuser, refuse, REFUSAL_STATUS } from './refusals.js';
 
 const EVENT: AuditEventInput = {
@@ -108,7 +108,7 @@ describe('AUD-1 refusal answers', () => {
 });
 
 describe('AUD-1 SEC-11 page refuser', () => {
-  const VIEWER = { subject: 'alice-id', clientId: 'aiops-web' };
+  const VIEWER = { subject: 'alice-id', clientId: 'mandate-web' };
   const ID = 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
 
   it('AUD-1 SEC-11 pageRefuser writes one denied row with reason and channel page, then answers', async () => {
@@ -120,7 +120,7 @@ describe('AUD-1 SEC-11 page refuser', () => {
       {
         id: expect.stringMatching(/^[0-9a-f-]{36}$/) as unknown,
         actor: 'alice-id',
-        clientId: 'aiops-web',
+        clientId: 'mandate-web',
         action: 'changeset.export',
         outcome: 'denied',
         correlationId: 'c1',

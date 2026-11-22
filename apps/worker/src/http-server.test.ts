@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { request } from 'node:http';
-import type { ReadinessReport } from '@aiops/config';
+import type { ReadinessReport } from '@mandate/config';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startWorkerHttpServer, type WorkerHttpDeps } from './http-server.js';
 
@@ -81,12 +81,12 @@ describe('NFR-10 NFR-12 worker HTTP server', () => {
       metrics: (_req, res) => {
         res.statusCode = 200;
         res.setHeader('content-type', 'text/plain');
-        res.end('aiops_changesets{status="prepared"} 0\n');
+        res.end('mandate_changesets{status="prepared"} 0\n');
       },
     });
     const reply = await send(port, 'GET', '/metrics');
     expect(reply.status).toBe(200);
-    expect(reply.body).toBe('aiops_changesets{status="prepared"} 0\n');
+    expect(reply.body).toBe('mandate_changesets{status="prepared"} 0\n');
   });
 
   it('NFR-10 other paths 404 and other methods 405 without echoing the request', async () => {

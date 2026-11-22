@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
-import type { UpstreamResolver } from '@aiops/connector-sdk';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
+import type { UpstreamResolver } from '@mandate/connector-sdk';
 import { assertFullyChecked, configurationLoadOptions } from './load-options.js';
 
 const loaded = await loadConfigurationSources([{ file: 'c.yaml', text: 'version: 1\n' }]);

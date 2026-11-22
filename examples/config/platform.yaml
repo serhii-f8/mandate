@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../packages/config/schema/aiops-config.v1.json
+# yaml-language-server: $schema=../../packages/config/schema/mandate-config.v1.json
 # Platform settings: change-sets, audit retention, rate limits and notifications. Each of
 # changesets, audit and rate_limits may appear in one document only.
 version: 1

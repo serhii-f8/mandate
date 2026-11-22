@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors-opentelemetry';
-import { parseTemporalKeys } from '@aiops/temporal';
+import { parseTemporalKeys } from '@mandate/temporal';
 import { createApiTemporalClient } from './temporal-client.js';
 
 /** An obviously fake key (32 bytes, base64) — never used outside tests. */

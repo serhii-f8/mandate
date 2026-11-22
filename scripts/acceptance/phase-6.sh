@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The AI Operations Layer Authors
+# Copyright 2026 The Mandate Authors
 # Phase 6 acceptance (SPEC section 7, designs phase-6-approvals*) against the Magento sandbox:
 #   sandbox-ready, stack-healthy (one worker, Mailpit), credential-entered, below-threshold-executes,
 #   above-threshold-pending, cannot-execute-without-approval, requester-cannot-approve,
@@ -17,27 +17,27 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SHA="$(git -C "$REPO" rev-parse HEAD)"
 WORK="$(mktemp -d)"
-PROJECT="aiops-accept6-$$"
+PROJECT="mandate-accept6-$$"
 FAILED=0
-SANDBOX="http://127.0.0.1:${AIOPS_MAGENTO_PORT:-4390}"
+SANDBOX="http://127.0.0.1:${MANDATE_MAGENTO_PORT:-4390}"
 
 free_port() { node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})"; }
-export AIOPS_API_PORT="$(free_port)" AIOPS_KEYCLOAK_PORT="$(free_port)" AIOPS_TEMPORAL_PORT="$(free_port)" AIOPS_POSTGRES_PORT="$(free_port)"
-export AIOPS_MAILPIT_PORT="$(free_port)"
-export AIOPS_KEYCLOAK_PUBLIC_URL="http://localhost:${AIOPS_KEYCLOAK_PORT}"
-export AIOPS_MCP_RESOURCE="http://localhost:${AIOPS_API_PORT}/mcp"
-# Origin of the trusted pages, the realm's redirect URI of the aiops-web client and the base of
+export MANDATE_API_PORT="$(free_port)" MANDATE_KEYCLOAK_PORT="$(free_port)" MANDATE_TEMPORAL_PORT="$(free_port)" MANDATE_POSTGRES_PORT="$(free_port)"
+export MANDATE_MAILPIT_PORT="$(free_port)"
+export MANDATE_KEYCLOAK_PUBLIC_URL="http://localhost:${MANDATE_KEYCLOAK_PORT}"
+export MANDATE_MCP_RESOURCE="http://localhost:${MANDATE_API_PORT}/mcp"
+# Origin of the trusted pages, the realm's redirect URI of the mandate-web client and the base of
 # the links in notification e-mails.
-export AIOPS_PUBLIC_URL="http://localhost:${AIOPS_API_PORT}"
-export AIOPS_ACCEPT_CONFIG_DIR="$WORK/config"
-MCP="http://127.0.0.1:${AIOPS_API_PORT}/mcp"
-API="$AIOPS_PUBLIC_URL"
-MAILPIT="http://127.0.0.1:${AIOPS_MAILPIT_PORT}"
+export MANDATE_PUBLIC_URL="http://localhost:${MANDATE_API_PORT}"
+export MANDATE_ACCEPT_CONFIG_DIR="$WORK/config"
+MCP="http://127.0.0.1:${MANDATE_API_PORT}/mcp"
+API="$MANDATE_PUBLIC_URL"
+MAILPIT="http://127.0.0.1:${MANDATE_MAILPIT_PORT}"
 
 compose() { docker compose -p "$PROJECT" -f compose.yaml -f scripts/acceptance/phase-6.compose.yaml "$@"; }
 
 cleanup() {
-  (cd "$WORK/aiops" 2>/dev/null && compose down -v --remove-orphans >/dev/null 2>&1) || true
+  (cd "$WORK/mandate" 2>/dev/null && compose down -v --remove-orphans >/dev/null 2>&1) || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -45,25 +45,25 @@ trap cleanup EXIT
 pass() { echo "PASS $1${2:+ — $2}"; }
 fail() { echo "FAIL $1${2:+ — $2}"; FAILED=1; }
 json() { node -e "try{const v=JSON.parse(process.argv[1])$2;console.log(v===undefined?'':typeof v==='string'?v:JSON.stringify(v))}catch{console.log('')}" "$1"; }
-login() { node "$REPO/tooling/acceptance/login.mjs" "$AIOPS_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$AIOPS_MCP_RESOURCE"; }
+login() { node "$REPO/tooling/acceptance/login.mjs" "$MANDATE_KEYCLOAK_PUBLIC_URL" "$1" dev-only-password "$MANDATE_MCP_RESOURCE"; }
 page_login() { node "$REPO/tooling/acceptance/page-login.mjs" "$API" "$1" dev-only-password "${2:-/app/approvals}"; }
-page_api() { AIOPS_PAGE_COOKIE="$1" node "$REPO/tooling/acceptance/page-api.mjs" "$API" "${@:2}"; }
+page_api() { MANDATE_PAGE_COOKIE="$1" node "$REPO/tooling/acceptance/page-api.mjs" "$API" "${@:2}"; }
 # alice calls a tool; she logs in again before every call, so no token expires during the run.
 alice_mcp() {
   local token
   token="$(login alice 2>&1)" || { echo "{\"loginError\":$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$token")}"; return 0; }
   node "$REPO/tooling/acceptance/mcp-call.mjs" "$MCP" --token "$token" --tool "$1" --args "$2" 2>&1 || true
 }
-psql_q() { compose exec -T postgres psql -U aiops -d aiops -tAc "$1"; }
+psql_q() { compose exec -T postgres psql -U mandate -d mandate -tAc "$1"; }
 # The superuser, for session_replication_role (the image trusts local socket connections).
-psql_su() { compose exec -T postgres psql -U postgres -d aiops -v ON_ERROR_STOP=1 -tAc "$1"; }
+psql_su() { compose exec -T postgres psql -U postgres -d mandate -v ON_ERROR_STOP=1 -tAc "$1"; }
 # Counts rows of a table whose JSON form contains the value on stdin's first line: the value
 # reaches psql as a variable on stdin, never on a command line.
 psql_contains() {
   local value
   IFS= read -r value
   printf "\\\\set v '%s'\nselect count(*) from %s t where row_to_json(t)::text like '%%' || :'v' || '%%';\n" "$value" "$1" |
-    compose exec -T postgres psql -U aiops -d aiops -tA -q
+    compose exec -T postgres psql -U mandate -d mandate -tA -q
 }
 # get_changeset every 2 s until the status matches the regex or the timeout (s) passes; the last
 # answer is left in POLL and its status in POLL_STATUS. Returns 1 on timeout.
@@ -88,36 +88,36 @@ none_has() { node -e 'try{const o=JSON.parse(process.argv[1]);console.log(Object
 # yes when every SKU in the list has exactly the value.
 all_have() { node -e 'try{const o=JSON.parse(process.argv[1]);console.log(process.argv[2].split(",").every((s)=>o[s]===process.argv[3])?"yes":"no")}catch{console.log("no")}' "$1" "$2" "$3"; }
 
-echo "# Phase 6 acceptance of ${SHA:0:12} (project $PROJECT, api port $AIOPS_API_PORT, mailpit port $AIOPS_MAILPIT_PORT)"
+echo "# Phase 6 acceptance of ${SHA:0:12} (project $PROJECT, api port $MANDATE_API_PORT, mailpit port $MANDATE_MAILPIT_PORT)"
 
 # 1. The sandbox is up (idempotent) and seeded (idempotent); its token is the credential.
 if bash "$REPO/deploy/sandbox/magento/up.sh" >"$WORK/sandbox.log" 2>&1 &&
   node "$REPO/deploy/sandbox/magento/seed.mjs" "$SANDBOX" >>"$WORK/sandbox.log" 2>&1 &&
   TOKEN="$(bash "$REPO/deploy/sandbox/magento/token.sh" "$SANDBOX" 2>>"$WORK/sandbox.log")" && [[ -n "$TOKEN" ]]; then
-  if docker network inspect aiops-sandbox >/dev/null 2>&1; then
-    pass sandbox-ready "$(grep -o 'SANDBOX UP.*' "$WORK/sandbox.log" | tail -1); $(grep -o 'SEEDED umbrella.*' "$WORK/sandbox.log" | tail -1); token present; network aiops-sandbox present"
+  if docker network inspect mandate-sandbox >/dev/null 2>&1; then
+    pass sandbox-ready "$(grep -o 'SANDBOX UP.*' "$WORK/sandbox.log" | tail -1); $(grep -o 'SEEDED umbrella.*' "$WORK/sandbox.log" | tail -1); token present; network mandate-sandbox present"
   else
-    fail sandbox-ready "network aiops-sandbox missing"; exit 1
+    fail sandbox-ready "network mandate-sandbox missing"; exit 1
   fi
 else
   fail sandbox-ready "see sandbox output below"; tail -30 "$WORK/sandbox.log"; exit 1
 fi
 
-git clone --quiet --no-local --no-checkout "$REPO" "$WORK/aiops"
-git -C "$WORK/aiops" checkout --quiet --detach "$SHA"
-cd "$WORK/aiops"
+git clone --quiet --no-local --no-checkout "$REPO" "$WORK/mandate"
+git -C "$WORK/mandate" checkout --quiet --detach "$SHA"
+cd "$WORK/mandate"
 
 # The acceptance configuration: the development configuration with the sandbox URL, and roles
 # with a record threshold of 2, a notified approver role and a short expiry.
-mkdir -p "$AIOPS_ACCEPT_CONFIG_DIR"
-cp deploy/config/*.yaml "$AIOPS_ACCEPT_CONFIG_DIR/"
-sed -i 's#^\(    base_url: \).*#\1http://magento-sandbox/rest/all#' "$AIOPS_ACCEPT_CONFIG_DIR/connections.yaml"
-grep -q '^    base_url: http://magento-sandbox/rest/all$' "$AIOPS_ACCEPT_CONFIG_DIR/connections.yaml" || { fail acceptance-config "base_url not replaced"; exit 1; }
-grep -q '^    allow_private_network: true$' "$AIOPS_ACCEPT_CONFIG_DIR/connections.yaml" || { fail acceptance-config "allow_private_network missing"; exit 1; }
-if grep -lE '^(changesets|notifications):' "$AIOPS_ACCEPT_CONFIG_DIR"/*.yaml >/dev/null; then
-  fail acceptance-config "the development configuration already has changesets: or notifications: ($(grep -lE '^(changesets|notifications):' "$AIOPS_ACCEPT_CONFIG_DIR"/*.yaml | xargs -n1 basename | xargs))"; exit 1
+mkdir -p "$MANDATE_ACCEPT_CONFIG_DIR"
+cp deploy/config/*.yaml "$MANDATE_ACCEPT_CONFIG_DIR/"
+sed -i 's#^\(    base_url: \).*#\1http://magento-sandbox/rest/all#' "$MANDATE_ACCEPT_CONFIG_DIR/connections.yaml"
+grep -q '^    base_url: http://magento-sandbox/rest/all$' "$MANDATE_ACCEPT_CONFIG_DIR/connections.yaml" || { fail acceptance-config "base_url not replaced"; exit 1; }
+grep -q '^    allow_private_network: true$' "$MANDATE_ACCEPT_CONFIG_DIR/connections.yaml" || { fail acceptance-config "allow_private_network missing"; exit 1; }
+if grep -lE '^(changesets|notifications):' "$MANDATE_ACCEPT_CONFIG_DIR"/*.yaml >/dev/null; then
+  fail acceptance-config "the development configuration already has changesets: or notifications: ($(grep -lE '^(changesets|notifications):' "$MANDATE_ACCEPT_CONFIG_DIR"/*.yaml | xargs -n1 basename | xargs))"; exit 1
 fi
-cat >"$AIOPS_ACCEPT_CONFIG_DIR/roles.yaml" <<'YAML'
+cat >"$MANDATE_ACCEPT_CONFIG_DIR/roles.yaml" <<'YAML'
 version: 1
 notifications:
   - { id: content-leads-mail, kind: email, to: [content-leads@example.test] }
@@ -349,7 +349,7 @@ while ((SECONDS - T0 < 60)); do
         return;
       }
       console.log("{}");
-    })().catch((e) => console.log(JSON.stringify({ error: String(e) })));' "$MAILPIT" "$CS_A" "$AIOPS_PUBLIC_URL")"
+    })().catch((e) => console.log(JSON.stringify({ error: String(e) })));' "$MAILPIT" "$CS_A" "$MANDATE_PUBLIC_URL")"
   [[ -n "$(json "$MAIL" '.subject')" ]] && break
   sleep 3
 done

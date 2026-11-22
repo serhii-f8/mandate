@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Widget bundles as MCP Apps UI resources over the real MCP transport (MCP-5, UI-6, SEC-1, AUTH-2).
  *
- * The api runs on `approval-config` with `AIOPS_WIDGET_DIR` set to `fixtures/widgets`, two small
+ * The api runs on `approval-config` with `MANDATE_WIDGET_DIR` set to `fixtures/widgets`, two small
  * HTML documents that stand in for the built bundles.
  */
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { startFakeUpstream, startTestIssuer, type FakeUpstream, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { connectClient, modernRequest, rawPost, startApi, startDatabase, text, tokenFor, vaultOf, type RunningApi } from './helpers.js';
 import { taskSession, type WireEntry } from './tasks-client.js';
 
@@ -35,7 +35,7 @@ beforeAll(async () => {
   databaseUrl = started.databaseUrl;
   issuer = await startTestIssuer();
   upstream = await startFakeUpstream();
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-widgets-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-widgets-e2e-'));
   await cp(APPROVAL_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));
@@ -66,11 +66,11 @@ describe('MCP-5 UI resources over HTTP', () => {
     try {
       const { resources } = await client.listResources();
       expect(resources).toEqual([
-        { uri: 'ui://aiops/changeset.html', name: 'changeset', title: 'Change-set', mimeType: MIME, _meta: UI_META },
-        { uri: 'ui://aiops/approval.html', name: 'approval', title: 'Approval', mimeType: MIME, _meta: UI_META },
+        { uri: 'ui://mandate/changeset.html', name: 'changeset', title: 'Change-set', mimeType: MIME, _meta: UI_META },
+        { uri: 'ui://mandate/approval.html', name: 'approval', title: 'Approval', mimeType: MIME, _meta: UI_META },
       ]);
       for (const file of ['changeset.html', 'approval.html']) {
-        const uri = `ui://aiops/${file}`;
+        const uri = `ui://mandate/${file}`;
         const { contents } = await client.readResource({ uri });
         expect(contents).toEqual([{ uri, mimeType: MIME, text: await readFile(join(WIDGET_DIR, file), 'utf8'), _meta: UI_META }]);
       }
@@ -83,9 +83,9 @@ describe('MCP-5 UI resources over HTTP', () => {
     const client = await connectClient({ era: 'legacy', baseUrls: [api.url], token: alice });
     try {
       const { resources } = await client.listResources();
-      expect(resources.map((r) => r.uri)).toEqual(['ui://aiops/changeset.html', 'ui://aiops/approval.html']);
-      const { contents } = await client.readResource({ uri: 'ui://aiops/changeset.html' });
-      expect(contents).toEqual([{ uri: 'ui://aiops/changeset.html', mimeType: MIME, text: await readFile(join(WIDGET_DIR, 'changeset.html'), 'utf8'), _meta: UI_META }]);
+      expect(resources.map((r) => r.uri)).toEqual(['ui://mandate/changeset.html', 'ui://mandate/approval.html']);
+      const { contents } = await client.readResource({ uri: 'ui://mandate/changeset.html' });
+      expect(contents).toEqual([{ uri: 'ui://mandate/changeset.html', mimeType: MIME, text: await readFile(join(WIDGET_DIR, 'changeset.html'), 'utf8'), _meta: UI_META }]);
     } finally {
       await client.close();
     }
@@ -94,7 +94,7 @@ describe('MCP-5 UI resources over HTTP', () => {
   it('MCP-5 an unknown URI rejects with code -32602 and data.uri', async () => {
     const client = await connectClient({ era: 'modern', baseUrls: [api.url], token: alice });
     try {
-      await expect(client.readResource({ uri: 'ui://aiops/nope.html' })).rejects.toMatchObject({ code: -32602, data: { uri: 'ui://aiops/nope.html' } });
+      await expect(client.readResource({ uri: 'ui://mandate/nope.html' })).rejects.toMatchObject({ code: -32602, data: { uri: 'ui://mandate/nope.html' } });
     } finally {
       await client.close();
     }
@@ -114,7 +114,7 @@ describe('MCP-5 tool linkage over HTTP', () => {
     try {
       const { tools } = await client.listTools();
       const meta = (name: string) => tools.find((t) => t.name === name)?._meta;
-      const linked = { ui: { resourceUri: 'ui://aiops/changeset.html' }, 'ui/resourceUri': 'ui://aiops/changeset.html' };
+      const linked = { ui: { resourceUri: 'ui://mandate/changeset.html' }, 'ui/resourceUri': 'ui://mandate/changeset.html' };
       for (const name of ['shop.update_content', 'shop.retire_content', 'get_changeset', 'submit_for_approval', 'exclude_changeset_items', 'rollback_changeset']) {
         expect(meta(name), name).toEqual(linked);
       }

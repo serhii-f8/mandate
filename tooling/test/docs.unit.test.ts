@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -132,11 +132,11 @@ describe('NFR-9 public docs', () => {
   // R8: env names are unquoted object keys in runtime-env.ts.
   it('NFR-9 configuration.md mentions every top-level schema key and every runtime-env name', () => {
     const page = read('docs/guide/configuration.md');
-    const schema = JSON.parse(read('packages/config/schema/aiops-config.v1.json')) as { properties: Record<string, unknown> };
+    const schema = JSON.parse(read('packages/config/schema/mandate-config.v1.json')) as { properties: Record<string, unknown> };
     const keys = Object.keys(schema.properties);
     expect(keys.length).toBeGreaterThanOrEqual(12);
     const envSource = read('packages/config/src/runtime-env.ts');
-    const names = [...new Set([...envSource.matchAll(/^\s+((?:AIOPS|API|OIDC|TEMPORAL|DATABASE|LOG|OTEL)_[A-Z0-9_]+):/gm)].map((m) => m[1] ?? ''))];
+    const names = [...new Set([...envSource.matchAll(/^\s+((?:MANDATE|API|OIDC|TEMPORAL|DATABASE|LOG|OTEL)_[A-Z0-9_]+):/gm)].map((m) => m[1] ?? ''))];
     expect(names.length).toBeGreaterThanOrEqual(30);
     const missing = [...keys.map((k) => `\`${k}\``), ...names.map((n) => `\`${n}\``)].filter((t) => !page.includes(t));
     expect(missing).toEqual([]);
@@ -186,7 +186,7 @@ describe('NFR-13 backup and restore of PostgreSQL, including the Temporal databa
   };
 
   it('NFR-13 init.sh creates the Temporal databases the scripts must cover', () => {
-    expect(created).toEqual(expect.arrayContaining(['aiops', 'temporal', 'temporal_visibility', 'keycloak']));
+    expect(created).toEqual(expect.arrayContaining(['mandate', 'temporal', 'temporal_visibility', 'keycloak']));
   });
 
   it('NFR-13 backup.sh dumps every database init.sh creates', () => {
@@ -199,7 +199,7 @@ describe('NFR-13 backup and restore of PostgreSQL, including the Temporal databa
 
   it('NFR-13 the backup guide documents both scripts, every database and the keys kept outside the backup', () => {
     const page = read('docs/guide/backup-and-restore.md');
-    const missing = ['deploy/backup/backup.sh', 'deploy/backup/restore.sh', ...created.map((d) => `\`${d}\``), 'AIOPS_TEMPORAL_KEYS', 'AIOPS_MASTER_KEYS'].filter(
+    const missing = ['deploy/backup/backup.sh', 'deploy/backup/restore.sh', ...created.map((d) => `\`${d}\``), 'MANDATE_TEMPORAL_KEYS', 'MANDATE_MASTER_KEYS'].filter(
       (t) => !page.includes(t),
     );
     expect(missing).toEqual([]);

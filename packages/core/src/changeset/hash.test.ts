@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { ChangeSetHasher, type HashableItem } from './hash.js';
@@ -40,7 +40,7 @@ describe('CS-4 change-set hash', () => {
   });
   it('CS-4 matches the golden digest', () => {
     const text =
-      '{"args":{},"format":"aiops.changeset.v1","operation":"op.x"}\n{"after":{"f":2},"before":{"f":1},"status":"pending","target":"A"}\n';
+      '{"args":{},"format":"mandate.changeset.v1","operation":"op.x"}\n{"after":{"f":2},"before":{"f":1},"status":"pending","target":"A"}\n';
     expect(digest('op.x', {}, [item()])).toBe(`sha256:${createHash('sha256').update(text).digest('hex')}`);
   });
 });

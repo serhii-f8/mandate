@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Shared Vitest configuration. Every workspace package has a `vitest.config.ts`
  * that calls `packageConfig()`; its scripts select a project:
@@ -7,7 +7,7 @@
  *   test:int  -> integration  test/integration/**\/*.int.test.ts
  *   test:e2e  -> e2e          test/e2e/**\/*.e2e.test.ts
  * Workspace packages resolve to their TypeScript sources through the
- * `@aiops/source` export condition (ADR 0010).
+ * `@mandate/source` export condition (ADR 0010).
  */
 import { defineConfig, type ViteUserConfig } from 'vitest/config';
 import { defaultServerConditions, type PluginOption } from 'vite';
@@ -19,7 +19,7 @@ import { defaultServerConditions, type PluginOption } from 'vite';
  * .../build/esm/baggage/utils"). Without `module`, packages resolve to the entry Node itself
  * picks in production (here the CommonJS `default`).
  */
-const conditions = ['@aiops/source', ...defaultServerConditions.filter((c) => c !== 'module')];
+const conditions = ['@mandate/source', ...defaultServerConditions.filter((c) => c !== 'module')];
 
 export interface PackageConfigOptions {
   /** Extra Vite plugins, e.g. SWC for decorator metadata in `apps/api`. */

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import { auditRowHash, GENESIS_HASH } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import { auditRowHash, GENESIS_HASH } from '@mandate/core';
 import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startPostgres, type StartedPostgres } from '@aiops/testing';
+import { startPostgres, type StartedPostgres } from '@mandate/testing';
 import { CHAIN_COLUMNS, sealAuditChain, toSealedChainRow } from '../../src/audit-chain.js';
 import { formatVerifyReport, verifyAuditChain } from '../../src/audit-verify.js';
 import { createDb, type Database } from '../../src/client.js';
@@ -167,7 +167,7 @@ describe('AUD-5 audit chain verification', () => {
                 (100, $1, 'audit-51-100.jsonl', 'sha256:y', 50)`,
         [anchorHash],
       );
-      await client.query("SELECT set_config('aiops.audit_retention', 'on', true)");
+      await client.query("SELECT set_config('mandate.audit_retention', 'on', true)");
       await client.query('DELETE FROM audit_event WHERE chain_pos <= 100');
       await client.query('COMMIT');
     } finally {

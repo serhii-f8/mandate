@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, PostgresChangeSetRepository, type Database } from '@aiops/db';
-import { InMemoryExecutor, pageLogin, ScriptedWriter, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@aiops/testing';
+import { createDb, PostgresChangeSetRepository, type Database } from '@mandate/db';
+import { InMemoryExecutor, pageLogin, ScriptedWriter, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@mandate/testing';
 import { seedPending, type Seeded } from './approval-seed.js';
 import { auditRows, startApi, startDatabase, type RunningApi } from './helpers.js';
 import { ToggleExecutor } from './toggle-executor.js';
@@ -52,7 +52,7 @@ interface Answer {
 beforeAll(async () => {
   ({ postgres, databaseUrl } = await startDatabase());
   issuer = await startTestIssuer();
-  webDir = await mkdtemp(join(tmpdir(), 'aiops-web-e2e-'));
+  webDir = await mkdtemp(join(tmpdir(), 'mandate-web-e2e-'));
   await mkdir(join(webDir, 'assets'));
   await writeFile(join(webDir, 'index.html'), '<!doctype html><title>Approvals</title><div id="root"></div>');
   seedDb = createDb(databaseUrl, { onError: () => undefined });
@@ -317,7 +317,7 @@ describe('APR-7 page-api.mjs for the acceptance run', () => {
   it('APR-7 page-api.mjs lists, reads, decides and starts through the page API', async () => {
     const seeded = await seedAlice();
     const dave = await login(DAVE);
-    const env = { ...process.env, AIOPS_PAGE_COOKIE: dave.cookie };
+    const env = { ...process.env, MANDATE_PAGE_COOKIE: dave.cookie };
     const call = async (...args: string[]): Promise<{ status: number; body: { viewer: { canDecide: boolean } } }> => {
       const { stdout } = await run(process.execPath, [PAGE_API, api.url, ...args], { env });
       const lines = stdout.trim().split('\n');

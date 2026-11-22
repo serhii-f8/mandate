@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /** Activities registered on the worker. Names and argument shapes are part of workflow history (ADR 0006). */
-import type { ChangesetActivities } from '@aiops/temporal';
+import type { ChangesetActivities } from '@mandate/temporal';
 import type { echo } from './echo.js';
 
 export { echo } from './echo.js';

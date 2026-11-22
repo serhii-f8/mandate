@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import { auditRowHash, GENESIS_HASH, type ChainHead, type ChainRow, type SealedChainRow } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import { auditRowHash, GENESIS_HASH, type ChainHead, type ChainRow, type SealedChainRow } from '@mandate/core';
 import type pg from 'pg';
 import { guarded } from './errors.js';
 import { AUDIT_SEAL_LOCK_KEY } from './locks.js';
@@ -130,7 +130,7 @@ export async function sealAuditChain(pool: pg.Pool, options?: { readonly batchSi
           await client.query('ROLLBACK');
           return { sealed: 0, locked: false };
         }
-        await client.query("SELECT set_config('aiops.audit_seal', 'on', true)");
+        await client.query("SELECT set_config('mandate.audit_seal', 'on', true)");
         const head = await chainHead(client);
         // Qualified: a bare `seq` would bind to the `seq::text` output column and sort as text.
         const pending = await client.query<Record<string, unknown>>(

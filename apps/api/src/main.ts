@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
-import { createAdapters } from '@aiops/adapters';
-import { ConfigurationError, ConfigurationHolder, formatIssue, parseApiEnv, startConfigurationSync } from '@aiops/config';
-import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresConfigRevisionStore, PostgresCredentialVault, runMigrations } from '@aiops/db';
+import { createAdapters } from '@mandate/adapters';
+import { ConfigurationError, ConfigurationHolder, formatIssue, parseApiEnv, startConfigurationSync } from '@mandate/config';
+import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresConfigRevisionStore, PostgresCredentialVault, runMigrations } from '@mandate/db';
 import { createApp } from './app.js';
 import { createLogger } from './logger.js';
 import { enableShutdown } from './shutdown.js';
 import { startApiTelemetry } from './telemetry.js';
-import { configurationLoadOptions, connectionCredential, createUpstreamInstrumentation } from '@aiops/upstream';
+import { configurationLoadOptions, connectionCredential, createUpstreamInstrumentation } from '@mandate/upstream';
 
 /**
  * Process entry: parse env, apply migrations (NFR-5), load the active configuration revision
- * (CFG-4; bootstrapped from AIOPS_CONFIG_DIR on an empty table), keep it current (CFG-3), serve.
+ * (CFG-4; bootstrapped from MANDATE_CONFIG_DIR on an empty table), keep it current (CFG-3), serve.
  * Migrations come first: the holder reads `config_revision`, which a fresh database gets from them.
  * Telemetry starts right after the logger (NFR-11, NFR-12), so the adapter's upstream calls carry
  * `traceparent` and are counted; `/metrics` listens once the app is built (ruling F2).
@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   const env = parseApiEnv(process.env);
   const logger = createLogger(env.logLevel);
   // Registered globally: the context manager carries the active span, and the Temporal interceptor uses the global tracer.
-  const telemetry = startApiTelemetry({ serviceName: 'aiops-api', register: true, ...(env.otlpEndpoint === undefined ? {} : { otlpEndpoint: env.otlpEndpoint }) });
+  const telemetry = startApiTelemetry({ serviceName: 'mandate-api', register: true, ...(env.otlpEndpoint === undefined ? {} : { otlpEndpoint: env.otlpEndpoint }) });
   // Parsed before any pool, so a malformed key set stops the start; messages name no key material.
   const masterKeys = parseMasterKeys(env.masterKeys);
   const { applied } = await runMigrations(env.databaseUrl);

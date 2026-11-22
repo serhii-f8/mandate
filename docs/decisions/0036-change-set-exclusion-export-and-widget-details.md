@@ -44,13 +44,13 @@ behaviour.
 **Views.**
 
 - **R10.** `apps/web/tsconfig.json` drops `customConditions: []` so it type-checks
-  `@aiops/widgets` from source; the web Vite config dedupes `react`.
+  `@mandate/widgets` from source; the web Vite config dedupes `react`.
 - **R11.** The `no-raw-html` test stays in `apps/web` and gets a copy in `packages/widgets`; lint
   rules for widgets cover `.tsx`.
 - **R12.** The single-file build sets Vite `root: 'src/widget'`, so bundles land in `dist/ui/`.
 - **R13.** The change-set widget also polls while `pending_approval`, so it updates after a page
   approval.
-- **R14.** The image copies the bundles to `/app/widgets`; `AIOPS_WIDGET_DIR` is set there.
+- **R14.** The image copies the bundles to `/app/widgets`; `MANDATE_WIDGET_DIR` is set there.
 - **F1.** The bundle check (`packages/widgets/scripts/check-bundles.mjs`) and the build test apply
   the `url(` and `@import` checks to the contents of `<style>` blocks only. `<script ... src=`,
   `<link`, `<img` and the `<!doctype html` start stay whole-document checks. The intent of the

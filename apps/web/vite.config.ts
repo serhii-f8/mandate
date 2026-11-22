@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
@@ -7,7 +7,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: '/app/',
   plugins: [react()],
-  // One React for the page and @aiops/widgets, which takes React as a peer.
+  // One React for the page and @mandate/widgets, which takes React as a peer.
   resolve: { dedupe: ['react', 'react-dom'] },
   build: { outDir: 'dist', emptyOutDir: true },
 });

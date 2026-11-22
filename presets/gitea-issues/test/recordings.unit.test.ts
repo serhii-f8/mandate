@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The vendored spec and the sandbox recordings of the Gitea preset (NFR-17). `pnpm record`
  * writes them from the sandbox; these tests pin their shape without a sandbox: every case of
@@ -10,7 +10,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { RecordedExchange } from '@aiops/testing';
+import type { RecordedExchange } from '@mandate/testing';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const readJson = async (...parts: string[]): Promise<unknown> => JSON.parse(await readFile(join(root, ...parts), 'utf8')) as unknown;

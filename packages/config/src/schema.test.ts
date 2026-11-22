@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { configDocumentSchema, schemaIssues } from './schema.js';
@@ -66,7 +66,7 @@ role_mapping:
     roles: [content_manager]
 presets:
   - id: magento2-catalog
-    package: "@aiops/preset-magento2-catalog"
+    package: "@mandate/preset-magento2-catalog"
     version: "0.1.0"
 notifications:
   - id: ops-email
@@ -181,17 +181,17 @@ describe('NFR-18 AUTH-4 service_accounts schema', () => {
   const parseDoc = (service_accounts: unknown) => configDocumentSchema.safeParse({ version: 1, service_accounts });
   it('NFR-18 AUTH-4 service_accounts is an optional list of strict { client_id, role, description? } entries', () => {
     expect(configDocumentSchema.safeParse({ version: 1 }).success).toBe(true);
-    expect(parseDoc([{ client_id: 'aiops-sa-ci', role: 'integration' }]).success).toBe(true);
+    expect(parseDoc([{ client_id: 'mandate-sa-ci', role: 'integration' }]).success).toBe(true);
     expect(parseDoc([{ client_id: 'x'.repeat(255), role: 'integration', description: 'd'.repeat(500) }]).success).toBe(true);
     for (const bad of [
       { client_id: '', role: 'integration' },
       { client_id: 'a\u0007b', role: 'integration' },
       { client_id: 'a\u009fb', role: 'integration' },
       { client_id: 'x'.repeat(256), role: 'integration' },
-      { client_id: 'aiops-sa-ci', role: 'Not An Id' },
-      { client_id: 'aiops-sa-ci' },
-      { client_id: 'aiops-sa-ci', role: 'integration', roles: ['x'] },
-      { client_id: 'aiops-sa-ci', role: 'integration', description: 'd'.repeat(501) },
+      { client_id: 'mandate-sa-ci', role: 'Not An Id' },
+      { client_id: 'mandate-sa-ci' },
+      { client_id: 'mandate-sa-ci', role: 'integration', roles: ['x'] },
+      { client_id: 'mandate-sa-ci', role: 'integration', description: 'd'.repeat(501) },
     ]) {
       expect(parseDoc([bad]).success, JSON.stringify(bad)).toBe(false);
     }

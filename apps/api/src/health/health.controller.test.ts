@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
 import type { Connection } from '@temporalio/client';
-import type { ConfigurationStateSource } from '@aiops/config';
-import type { Database } from '@aiops/db';
+import type { ConfigurationStateSource } from '@mandate/config';
+import type { Database } from '@mandate/db';
 import { HealthController } from './health.controller.js';
 
 const active: ConfigurationStateSource = { state: () => ({ status: 'active', revision: null, hash: 'h1' }) };

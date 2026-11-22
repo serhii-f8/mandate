@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
 import { createTaskResult } from '../mcp/tasks/task-result.js';
 import { changesetIdOf, pageLink, withPageLink } from './links.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
-const PUBLIC = new URL('https://aiops.example.test');
-const URL_OF_ID = `https://aiops.example.test/app/changesets/${ID}`;
+const PUBLIC = new URL('https://mandate.example.test');
+const URL_OF_ID = `https://mandate.example.test/app/changesets/${ID}`;
 
 /** A prepared-like answer: summary, the structured data again as JSON, and the structured data. */
 function prepared(structured: Record<string, unknown>): CallToolResult {

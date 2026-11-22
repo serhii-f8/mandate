@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { describe, expect, it } from 'vitest';
-import { loadConfigurationSources, type LoadedConfiguration } from '@aiops/config';
+import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
 import {
   CHANGESET_TEXT,
   changesetTransitionEvent,
@@ -13,8 +13,8 @@ import {
   type TaskRecord,
   type UpstreamReader,
   type WorkflowStarter,
-} from '@aiops/core';
-import { InMemoryChangeSetRepository, InMemoryTaskRepository } from '@aiops/testing';
+} from '@mandate/core';
+import { InMemoryChangeSetRepository, InMemoryTaskRepository } from '@mandate/testing';
 import { ChangeSetInvoker, type PrepareWait } from './changeset-invoker.js';
 
 const CHANGESET_SOURCES = {
@@ -87,7 +87,7 @@ function bareDestructive(): OperationDefinition {
   return bare;
 }
 
-const caller: Caller = { subject: 'alice-id', clientId: 'aiops-mcp', groups: ['content'] };
+const caller: Caller = { subject: 'alice-id', clientId: 'mandate-mcp', groups: ['content'] };
 const NOW = new Date('2026-11-17T10:00:00.000Z');
 
 class ScriptedReader implements UpstreamReader {
@@ -207,7 +207,7 @@ describe('MCP-7 MCP-1 EXE-1 asynchronous write call', () => {
     expect(await tasks.findOwned(task.taskId, caller.subject)).toEqual({
       taskId: task.taskId,
       owner: caller.subject,
-      clientId: 'aiops-mcp',
+      clientId: 'mandate-mcp',
       changesetId: ID,
       kind: 'prepare',
       tool: 'catalog.update_content',
@@ -402,7 +402,7 @@ describe('MCP-7 MCP-1 EXE-1 asynchronous write call', () => {
     expect(() => setup({ wait: { ...settings, sleep: () => Promise.resolve() } })).toThrow(message);
   });
 
-  it('MCP-1 a zero wait (AIOPS_PREPARE_WAIT_MS=0) answers preparing without sleeping', async () => {
+  it('MCP-1 a zero wait (MANDATE_PREPARE_WAIT_MS=0) answers preparing without sleeping', async () => {
     const sleeps: number[] = [];
     const sleep = (ms: number): Promise<void> => {
       sleeps.push(ms);

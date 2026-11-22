@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { Caller } from '../caller.js';
 import type { ManifestDefinition, ManifestTemplate, OperationDefinition } from '../policy-model.js';
 import { changesetTransitionEvent } from './audit.js';

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import type { AuditAction, AuditOutcome } from '../audit.js';
 
 /** Filters of an audit search (AUD-6). Every field is optional; present fields are combined with AND. */
@@ -32,7 +32,7 @@ export interface AuditRecord {
   readonly chainPos: number | null;
 }
 
-/** Read port over the audit log (AUD-6). Implemented in `@aiops/db`. */
+/** Read port over the audit log (AUD-6). Implemented in `@mandate/db`. */
 export interface AuditReader {
   /** Newest first; `beforeSeq` excludes it and everything newer. `more` is true when older matching rows exist. */
   search(

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@aiops/testing';
+import { startTestIssuer, type StartedPostgres, type TestIssuer } from '@mandate/testing';
 import { auditRows, modernRequest, rawPost, startApi, startDatabase, type RunningApi } from './helpers.js';
 
 let postgres: StartedPostgres;
@@ -35,7 +35,7 @@ describe('AUTH-2 protected resource metadata', () => {
       authorization_servers: [issuer.issuer],
       scopes_supported: ['mcp:tools'],
       bearer_methods_supported: ['header'],
-      resource_name: 'AI Operations Layer',
+      resource_name: 'Mandate',
     });
   });
 

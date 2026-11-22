@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { afterAll, beforeAll } from 'vitest';
-import { describeRateCounterContract, startPostgres, type StartedPostgres } from '@aiops/testing';
+import { describeRateCounterContract, startPostgres, type StartedPostgres } from '@mandate/testing';
 import { createDb, type Database } from '../../src/client.js';
 import { runMigrations } from '../../src/migrate.js';
 import { PostgresRateCounter } from '../../src/rate-counter.js';

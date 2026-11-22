@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
-import type { WorkflowStarter } from '@aiops/core';
+// Copyright 2026 The Mandate Authors
+import type { WorkflowStarter } from '@mandate/core';
 import type { Client } from '@temporalio/client';
 import { CHANGESET_WORKFLOW, type ChangesetWorkflowInput } from './contract.js';
 

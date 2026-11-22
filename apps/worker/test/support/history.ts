@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The SEC-4 walk over a workflow history in its proto JSON form (base64 strings): every payload's
  * encoding, apart from SDK payloads that never pass the codec and are accepted only in their

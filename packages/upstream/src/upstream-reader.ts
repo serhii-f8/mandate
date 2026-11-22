@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * The `api` implementation of the core `UpstreamReader` port (design §4.2): the reads a
  * manifest asks for while preparing a change-set. It runs the Phase 3 read path without a
@@ -7,8 +7,8 @@
  * `read` operation bound to GET (CS-1 in code, not only in configuration) and on arguments
  * the read operation's own validator accepts.
  */
-import type { ReadOutcome } from '@aiops/connector-sdk';
-import type { ReadPage, UpstreamReader } from '@aiops/core';
+import type { ReadOutcome } from '@mandate/connector-sdk';
+import type { ReadPage, UpstreamReader } from '@mandate/core';
 import { performRead, type ReadDeps } from './read.js';
 
 export type UpstreamReaderDeps = ReadDeps & { readonly correlationId: string };

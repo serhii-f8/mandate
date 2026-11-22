@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { Client, Connection } from '@temporalio/client';
 import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors-opentelemetry';
-import type { ApiEnv } from '@aiops/config';
-import type { VersionedKeys } from '@aiops/core';
-import { clientDataConverter } from '@aiops/temporal';
+import type { ApiEnv } from '@mandate/config';
+import type { VersionedKeys } from '@mandate/core';
+import { clientDataConverter } from '@mandate/temporal';
 
 /**
  * The api's Temporal client: lazy connection (the api starts while Temporal is down, ADR 0029),

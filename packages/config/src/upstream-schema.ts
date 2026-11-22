@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Schemas of the upstream side of the configuration (design part 1 §3, ADR 0017):
  * connection settings and auth, the operation's `upstream` mapping, and their
- * conversion to the `@aiops/connector-sdk` types. Strict like the rest (ADR 0015).
+ * conversion to the `@mandate/connector-sdk` types. Strict like the rest (ADR 0015).
  */
-import type { AuthSettings, BulkMapping, ResponseMapping, TemplateValue, UpstreamMapping } from '@aiops/connector-sdk';
+import type { AuthSettings, BulkMapping, ResponseMapping, TemplateValue, UpstreamMapping } from '@mandate/connector-sdk';
 import { z } from 'zod';
 import { mcpUpstreamSchema, type McpUpstreamConfig } from './mcp.js';
 
@@ -162,7 +162,7 @@ export type BulkConfig = z.output<typeof bulkSchema>;
  * Headers the platform sets itself. `authorization`, `proxy-authorization` and `cookie` are
  * caught by the CFG-5 key scan when they are keys of `headers`; `idempotency.header` names a
  * header in a value, so it is checked against `CREDENTIAL_HEADERS` too. Keep in step with `FORBIDDEN_HEADERS` in
- * `@aiops/adapters` (src/http/headers.ts); this package cannot import the adapters.
+ * `@mandate/adapters` (src/http/headers.ts); this package cannot import the adapters.
  */
 const PLATFORM_HEADERS: ReadonlySet<string> = new Set(['host', 'content-length', 'transfer-encoding', 'connection']);
 /** Headers that carry credentials (SEC-2): the platform's own, never a configured value. */
@@ -209,7 +209,7 @@ export const httpUpstreamSchema = z
 export const upstreamSchema = httpUpstreamSchema;
 export type UpstreamConfig = z.output<typeof httpUpstreamSchema>;
 
-/** OPS-5: a code operation name, as `parsePresetModule` of `@aiops/connector-sdk` accepts it. */
+/** OPS-5: a code operation name, as `parsePresetModule` of `@mandate/connector-sdk` accepts it. */
 export const CODE_OPERATION_NAME = /^[a-z][a-z0-9_]{0,62}$/;
 
 /** OPS-5: the upstream of a preset operation served by an operation of the preset's code module. */

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Curated operations and manifests for Gitea issues (preset `preset.yaml`, CONN-8 second preset).
- * The default export is the code module of `aiops.code` (OPS-5): the two code reads and the label
+ * The default export is the code module of `mandate.code` (OPS-5): the two code reads and the label
  * writer. The SDK is imported as types only, so the built module needs nothing but its own files.
  */
 import { fileURLToPath } from 'node:url';
-import type { PresetModule } from '@aiops/connector-sdk';
+import type { PresetModule } from '@mandate/connector-sdk';
 import { setLabels } from './labels.js';
 import { getIssues, searchIssues } from './reads.js';
 

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import pg from 'pg';
-import { createDb, parseMasterKeys, PostgresConfigRevisionStore, PostgresCredentialVault } from '@aiops/db';
-import { startFakeUpstream, type FakeUpstream, type StartedPostgres } from '@aiops/testing';
+import { createDb, parseMasterKeys, PostgresConfigRevisionStore, PostgresCredentialVault } from '@mandate/db';
+import { startFakeUpstream, type FakeUpstream, type StartedPostgres } from '@mandate/testing';
 import { runApiCli } from '../../src/cli.js';
 import { auditRows, startDatabase } from './helpers.js';
 
@@ -30,7 +30,7 @@ beforeAll(async () => {
     authorizations.push(String(request.headers.authorization));
     return { status: 200, body: { items: [{ sku: 'a' }], total_count: 1 } };
   });
-  configDir = await mkdtemp(join(tmpdir(), 'aiops-cli-e2e-'));
+  configDir = await mkdtemp(join(tmpdir(), 'mandate-cli-e2e-'));
   await cp(CREDENTIALS_CONFIG, configDir, { recursive: true });
   const connections = join(configDir, 'connections.yaml');
   await writeFile(connections, (await readFile(connections, 'utf8')).replaceAll('__UPSTREAM_URL__', upstream.url));
@@ -46,7 +46,7 @@ afterAll(async () => {
 async function cli(argv: string[], masterKeys: string, url = databaseUrl): Promise<{ code: number; lines: string[] }> {
   const lines: string[] = [];
   const code = await runApiCli(argv, (line) => lines.push(line), {
-    env: { AIOPS_CONFIG_DIR: configDir, DATABASE_URL: url, AIOPS_MASTER_KEYS: masterKeys },
+    env: { MANDATE_CONFIG_DIR: configDir, DATABASE_URL: url, MANDATE_MASTER_KEYS: masterKeys },
     defaultPresetDir: null,
   });
   return { code, lines };
@@ -62,7 +62,7 @@ async function store(ref: string, keys: string): Promise<void> {
   }
 }
 
-describe('CONN-7 aiops test-connection against PostgreSQL', () => {
+describe('CONN-7 mandate test-connection against PostgreSQL', () => {
   it('CONN-7 AUD-1 reads the stored credential, calls the upstream with it and audits as cli', async () => {
     await store('shop-token', `1:${KEY_1}`);
     const { code, lines } = await cli(['test-connection', 'shop'], `1:${KEY_1}`);
@@ -115,12 +115,12 @@ describe('SEC-2 key rotation from the CLI', () => {
   it('SEC-2 a malformed master key set is a usage error naming the variable, never the value', async () => {
     const { code, lines } = await cli(['credentials', 'rotate'], 'not-a-key-list-secret');
     expect(code).toBe(2);
-    expect(lines.join('\n')).toContain('AIOPS_MASTER_KEYS');
+    expect(lines.join('\n')).toContain('MANDATE_MASTER_KEYS');
     expect(lines.join('\n')).not.toContain('not-a-key-list-secret');
   });
 });
 
-describe('CFG-3 CFG-4 aiops config apply against PostgreSQL', () => {
+describe('CFG-3 CFG-4 mandate config apply against PostgreSQL', () => {
   it('CFG-3 CFG-4 config apply against PostgreSQL stores the revision, audits it and notifies a listener', async () => {
     const database = createDb(databaseUrl, { onError: () => undefined });
     const store = new PostgresConfigRevisionStore(database.db, { databaseUrl });
@@ -179,13 +179,13 @@ describe('CFG-3 CFG-4 aiops config apply against PostgreSQL', () => {
   });
 });
 
-describe('CONN-1 aiops validate with an mcp connection', () => {
-  it('CONN-1 aiops validate accepts an mcp connection and reports no issue when the server is down', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'aiops-cli-mcp-'));
+describe('CONN-1 mandate validate with an mcp connection', () => {
+  it('CONN-1 mandate validate accepts an mcp connection and reports no issue when the server is down', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mandate-cli-mcp-'));
     try {
       // Nothing listens on port 1: the load-time tool list fails, which is never a load issue (R1).
       await writeFile(
-        join(dir, 'aiops.yaml'),
+        join(dir, 'mandate.yaml'),
         `version: 1
 connections:
   - { id: tools, adapter: mcp, mcp_url: 'http://127.0.0.1:1/mcp', allow_private_network: true, retry: { max_attempts: 1 } }

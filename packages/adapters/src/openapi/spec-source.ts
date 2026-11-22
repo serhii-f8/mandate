@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The AI Operations Layer Authors
+// Copyright 2026 The Mandate Authors
 /**
  * Spec loading (CONN-2, design §4.2): a file (JSON or YAML, up to 5 MB) or a URL fetched through
  * the connection client (egress guard, timeouts, retries). Messages are fixed strings: they never
  * quote file contents, upstream bodies or parser output (SEC-3).
  */
 import { open } from 'node:fs/promises';
-import type { SpecIssue } from '@aiops/connector-sdk';
+import type { SpecIssue } from '@mandate/connector-sdk';
 import { parse as parseYaml } from 'yaml';
 import type { ConnectionClient } from '../http/client.js';
 

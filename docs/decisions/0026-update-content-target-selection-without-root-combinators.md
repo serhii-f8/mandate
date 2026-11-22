@@ -47,7 +47,7 @@ rule and that the schema has no root `anyOf`, `oneOf`, `allOf` or `not`.
 2026-11-17: the 400 error text and its effect on Claude clients are reported in
 anthropics/claude-code issues #4886, #27337 and #40075 (github.com/anthropics/claude-code/issues),
 including every request of the conversation failing for a connector with a top-level `anyOf`.
-`pnpm aiops validate deploy/config --preset-dir presets` → `Configuration valid: 1
+`pnpm mandate validate deploy/config --preset-dir presets` → `Configuration valid: 1
 connections, 5 operations, 3 roles` (exit 0) with the new schema; preset contract test
 `NFR-17 OPS-4 catalog.update_content names its targets by exactly one of skus or name_like`
 passes.
