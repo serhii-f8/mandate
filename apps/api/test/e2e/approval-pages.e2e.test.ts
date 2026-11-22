@@ -6,9 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { planCreatedEvent } from '@mandate/core';
 import { createDb, PostgresChangeSetRepository, type Database } from '@mandate/db';
 import { pageLogin, recordApproval, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@mandate/testing';
-import { seedExecuted, seedPending, seedPrepared } from './approval-seed.js';
+import { seedExecuted, seedPending, seedPrepared, submitSeeded } from './approval-seed.js';
 import { startApi, startDatabase, type RunningApi } from './helpers.js';
 
 const CONFIG = fileURLToPath(new URL('./fixtures/approvals-pages-config', import.meta.url));
@@ -238,6 +239,37 @@ describe('APR-5 the detail is built from storage', () => {
       rollback: { available: true, count: 2, until: until.toISOString() },
     });
     expect((await get(page, `/api/v1/changesets/${closed.id}`)).body).toMatchObject({ rollback: { available: false, reason: 'window_closed' } });
+  });
+
+  it('UI-4 CS-9 the page detail carries the plan; a sibling the viewer may not open is not marked visible', async () => {
+    const first = await seedPrepared(repo, { requester: ALICE.sub, items: 2 });
+    const second = await seedPrepared(repo, { requester: ALICE.sub, items: 2 });
+    const planId = randomUUID();
+    const made = await repo.createPlan({
+      id: planId,
+      title: 'Spring launch',
+      requester: ALICE.sub,
+      changesetIds: [first.id, second.id],
+      now: new Date(),
+      audit: planCreatedEvent({ id: randomUUID(), plan: { id: planId, title: 'Spring launch', requester: ALICE.sub, createdAt: new Date() }, steps: 2, correlationId: randomUUID() }),
+    });
+    expect(made.ok).toBe(true);
+    // Only step 2 goes to approval: its approver may open step 2 but has no right to the prepared step 1.
+    await submitSeeded(repo, second, { requester: ALICE.sub, groups: ['content', 'leads'], role: 'content_manager' });
+    const rows = (visible: boolean[]) => [
+      { step: 1, id: first.id, status: 'prepared', visible: visible[0] },
+      { step: 2, id: second.id, status: 'pending_approval', visible: visible[1] },
+    ];
+    const plan = (answer: Answer) => (answer.body as { plan?: { id: string; title: string; step: number; of: number; steps: Record<string, unknown>[] } }).plan;
+
+    const own = plan(await get(await login(ALICE), `/api/v1/changesets/${second.id}`));
+    expect(own).toMatchObject({ id: planId, title: 'Spring launch', step: 2, of: 2, steps: rows([true, true]) });
+    const approver = plan(await get(await login(DAVE), `/api/v1/changesets/${second.id}`));
+    expect(approver).toMatchObject({ id: planId, step: 2, of: 2, steps: rows([false, true]) });
+    expect(approver?.steps.map((r) => r.operation)).toEqual([expect.any(String), expect.any(String)]);
+    // A change-set outside a plan answers without a plan block.
+    const alone = await seedAlice();
+    expect((await get(await login(ALICE), `/api/v1/changesets/${alone.id}`)).body).not.toHaveProperty('plan');
   });
 
   it('APR-5 the sample is deterministic per seed, included items only, and re-sampling draws a new seed', async () => {

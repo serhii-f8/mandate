@@ -7,6 +7,7 @@ import { Notice } from '../components/Notice.js';
 import { RawArguments } from '../components/RawArguments.js';
 import { Pager } from '../components/Pager.js';
 import { RollbackCounts } from '../components/RollbackCounts.js';
+import { PlanSection } from '../components/PlanSection.js';
 import { StatusBadge } from '../components/StatusBadge.js';
 import type { ChangeSetActions, ChangeSetViewModel, ItemsPageModel } from '../model.js';
 import { type ItemPages, useItemPages } from '../paging.js';
@@ -75,6 +76,7 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
           <h2>{data.operation.title ?? data.operation.id}</h2>
           <StatusBadge status={data.status} />
         </header>
+        <PlanSection plan={data.plan} />
         <RawArguments args={data.args ?? {}} />
         <p className="outcome">{callOutcome(data)}</p>
         {data.errorCode === undefined ? null : <p className="error-code">{`Error: ${data.errorCode}`}</p>}
@@ -87,6 +89,7 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
         <h2>{data.operation.title ?? data.operation.id}</h2>
         <StatusBadge status={data.status} />
       </header>
+      <PlanSection plan={data.plan} />
       <p className="counts">{summary(data)}</p>
       {verification === undefined ? null : <p className="verification">{verification}</p>}
       <RollbackCounts stats={data.rollback.stats} />

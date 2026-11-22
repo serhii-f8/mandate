@@ -6,7 +6,7 @@
  * link, never a crash (Review Focus 1).
  */
 import type { CallToolResult } from '@modelcontextprotocol/client';
-import type { ApprovalStateModel, ApprovalViewModel, ChangeSetViewModel, ItemFilter, ItemRowModel, ItemsPageModel, StatsModel } from '../model.js';
+import type { ApprovalStateModel, ApprovalViewModel, ChangeSetViewModel, ItemFilter, ItemRowModel, ItemsPageModel, PlanModel, StatsModel } from '../model.js';
 import { changeSetAnswerSchema, isPageUrl, reviewAnswerSchema, uuidSchema, type ChangeSetAnswer, type ItemAnswer, type ReviewAnswer } from './schemas.js';
 
 export type ChangeSetTrigger =
@@ -34,6 +34,22 @@ function reasonTitlesOf(titles: Record<string, string> | undefined): { reasonTit
 /** EXE-12: the verification texts only when there are any, so an unverified model is unchanged. */
 function verificationTitlesOf(titles: Record<string, string> | undefined): { verificationTitles?: Record<string, string> } {
   return titles === undefined || Object.keys(titles).length === 0 ? {} : { verificationTitles: titles };
+}
+
+/**
+ * CS-9, UI-4: the plan as the model. A widget cannot open another change-set, so no step carries a link; the
+ * server's `visible` flag is for the pages.
+ */
+function toPlan(plan: ChangeSetAnswer['plan']): { plan?: PlanModel } {
+  if (plan === undefined) return {};
+  return {
+    plan: {
+      title: plan.title,
+      step: plan.step,
+      of: plan.of,
+      steps: plan.steps.map((s) => ({ step: s.step, id: s.id, operation: s.operation, status: s.status })),
+    },
+  };
 }
 
 function toStats(stats: ChangeSetAnswer['changeset']['stats']): StatsModel {
@@ -100,6 +116,7 @@ export function fromGetChangeset(structured: unknown, filter?: ItemFilter): Chan
     kind,
     ...actionOf(cs.action),
     ...verificationTitlesOf(a.verificationTitles),
+    ...toPlan(a.plan),
     ...(kind === 'opaque' && cs.args !== undefined ? { args: cs.args } : {}),
     operation: { id: cs.operation.id, ...(cs.operation.title === undefined ? {} : { title: cs.operation.title }) },
     status: cs.status,
@@ -163,6 +180,7 @@ export function fromReviewChangeset(structured: unknown, filter?: ItemFilter): A
     kind: detail.kind ?? 'diff',
     ...actionOf(detail.action),
     ...reasonTitlesOf(detail.reasonTitles),
+    ...toPlan(detail.plan),
     status: detail.status,
     ...(detail.hash === undefined ? {} : { hash: detail.hash }),
     operation: {

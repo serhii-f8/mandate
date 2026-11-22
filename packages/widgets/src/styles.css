@@ -391,3 +391,12 @@
     min-width: 10rem;
   }
 }
+
+.mandate .plan ol {
+  margin: 0.25rem 0;
+  padding-left: 1.25rem;
+}
+
+.mandate .plan .waiting {
+  color: var(--color-text-secondary, #6b7280);
+}

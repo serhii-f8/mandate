@@ -40,6 +40,15 @@ export const statsSchema = z.object({
 
 const progressSchema = z.object({ total: z.number(), done: z.number(), failed: z.number(), skipped: z.number() });
 
+/** CS-9, UI-4: the plan block of `get_changeset` and of the review detail; `visible` is on the detail only and unused here. */
+const planSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  step: z.number(),
+  of: z.number(),
+  steps: z.array(z.object({ step: z.number(), id: z.string(), operation: z.string(), status: z.string(), visible: z.boolean().optional() })),
+});
+
 /** Today `get_changeset` sends the operation ID as a string; an object with a title is read too (ruling F13). */
 const operationSchema = z
   .union([z.string(), z.object({ id: z.string(), title: z.string().optional() })])
@@ -91,6 +100,8 @@ export const changeSetAnswerSchema = z.object({
   execution: z.object({ drift: z.number() }).optional(),
   /** EXE-12: absent unless the change-set was verified. */
   verificationTitles: z.record(z.string(), z.string()).optional(),
+  /** CS-9: absent for a change-set outside a plan, and in answers from before 1.3.0. */
+  plan: planSchema.optional(),
   pageUrl: pageUrlSchema,
 });
 
@@ -103,6 +114,7 @@ const detailSchema = z.object({
   action: z.enum(['update', 'create', 'delete']).optional(),
   /** CS-3: absent in answers from before 1.2.0. */
   reasonTitles: z.record(z.string(), z.string()).optional(),
+  plan: planSchema.optional(),
   operation: z.object({ id: z.string(), title: z.string().optional(), description: z.string().optional(), risk: z.string().optional() }),
   request: z.object({
     args: z.record(z.string(), z.unknown()),

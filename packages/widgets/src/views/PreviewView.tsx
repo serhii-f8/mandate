@@ -7,6 +7,7 @@ import { Notice } from '../components/Notice.js';
 import { RawArguments } from '../components/RawArguments.js';
 import { Pager } from '../components/Pager.js';
 import { StatsSummary } from '../components/StatsSummary.js';
+import { PlanSection } from '../components/PlanSection.js';
 import { StatusBadge } from '../components/StatusBadge.js';
 import { formatDateTime, plural, shortId } from '../format.js';
 import type { ChangeSetActions, ChangeSetViewModel, ItemFilter, ItemRowModel } from '../model.js';
@@ -117,6 +118,7 @@ export function PreviewView({ data, actions, onData }: ViewProps<ChangeSetViewMo
         <StatusBadge status={data.status} />
         <span className="expires">{` Expires ${formatDateTime(data.expiresAt)}`}</span>
       </header>
+      <PlanSection plan={data.plan} />
       <StatsSummary stats={data.stats} {...(hash === undefined ? {} : { hash })} />
       {opaque ? <RawArguments args={data.args ?? {}} /> : null}
       {opaque ? null : (

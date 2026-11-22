@@ -116,7 +116,20 @@ export async function seedPending(
 ): Promise<Seeded> {
   const at = o.at ?? new Date();
   const correlationId = randomUUID();
-  const { id, hash, included } = await prepare(repo, { ...o, at }, correlationId);
+  const seeded = await prepare(repo, { ...o, at }, correlationId);
+  await submitSeeded(repo, seeded, { requester: o.requester, groups: o.groups, role: o.role, at, correlationId });
+  return seeded;
+}
+
+/** Submits a change-set `seedPrepared` made (for example one that is already a plan step) for approval under the fixture role's plan. */
+export async function submitSeeded(
+  repo: ChangeSetRepository,
+  seeded: Seeded,
+  o: { requester: string; groups: string[]; role: 'content_manager' | 'catalog_editor'; at?: Date; correlationId?: string },
+): Promise<void> {
+  const at = o.at ?? new Date();
+  const correlationId = o.correlationId ?? randomUUID();
+  const { id, hash, included } = seeded;
   const changeset = { id, operation: OPERATION };
 
   const plan = planOf(o.role, included);
@@ -140,8 +153,7 @@ export async function seedPending(
     },
     notifications: [],
   });
-  if (!result.ok) throw new Error(`seedPending: submitForApproval refused: ${result.reason}`);
-  return { id, hash, included };
+  if (!result.ok) throw new Error(`submitSeeded: submitForApproval refused: ${result.reason}`);
 }
 
 export interface ExecutedOptions {

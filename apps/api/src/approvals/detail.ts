@@ -29,6 +29,7 @@ import {
   type VerificationStatus,
 } from '@mandate/core';
 import type { RollbackBlock } from '../changesets/rollback.js';
+import type { PlanBlock } from '../changesets/plan-view.js';
 import { verificationTitlesOf } from './texts.js';
 
 export interface PageViewer {
@@ -134,6 +135,8 @@ export interface ChangeSetDetail {
   reasonTitles: Record<string, string>;
   /** EXE-12: the texts of the verification codes, present only for a verified change-set. */
   verificationTitles?: Record<string, string>;
+  /** CS-9, UI-4: the plan this change-set is a step of; each step says whether the viewer may open it. */
+  plan?: PlanBlock;
   viewer: ViewerBlock;
 }
 
@@ -256,6 +259,7 @@ export function changesetDetail(input: {
   now: Date;
   drift?: number;
   rollback: RollbackBlock;
+  plan?: PlanBlock;
 }): ChangeSetDetail {
   const { viewer, now, ...rest } = input;
   return changesetDetailWith({ ...rest, viewer: viewerBlock(input.changeset, input.approvals, viewer, now) });
@@ -270,6 +274,7 @@ export function changesetDetailWith(input: {
   viewer: ViewerBlock;
   drift?: number;
   rollback: RollbackBlock;
+  plan?: PlanBlock;
 }): ChangeSetDetail {
   const { changeset: cs, approvals, progress } = input;
   const submission = cs.submission;
@@ -320,6 +325,7 @@ export function changesetDetailWith(input: {
     rollback: input.rollback,
     reasonTitles: reasonTitlesOf(input.operation),
     ...optionalVerificationTitles(cs.stats, input.operation),
+    ...(input.plan === undefined ? {} : { plan: input.plan }),
     // CS-5: an opaque change-set has no items to exclude.
     viewer: kind === 'opaque' ? { ...input.viewer, canExclude: false } : input.viewer,
   };

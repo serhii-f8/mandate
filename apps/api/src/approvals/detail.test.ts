@@ -324,6 +324,26 @@ describe('EXE-12 detail verification', () => {
   });
 });
 
+describe('UI-4 CS-9 the plan block', () => {
+  const plan = {
+    id: '33333333-3333-4333-8333-333333333333',
+    title: 'Spring launch',
+    step: 2,
+    of: 2,
+    steps: [
+      { step: 1, id: '22222222-2222-4222-8222-222222222222', operation: 'catalog.retire', status: 'executing' as const, visible: false },
+      { step: 2, id: ID, operation: 'catalog.update_content', status: 'prepared' as const, visible: true },
+    ],
+  };
+
+  it('UI-4 the detail carries the given plan block; without one the answer has no plan key', () => {
+    const input = { changeset: prepared(), approvals: [], viewer: alice, now: NOW, rollback: NO_ROLLBACK };
+    expect(changesetDetail({ ...input, plan }).plan).toEqual(plan);
+    expect('plan' in changesetDetail(input)).toBe(false);
+    expect('plan' in changesetDetailWith({ changeset: prepared(), approvals: [], viewer: viewerBlock(prepared(), [], alice, NOW), rollback: NO_ROLLBACK })).toBe(false);
+  });
+});
+
 describe('detail additions', () => {
   it('CS-5 the detail carries derivedFrom of a derived change-set', () => {
     const src = '22222222-2222-4222-8222-222222222222';

@@ -473,3 +473,32 @@ describe('ApprovalView', () => {
     expect(container.querySelector('table')).toBeNull();
   });
 });
+
+describe('UI-4 APR-5 CS-9 the approval view shows the plan', () => {
+  const SIBLING = '22222222-2222-4222-8222-222222222222';
+  const plan: NonNullable<ApprovalViewModel['plan']> = {
+    title: 'Spring launch',
+    step: 2,
+    of: 3,
+    steps: [
+      { step: 1, id: SIBLING, operation: 'shop.retire', status: 'executing' },
+      { step: 2, id: ID, operation: 'catalog.update', status: 'pending_approval' },
+      { step: 3, id: '33333333-3333-4333-8333-333333333333', operation: 'shop.publish', status: 'prepared', href: '/app/changesets/33333333-3333-4333-8333-333333333333' },
+    ],
+  };
+
+  it('UI-4 step 2 of 3 names its plan and what it waits for; only a step with a link is a link', () => {
+    const { container } = render(<ApprovalView data={detail({ plan })} actions={actionsWith()} onData={vi.fn()} />);
+    expect(screen.getByText('Step 2 of 3 in plan "Spring launch"')).toBeTruthy();
+    expect(screen.getByText('Runs after step 1 completes (now: executing)')).toBeTruthy();
+    const rows = Array.from(container.querySelectorAll('.plan li')).map((li) => li.textContent);
+    expect(rows).toEqual(['1 shop.retire executing', '2 catalog.update pending_approval', '3 shop.publish prepared']);
+    const links = Array.from(container.querySelectorAll('.plan a')).map((a) => a.getAttribute('href'));
+    expect(links).toEqual(['/app/changesets/33333333-3333-4333-8333-333333333333']);
+  });
+
+  it('UI-4 without a plan the view has no plan section', () => {
+    const { container } = render(<ApprovalView data={detail()} actions={actionsWith()} onData={vi.fn()} />);
+    expect(container.querySelector('.plan')).toBeNull();
+  });
+});

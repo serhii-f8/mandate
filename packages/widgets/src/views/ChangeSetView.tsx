@@ -3,6 +3,7 @@
 import { Fragment, type ReactElement } from 'react';
 import { ActionBar } from '../components/ActionBar.js';
 import { Notice } from '../components/Notice.js';
+import { PlanSection } from '../components/PlanSection.js';
 import { StatusBadge } from '../components/StatusBadge.js';
 import { formatDateTime } from '../format.js';
 import type { ApprovalStateModel, ChangeSetActions, ChangeSetViewModel, StepDecisionModel } from '../model.js';
@@ -41,6 +42,7 @@ function PendingView({ data, actions }: Props): ReactElement {
   return (
     <section className="view pending">
       <Title data={data} />
+      <PlanSection plan={data.plan} />
       {data.approval ? (
         <>
           <p className="round">{`Round ${String(data.approval.round)}`}</p>
@@ -85,6 +87,7 @@ function ClosedView({ data }: { data: ChangeSetViewModel }): ReactElement {
   return (
     <section className="view closed">
       <Title data={data} />
+      <PlanSection plan={data.plan} />
       {decision?.comment === undefined ? null : (
         <p>
           {`${decision.by}: `}
@@ -99,6 +102,7 @@ function Preparing({ data }: { data: ChangeSetViewModel }): ReactElement {
   return (
     <section className="view preparing">
       <Title data={data} />
+      <PlanSection plan={data.plan} />
       <p>Being prepared…</p>
     </section>
   );

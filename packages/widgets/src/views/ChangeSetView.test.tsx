@@ -399,4 +399,49 @@ describe('ChangeSetView', () => {
     setup(opaqueChangeSetModel({ status: 'completed', items: { items: [item('call', { status: 'written' })] } }));
     expect(screen.getByText('Call outcome: written')).toBeTruthy();
   });
+
+  describe('UI-4 CS-9 the plan', () => {
+    const SIBLING = '22222222-2222-4222-8222-222222222222';
+    const plan: NonNullable<ChangeSetViewModel['plan']> = {
+      title: '<img src=x onerror=alert(1)> launch',
+      step: 2,
+      of: 3,
+      steps: [
+        { step: 1, id: SIBLING, operation: 'shop.retire', status: 'executing', href: `/app/changesets/${SIBLING}` },
+        { step: 2, id: changeSetModel().id, operation: 'shop.update', status: 'approved' },
+        { step: 3, id: '33333333-3333-4333-8333-333333333333', operation: 'shop.publish', status: 'prepared' },
+      ],
+    };
+
+    it('UI-4 the plan line, one row per step and what the step waits for show on every status view', () => {
+      for (const status of ['prepared', 'pending_approval', 'approved', 'executing', 'completed', 'rejected']) {
+        setup(changeSetModel({ status, plan, ...(status === 'executing' ? { progress } : {}) }));
+        expect(screen.getByText('Step 2 of 3 in plan "<img src=x onerror=alert(1)> launch"'), status).toBeTruthy();
+        expect(screen.getByText('Runs after step 1 completes (now: executing)'), status).toBeTruthy();
+        expect(screen.getAllByRole('listitem').filter((li) => li.closest('.plan') !== null)).toHaveLength(3);
+        cleanup();
+      }
+    });
+
+    it('UI-4 a step links only when the model carries a link; the title stays text', () => {
+      const { container } = setup(changeSetModel({ plan }));
+      const links = screen.getAllByRole('link').filter((a) => a.closest('.plan') !== null);
+      expect(links.map((a) => a.getAttribute('href'))).toEqual([`/app/changesets/${SIBLING}`]);
+      expect(container.querySelector('.plan img')).toBeNull();
+    });
+
+    it('CS-9 step 1, or a predecessor that completed, shows no waiting line', () => {
+      setup(changeSetModel({ plan: { ...plan, step: 1 } }));
+      expect(screen.queryByText(/^Runs after/)).toBeNull();
+      cleanup();
+      const done = { ...plan, steps: plan.steps.map((s) => (s.step === 1 ? { ...s, status: 'completed' } : s)) };
+      setup(changeSetModel({ plan: done }));
+      expect(screen.queryByText(/^Runs after/)).toBeNull();
+    });
+
+    it('UI-4 a change-set without a plan renders no plan section', () => {
+      const { container } = setup(changeSetModel());
+      expect(container.querySelector('.plan')).toBeNull();
+    });
+  });
 });

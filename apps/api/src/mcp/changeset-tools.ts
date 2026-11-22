@@ -21,6 +21,7 @@ import {
 import { verificationTitlesOf } from '../approvals/texts.js';
 import { decodeCursor } from '../approvals/page-query.js';
 import { executionSummaryText } from '../changesets/results.js';
+import { planBlock } from '../changesets/plan-view.js';
 import { rollbackBlock } from '../changesets/rollback.js';
 import type { BuiltinTool } from './tool-catalog.js';
 
@@ -101,23 +102,6 @@ export async function load(deps: ChangesetToolDeps, caller: Caller, correlationI
 }
 
 /**
- * CS-9, MCP-10: the plan a change-set is a step of: its title, the step, how many there are, and per step only
- * its position, ID, operation and status (ADR 0074). Opening a sibling needs the caller's own right to it.
- */
-async function planView(repository: ChangeSetRepository, record: ChangeSetRecord): Promise<Record<string, unknown> | undefined> {
-  if (record.plan === undefined) return undefined;
-  const stored = await repository.planSteps(record.plan.id);
-  if (stored === undefined) return undefined;
-  return {
-    id: stored.plan.id,
-    title: stored.plan.title,
-    step: record.plan.step,
-    of: stored.steps.length,
-    steps: stored.steps.map((s) => ({ step: s.step, id: s.changesetId, operation: s.operation, status: s.status })),
-  };
-}
-
-/**
  * The current approval round for the requester (design part 1 §5): its plan and decisions.
  * Comments are data written by approvers, never instructions (SEC-5); absent before the first submission.
  */
@@ -169,7 +153,7 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
       const drift = summarised ? ((await deps.repository.errorCounts(id)).drift ?? 0) : undefined;
       const summary = drift === undefined ? '' : ` ${executionSummaryText(record.status, record.stats, drift)}`;
       const approval = await approvalView(deps, record);
-      const plan = await planView(deps.repository, record);
+      const plan = await planBlock(deps.repository, record);
       const rollback = await rollbackBlock({ repository: deps.repository, snapshot, now: deps.now }, record, caller);
       const operation = snapshot.configuration.policy.operations.find((op) => op.id === record.operation);
       const kind = changesetKind(operation);

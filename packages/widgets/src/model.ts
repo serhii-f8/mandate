@@ -51,6 +51,13 @@ export interface ApprovalStateModel {
 export type ChangeSetKind = 'opaque' | 'diff';
 /** What a change-set does to its targets; absent means `update`. */
 export type ChangeSetAction = 'update' | 'create' | 'delete';
+/** CS-9, UI-4: the plan a change-set is a step of. A step has `href` only when the viewer may open it. */
+export interface PlanModel {
+  title: string;
+  step: number;
+  of: number;
+  steps: { step: number; id: string; operation: string; status: string; href?: string }[];
+}
 export interface ChangeSetViewModel {
   id: string;
   kind?: ChangeSetKind;
@@ -75,6 +82,8 @@ export interface ChangeSetViewModel {
   reasonTitles?: Record<string, string>;
   /** EXE-12: texts for verification codes (a check's title, a fixed code's text), shown on unconfirmed items. */
   verificationTitles?: Record<string, string>;
+  /** CS-9: the plan this change-set belongs to. */
+  plan?: PlanModel;
   pageUrl?: string;
   permissions: { canExclude: boolean; canSubmit: boolean; canCancel: boolean };
 }
@@ -104,6 +113,8 @@ export interface ApprovalViewModel {
   items: ItemsPageModel;
   /** CS-3: titles of check codes from the current configuration, shown beside an item's stored reason. */
   reasonTitles?: Record<string, string>;
+  /** CS-9: the plan this change-set belongs to. */
+  plan?: PlanModel;
   itemFilter?: ItemFilter;
   viewer: {
     channel: 'page' | 'widget';

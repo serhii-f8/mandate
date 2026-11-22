@@ -14,6 +14,7 @@ import {
   type ChangeSetRepository,
   type StartOutcome,
 } from '@mandate/core';
+import { planBlockFor } from '../changesets/plan-view.js';
 import { rollbackBlock } from '../changesets/rollback.js';
 import { progressOf } from '../mcp/changeset-tools.js';
 import { snapshotOf } from '../mcp/tool-pipeline.js';
@@ -206,10 +207,13 @@ export class ChangeSetPagesController {
     const caller = { subject: session.subject, groups: session.groups, clientId: session.clientId, authTime: session.authTime };
     // UI-4: the same block as get_changeset, under the current configuration (POL-6).
     const rollback = await rollbackBlock({ repository: this.repository, snapshot, now: () => now }, changeset, caller);
+    // UI-4, CS-9: the plan, each sibling marked with the same visibility check that guards its page.
+    const plan = await planBlockFor(this.repository, changeset, viewer);
     res.status(200).json(
       changesetDetail({
         changeset,
         rollback,
+        ...(plan === undefined ? {} : { plan }),
         ...(drift === undefined ? {} : { drift }),
         approvals,
         ...(operation === undefined ? {} : { operation }),

@@ -7,8 +7,10 @@ import type {
   ItemFilter,
   ItemRowModel,
   ItemsPageModel,
+  PlanModel,
 } from '@mandate/widgets';
 import type { ChangeSetDetail, ItemRow, ItemsPage, Sample } from './api.js';
+import { changesetPath } from './routes.js';
 
 /** The page entry's mapping from the typed REST answers to the shared view models (UI-1). */
 
@@ -72,6 +74,26 @@ function verificationTitlesOf(detail: ChangeSetDetail): { verificationTitles?: R
   return titles === undefined || Object.keys(titles).length === 0 ? {} : { verificationTitles: titles };
 }
 
+/** CS-9, UI-4: the plan; a step links to its page only when the server marked it `visible` (SEC-1). */
+function planOf(detail: ChangeSetDetail): { plan?: PlanModel } {
+  const plan = detail.plan;
+  if (plan === undefined) return {};
+  return {
+    plan: {
+      title: plan.title,
+      step: plan.step,
+      of: plan.of,
+      steps: plan.steps.map((s) => ({
+        step: s.step,
+        id: s.id,
+        operation: s.operation,
+        status: s.status,
+        ...(s.visible === true ? { href: changesetPath(s.id) } : {}),
+      })),
+    },
+  };
+}
+
 /**
  * The requester's model. Permissions come from the server's viewer block; the page has no cancel
  * route in this phase, and it is the page itself, so there is no `pageUrl`.
@@ -85,6 +107,7 @@ export function toChangeSetModel(detail: ChangeSetDetail, items: ItemsPage, filt
     ...actionOf(detail),
     ...reasonTitlesOf(detail),
     ...verificationTitlesOf(detail),
+    ...planOf(detail),
     ...(kind === 'opaque' ? { args: detail.request.args } : {}),
     operation: { id: operation.id, ...(operation.title === undefined ? {} : { title: operation.title }) },
     status: detail.status,
@@ -126,6 +149,7 @@ export function toApprovalModel(
     kind: detail.kind ?? 'diff',
     ...actionOf(detail),
     ...reasonTitlesOf(detail),
+    ...planOf(detail),
     status: detail.status,
     ...(detail.hash === undefined ? {} : { hash: detail.hash }),
     operation: detail.operation,

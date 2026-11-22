@@ -83,6 +83,39 @@ describe('widget adapters', () => {
     expect(old.kind === 'view' && ('verificationTitles' in old.model || 'verification' in old.model.stats)).toBe(false);
   });
 
+  it('UI-4 CS-9 the plan of a get_changeset answer and of a review detail reaches the models without links; older answers still parse', () => {
+    const plan = {
+      id: B,
+      title: 'Spring launch',
+      step: 2,
+      of: 2,
+      steps: [
+        { step: 1, id: A, operation: 'shop.retire', status: 'executing', visible: true },
+        { step: 2, id: B, operation: 'shop.update', status: 'approved', visible: true },
+      ],
+    };
+    const expected = {
+      title: 'Spring launch',
+      step: 2,
+      of: 2,
+      steps: [
+        { step: 1, id: A, operation: 'shop.retire', status: 'executing' },
+        { step: 2, id: B, operation: 'shop.update', status: 'approved' },
+      ],
+    };
+    const base = answer(getPrepared).structuredContent as object;
+    const t = parseChangeSetTrigger({ ...answer(getPrepared), structuredContent: { ...base, plan: { ...plan, steps: plan.steps.map((s) => ({ step: s.step, id: s.id, operation: s.operation, status: s.status })) } } });
+    expect(t.kind === 'view' && t.model.plan).toEqual(expected);
+    const rv = review.structuredContent;
+    const a = parseApprovalTrigger({ ...answer(review), structuredContent: { ...rv, detail: { ...rv.detail, plan } } });
+    // The widget has no way to open another change-set: no step carries a link.
+    expect(a.kind === 'view' && a.model.plan).toEqual(expected);
+    const old = parseChangeSetTrigger(answer(getPrepared));
+    expect(old.kind === 'view' && 'plan' in old.model).toBe(false);
+    const oldReview = parseApprovalTrigger(answer(review));
+    expect(oldReview.kind === 'view' && 'plan' in oldReview.model).toBe(false);
+  });
+
   it('UI-1 a prepared result and a get_changeset answer become a view model', () => {
     const fromPrepared = parseChangeSetTrigger(answer(prepared));
     expect(fromPrepared.kind).toBe('view');

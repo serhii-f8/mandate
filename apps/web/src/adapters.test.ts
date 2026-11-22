@@ -134,6 +134,33 @@ describe('page adapters', () => {
     expect(Object.keys(toItemsPage({ items: [{ targetId: 'A', status: 'written', before: 1, after: 2 }] }).items[0] ?? {})).not.toContain('verificationStatus');
   });
 
+  it('UI-4 CS-9 the plan reaches both models; a step links only when the answer marked it visible; none adds nothing', () => {
+    const A = '22222222-2222-4222-8222-222222222222';
+    const plan = {
+      id: '33333333-3333-4333-8333-333333333333',
+      title: 'Spring launch',
+      step: 2,
+      of: 2,
+      steps: [
+        { step: 1, id: A, operation: 'shop.retire', status: 'executing', visible: false },
+        { step: 2, id: requester.id, operation: 'shop.update', status: 'approved', visible: true },
+      ],
+    };
+    const expected = {
+      title: 'Spring launch',
+      step: 2,
+      of: 2,
+      steps: [
+        { step: 1, id: A, operation: 'shop.retire', status: 'executing' },
+        { step: 2, id: requester.id, operation: 'shop.update', status: 'approved', href: `/app/changesets/${requester.id}` },
+      ],
+    };
+    expect(toChangeSetModel({ ...requester, plan }, items).plan).toEqual(expected);
+    expect(toApprovalModel({ ...approver, plan }, items, sample, FRESH).plan).toEqual(expected);
+    expect('plan' in toChangeSetModel(requester, items)).toBe(false);
+    expect('plan' in toApprovalModel(approver, items, sample, FRESH)).toBe(false);
+  });
+
   it('APR-5 the stored action reaches both models; an update carries none', () => {
     const created: ChangeSetDetail = { ...requester, action: 'create' };
     expect(toChangeSetModel(created, items).action).toBe('create');

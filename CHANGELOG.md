@@ -31,6 +31,9 @@ Additive release: the configuration schema and the connector SDK are 1.3.0. A pr
 - A plan step that ends `completed` starts the next step by itself when that one is `approved`, as
   `system` with the requester's identity and role limits, behind a new `changesetWorkflow` patch
   (EXE-13, EXE-10).
+- The change-set and approval views, on the pages and in the widgets, show the plan: "Step N of M in
+  plan ...", one row per step and, for a step whose predecessor is not `completed`, what it waits
+  for. The page answer marks the steps the viewer may open; only those link (UI-4, APR-5, CS-9).
 
 ## 1.2.0
 

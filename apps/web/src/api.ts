@@ -114,6 +114,14 @@ export interface ChangeSetDetail {
   reasonTitles?: Record<string, string>;
   /** EXE-12: texts for verification codes, shown beside an unconfirmed item. */
   verificationTitles?: Record<string, string>;
+  /** CS-9: the plan this change-set is a step of; `visible` is the server's page visibility check for that step. */
+  plan?: {
+    id: string;
+    title: string;
+    step: number;
+    of: number;
+    steps: { step: number; id: string; operation: string; status: string; visible?: boolean }[];
+  };
   operation: { id: string; title?: string; description?: string; risk?: string };
   connection: string;
   request: { args: Record<string, unknown>; requester: string; clientId?: string; createdAt: string; submittedAt?: string };

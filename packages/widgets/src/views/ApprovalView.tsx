@@ -4,6 +4,7 @@ import { type ReactElement, useCallback, useState } from 'react';
 import { ItemTable } from '../components/ItemTable.js';
 import { Notice } from '../components/Notice.js';
 import { RawArguments } from '../components/RawArguments.js';
+import { PlanSection } from '../components/PlanSection.js';
 import { Pager } from '../components/Pager.js';
 import { StatusBadge } from '../components/StatusBadge.js';
 import { formatDateTime, plural } from '../format.js';
@@ -191,6 +192,7 @@ export function ApprovalView({ data, actions, onData }: Props): ReactElement {
           {'Expires: '}
           <Time iso={data.expiresAt} />
         </p>
+        <PlanSection plan={data.plan} />
       </section>
       <section aria-label="Request">
         <h2>Request</h2>
