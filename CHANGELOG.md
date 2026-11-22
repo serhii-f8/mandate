@@ -22,6 +22,10 @@ only. Nothing needs to change on upgrade.
 - `grants[].approval` and `approval.field_rules` route approval per grant and per touched field: a grant's
   rule replaces the role's, and the first field rule naming a touched field replaces that. Submission, the
   execution guard and `config explain` use the same resolution (POL-5, ADR 0066).
+- Presets declare typed parameters with defaults (`params` in `preset.yaml`), and a connection sets them
+  with `preset_params`; `{ $param: <name> }` nodes in the preset's operations and test take the
+  connection's value. Code operations receive the values as `ctx.params`, carried by
+  `ConnectionSettings.presetParams` (CONN-8, ADR 0067).
 
 ## 1.0.1
 

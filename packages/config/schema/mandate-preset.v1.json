@@ -27,6 +27,7 @@
     },
     "presetDocument": {
       "additionalProperties": false,
+      "description": "A preset file after substitution: every mapping { $param: <name> } inside operations and test is replaced by the parameter value before this schema applies (CONN-8, ADR 0067).",
       "properties": {
         "adapter": {
           "default": "openapi",
@@ -530,6 +531,111 @@
             "type": "object"
           },
           "type": "array"
+        },
+        "params": {
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "maxLength": 4000,
+                    "type": "string"
+                  },
+                  "description": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "string",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "default"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "number"
+                  },
+                  "description": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "number",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "default"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "description": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "boolean",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "default"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "items": {
+                      "maxLength": 4000,
+                      "type": "string"
+                    },
+                    "maxItems": 500,
+                    "type": "array"
+                  },
+                  "description": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "string_list",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "default"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "type": "object"
         },
         "spec": {
           "maxLength": 1024,

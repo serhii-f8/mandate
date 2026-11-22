@@ -23,7 +23,8 @@ connections:
 ```
 
 `operation_prefix` prefixes every operation ID of the preset (`gt.issues.search`), so two presets,
-or two uses of one preset, do not collide. It needs `preset` and matches `^[a-z][a-z0-9_]{0,30}$`.
+or two uses of one preset, do not collide. `preset_params` sets the preset's
+[parameters](#parameters) for this connection. It needs `preset` and matches `^[a-z][a-z0-9_]{0,30}$`.
 `overrides` apply after the preset, so you can rename or disable one of its operations. The key
 reference is in [Configuration reference](configuration.md).
 
@@ -106,6 +107,56 @@ operations:
 Write input schemas strictly: `additionalProperties: false`, bounded lengths, an `enum` for the
 fields a caller may ask for. The schema is what refuses a bad call before anything reaches the
 upstream.
+
+### Parameters
+
+A preset can leave details to the connection that binds it: the attribute a search filters on, or
+the fields a read may return. Declare each parameter under `params` with a type and a default, and
+put `{ $param: <name> }` where the value goes:
+
+```yaml
+params:
+  search_fields:
+    type: string_list           # string, number, boolean or string_list
+    default: [id, title, body, updated_at]
+    description: Note fields notes.search may return.
+operations:
+  - id: notes.search
+    input_schema:
+      properties:
+        fields:
+          type: array
+          items: { type: string, enum: { $param: search_fields } }
+```
+
+A connection sets the values it needs; the others keep their defaults:
+
+```yaml
+connections:
+  - id: notes
+    preset: notes
+    preset_params: { search_fields: [id, title] }
+```
+
+- The default is required and must have the declared type, so the preset loads without any
+  `preset_params`. Names match `^[a-z][a-z0-9_]{0,63}$`; at most 50 parameters, strings up to 4000
+  characters, lists up to 500 strings.
+- A mapping whose only key is `$param` is replaced by the value, anywhere inside `operations` and
+  `test`. A list value replaces the node as a whole (here the whole `enum`); it is not spliced into a
+  surrounding list. Any other mapping, including one with `$param` and other keys, stays as it is.
+- Substitution happens before the operation schema is checked, once per connection: two connections
+  can bind the same preset with different values (with `operation_prefix`). The published preset
+  format schema, `packages/config/schema/mandate-preset.v1.json`, describes the file after
+  substitution.
+- Values are data. They are never coerced (`"5"` is not a number), never searched for another
+  `$param`, and the result must pass the same checks as the preset's own values. A value that breaks
+  an operation is reported at the connection's `preset_params`, naming the operation.
+- Parameters are not secrets; the secret-key check applies to them like to every key. Credentials
+  belong on the credential page.
+- Code operations read the connection's values, defaults filled in, from `ctx.params`.
+
+Choose today's value as the default when you parameterize an existing preset, so connections that
+set nothing keep its behaviour and the recordings stay valid.
 
 ### Manifests
 

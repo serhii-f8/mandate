@@ -69,6 +69,7 @@ Each entry has `adapter: openapi` or `adapter: mcp`.
 | `auth.client_auth` | `basic`, `body` | `basic` | `oauth_password` only; since 1.1.0. `basic`: client id and secret in a Basic header. `body`: as form fields, for token endpoints that do not accept the header |
 | `preset` | id | none | Names an entry of `presets` |
 | `operation_prefix` | string | none | `^[a-z][a-z0-9_]{0,30}$`; requires `preset` |
+| `preset_params` | map of name to value | none | Since 1.1.0; requires `preset`. Values of the preset's [parameters](presets.md#parameters): a string (up to 4000 characters), a number, a boolean or a list of up to 500 strings, of the declared type (never coerced); at most 50 entries. Unset parameters take the preset's default |
 | `timeout_ms` | integer | 10000 | 1-120000 |
 | `retry.max_attempts` | integer | 3 | 1-10 |
 | `retry.initial_backoff_ms` | integer | 200 | 0-60000 |

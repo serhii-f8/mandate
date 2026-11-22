@@ -5,6 +5,13 @@ version: 1
 spec: spec/notes.openapi.json
 auth: { scheme: bearer }
 test: { operation: notes.search, args: { fields: [id], page_size: 1 } }
+# Parameters (CONN-8): a connection may set them with `preset_params`; `{ $param: <name> }` below
+# is replaced by the connection's value, or by the default, before the operations are checked.
+params:
+  search_fields:
+    type: string_list
+    default: [id, title, body, updated_at]
+    description: Note fields notes.search may return.
 operations:
   # A read: also serves as the manifest's read_before, so it takes an optional `ids` array.
   - id: notes.search
@@ -31,7 +38,7 @@ operations:
           minItems: 1
           uniqueItems: true
           description: Note fields to return.
-          items: { type: string, enum: [id, title, body, updated_at] }
+          items: { type: string, enum: { $param: search_fields } }
         page_size:
           type: integer
           minimum: 1

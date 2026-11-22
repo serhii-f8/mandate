@@ -30,6 +30,7 @@ export interface CodeContext {
     readonly connection: {
         readonly id: string;
     };
+    readonly params?: Readonly<Record<string, string | number | boolean | readonly string[]>>;
 }
 export type CodeArgs = Readonly<Record<string, unknown>>;
 export type WriteRecord = Readonly<Record<string, unknown>>;
@@ -109,6 +110,7 @@ export interface ConnectionSettings {
     minIntervalMs?: number;
     allowPrivateNetwork: boolean;
     extraHosts: readonly string[];
+    presetParams?: Readonly<Record<string, string | number | boolean | readonly string[]>>;
 }
 
 // file: credentials.d.ts

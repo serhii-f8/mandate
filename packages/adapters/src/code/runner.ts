@@ -2,7 +2,7 @@
 // Copyright 2026 The Mandate Authors
 /**
  * Runs a preset's code operations (OPS-5): each invocation gets a fresh `ctx` with the guarded
- * HTTP client of its connection, an abort signal and a deadline. The code's result is copied as
+ * HTTP client of its connection, its preset parameter values (CONN-8), an abort signal and a deadline. The code's result is copied as
  * JSON and checked before it is used; a throw, a malformed result or the deadline become fixed
  * codes. The thrown text reaches only the optional `onCodeError` hook, scrubbed and cut (SEC-3).
  */
@@ -72,6 +72,18 @@ function messageOf(err: unknown): string {
   }
 }
 
+type ParamValues = NonNullable<CodeContext['params']>;
+
+/**
+ * The connection's preset parameter values for one invocation (CONN-8): a frozen copy, lists
+ * included, so code can neither change them nor pass a change to the next invocation.
+ */
+function paramsOf(connection: ConnectionSettings): ParamValues {
+  const copy: Record<string, ParamValues[string]> = {};
+  for (const [name, value] of Object.entries(connection.presetParams ?? {})) copy[name] = typeof value === 'object' ? Object.freeze([...value]) : value;
+  return Object.freeze(copy);
+}
+
 /** The context of a read or a call: nothing beyond the base. */
 const plain = (base: CodeContext): CodeContext => base;
 
@@ -127,7 +139,7 @@ export function createCodeRunner(deps: CodeRunnerDeps): CodeAdapter {
       ...(credential === undefined ? {} : { credential }),
       ...(input.onProgress === undefined ? {} : { onSend: input.onProgress }),
     });
-    const ctx: C = Object.freeze(extend({ http, signal: controller.signal, connection: Object.freeze({ id: connection.id }) }));
+    const ctx: C = Object.freeze(extend({ http, signal: controller.signal, connection: Object.freeze({ id: connection.id }), params: paramsOf(connection) }));
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<'timeout'>((resolve) => {
       timer = setTimeout(() => {

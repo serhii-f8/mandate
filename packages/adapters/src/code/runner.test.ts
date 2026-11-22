@@ -109,6 +109,38 @@ describe('OPS-5 code runner', () => {
     expect(items.requestsTo('GET', '/items/404')).toBe(1);
   });
 
+  it('CONN-8 a code read receives the binding\'s parameter values as ctx.params; {} without any', async () => {
+    const echo = readOp((ctx) => Promise.resolve({ items: [{ params: ctx.params, frozen: Object.isFrozen(ctx.params) }] }));
+    const presetParams = { scope: 'vendor', limit: 20, strict: true, fields: ['sku', 'name'] };
+    const r = await runner().codeRead({ connection: settings({ presetParams }), name: 'echo', operation: echo, args: {}, response: { maxItems: 10 } });
+    expect(r).toMatchObject({ ok: true, items: [{ params: presetParams, frozen: true }] });
+    const none = await runner().codeRead({ connection: settings(), name: 'echo', operation: echo, args: {}, response: { maxItems: 10 } });
+    expect(none).toMatchObject({ ok: true, items: [{ params: {}, frozen: true }] });
+  });
+
+  it('CONN-8 writes and calls receive ctx.params too, and the code cannot change the connection\'s values', async () => {
+    const presetParams = { fields: ['sku'] };
+    const seen: unknown[] = [];
+    const write = writeOp((ctx, records) => {
+      seen.push(ctx.params);
+      try {
+        (ctx.params?.fields as string[]).push('cost');
+      } catch {
+        // A frozen list refuses the push.
+      }
+      return Promise.resolve(records.map(() => 'ok' as const));
+    });
+    const call = callOp((ctx) => {
+      seen.push(ctx.params);
+      return Promise.resolve({ ok: true });
+    });
+    const connection = settings({ presetParams });
+    await runner().codeWrite({ connection, name: 'w', operation: write, records: [{ id: '1' }], args: {} });
+    await runner().codeCall({ connection, name: 'c', operation: call, args: {} });
+    expect(seen).toEqual([{ fields: ['sku'] }, { fields: ['sku'] }]);
+    expect(presetParams.fields).toEqual(['sku']);
+  });
+
   it('OPS-5 codeRead of a malformed result is invalid_response', async () => {
     const malformed: unknown[] = [
       undefined,

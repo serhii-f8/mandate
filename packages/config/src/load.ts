@@ -14,7 +14,8 @@ import type { DisabledOperation, FieldApprovalRule, GrantDefinition, PolicyConfi
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN, DEFAULT_ROLLBACK_WINDOW_HOURS } from './manifest.js';
-import { readSpecFile, resolvePreset, type LoadedPreset } from './presets.js';
+import { bindPresetParams, readSpecFile, resolvePreset, type LoadedPreset } from './presets.js';
+import type { PresetParamValue } from './preset-params.js';
 import type { PresetOperationConfig } from './schema.js';
 import { isMcpUpstream, toMcpCatalog, type McpCatalogState } from './mcp.js';
 import { buildRegistry, propertiesOf, sentArguments, type CatalogState, type Located, type OperationBinding, type OperationSource } from './registry.js';
@@ -293,6 +294,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   for (const { value: c, source, path } of connections) {
     if (c.preset === undefined) {
       if (c.operation_prefix !== undefined) at(source, [...path, 'operation_prefix'], 'requires preset');
+      if (c.preset_params !== undefined) at(source, [...path, 'preset_params'], 'requires preset');
       continue;
     }
     if (!presetById.has(c.preset)) at(source, [...path, 'preset'], 'names a preset that is not defined');
@@ -302,10 +304,21 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       at(source, [...path, 'preset'], `the preset is for ${presetAdapter} connections`);
       continue;
     }
-    const binding: PresetBinding = { connection: c.id, ...(c.operation_prefix === undefined ? {} : { prefix: c.operation_prefix }) };
-    const namespaces = bindingNamespaces(binding, resolved);
+    // CONN-8: this binding's parameter values, substituted into its own copy of the operations.
+    let bound = resolved === undefined ? undefined : bindPresetParams(resolved, c.preset_params);
+    if (resolved !== undefined && bound?.ok === false) {
+      for (const issue of bound.issues) at(source, [...path, 'preset_params', ...issue.path], issue.message);
+      // The load fails on these issues; the defaults keep later checks free of follow-on issues.
+      bound = bindPresetParams(resolved, undefined);
+    }
+    const binding: PresetBinding = {
+      connection: c.id,
+      ...(c.operation_prefix === undefined ? {} : { prefix: c.operation_prefix }),
+      ...(bound?.ok === true ? { operations: bound.operations, params: bound.values, ...(bound.test === undefined ? {} : { test: bound.test }) } : {}),
+    };
+    const namespaces = bindingNamespaces(binding);
     const bindings = presetBoundTo.get(c.preset) ?? [];
-    const clash = bindings.find((b) => [...bindingNamespaces(b, resolved)].some((ns) => namespaces.has(ns)));
+    const clash = bindings.find((b) => [...bindingNamespaces(b)].some((ns) => namespaces.has(ns)));
     if (clash !== undefined) {
       at(source, [...path, 'preset'], `the preset is already bound to connection ${clash.connection} with the same operation prefix`);
       continue;
@@ -319,8 +332,9 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     const preset = resolvedPresets.get(presetId);
     if (preset === undefined) continue;
     for (const binding of bindings) {
-      const alias = presetAlias(preset, binding.prefix);
-      preset.operations.forEach((value, index) => {
+      const bound = binding.operations ?? preset.operations;
+      const alias = presetAlias(bound, binding.prefix);
+      bound.forEach((value, index) => {
         operations.push({ value: alias.operation(value), source: preset.source, path: ['operations', index], connection: binding.connection, origin: `preset:${presetId}` });
       });
     }
@@ -339,11 +353,19 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     const { value: c, source, path } = located;
     const binding = c.preset === undefined ? undefined : presetBoundTo.get(c.preset)?.find((b) => b.connection === c.id);
     const loadedPreset = c.preset === undefined || binding === undefined ? undefined : resolvedPresets.get(c.preset);
-    // The preset's test names its own operation IDs; on an aliased binding it follows the prefix.
+    // The binding's own test (CONN-8 parameters); it names the preset's operation IDs, so on an
+    // aliased binding it follows the prefix.
+    const boundTest = binding?.test;
     const preset =
-      loadedPreset === undefined || binding?.prefix === undefined || loadedPreset.test === undefined
-        ? loadedPreset
-        : { ...loadedPreset, test: { ...loadedPreset.test, operation: presetAlias(loadedPreset, binding.prefix).id(loadedPreset.test.operation) } };
+      loadedPreset === undefined
+        ? undefined
+        : {
+            ...loadedPreset,
+            ...(boundTest === undefined
+              ? {}
+              : { test: binding?.prefix === undefined ? boundTest : { ...boundTest, operation: presetAlias(binding.operations ?? loadedPreset.operations, binding.prefix).id(boundTest.operation) } }),
+          };
+    const presetParams = loadedPreset === undefined ? undefined : binding?.params;
     const auth = c.auth ?? preset?.auth;
     // A preset that failed to load, or a binding already refused, leaves auth unknown: no follow-on issue.
     const presetFailed = c.preset !== undefined && presetById.has(c.preset) && (!resolvedPresets.has(c.preset) || binding === undefined);
@@ -369,6 +391,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       ...(c.rate === undefined ? {} : { minIntervalMs: Math.ceil(1000 / c.rate.requests_per_second) }),
       allowPrivateNetwork: c.allow_private_network,
       extraHosts: spec?.kind === 'url' && URL.canParse(spec.url) ? [new URL(spec.url).hostname] : [],
+      ...(presetParams === undefined ? {} : { presetParams }),
     };
     states.set(c.id, { located, ...(preset === undefined ? {} : { preset }), ...(auth === undefined ? {} : { auth }), ...(spec === undefined ? {} : { spec }), settings });
   }
@@ -747,10 +770,16 @@ export async function loadConfigurationSources(sources: readonly { file: string;
  * Resolver issues carry paths under `openapi.spec` (inside the spec) or
  * `openapi.include`. A preset spec's issues point into the preset file.
  */
-/** CONN-8: one connection that binds a preset, with its optional operation prefix. */
+/**
+ * CONN-8: one connection that binds a preset, with its optional operation prefix and, when the
+ * preset loaded, the operations, test and parameter values substituted for this binding.
+ */
 interface PresetBinding {
   readonly connection: string;
   readonly prefix?: string;
+  readonly operations?: readonly PresetOperationConfig[];
+  readonly test?: ConnectionTestConfig;
+  readonly params?: Readonly<Record<string, PresetParamValue>>;
 }
 
 /** The first segment of an operation ID. */
@@ -760,14 +789,14 @@ function namespaceOf(operationId: string): string {
 }
 
 /**
- * The effective namespaces of a binding: its prefix, or the first segments of the preset's own
- * operation IDs. A preset that failed to load has unknown operations, so an unprefixed binding
- * of it gets a sentinel that only another unprefixed binding of the same preset shares.
+ * The effective namespaces of a binding: its prefix, or the first segments of its operation IDs.
+ * A preset that failed to load has unknown operations, so an unprefixed binding of it gets a
+ * sentinel that only another unprefixed binding of the same preset shares.
  */
-function bindingNamespaces(binding: PresetBinding, preset: LoadedPreset | undefined): ReadonlySet<string> {
+function bindingNamespaces(binding: PresetBinding): ReadonlySet<string> {
   if (binding.prefix !== undefined) return new Set([binding.prefix]);
-  if (preset === undefined) return new Set(['']);
-  return new Set(preset.operations.map((o) => namespaceOf(o.id)));
+  if (binding.operations === undefined) return new Set(['']);
+  return new Set(binding.operations.map((o) => namespaceOf(o.id)));
 }
 
 /**
@@ -775,8 +804,11 @@ function bindingNamespaces(binding: PresetBinding, preset: LoadedPreset | undefi
  * `<prefix>.<rest>` (a one-segment ID `<id>` becomes `<prefix>.<id>`), and so does every
  * reference to one of the preset's own operations inside its manifests. Other IDs stay as they are.
  */
-function presetAlias(preset: LoadedPreset, prefix: string | undefined): { id(operationId: string): string; operation(op: PresetOperationConfig): PresetOperationConfig } {
-  const own = new Set(preset.operations.map((o) => o.id));
+function presetAlias(
+  operations: readonly PresetOperationConfig[],
+  prefix: string | undefined,
+): { id(operationId: string): string; operation(op: PresetOperationConfig): PresetOperationConfig } {
+  const own = new Set(operations.map((o) => o.id));
   const id = (operationId: string): string => {
     if (prefix === undefined || !own.has(operationId)) return operationId;
     const dot = operationId.indexOf('.');

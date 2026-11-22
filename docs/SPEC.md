@@ -193,7 +193,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 - **CONN-5** Restrict outbound calls to hosts declared in connections. Block private and link-local address ranges unless explicitly allowed per connection.
 - **CONN-6** Apply per-connection timeout, retry policy, concurrency limit and, when `rate.requests_per_second` is set, a minimum interval between requests (retries included). A `Retry-After` the client honours also holds later requests of the connection. A request whose turn is further away than the connection timeout fails as `busy`. The interval is kept per process (ADR 0064).
 - **CONN-7** Provide a connection test that performs one declared read call and reports the result.
-- **CONN-8** Load presets as versioned packages that contribute operations and manifests for a connection.
+- **CONN-8** Load presets as versioned packages that contribute operations and manifests for a connection. A preset may declare typed parameters with defaults (`params`); a connection that binds it may set their values (`preset_params`), which replace every `{ $param: <name> }` node in the preset's operations and test for that binding before the operation schema is checked. Unknown names and values of another type are refused at the connection, values are never coerced, and code operations receive the values as `ctx.params` (ADR 0067).
 
 ### 5.5 Operations and manifests
 

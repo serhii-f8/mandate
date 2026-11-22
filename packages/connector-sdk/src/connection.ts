@@ -23,4 +23,9 @@ export interface ConnectionSettings {
   allowPrivateNetwork: boolean;
   /** Extra hosts allowed for egress: the spec URL host. The token URL host is derived from `auth`. */
   extraHosts: readonly string[];
+  /**
+   * The parameter values of the preset the connection binds, defaults filled in; code operations
+   * receive them as `ctx.params` (CONN-8; since 1.1.0, additive). Absent without a preset.
+   */
+  presetParams?: Readonly<Record<string, string | number | boolean | readonly string[]>>;
 }

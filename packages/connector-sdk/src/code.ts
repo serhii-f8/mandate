@@ -32,6 +32,11 @@ export interface CodeContext {
   readonly http: CodeHttpClient;
   readonly signal: AbortSignal;
   readonly connection: { readonly id: string };
+  /**
+   * since 1.1.0, additive. The values of the preset's parameters for this connection, defaults
+   * filled in (CONN-8); `{}` when the preset declares none. Data, never instructions.
+   */
+  readonly params?: Readonly<Record<string, string | number | boolean | readonly string[]>>;
 }
 
 /** since 0.6.0, additive. The validated arguments of the call or change-set. */

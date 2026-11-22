@@ -6,6 +6,9 @@
  * a semver range, holding a preset file (`mandate.preset`, default `preset.yaml`) and, for an
  * openapi preset, a vendored spec. Issues inside the preset are reported with the file
  * `<package>/<preset file>` (CFG-2), issues about `mandate` with `<package>/package.json`.
+ * Parameters (ADR 0067): `{ $param: <name> }` nodes in `operations` and `test` are replaced by
+ * the declared defaults before `presetDocumentSchema` applies, and again per binding with the
+ * connection's `preset_params` (`bindPresetParams`).
  */
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
@@ -15,13 +18,20 @@ import { z } from 'zod';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { loadPresetCode, type ImportModule, type LoadedPresetCode } from './preset-code.js';
 import { parseMandateField, selectPackage } from './preset-package.js';
-import { PARSE_PARAMS, presetOperationSchema, schemaIssues, type PresetConfig, type PresetOperationConfig } from './schema.js';
+import { PRESET_PARAM_NAME, presetParamsSchema, resolveParamValues, substituteParams, type ParamIssue, type PresetParamDecl, type PresetParamValue } from './preset-params.js';
+import { OPERATION_ID, PARSE_PARAMS, presetOperationSchema, schemaIssues, type PresetConfig, type PresetOperationConfig } from './schema.js';
 import { findSecretKeys, SECRET_MESSAGE } from './secrets.js';
 import { authSchema, connectionTestSchema, isSpecUrl, type AuthConfig, type ConnectionTestConfig } from './upstream-schema.js';
 import { parseYamlSource, type SourceDocument } from './yaml-source.js';
 
+/**
+ * The preset file after its `{ $param: <name> }` nodes were replaced (ADR 0067): such a node may
+ * stand anywhere inside `operations` and `test` of the file and is resolved before this schema.
+ */
 export const presetDocumentSchema = z.strictObject({
   version: z.literal(1),
+  /** CONN-8: parameters with their defaults, set per binding by the connection's `preset_params`. */
+  params: presetParamsSchema.optional(),
   /** The connection adapter the preset is for (CONN-8). */
   adapter: z.enum(['openapi', 'mcp']).default('openapi'),
   /** The vendored spec, relative to the preset directory: required for openapi, refused for mcp. */
@@ -30,7 +40,7 @@ export const presetDocumentSchema = z.strictObject({
   auth: authSchema.optional(),
   test: connectionTestSchema.optional(),
   operations: z.array(presetOperationSchema).default([]),
-});
+}).describe('A preset file after substitution: every mapping { $param: <name> } inside operations and test is replaced by the parameter value before this schema applies (CONN-8, ADR 0067).');
 
 export interface LoadedPreset {
   readonly id: string;
@@ -48,7 +58,14 @@ export interface LoadedPreset {
   readonly sdk?: string;
   readonly auth?: AuthConfig;
   readonly test?: ConnectionTestConfig;
+  /** The operations with the parameter defaults substituted (ADR 0067). */
   readonly operations: readonly PresetOperationConfig[];
+  /** CONN-8: the declared parameters; empty when the preset declares none. */
+  readonly params: Readonly<Record<string, PresetParamDecl>>;
+  /** The `operations` of the preset file before substitution; each binding substitutes its own copy. */
+  readonly rawOperations: readonly unknown[];
+  /** The `test` of the preset file before substitution, when it has one. */
+  readonly rawTest?: unknown;
   /** `package.json`, the preset file and the spec (openapi only), in this order; covered by the configuration hash. */
   readonly files: readonly { readonly file: string; readonly text: string }[];
   /** The code module of `mandate.code` (OPS-5); its tree digest is covered by the configuration hash (CFG-4). */
@@ -137,7 +154,11 @@ export async function resolvePreset(
     issues.push({ file, path: pathToString(path), ...(source.locate(path) ?? {}), message });
   };
   for (const path of findSecretKeys(source.value)) at(path, SECRET_MESSAGE);
-  const result = presetDocumentSchema.safeParse(source.value ?? {}, PARSE_PARAMS);
+  // CONN-8: parameters first, so their defaults stand in for the `{ $param }` nodes below.
+  const raw = isRecord(source.value) ? source.value : undefined;
+  const bound = raw === undefined ? undefined : bindDefaults(raw, at);
+  if (issues.length > 0) return { ok: false, issues };
+  const result = presetDocumentSchema.safeParse(bound ?? source.value ?? {}, PARSE_PARAMS);
   for (const issue of schemaIssues(result)) at(issue.path, issue.message);
   if (!result.success || issues.length > 0) return { ok: false, issues };
   const doc = result.data;
@@ -185,10 +206,91 @@ export async function resolvePreset(
       ...(doc.auth === undefined ? {} : { auth: doc.auth }),
       ...(doc.test === undefined ? {} : { test: doc.test }),
       operations: doc.operations,
+      params: doc.params ?? {},
+      rawOperations: Array.isArray(raw?.operations) ? raw.operations : [],
+      ...(raw?.test === undefined ? {} : { rawTest: raw.test }),
       files,
       ...(code === undefined ? {} : { code }),
     },
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The keys of a preset file that may hold `{ $param }` nodes. */
+const PARAMETERIZED = ['operations', 'test'] as const;
+
+/**
+ * The preset document with the parameter defaults substituted into `operations` and `test`.
+ * Invalid declarations and `$param` names that are not declared are reported through `at`.
+ */
+function bindDefaults(raw: Record<string, unknown>, at: (path: readonly PropertyKey[], message: string) => void): Record<string, unknown> | undefined {
+  const declared = presetParamsSchema.safeParse(raw.params ?? {}, PARSE_PARAMS);
+  for (const issue of schemaIssues(declared)) at(['params', ...issue.path], issue.message);
+  if (!declared.success) return undefined;
+  const defaults = resolveParamValues(declared.data, undefined);
+  // Defaults alone cannot fail; kept total for the type.
+  if (!defaults.ok) return undefined;
+  const bound: Record<string, unknown> = { ...raw };
+  for (const key of PARAMETERIZED) {
+    if (!Object.hasOwn(raw, key)) continue;
+    const substituted = substituteParams(raw[key], defaults.values);
+    if (substituted.ok) bound[key] = substituted.value;
+    else at([key], `names undeclared preset parameters: ${substituted.unknown.map((name) => (PRESET_PARAM_NAME.test(name) ? name : '(invalid name)')).join(', ')}`);
+  }
+  return bound;
+}
+
+/** CONN-8: what one connection binds of a preset. */
+export type PresetParamsBinding =
+  | {
+      readonly ok: true;
+      readonly values: Readonly<Record<string, PresetParamValue>>;
+      readonly operations: readonly PresetOperationConfig[];
+      readonly test?: ConnectionTestConfig;
+    }
+  | { readonly ok: false; readonly issues: readonly ParamIssue[] };
+
+const presetOperationsSchema = z.array(presetOperationSchema);
+
+/**
+ * CONN-8: the operations and test of `preset` for one binding. Without `given` they are the
+ * default-bound ones; with it, the values are checked against the declarations, substituted into
+ * a fresh copy of the raw nodes and validated again. Issue paths are relative to `preset_params`.
+ */
+export function bindPresetParams(preset: LoadedPreset, given: Readonly<Record<string, unknown>> | undefined): PresetParamsBinding {
+  const resolved = resolveParamValues(preset.params, given);
+  if (!resolved.ok) return resolved;
+  const { values } = resolved;
+  if (given === undefined) return { ok: true, values, operations: preset.operations, ...(preset.test === undefined ? {} : { test: preset.test }) };
+  const issues: ParamIssue[] = [];
+  // The raw nodes passed the default substitution at resolve time, so every name is declared;
+  // the check stays so a binding never proceeds on a partial substitution.
+  const operations = substituteParams(preset.rawOperations, values);
+  const rawTest = preset.rawTest === undefined ? undefined : substituteParams(preset.rawTest, values);
+  if (!operations.ok || rawTest?.ok === false) return { ok: false, issues: [{ path: [], message: 'the preset names undeclared parameters' }] };
+  const parsedOps = presetOperationsSchema.safeParse(operations.value, PARSE_PARAMS);
+  for (const { path: [index, ...rest], message } of schemaIssues(parsedOps)) {
+    const op: unknown = typeof index === 'number' && Array.isArray(operations.value) ? operations.value[index] : undefined;
+    const id = isRecord(op) && typeof op.id === 'string' && OPERATION_ID.test(op.id) ? op.id : `operations[${String(index)}]`;
+    issues.push({ path: [], message: `makes preset operation ${id} invalid: ${withPath(rest, message)}` });
+  }
+  let test: ConnectionTestConfig | undefined;
+  if (rawTest !== undefined) {
+    const parsedTest = connectionTestSchema.safeParse(rawTest.value, PARSE_PARAMS);
+    for (const { path, message } of schemaIssues(parsedTest)) issues.push({ path: [], message: `makes the preset test invalid: ${withPath(path, message)}` });
+    if (parsedTest.success) test = parsedTest.data;
+  }
+  if (issues.length > 0 || !parsedOps.success) return { ok: false, issues };
+  return { ok: true, values, operations: parsedOps.data, ...(test === undefined ? {} : { test }) };
+}
+
+/** `<path> <message>`, or the message alone at the root. */
+function withPath(path: readonly PropertyKey[], message: string): string {
+  const where = pathToString(path);
+  return where === '' ? message : `${where} ${message}`;
 }
 
 /** Reads the vendored spec of an openapi preset; it must lie inside the package, real path included. */

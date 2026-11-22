@@ -18,6 +18,7 @@ import {
   operationUpstreamSchema,
 } from './upstream-schema.js';
 import { changesetsSchema, manifestSchema } from './manifest.js';
+import { presetParamValuesSchema } from './preset-params.js';
 
 export { OPERATION_ID };
 const credentialRef = id;
@@ -29,6 +30,8 @@ const connectionBase = {
   preset: id.optional(),
   /** CONN-8: the preset's operation IDs `<ns>.<op>` become `<operation_prefix>.<op>` on this connection. */
   operation_prefix: z.string().regex(/^[a-z][a-z0-9_]{0,30}$/).optional(),
+  /** CONN-8: values of the bound preset's parameters; checked against its declarations when the preset loads. */
+  preset_params: presetParamValuesSchema.optional(),
   ...connectionSettingsFields,
 };
 const connection = z.discriminatedUnion('adapter', [

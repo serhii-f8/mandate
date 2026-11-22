@@ -10,7 +10,8 @@ import { formatIssue, type ConfigIssue } from './issues.js';
 import { DEFAULT_RATE_LIMITS } from './schema.js';
 import { loadConfigurationDirectory, loadConfigurationSources, type LoadResult } from './load.js';
 import { resolvePreset } from './presets.js';
-import { loadCodeFixture, presetWithoutUpdate } from '../test/code-fixture.js';
+import { SECRET_MESSAGE } from './secrets.js';
+import { FIXTURE_CONFIG, FIXTURE_PRESET_FILE, loadCodeFixture, presetWithoutUpdate } from '../test/code-fixture.js';
 
 const VALID_DIR = fileURLToPath(new URL('../test/fixtures/valid', import.meta.url));
 const FIXTURES = fileURLToPath(new URL('../test/fixtures', import.meta.url));
@@ -658,6 +659,137 @@ role_mapping:
   it('POL-1 a grant naming the unprefixed ID of an aliased preset is an unknown operation', async () => {
     const result = await loadAliased(twoShops(', operation_prefix: shop_a', ', operation_prefix: shop_b', '      - { operation: fixture.search }\n'));
     expect(issues(result)).toEqual([expect.objectContaining({ file: 'config.yaml', path: 'roles[0].grants[0].operation', message: 'names an operation that is not defined' })]);
+  });
+});
+
+describe('CONN-8 preset parameters bound per connection', () => {
+  /** The fixture preset with two parameters used by fixture.search (operation index 0). */
+  async function parameterized(): Promise<string> {
+    const text = await presetWithoutUpdate();
+    return text
+      .replace('operations:\n', 'params:\n  scope: { type: string, default: brand, description: Attribute to filter on. }\n  limit: { type: number, default: 50 }\noperations:\n')
+      .replace("        limit: { arg: per_page }\n      response: { items: '$', fields_from_arg: fields }", () =>
+        "        limit: { arg: per_page }\n        filter_field: { $param: scope }\n      response: { items: '$', fields_from_arg: fields, max_items: { $param: limit } }",
+      );
+  }
+  const oneShop = (extra = ''): string => FIXTURE_CONFIG.replace('    preset: fixture\n', `    preset: fixture\n${extra}`);
+  const twoShops = (a: string, b: string): string => `version: 1
+presets:
+  - { id: fixture, package: "@mandate/code-fixture-preset" }
+connections:
+  - { id: a, adapter: openapi, base_url: https://a.example.test/api, credential_ref: items-token, preset: fixture, operation_prefix: shop_a${a} }
+  - { id: b, adapter: openapi, base_url: https://b.example.test/api, credential_ref: items-token, preset: fixture, operation_prefix: shop_b${b} }
+roles:
+  - id: integration_admin
+    grants: []
+    manage_credentials: [items-token]
+`;
+
+  async function loadWith(config: string, preset?: string): Promise<LoadResult> {
+    const dirs: string[] = [];
+    try {
+      return await loadCodeFixture(dirs, { preset: preset ?? (await parameterized()), config: { 'config.yaml': config } });
+    } finally {
+      await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+    }
+  }
+
+  function searchMapping(result: LoadResult, id: string): unknown {
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    const binding = result.configuration.bindings.get(id);
+    if (binding?.kind !== 'http') throw new Error(`${id} has no HTTP binding`);
+    return binding.mapping;
+  }
+
+  it('CONN-8 without preset_params the bound operation carries the defaults', async () => {
+    const result = await loadWith(oneShop());
+    expect(searchMapping(result, 'fixture.search')).toMatchObject({ query: { filter_field: 'brand' }, response: { maxItems: 50 } });
+    expect(result.ok && result.configuration.connectionSettings.get('items')?.presetParams).toEqual({ scope: 'brand', limit: 50 });
+  });
+
+  it('CONN-8 a connection binding a preset without parameters gets empty values; one without a preset gets none', async () => {
+    const result = await loadWith(oneShop(), await presetWithoutUpdate());
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    expect(result.configuration.connectionSettings.get('items')?.presetParams).toEqual({});
+    const plain = await load();
+    expect(plain.ok && plain.configuration.connectionSettings.get('magento')?.presetParams).toBeUndefined();
+  });
+
+  it('CONN-8 two connections bind one preset with different parameters; nothing is shared between bindings', async () => {
+    const result = await loadWith(twoShops(', preset_params: { scope: vendor, limit: 20 }', ''));
+    expect(searchMapping(result, 'shop_a.search')).toMatchObject({ query: { filter_field: 'vendor' }, response: { maxItems: 20 } });
+    expect(searchMapping(result, 'shop_b.search')).toMatchObject({ query: { filter_field: 'brand' }, response: { maxItems: 50 } });
+    if (!result.ok) throw new Error('expected a configuration');
+    expect(result.configuration.connectionSettings.get('a')?.presetParams).toEqual({ scope: 'vendor', limit: 20 });
+    expect(result.configuration.connectionSettings.get('b')?.presetParams).toEqual({ scope: 'brand', limit: 50 });
+  });
+
+  it('CONN-8 a value of the wrong type is an issue at the connection, without echoing it', async () => {
+    const found = issues(await loadWith(oneShop('    preset_params: { scope: 5 }\n')));
+    expect(found).toEqual([expect.objectContaining({ file: 'config.yaml', path: 'connections[0].preset_params.scope', message: 'must be a string' })]);
+  });
+
+  it('CONN-8 an unknown parameter name, an object value and a nested list are issues at the connection', async () => {
+    expect(issues(await loadWith(oneShop('    preset_params: { nope: x }\n')))).toEqual([
+      expect.objectContaining({ file: 'config.yaml', path: 'connections[0].preset_params.nope', message: 'is not a parameter of the preset' }),
+    ]);
+    for (const value of ['{ a: 1 }', '[[a]]']) {
+      const found = issues(await loadWith(oneShop(`    preset_params: { scope: ${value} }\n`)));
+      expect(found).toEqual([expect.objectContaining({ file: 'config.yaml', path: 'connections[0].preset_params.scope' })]);
+    }
+  });
+
+  it('CONN-8 a value that breaks the operation schema is reported at preset_params, naming the operation', async () => {
+    const found = issues(await loadWith(oneShop('    preset_params: { limit: 1000 }\n')));
+    expect(found).toEqual([
+      expect.objectContaining({
+        file: 'config.yaml',
+        path: 'connections[0].preset_params',
+        message: expect.stringContaining('operation fixture.search') as unknown,
+      }),
+    ]);
+  });
+
+  it('CONN-8 preset_params on a connection without preset is refused', async () => {
+    const result = await load({
+      'connections.yaml': CONNECTIONS.replace('auth: { scheme: bearer } }', 'auth: { scheme: bearer }, preset_params: { scope: x } }'),
+    });
+    expect(issues(result)).toEqual([expect.objectContaining({ file: 'connections.yaml', path: 'connections[0].preset_params', message: 'requires preset' })]);
+  });
+
+  it('CONN-8 an operation naming an undeclared parameter fails in the preset file', async () => {
+    const preset = (await parameterized()).replace('filter_field: { $param: scope }', 'filter_field: { $param: x }');
+    const found = issues(await loadWith(oneShop(), preset));
+    expect(found).toEqual([expect.objectContaining({ file: FIXTURE_PRESET_FILE, path: 'operations', message: 'names undeclared preset parameters: x' })]);
+  });
+
+  it('CONN-8 a declaration whose default does not match its type fails in the preset file', async () => {
+    const preset = (await parameterized()).replace('limit: { type: number, default: 50 }', 'limit: { type: number, default: "50" }');
+    const found = issues(await loadWith(oneShop(), preset));
+    expect(found).toEqual([expect.objectContaining({ file: FIXTURE_PRESET_FILE, path: 'params.limit.default' })]);
+  });
+
+  it('CONN-8 the preset test is substituted per binding', async () => {
+    const preset = (await parameterized())
+      .replace('params:\n', 'params:\n  probe_state: { type: string, default: open }\n')
+      .replace('operations:\n', 'test: { operation: fixture.search, args: { page: 1, per_page: 1, fields: [id], state: { $param: probe_state } } }\noperations:\n');
+    const result = await loadWith(twoShops(', preset_params: { probe_state: closed }', ''), preset);
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    expect(result.configuration.connectionTests.get('a')).toEqual({ operation: 'shop_a.search', args: { page: 1, per_page: 1, fields: ['id'], state: 'closed' } });
+    expect(result.configuration.connectionTests.get('b')).toEqual({ operation: 'shop_b.search', args: { page: 1, per_page: 1, fields: ['id'], state: 'open' } });
+  });
+
+  it('CFG-4 two configurations differing only in a preset_params value have different hashes', async () => {
+    const a = await loadWith(oneShop('    preset_params: { scope: vendor }\n'));
+    const b = await loadWith(oneShop('    preset_params: { scope: maker }\n'));
+    if (!a.ok || !b.ok) throw new Error('expected valid configurations');
+    expect(a.configuration.hash).not.toBe(b.configuration.hash);
+  });
+
+  it('CFG-5 a secret-like key under preset_params is refused like anywhere in a connection', async () => {
+    const found = issues(await loadWith(oneShop('    preset_params: { api_token: hunter2-value }\n')));
+    expect(found).toContainEqual(expect.objectContaining({ file: 'config.yaml', path: 'connections[0].preset_params.api_token', message: SECRET_MESSAGE }));
+    expect(found.map(formatIssue).join('\n')).not.toContain('hunter2-value');
   });
 });
 

@@ -240,6 +240,35 @@
                 "pattern": "^[a-z][a-z0-9_-]{0,62}$",
                 "type": "string"
               },
+              "preset_params": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "maxLength": 4000,
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "items": {
+                        "maxLength": 4000,
+                        "type": "string"
+                      },
+                      "maxItems": 500,
+                      "type": "array"
+                    }
+                  ]
+                },
+                "propertyNames": {
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$",
+                  "type": "string"
+                },
+                "type": "object"
+              },
               "rate": {
                 "additionalProperties": false,
                 "properties": {
@@ -487,6 +516,35 @@
               "preset": {
                 "pattern": "^[a-z][a-z0-9_-]{0,62}$",
                 "type": "string"
+              },
+              "preset_params": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "maxLength": 4000,
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "items": {
+                        "maxLength": 4000,
+                        "type": "string"
+                      },
+                      "maxItems": 500,
+                      "type": "array"
+                    }
+                  ]
+                },
+                "propertyNames": {
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$",
+                  "type": "string"
+                },
+                "type": "object"
               },
               "rate": {
                 "additionalProperties": false,
