@@ -3,7 +3,7 @@
 import type { ManifestDefinition, OperationDefinition } from '../policy-model.js';
 import { CanonicalJsonError, canonicalJson } from './canonical.js';
 import { itemFields, manifestAction } from './fields.js';
-import { inScope, touchedFields } from './items.js';
+import { existenceReadIncomplete, inScope, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord } from './model.js';
 import type { BatchContext, ChangeWriter, ItemOutcome, PlanEntry, ReadPage, UpstreamReader } from './ports.js';
 import { resolveTemplates } from './templates.js';
@@ -430,6 +430,8 @@ export class ManifestBatchWriter implements ChangeWriter {
     const page: ReadPage = await reader.read(rb.operation, args);
     if (!page.ok) throw new RetryableWriteError('read_failed');
     if (page.truncated) throw new RetryableWriteError('incomplete_read');
+    // CS-7: for a create or delete (either direction) a short page could hide a record that exists.
+    if (existenceReadIncomplete(this.manifest, page)) throw new RetryableWriteError('incomplete_read');
     const byId = new Map<string, Readonly<Record<string, unknown>>>();
     for (const record of page.items) {
       const id = record[this.manifest.idField];

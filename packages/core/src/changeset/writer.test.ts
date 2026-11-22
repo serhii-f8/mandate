@@ -1342,6 +1342,62 @@ describe('CS-7 OPS-2 create and delete', () => {
     });
   });
 
+  describe('CS-7 a short read_before page is incomplete for create and delete', () => {
+    /** Fewer records than the upstream reports: a default page size cut the answer. */
+    const shortPage = (...items: Record<string, unknown>[]): ReadPage => ({ ok: true, items, total: items.length + 1, truncated: false });
+
+    it('CS-7 a create whose classify read is short throws incomplete_read and sends nothing', async () => {
+      const { reader, direct, batch, writer } = directSetup(undefined, createOperation);
+      reader.pages = [shortPage()];
+      await expect(writer.writeBatch({ changeset: createChangeset({ sku: 'n1', name: 'N' }), items: [created('n1', 'N')], batch })).rejects.toMatchObject({
+        name: 'RetryableWriteError',
+        code: 'incomplete_read',
+      });
+      expect(direct.written).toEqual([]);
+    });
+
+    it('CS-7 a delete whose classify read returns a record without a readable identifier throws incomplete_read', async () => {
+      const { reader, direct, batch, writer } = directSetup(undefined, deleteOperation);
+      reader.pages = [page({ brand: 'acme', name: 'N', price: 1 })];
+      await expect(writer.writeBatch({ changeset: deleteChangeset, items: [deleted], batch })).rejects.toMatchObject({ code: 'incomplete_read' });
+      expect(direct.written).toEqual([]);
+    });
+
+    it('CS-7 a delete whose verify read is short throws incomplete_read and never ends written', async () => {
+      const { reader, direct, batch, writer } = directSetup(undefined, deleteOperation);
+      reader.pages = [page({ sku: 'A', brand: 'acme', name: 'N', price: 1 }), shortPage()];
+      await expect(writer.writeBatch({ changeset: deleteChangeset, items: [deleted], batch })).rejects.toMatchObject({ code: 'incomplete_read' });
+      expect(direct.written).toEqual([[{ sku: 'A' }]]);
+    });
+
+    it('CS-7 a create whose verify read returns a record without a readable identifier throws incomplete_read', async () => {
+      const { reader, batch, writer } = directSetup(undefined, createOperation);
+      reader.pages = [page(), page({ name: 'N' })];
+      await expect(writer.writeBatch({ changeset: createChangeset({ sku: 'n1', name: 'N' }), items: [created('n1', 'N')], batch })).rejects.toMatchObject({
+        code: 'incomplete_read',
+      });
+    });
+
+    it('CS-7 the reverse of a create (a delete-shaped rollback) is held to the same rule', async () => {
+      const { reader, direct, batch, writer } = directSetup('reverse', createOperation);
+      reader.pages = [page({ sku: 'n1', name: 'N' }), shortPage()];
+      await expect(
+        writer.writeBatch({ changeset: createChangeset({ sku: 'n1', name: 'N' }), items: [{ ...created('n1', 'N'), status: 'written' }], batch }),
+      ).rejects.toMatchObject({ code: 'incomplete_read' });
+      expect(direct.written).toEqual([[{ sku: 'n1' }]]);
+    });
+
+    it('CS-7 an update batch with the same short page behaves as before: the missing target is gone', async () => {
+      const { reader, batch, writer } = directSetup();
+      reader.pages = [shortPage(product('A', 'old')), shortPage(product('A', 'new'))];
+      const outcomes = await writer.writeBatch({ changeset: changesetFor(['A', 'B']), items: [item('A'), item('B')], batch });
+      expect(outcomes).toEqual([
+        { targetId: 'A', status: 'written' },
+        { targetId: 'B', status: 'skipped', error: 'gone' },
+      ]);
+    });
+  });
+
   it('EXE-8 reverse of a written create sends a delete-shaped record and ends written once the record is gone', async () => {
     const { reader, direct, batch, writer } = directSetup('reverse', createOperation);
     reader.pages = [page({ sku: 'n1', name: 'N' }), page()];

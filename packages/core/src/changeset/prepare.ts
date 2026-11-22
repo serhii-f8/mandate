@@ -8,9 +8,9 @@ import { checkRecordFields } from './checks.js';
 import { PreparationFailure } from './failure.js';
 import { callRecords, manifestAction } from './fields.js';
 import { CURRENT_HASH_VERSION } from './hash.js';
-import { buildItems, touchedFields } from './items.js';
+import { buildItems, existenceReadIncomplete, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStatus } from './model.js';
-import { chunkLookups } from './lookups.js';
+import { chunkLookups, chunks } from './lookups.js';
 import { isOpaque } from './opaque.js';
 import type { PreparationRepository, PrepareFailure, ReadPage, UpstreamReader } from './ports.js';
 import { resolveTemplates } from './templates.js';
@@ -73,12 +73,6 @@ class LostRace extends Error {
   constructor() {
     super('change-set left preparing');
   }
-}
-
-function chunks<T>(list: readonly T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
-  return out;
 }
 
 function okPage(page: ReadPage): Extract<ReadPage, { ok: true }> {
@@ -239,6 +233,8 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
         ...(readFieldsArg === undefined ? {} : { [readFieldsArg]: readFields }),
       }),
     );
+    // CS-7: a create or delete must not mistake a target cut from a short page for an absent one.
+    if (existenceReadIncomplete(manifest, page)) throw new PreparationFailure('incomplete_read');
     // OPS-7: the lookups of this chunk's items, read during preparation only and dropped after the checks.
     const lookups = await chunkLookups({ manifest, args, targetIds, records: page.items, reader, readFieldsArg: req.readFieldsArg });
     const items = buildItems({ manifest, args, targetIds, records: page.items, ...(lookups === undefined ? {} : { lookups }) });

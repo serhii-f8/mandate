@@ -722,6 +722,67 @@ describe('OPS-2 CS-7 POL-2 create and delete read existence without the scope fi
   });
 });
 
+describe('CS-7 a short read_before page fails a create or delete preparation closed', () => {
+  const createManifest: ManifestDefinition = {
+    action: 'create',
+    idField: 'sku',
+    recordsArg: 'records',
+    fields: ['name'],
+    requiredFields: [],
+    scopeArgs: {},
+    readBefore: { operation: 'catalog.get_products_by_sku', idsArg: 'skus', args: {} },
+    batchSize: 10,
+    maxTargets: 10_000,
+    rollback: { strategy: 'none' },
+  };
+  const deleteManifest: ManifestDefinition = {
+    action: 'delete',
+    idField: 'sku',
+    idsArg: 'skus',
+    fields: ['name'],
+    requiredFields: [],
+    scopeArgs: {},
+    readBefore: { operation: 'catalog.get_products_by_sku', idsArg: 'skus', args: {} },
+    batchSize: 10,
+    maxTargets: 10_000,
+    rollback: { strategy: 'none' },
+  };
+  const createArgs = { records: [{ sku: 'n1', name: 'N1' }, { sku: 'n2', name: 'N2' }] };
+  const deleteArgs = { skus: ['A', 'B'] };
+  /** One record of the two asked for, while the upstream reports two: a default page size cut the answer. */
+  const short = (sku: string): ReadPage => ({ ok: true, items: [{ sku, name: 'x' }], total: 2, truncated: false });
+  const prepare = (page: ReadPage, args: Record<string, unknown>, manifest: ManifestDefinition, fieldsArg = 'changes') => {
+    const { deps } = setup(new ScriptedReader({}, { readOverride: () => page }));
+    const req = request(args);
+    return prepareChangeSet(deps, { ...req, operation: { ...req.operation, fieldsArg, manifest } });
+  };
+
+  it('CS-7 a create whose read answers fewer records than the reported total fails incomplete_read', async () => {
+    expect(await prepare(short('n1'), createArgs, createManifest, 'records')).toMatchObject({ ok: false, code: 'incomplete_read' });
+  });
+
+  it('CS-7 a delete whose read answers fewer records than the reported total fails incomplete_read', async () => {
+    expect(await prepare(short('A'), deleteArgs, deleteManifest)).toMatchObject({ ok: false, code: 'incomplete_read' });
+  });
+
+  it('CS-7 a create or delete whose read returns a record without a readable identifier fails incomplete_read', async () => {
+    const unidentified: ReadPage = { ok: true, items: [{ sku: 'n1', name: 'x' }, { name: 'y' }], truncated: false };
+    expect(await prepare(unidentified, createArgs, createManifest, 'records')).toMatchObject({ ok: false, code: 'incomplete_read' });
+    const unidentifiedDelete: ReadPage = { ok: true, items: [{ sku: 'A', name: 'x' }, { sku: { id: 'B' }, name: 'y' }], truncated: false };
+    expect(await prepare(unidentifiedDelete, deleteArgs, deleteManifest)).toMatchObject({ ok: false, code: 'incomplete_read' });
+  });
+
+  it('CS-7 an update with the same short page prepares as before: the missing target is not_found', async () => {
+    const out = await prepare(
+      { ok: true, items: [product('A')], total: 2, truncated: false },
+      { brand: 'acme', skus: ['A', 'B'], changes: { description: 'new' } },
+      { ...baseManifest, batchSize: 10 },
+    );
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(out.changeset.stats).toMatchObject({ total: 2, included: 1, excluded: { not_found: 1 } });
+  });
+});
+
 describe('OPS-4 selector targets', () => {
   const selectorArgs = { brand: 'acme', changes: { description: 'new' } };
   const page = (ids: string[], total?: number): ReadPage => ({

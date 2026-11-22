@@ -147,6 +147,16 @@ describe('OPS-2 CS-3 create items', () => {
     });
     expect(create([], { sku: 'n1', brand: 'acme', name: null })?.reason).toBe('missing_data');
   });
+  it('OPS-2 CS-3 a record that carries only its identifier is missing_data, never pending with an empty after', () => {
+    const bare: ManifestDefinition = { ...m, requiredFields: [], scopeArgs: {} };
+    expect(build([], ['n1'], bare, { records: [{ sku: 'n1' }] })[0]).toEqual({
+      targetId: 'n1',
+      status: 'excluded',
+      reason: 'missing_data',
+      before: null,
+      after: null,
+    });
+  });
 });
 
 describe('OPS-2 CS-3 delete items', () => {

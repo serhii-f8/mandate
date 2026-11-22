@@ -119,8 +119,30 @@ function createItem(
     return excluded(targetId, 'already_exists', before, { ...values });
   }
   if (!inScope(manifest, args, values)) return excluded(targetId, 'out_of_scope');
-  if (missingRequired(manifest, values)) return excluded(targetId, 'missing_data');
+  // A record with only its identifier would be pending with `after: {}`: nothing to create or compare.
+  if (missingRequired(manifest, values) || valuesFields(manifest, values).length === 0) return excluded(targetId, 'missing_data');
   return { targetId, status: 'pending', before: null, after: { ...values } };
+}
+
+function readableId(manifest: ManifestDefinition, record: Readonly<Record<string, unknown>>): boolean {
+  const id = record[manifest.idField];
+  return typeof id === 'string' || typeof id === 'number';
+}
+
+/**
+ * For a create or delete the `read_before` decides existence (CS-7, ADR 0071), so a page shorter than
+ * the total the upstream reports, or holding a record without a readable identifier, could hide a
+ * target that exists: the read is incomplete. Keyed on the manifest's action, so the reverse of a
+ * create or delete is held to it too. An update reads such a page as before (a missing target is
+ * `not_found` at preparation and `gone` at execution).
+ */
+export function existenceReadIncomplete(
+  manifest: ManifestDefinition,
+  page: { readonly items: readonly Readonly<Record<string, unknown>>[]; readonly total?: number },
+): boolean {
+  if (manifestAction(manifest) === 'update') return false;
+  if (page.total !== undefined && page.total > page.items.length) return true;
+  return page.items.some((record) => !readableId(manifest, record));
 }
 
 /** The read records by their `idField` as a string; a record without one is skipped and the first wins. */

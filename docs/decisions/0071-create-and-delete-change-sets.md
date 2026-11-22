@@ -63,6 +63,11 @@ option 3 makes the meaning of a configuration depend on its call.
   out of scope, else `drift`. A record that appeared with other values is not overwritten by a create,
   and a record changed since approval is not deleted. After an `ok` answer the state must equal
   `after`; a create still absent or a delete still present ends `failed` with `not_applied`.
+- **Short reads.** Absence decides a create or delete, so for these actions (in either direction) a
+  `read_before` page with fewer records than the total the upstream reports, or with a record without
+  a readable identifier, is incomplete: preparation fails `incomplete_read`, and the batch's classify
+  or verify read is retried (`incomplete_read`) instead of reading a cut-off record as absent. An
+  update reads such a page as before.
 - **Records sent.** Update as before; create `{ id_field, ...after }`; delete `{ id_field }` plus
   `carry_fields`.
 - **Rollback.** `replay_previous_state` is refused for both (`is not available for action <action>`).

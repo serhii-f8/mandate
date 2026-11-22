@@ -41,7 +41,8 @@ export function lookupKey(
   return undefined;
 }
 
-function chunks<T>(list: readonly T[], size: number): T[][] {
+/** `list` in consecutive slices of at most `size` (the read chunks of preparation and lookups). */
+export function chunks<T>(list: readonly T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
   return out;
