@@ -94,9 +94,11 @@ operation (OPS-5) that reads both systems. Option (a) misses the case that motiv
   asking for `key_field` and `fields`. Results are indexed by `key_field` as a string, the first
   record with a key winning. Items that are already excluded run no check and cause no lookup read.
 - **Failures.** A failed lookup read fails the preparation with the fixed code `lookup_failed` and
-  the upstream HTTP status when there was one, never the upstream message. A truncated read fails it
-  with `incomplete_read`, as a truncated `read_before` read does. A lookup that could not be read
-  completely is never read as "not found".
+  the upstream HTTP status when there was one, never the upstream message. A truncated read, or a
+  page with fewer records than the `total` the upstream reports for it (a default page size), fails
+  it with `incomplete_read`, as a truncated `read_before` read and a short selector page do. A lookup
+  that could not be read completely is never read as "not found": with `{ not_found: <lookup> }` that
+  would let through targets the upstream holds.
 - **Authorization (call).** The operator declared the lookup in the write's manifest, and the write
   operation's policy decision covers it, as it already covers `read_before` and `selector`. The
   requester needs no grant on the lookup operation. A requester can therefore cause reads on a
@@ -109,12 +111,16 @@ operation (OPS-5) that reads both systems. Option (a) misses the case that motiv
   in workflow history: the prepare activity takes the change-set identifier only.
 - **Connection.** A lookup read goes through the lookup operation's own connection: its egress rules,
   its pacing and its credential, never the write connection's and never the user's access token
-  (AUTH-7). It is a read bound to `GET` (CS-1); the reader refuses any other operation.
+  (AUTH-7). It is a read (CS-1): the reader admits only a `read` operation bound to HTTP `GET` or a
+  code read operation (OPS-5), and refuses any other binding, an MCP tool among them.
 - **Presets.** A lookup's `operation` may be a `{ $param }`: a preset cannot know the operations of
   another connection, so the binding names one. Lookup names are not fixed nodes: they are mapping
   keys, which a `{ $param }` cannot replace, and are never shown or counted; a reference to them is
-  checked after substitution. A lookup on one of the preset's own reads follows `operation_prefix`
-  like `read_before`.
+  checked after substitution. A lookup `operation` written as a literal in the preset file that
+  names one of the preset's own operations follows the binding's `operation_prefix`, like
+  `read_before`. A lookup `operation` that came from a `{ $param }` (the binding's value or the
+  default) is taken exactly as the connection gave it, never rewritten by the prefix: it may name
+  another binding's read, such as the unprefixed `fixture.get_many` of the same preset.
 - Versions: configuration schema 1.2.0, additive (`lookups` is optional).
 
 ## Consequences
@@ -147,7 +153,10 @@ a loader test refuses `constructor`; core tests show an unknown predicate or ref
 2026-11-22 (lookups): core unit tests cover each key form, a key that is an object, missing or on a
 `null` side, three reads for 250 keys in chunks of 100, duplicate keys sent once, the template values
 and the field list in the read, `lookup_failed` with status 503 and `incomplete_read` on a truncated
-read; a preparation test excludes the target the lookup does not return with the check's code, finds
+read; fix round 1 adds a page with fewer records than its `total` failing `incomplete_read`, a
+lookup on a disabled read operation refused, and a `$param` lookup on a prefixed binding that keeps
+the unprefixed binding's operation the connection named; a preparation test excludes the target the
+lookup does not return with the check's code, finds
 no value of the lookup in the stored items, the audit or the returned change-set, reads only for
 pending items and adds a `{ record }` key to the `read_before` fields. Loader tests cover a lookup on
 another connection and each refusal at its path. A worker integration test runs the prepare activity

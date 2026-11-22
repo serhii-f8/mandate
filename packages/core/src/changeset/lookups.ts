@@ -78,6 +78,8 @@ export async function readLookups(input: {
       // Only the fixed code and the status leave; the upstream's message stays behind (SEC-3).
       if (!page.ok) throw new PreparationFailure('lookup_failed', page.status);
       if (page.truncated) throw new PreparationFailure('incomplete_read');
+      // The upstream says it holds more than it sent (a default page size): the rest is not "not found".
+      if (page.total !== undefined && page.total > page.items.length) throw new PreparationFailure('incomplete_read');
       for (const record of page.items) {
         const key = asKey(record[lookup.keyField]);
         if (key !== undefined && !results.has(key)) results.set(key, record);

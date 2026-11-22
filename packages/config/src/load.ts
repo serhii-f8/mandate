@@ -15,7 +15,7 @@ import { createSchemaCompiler, type ArgumentValidator } from './argument-validat
 import { pathToString, type ConfigIssue } from './issues.js';
 import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN, DEFAULT_ROLLBACK_WINDOW_HOURS } from './manifest.js';
 import { bindPresetParams, readSpecFile, resolvePreset, withPath, type LoadedPreset } from './presets.js';
-import type { PresetParamValue } from './preset-params.js';
+import { isParamNode, type PresetParamValue } from './preset-params.js';
 import type { PresetOperationConfig } from './schema.js';
 import { isMcpUpstream, toMcpCatalog, type McpCatalogState } from './mcp.js';
 import { buildRegistry, closedFieldNames, propertiesOf, sentArguments, type CatalogState, type Located, type OperationBinding, type OperationSource } from './registry.js';
@@ -358,7 +358,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       const bound = binding.operations ?? preset.operations;
       const alias = presetAlias(bound, binding.prefix);
       bound.forEach((value, index) => {
-        operations.push({ value: alias.operation(value), source: binding.source ?? preset.source, path: ['operations', index], connection: binding.connection, origin: `preset:${presetId}` });
+        operations.push({ value: alias.operation(value, preset.rawOperations[index]), source: binding.source ?? preset.source, path: ['operations', index], connection: binding.connection, origin: `preset:${presetId}` });
       });
     }
   }
@@ -881,18 +881,21 @@ function bindingNamespaces(binding: PresetBinding): ReadonlySet<string> {
  * CONN-8: the operation IDs of a preset bound with `operation_prefix`. `<ns>.<rest>` becomes
  * `<prefix>.<rest>` (a one-segment ID `<id>` becomes `<prefix>.<id>`), and so does every
  * reference to one of the preset's own operations inside its manifests. Other IDs stay as they are.
+ * A lookup operation that the preset file gives as a `{ $param }` is taken exactly as the
+ * connection gave it (OPS-7): it names an operation of the connection's choosing, maybe another
+ * binding's. `raw` is the operation's node in the preset file, before substitution.
  */
 function presetAlias(
   operations: readonly PresetOperationConfig[],
   prefix: string | undefined,
-): { id(operationId: string): string; operation(op: PresetOperationConfig): PresetOperationConfig } {
+): { id(operationId: string): string; operation(op: PresetOperationConfig, raw: unknown): PresetOperationConfig } {
   const own = new Set(operations.map((o) => o.id));
   const id = (operationId: string): string => {
     if (prefix === undefined || !own.has(operationId)) return operationId;
     const dot = operationId.indexOf('.');
     return `${prefix}.${dot < 0 ? operationId : operationId.slice(dot + 1)}`;
   };
-  const operation = (op: PresetOperationConfig): PresetOperationConfig => {
+  const operation = (op: PresetOperationConfig, raw: unknown): PresetOperationConfig => {
     if (prefix === undefined) return op;
     const m = op.manifest;
     if (m === undefined) return { ...op, id: id(op.id) };
@@ -903,15 +906,31 @@ function presetAlias(
         ...m,
         read_before: { ...m.read_before, operation: id(m.read_before.operation) },
         ...(m.selector === undefined ? {} : { selector: { ...m.selector, operation: id(m.selector.operation) } }),
-        // OPS-7: a lookup on one of the preset's own reads follows the prefix; one on another connection stays.
+        // OPS-7: a literal lookup on one of the preset's own reads follows the prefix; another ID, or
+        // one that came from a parameter, stays as it is.
         ...(m.lookups === undefined
           ? {}
-          : { lookups: Object.fromEntries(Object.entries(m.lookups).map(([name, l]) => [name, { ...l, operation: id(l.operation) }])) }),
+          : {
+              lookups: Object.fromEntries(
+                Object.entries(m.lookups).map(([name, l]) => [name, { ...l, operation: parameterLookup(raw, name) ? l.operation : id(l.operation) }]),
+              ),
+            }),
         rollback: m.rollback.strategy === 'inverse_operation' ? { ...m.rollback, operation: id(m.rollback.operation) } : m.rollback,
       },
     };
   };
   return { id, operation };
+}
+
+/** Whether the preset file gives lookup `name` of this raw operation node its operation as a `{ $param }`. */
+function parameterLookup(raw: unknown, name: string): boolean {
+  const child = (node: unknown, key: string): unknown => (isPlainRecord(node) && Object.hasOwn(node, key) ? node[key] : undefined);
+  const operation = child(child(child(child(raw, 'manifest'), 'lookups'), name), 'operation');
+  return isPlainRecord(operation) && isParamNode(operation);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function locateSpecIssue(state: ConnectionState, issue: SpecIssue, at: (source: SourceDocument, path: readonly PropertyKey[], message: string) => void): void {

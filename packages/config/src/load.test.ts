@@ -948,6 +948,32 @@ roles:
       const manifest = result.configuration.policy.operations.find((o) => o.id === 'fixture.set_tags')?.manifest;
       expect(manifest?.lookups?.known?.operation).toBe('fixture.get_many');
     });
+
+    it('CONN-8 OPS-7 a parameter lookup operation is taken as the connection gave it, never rewritten by operation_prefix', async () => {
+      const lookup =
+        '      values_arg: changes\n' +
+        '      lookups: { known: { operation: { $param: p }, ids_arg: ids, key_field: id, key: { target: true }, fields: [state] } }\n' +
+        '      checks: [{ code: unknown_item, require: [{ found: known }] }]\n';
+      // Connection a binds the preset unprefixed (fixture.*); b, prefixed, looks its targets up in a's read.
+      const config = `version: 1
+presets:
+  - { id: fixture, package: "@mandate/code-fixture-preset" }
+connections:
+  - { id: a, adapter: openapi, base_url: https://a.example.test/api, credential_ref: items-token, preset: fixture }
+  - { id: b, adapter: openapi, base_url: https://b.example.test/api, credential_ref: items-token, preset: fixture, operation_prefix: shop_b, preset_params: { p: fixture.get_many } }
+roles:
+  - id: integration_admin
+    grants: []
+    manage_credentials: [items-token]
+`;
+      const result = await loadWith(config, await withIdentityParam('fixture.get_many', '      values_arg: changes\n', lookup));
+      if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+      const byId = new Map(result.configuration.policy.operations.map((o) => [o.id, o]));
+      expect(byId.get('fixture.set_tags')?.manifest?.lookups?.known?.operation).toBe('fixture.get_many');
+      expect(byId.get('shop_b.set_tags')?.manifest?.lookups?.known?.operation).toBe('fixture.get_many');
+      // A literal own read in the same manifest still follows the prefix.
+      expect(byId.get('shop_b.set_tags')?.manifest?.readBefore.operation).toBe('shop_b.get_many');
+    });
   });
 
   it('CONN-8 a declaration whose default does not match its type fails in the preset file', async () => {

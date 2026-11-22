@@ -928,6 +928,14 @@ operations:
     const write = await expectLookupIssue(lookup(ERP_LOOKUP.replace('erp.get_parts', 'catalog.update_content')), `${L}.erp.operation`, 'catalog.update_content');
     expect(write.message).toBe('must name an enabled read operation');
     await expectLookupIssue(lookup(ERP_LOOKUP.replace('erp.get_parts', 'erp.unknown')), `${L}.erp.operation`, 'erp.unknown');
+    const disabled = issues(
+      await load({
+        'write.yaml': withLookups(WRITE, lookup(ERP_LOOKUP)),
+        'erp.yaml': ERP,
+        'overrides.yaml': 'version: 1\noverrides:\n  - { operation: erp.get_parts, enabled: false }\n',
+      }),
+    );
+    expect(disabled.filter((i) => i.path === `${L}.erp.operation`)).toEqual([expect.objectContaining({ message: 'must name an enabled read operation' })]);
   });
 
   it('OPS-7 the operation declares fields_arg', async () => {

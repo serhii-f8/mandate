@@ -221,8 +221,11 @@ manifest:
 
 A check `code` cannot be a `$param`; the literals a check compares against can. `lookups` (since
 1.2.0) let checks read another system; a lookup's `operation` usually names an operation of another
-connection, which a preset cannot know, so it may be a `$param` that the binding sets. A lookup on one
-of the preset's own reads follows `operation_prefix`. The keys and predicates are in the
+connection, which a preset cannot know, so it may be a `$param` that the binding sets. A lookup
+`operation` written as a literal that names one of the preset's own reads follows `operation_prefix`;
+one that comes from a `$param` (the binding's value or the default) is used exactly as given, so a
+prefixed binding can name the read of an unprefixed binding of the same preset. The keys and
+predicates are in the
 [Configuration reference](configuration.md).
 
 ### Code operations

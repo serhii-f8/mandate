@@ -135,5 +135,13 @@ describe('OPS-7 lookups', () => {
       const reader = new FakeErp({ ok: true, items: [], truncated: true });
       await expect(readLookups(input(['A'], reader))).rejects.toMatchObject({ code: 'incomplete_read' });
     });
+
+    it('OPS-7 a page with fewer items than its reported total rejects incomplete_read, never "not found"', async () => {
+      const partial = new FakeErp({ ok: true, items: [{ code: 'A', cost: 1 }], total: 3, truncated: false });
+      await expect(readLookups(input(['A', 'B', 'C'], partial))).rejects.toMatchObject({ code: 'incomplete_read' });
+      // A total that the page meets, or none at all, is a complete answer.
+      const complete = new FakeErp({ ok: true, items: [{ code: 'A', cost: 1 }], total: 1, truncated: false });
+      expect((await readLookups(input(['A', 'B'], complete))).get('erp')?.size).toBe(1);
+    });
   });
 });

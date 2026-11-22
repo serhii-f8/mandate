@@ -28,8 +28,9 @@ Upgrade every `api` and `worker` before preparing new change-sets. See
 - `manifest.lookups` let checks read another system during preparation: up to 5 reads of a read
   operation on any connection, keyed by the target, a value or a current-record field, through that
   connection's own egress rules, pacing and credential. Lookup values are never stored, shown,
-  audited or returned; a failed lookup read fails the preparation with `lookup_failed` (OPS-7,
-  ADR 0072).
+  audited or returned; a failed lookup read fails the preparation with `lookup_failed`, an
+  incomplete one (truncated, or fewer records than the reported total) with `incomplete_read`
+  (OPS-7, ADR 0072).
 
 ## 1.1.0
 

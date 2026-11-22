@@ -219,7 +219,9 @@ During preparation each lookup reads, per read chunk, the distinct keys of the i
 after the built-in exclusions, in chunks of `batch_size`, and indexes the results by `key_field` (the
 first record with a key wins). A key that is not a string or a number, or that the read does not
 return, makes the lookup "not found" for that item. A failed lookup read fails the preparation with
-`lookup_failed` and the upstream status; a truncated one fails it with `incomplete_read`.
+`lookup_failed` and the upstream status. A truncated one, or a page with fewer records than the
+total the upstream reports (for example a default page size), fails it with `incomplete_read`. A
+lookup that could not be read completely is never "not found".
 
 ```yaml
     manifest:
