@@ -5,7 +5,11 @@ All notable changes are recorded here. The project follows [semantic versioning]
 ## 1.1.0
 
 Additive release: the connector SDK (1.1.0) and the configuration schema (1.1.0) gain optional members
-only. Nothing needs to change on upgrade.
+only. One step on upgrade: the image ships the Magento preset 1.1.0 only, so a configuration that pins
+`@mandate/magento2-catalog` with `version: '1.0.0'` (as the shipped `deploy/config/connections.yaml`, the
+preset README and the Magento guide told you to write) no longer resolves and `config apply` fails.
+Change the pin to `'1.1.0'` or `'^1.0.0'`. A preset of your own that starts using `params` must declare
+`mandate.sdk: ^1.1.0`. See [Upgrading](docs/guide/upgrading.md#upgrading-to-110).
 
 ### Added
 
@@ -21,11 +25,13 @@ only. Nothing needs to change on upgrade.
   (CONN-3, ADR 0065).
 - `grants[].approval` and `approval.field_rules` route approval per grant and per touched field: a grant's
   rule replaces the role's, and the first field rule naming a touched field replaces that. Submission, the
-  execution guard and `config explain` use the same resolution (POL-5, ADR 0066).
+  execution guard and `config explain` use the same resolution (POL-5, ADR 0066). A field rule naming a
+  field that the operation's closed fields argument does not list is refused.
 - Presets declare typed parameters with defaults (`params` in `preset.yaml`), and a connection sets them
   with `preset_params`; `{ $param: <name> }` nodes in the preset's operations and test take the
   connection's value. Code operations receive the values as `ctx.params`, carried by
-  `ConnectionSettings.presetParams` (CONN-8, ADR 0067).
+  `ConnectionSettings.presetParams` (CONN-8, ADR 0067). An operation's `id`, `fields_arg` and
+  `manifest.values_arg` and the test's `operation` cannot be parameters. The preset template is 1.1.0.
 - `@mandate/magento2-catalog` 1.1.0 takes the parameters `scope_attribute` (default `brand`) and `read_fields`
   (default the 1.0.0 field list); without them it behaves as 1.0.0. It requires connector SDK `^1.1.0`
   (CONN-8).

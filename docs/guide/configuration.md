@@ -74,7 +74,7 @@ Each entry has `adapter: openapi` or `adapter: mcp`.
 | `retry.max_attempts` | integer | 3 | 1-10 |
 | `retry.initial_backoff_ms` | integer | 200 | 0-60000 |
 | `max_concurrency` | integer | 4 | 1-1000 |
-| `rate.requests_per_second` | number | none (unpaced) | 0.01-1000; since 1.1.0. Requests of the connection start at least `1000 / value` ms apart, retries included; per process |
+| `rate.requests_per_second` | number | none (unpaced) | 0.01-1000; since 1.1.0. Requests of the connection start at least `1000 / value` ms apart, retries included; per process. On an `mcp` connection the unit is one attempt of a tool operation (list, call), which can be several HTTP requests (initialize, notification, call, session `DELETE`) |
 | `allow_private_network` | boolean | `false` | Allows private and loopback addresses |
 | `test.operation` | operation ID | none | The read operation of the connection test |
 | `test.args` | object | `{}` | Arguments of the test call |

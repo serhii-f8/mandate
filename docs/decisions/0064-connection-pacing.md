@@ -39,6 +39,10 @@ every later request of the connection until then.
 - The state is per process. With several `api` or `worker` instances each paces separately and the
   upstream sees up to the rate times the number of instances. A shared limiter is not built.
 - Only the HTTP client reads `Retry-After`; the MCP adapter paces by interval and keeps its backoff.
+- The MCP adapter reserves one slot per attempt of a tool operation (a tool list, a tool call, a
+  call-once), not per HTTP request. One operation can be several requests (`initialize`, the
+  initialized notification, the call, the session `DELETE`), so the upstream can see more requests per
+  second than the rate during an operation; the rate bounds how often operations start.
 
 ## Verified
 

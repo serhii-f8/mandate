@@ -65,6 +65,28 @@ Two rules for you:
 - Keep `MANDATE_TEMPORAL_KEYS` and `MANDATE_MASTER_KEYS` the same across the upgrade, and never remove a
   key that open workflows or stored credentials still use.
 
+## Upgrading to 1.1.0
+
+1.1.0 is additive, with one step for most installations. The image ships the Magento preset 1.1.0
+only. If your configuration pins it exactly, as the 1.0.0 `deploy/config/connections.yaml`, the preset
+README and [Connecting Magento](connecting-magento.md) showed:
+
+```yaml
+  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '1.0.0' }
+```
+
+the pin no longer resolves and `config diff` and `config apply` fail. Change it before you apply, to
+the exact new version or to a range that follows 1.x:
+
+```yaml
+  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '1.1.0' }
+```
+
+Without `preset_params` the 1.1.0 preset loads the same operations as 1.0.0. A preset of your own
+keeps loading with `mandate.sdk: ^1.0.0`; if you add `params` to it, declare `^1.1.0`, which a 1.0.x
+platform refuses with `preset_sdk_incompatible` (see [Presets](presets.md#parameters)). The rest of
+the notes are in the [CHANGELOG](../../CHANGELOG.md).
+
 ## Upgrading to 1.0.0
 
 The 1.0.0 notes (changes in what the loader accepts, the SDK range, and credential entry) are in the
