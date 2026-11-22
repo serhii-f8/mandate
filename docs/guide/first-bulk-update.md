@@ -224,6 +224,15 @@ set `AIOPS_KEYCLOAK_PUBLIC_URL`, `AIOPS_MCP_RESOURCE` and `AIOPS_PUBLIC_URL` to 
 Both then show the same login, the same per-user tool list and the same approval flow you used
 above.
 
+### Background
+
+- [ADR 0004](../decisions/0004-authorization-and-client-registration.md): how clients register
+  (a pre-registered public client `aiops-mcp`, CIMD for `claude.ai`; dynamic registration off by
+  default) and how tokens are bound to the MCP URL.
+- [ADR 0009](../decisions/0009-offline-access-and-observed-client-registration.md): what the manual
+  checks with claude.ai and ChatGPT found, including the exact ChatGPT settings and why claude.ai
+  needs `offline_access`.
+
 ## Next
 
 [Backup and restore](backup-and-restore.md) before you put real data in, and

@@ -40,9 +40,9 @@ activity signatures and `apps/worker/test/workflow-histories/`.
   with the old result) or go behind `patched()`.
 - Workflow types that have never been on `main` may have their fixtures re-recorded freely;
   from the first merge on, the rules above apply (`changesetWorkflow` from Phase 5 on).
-- Worker Deployments with pinned workflows are not used (ADR 0006).
+- Worker Deployments with pinned workflows are not used ([ADR 0006](../decisions/0006-temporal-workflow-versioning.md)).
 - Never send signal or terminate input from the Temporal CLI or UI: the codec refuses
-  plaintext payloads and the workflow can no longer be replayed (ADR 0027 addendum).
+  plaintext payloads and the workflow can no longer be replayed ([ADR 0027](../decisions/0027-execution-on-temporal.md) addendum).
 - Payloads go through the encrypting data converter (SEC-4). Nothing sensitive in
   workflow history, search attributes or workflow IDs (SEC-3).
 - Large change-sets use child workflows or continue-as-new (EXE-9) and stream items in

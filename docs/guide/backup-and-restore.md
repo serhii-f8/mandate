@@ -236,6 +236,11 @@ echo "$REPORT"
 test "$(node -p 'JSON.parse(process.argv[1]).body.ok' "$REPORT")" = true
 ```
 
+### Background
+
+- [ADR 0012](../decisions/0012-compose-topology.md): the Compose topology, with one PostgreSQL role
+  and database per component.
+
 ## Next
 
 [Upgrading](upgrading.md) and [Production hardening](production.md).

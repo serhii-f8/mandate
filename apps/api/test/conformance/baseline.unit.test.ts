@@ -12,7 +12,7 @@ import { parse } from 'yaml';
 import { MUST_PASS } from './must-pass.ts';
 
 const DIR = fileURLToPath(new URL('.', import.meta.url));
-/** One baseline entry with its reason as a trailing comment (ledger ruling P15). */
+/** One baseline entry with its reason as a trailing comment (ADR 0055). */
 const ENTRY_WITH_REASON = /^\s*-\s+([\w:/-]+)\s+#\s*\S/;
 
 /** Problems of one baseline file's text; empty when the file is acceptable. */

@@ -218,6 +218,8 @@ configuration validated with Zod, Vitest and Testcontainers, Docker Compose.
 
 ## Background
 
+- [Technical specification](../SPEC.md): every requirement with its identifier.
+- [Decision records](../decisions/README.md): why each choice was made.
 - [Temporal workflow conventions](../conventions/temporal-workflows.md).
 
 ## Next

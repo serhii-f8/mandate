@@ -89,7 +89,7 @@ trap cleanup EXIT
 
 manual_steps() {
   cat <<'EOF'
-# Newcomer walkthrough (ADR 0059; SPEC section 7): a fresh agent or a person in a clean clone reads
+# Newcomer walkthrough (ADR 0059; SPEC section 7): someone new to the repository, in a clean clone, reads
 #   only README.md, docs/guide/ and examples/ as rendered, follows installation.md ->
 #   connecting-magento.md -> roles-and-approvals.md -> first-bulk-update.md, and reports pass or fail,
 #   the time and every unclear place. 

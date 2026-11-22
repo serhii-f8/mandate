@@ -229,3 +229,10 @@ The connector SDK and the configuration schema are public interfaces with their 
 preset declares the SDK range it works with in `aiops.sdk`. A preset written for `^1.0.0` loads on
 any 1.x platform. A preset written for the pre-release SDK (0.6) must be rebuilt, re-tested and
 republished with `^1.0.0`. The policy is on [Versioning](versioning.md).
+
+## Background
+
+- [ADR 0050](../decisions/0050-mcp-upstream-opaque-presets-service-accounts.md): why presets are
+  versioned npm packages with code operations.
+- [ADR 0051](../decisions/0051-mcp-upstream-opaque-presets-service-accounts-details.md): the code-write signature and the preset
+  code digest.

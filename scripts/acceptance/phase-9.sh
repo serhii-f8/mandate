@@ -78,7 +78,7 @@ fail() { echo "FAIL $1${2:+ — $2}"; FAILED=1; }
 # `Plan: phase-9-mcp-upstream-gitea`; its range is BASE (parent of the first) .. END (the last).
 PLAN_TRAILER='Plan: phase-9-mcp-upstream-gitea'
 check_no_core_change() {
-  local commits c touched bad="" plan first base end ledger ledger_base base_detail range n_range foreign
+  local commits c touched bad="" plan first base end base_detail range n_range foreign
   commits="$(git -C "$REPO" log --no-merges --format=%H "$SHA" -- presets/gitea-issues)" ||
     { fail no-core-change "git log over presets/gitea-issues failed"; return 0; }
   [[ -n "$commits" ]] || { fail no-core-change "no commit touches presets/gitea-issues at ${SHA:0:12}"; return 0; }
@@ -94,18 +94,7 @@ check_no_core_change() {
   first="$(head -1 <<<"$plan")"
   end="$(tail -1 <<<"$plan")"
   base="$(git -C "$REPO" rev-parse --verify --quiet "${first}^")" || { fail no-core-change "the first plan commit ${first:0:12} has no parent"; return 0; }
-  # c. The controller's ledger, when present, names the same base.
-  ledger="$REPO/.superpowers/sdd/phase-9-mcp-upstream-gitea/progress.md"
-  if [[ -f "$ledger" ]]; then
-    ledger_base="$(sed -n 's/^Task 1: dispatched (base \([0-9a-f]\{7,40\}\))$/\1/p' "$ledger" | head -1)"
-    [[ -n "$ledger_base" ]] || { fail no-core-change "the ledger has no line 'Task 1: dispatched (base <sha>)'"; return 0; }
-    if [[ "$(git -C "$REPO" rev-parse --verify --quiet "${ledger_base}^{commit}" || true)" != "$base" ]]; then
-      fail no-core-change "the ledger base $ledger_base is not the parent ${base:0:12} of the first plan commit ${first:0:12}"; return 0
-    fi
-    base_detail="ledger base ${ledger_base:0:12} matches"
-  else
-    base_detail="ledger absent; range from trailers"
-  fi
+  base_detail="range from trailers"
   # d. Every commit of the range is a plan commit; a foreign commit would void the claim.
   range="$(git -C "$REPO" log --no-merges --format=%H "$base..$end")"
   n_range="$(grep -c . <<<"$range" || true)"

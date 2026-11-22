@@ -1,8 +1,9 @@
 # Contributing
 
-Thank you for helping. This guide is the short version of how the repository works. Identifiers such as
-`POL-3` or `NFR-18` in test names, comments and commit messages are requirement IDs of the project's
-specification; the behaviour behind them is described in the [guide](docs/guide/README.md). Be kind: see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Thank you for helping. This guide is the short version of how the repository works. The product is
+specified in [docs/SPEC.md](docs/SPEC.md); requirement IDs such as `POL-3` or `NFR-18` come from its
+sections 5 and 6. Decisions cited as "ADR NNNN" are in [docs/decisions](docs/decisions/README.md).
+AI coding assistants read [CLAUDE.md](CLAUDE.md), which states the same rules. Be kind: see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Development setup
 
