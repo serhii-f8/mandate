@@ -5,7 +5,7 @@
 #   docker build -f deploy/Dockerfile --target worker .
 # Debian (glibc) base because @temporalio/worker ships a native core bridge.
 
-FROM node:22-bookworm-slim AS base
+FROM node:26-bookworm-slim AS base
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /repo
@@ -34,7 +34,7 @@ RUN cp -r apps/web/dist /out/web \
       tar -xzf "/tmp/packs/$name"/*.tgz -C "/out/presets/$name" --strip-components=1; \
     done
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 # The product version (NFR-18); api and worker inherit it from this stage.
 LABEL org.opencontainers.image.version="1.0.0"
 ENV NODE_ENV=production
