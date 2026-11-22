@@ -7,14 +7,30 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # The runtime is Node 22 (.nvmrc, engines); its types follow the runtime, not the newest Node.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # OpenTelemetry SDK lines move together and need the Temporal tracing adapter checked
+      # (ADR 0054): the 0.x experimental packages change line with a "minor". Patches only here;
+      # a new line is a planned migration.
+      - dependency-name: '@opentelemetry/*'
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
   - package-ecosystem: docker
     directory: /deploy
     schedule:
       interval: weekly
+    ignore:
+      # The Node major of the images follows .nvmrc and engines; change them together.
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
   - package-ecosystem: docker
     directory: /tooling/acceptance
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule:
