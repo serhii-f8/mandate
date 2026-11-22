@@ -28,6 +28,9 @@ Additive release: the configuration schema and the connector SDK are 1.3.0. A pr
 - `create_plan` creates a plan from MCP, `get_changeset` shows a step's plan, the execution guard
   refuses a step whose predecessor is not `completed`, and a step rolls back only after every later
   step that ran was rolled back; `create_plan` is now a reserved tool name (MCP-10, EXE-13, EXE-8).
+- A plan step that ends `completed` starts the next step by itself when that one is `approved`, as
+  `system` with the requester's identity and role limits, behind a new `changesetWorkflow` patch
+  (EXE-13, EXE-10).
 
 ## 1.2.0
 

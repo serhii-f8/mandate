@@ -83,6 +83,8 @@ export type BeginResult =
       readonly cancelRequested: boolean;
       /** EXE-12: true when the operation's manifest has `verify_after`; absent means no verification. */
       readonly verifyAfter?: boolean;
+      /** EXE-13: true when the change-set is a plan step; absent means outside a plan (no advance). */
+      readonly inPlan?: boolean;
     } & ExecutionCounts)
   | { readonly ok: false; readonly outcome: 'hash_mismatch' | 'policy_denied' | 'approval_missing' };
 
@@ -154,4 +156,10 @@ export interface ChangesetActivities {
   beginVerification(changesetId: string): Promise<BeginVerificationResult>;
   verifyBatch(changesetId: string, round: number): Promise<VerifyBatchResult>;
   finishVerification(changesetId: string, end: VerificationEnd): Promise<void>;
+  /**
+   * EXE-13: starts the next step of the finished change-set's plan when this one is `completed` and
+   * the next one `approved`, through the executor's start with actor `system`; `started: false` for
+   * every other case and every refusal (the start's own audit rows are the record).
+   */
+  advancePlan(changesetId: string): Promise<{ started: boolean }>;
 }

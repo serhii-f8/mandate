@@ -79,6 +79,11 @@ function beginRollback(
       throw new Error('not used');
     },
     settingsFor: () => ({ batchSize: 100, failureThreshold: 0.5, itemsPerRun: 2000, rollbackWindowHours: 168 }),
+    executor: {
+      start: () => {
+        throw new Error('not used');
+      },
+    },
     tuning: DEFAULT_TUNING,
     newId: () => 'id',
     now: () => NOW,

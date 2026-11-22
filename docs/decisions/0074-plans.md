@@ -131,3 +131,17 @@ a later step that started is not `rolled_back`, admitted once it is) and a start
 rollback request of step 1 (`Promise.all`, eight rounds): before both took the plan lock first, the
 PostgreSQL run let both succeed; with it, exactly one does. The execution guard refuses a step whose
 predecessor is not `completed` as `policy_denied`.
+
+2026-11-22, automatic start: on the Temporal test server with PostgreSQL
+(`plan-workflow.int.test.ts`), a completed step starts the approved next one through the worker's
+`advancePlan` and the `TemporalExecutor` start, with actor `system` on the `executing` transition and
+the requester's identity on the execution request; a step that ends `completed_with_errors` calls no
+`advancePlan`; a `prepared` next step is not started and runs after a later approval and the
+approver's start; a next step over its role limit stays `approved` with one `limit_exceeded`
+decision while the finished step settles through its rollback window; with `verify_after` the next
+step stays `approved` until verification confirmed; an `advancePlan` that fails all five attempts
+leaves the next step `approved` and the finished step `completed`; a change-set outside a plan
+records no marker. Fixtures `plan-advanced`, `plan-advanced-traced` and `plan-not-advanced` replay
+with every older history unchanged. The Temporal `Client` of the worker runs on its
+`NativeConnection` (`@temporalio/worker` 1.26.0 `lib/connection.d.ts`: "can be used to power
+`@temporalio/client`'s Client objects") with `clientDataConverter` over the worker's keys.

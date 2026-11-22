@@ -13,7 +13,7 @@ describe('workflow contract', () => {
     expect(source).not.toMatch(/\brequire\(|\bimport\(/);
   });
 
-  it('EXE-8 EXE-12 the activity names are part of the contract', () => {
+  it('EXE-8 EXE-12 EXE-13 the activity names are part of the contract', () => {
     // A key missing here or unknown to the interface fails the type-check; the sorted list pins the names.
     const names = {
       inspect: true,
@@ -29,8 +29,10 @@ describe('workflow contract', () => {
       beginVerification: true,
       verifyBatch: true,
       finishVerification: true,
+      advancePlan: true,
     } satisfies Record<keyof ChangesetActivities, true>;
     expect(Object.keys(names).sort()).toEqual([
+      'advancePlan',
       'beginExecution',
       'beginRollback',
       'beginVerification',

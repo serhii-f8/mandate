@@ -15,6 +15,10 @@
  *   operation with `verify_after` the workflow verifies the written items before it finishes;
  *   checked only when `beginExecution` answered `verifyAfter: true` (absent in every older
  *   history), so an execution without `verify_after` records no marker.
+ * - `changeset-workflow-plan-advance-20261122` (EXE-13, ADR 0074) — a plan step that finished
+ *   `completed` starts the next approved step (`advancePlan`) before its rollback window opens;
+ *   checked only when `beginExecution` answered `inPlan: true` (absent in every older history), so
+ *   a change-set outside a plan records no marker.
  */
 import {
   ActivityFailure,
@@ -67,6 +71,15 @@ const ROLLBACK_PATCH = 'changeset-workflow-rollback-20261118';
  * retention; recompute from the real deployment date.
  */
 const VERIFY_PATCH = 'changeset-workflow-verify-after-20261122';
+
+/**
+ * EXE-13 (ADR 0074): a completed plan step starts the next approved one.
+ * remove not before 2027-07-04 — earliest deployment 2026-11-22 + 90 d maximum expiry
+ * (expire_after_hours ≤ 2160) + 7 d maximum verification (timeout_seconds ≤ 604800) + 90 d maximum
+ * rollback window (rollback_window_hours ≤ 2160) + 30 d assumed longest execution + 7 d namespace
+ * retention; recompute from the real deployment date.
+ */
+const PLAN_PATCH = 'changeset-workflow-plan-advance-20261122';
 /** Looks (verifyBatch calls plus waits) per run before continuing as new; keeps a run's history small. */
 const MAX_LOOKS_PER_RUN = 50;
 
@@ -276,9 +289,21 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
 
     // Execution (EXE-3, EXE-5, EXE-6, EXE-7, EXE-9).
     const batches = batchActivities(s.tuning);
+    // EXE-13: set from `beginExecution` once it answered; false on the paths that finish before it.
+    let inPlan = false;
     const finish = async (outcome: FinishOutcome): Promise<ChangesetWorkflowResult> => {
       const r = await db.finishExecution(id, outcome);
       progress = { ...progress, status: r.status };
+      // The result field first: a change-set outside a plan records no marker (old histories never
+      // have the field). Bounded retries: a start that cannot be made does not hold up the window.
+      if (r.status === 'completed' && inPlan && patched(PLAN_PATCH)) {
+        try {
+          await slow.advancePlan(id);
+        } catch (e) {
+          // The plan simply does not advance by itself; the next step stays approved.
+          if (!(e instanceof ActivityFailure)) throw e;
+        }
+      }
       return settle(r.status);
     };
 
@@ -291,6 +316,7 @@ export async function changesetWorkflow(input: ChangesetWorkflowInput): Promise<
       throw e;
     }
     if (!begin.ok) return finish(begin.outcome);
+    inPlan = begin.inPlan === true;
     progress = { status: 'executing', total: begin.total, done: begin.done, failed: begin.failed, skipped: begin.skipped };
     // A run continued during verification (only new histories carry `verificationRound`) has
     // written everything: a stored cancel stops its verification instead (EXE-7).

@@ -29,7 +29,7 @@ import {
   sealAuditChain,
   type Database,
 } from '@mandate/db';
-import { parseTemporalKeys, workerDataConverter, type ActivityTuning } from '@mandate/temporal';
+import { clientDataConverter, parseTemporalKeys, TemporalExecutor, workerDataConverter, type ActivityTuning } from '@mandate/temporal';
 import {
   assertFullyChecked,
   configurationLoadOptions,
@@ -40,7 +40,10 @@ import {
   type UpstreamCallLog,
 } from '@mandate/upstream';
 import type { McpToolAdapter } from '@mandate/connector-sdk';
+import type { VersionedKeys } from '@mandate/core';
 import { heartbeat } from '@temporalio/activity';
+import { Client } from '@temporalio/client';
+import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors-opentelemetry';
 import { NativeConnection, type Worker } from '@temporalio/worker';
 import type { Logger } from 'pino';
 import { createActivities, createExecutionGuard, echo, type WorkerActivities } from './activities/index.js';
@@ -83,6 +86,8 @@ interface RuntimeStores {
   readonly vault: PostgresCredentialVault;
   readonly tuning: ActivityTuning;
   readonly logger: Logger;
+  /** EXE-13: the executor `advancePlan` starts the next plan step with. */
+  readonly executor: TemporalExecutor;
 }
 
 /**
@@ -92,6 +97,7 @@ interface RuntimeStores {
  * an MCP tool; a bulk, per-record or code binding writes (OPS-5, OPS-6); anything else fails every
  * item with `write_mode_unsupported`),
  * rollbacks through `createRollbackWriterFor` (EXE-8, OPS-3); reads run the shared upstream read path.
+ * The next plan step starts through the same Temporal executor the api uses (EXE-13).
  */
 function activitiesFor(stores: RuntimeStores): WorkerActivities {
   const { configuration, repository, vault, adapter, logger } = stores;
@@ -115,11 +121,28 @@ function activitiesFor(stores: RuntimeStores): WorkerActivities {
           heartbeat();
         },
       }),
+      executor: stores.executor,
       tuning: stores.tuning,
       newId: randomUUID,
       now: () => new Date(),
     }),
   };
+}
+
+/**
+ * The worker's own Temporal client, on the worker's connection (a `NativeConnection` powers a
+ * `Client`, @temporalio/worker 1.26.0 lib/connection.d.ts): the same keys and codec as the worker's
+ * data converter, so the workflows it starts or wakes decode what it sends (SEC-4), and the
+ * OpenTelemetry client interceptor as in the api, so a start from an activity carries its trace
+ * context (NFR-11, ADR 0047).
+ */
+function createWorkerTemporalClient(connection: NativeConnection, namespace: string, keys: VersionedKeys): Client {
+  return new Client({
+    connection,
+    namespace,
+    dataConverter: clientDataConverter(keys),
+    interceptors: { workflow: [new OpenTelemetryWorkflowClientInterceptor()] },
+  });
 }
 
 /**
@@ -248,6 +271,14 @@ export async function startWorkerRuntime(
     const repository = new PostgresChangeSetRepository(database.db);
     // Preset sensitive fields are covered: the configuration was loaded with the preset directories (AUD-4).
     const audit = new DrizzleAuditLog(database.db, { sensitiveKeys: () => configuration.current.sensitiveFields });
+    connection = await NativeConnection.connect({ address: env.temporalAddress });
+    const executor = new TemporalExecutor({
+      client: createWorkerTemporalClient(connection, env.temporalNamespace, temporalKeys),
+      taskQueue: env.taskQueue,
+      repository,
+      newId: randomUUID,
+      now: () => new Date(),
+    });
     // The two batch activities record mandate_batch_duration_seconds (NFR-12).
     const activities = timeBatchActivities(activitiesFor({
       configuration,
@@ -257,6 +288,7 @@ export async function startWorkerRuntime(
       vault,
       tuning: env.activityTuning,
       logger,
+      executor,
     }), meter);
     const dispatcher = createNotificationDispatcher({
       outbox: new PostgresNotificationOutbox(database.db),
@@ -286,7 +318,6 @@ export async function startWorkerRuntime(
         }),
       logger,
     });
-    connection = await NativeConnection.connect({ address: env.temporalAddress });
     const running = await createWorker({
       connection,
       namespace: env.temporalNamespace,

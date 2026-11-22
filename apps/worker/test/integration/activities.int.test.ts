@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { LoadedConfiguration } from '@mandate/config';
 import {
   changesetTransitionEvent,
+  ExecutorUnavailable,
   type BatchContext,
   type ChangeItemRecord,
   type ChangeSetRecord,
@@ -13,6 +14,8 @@ import {
   type ManifestVerifyAfter,
   type ReadPage,
   type RollbackStrategy,
+  type StartOutcome,
+  type StartRequest,
   type UpstreamReader,
 } from '@mandate/core';
 import { PostgresChangeSetRepository, PostgresNotificationOutbox } from '@mandate/db';
@@ -22,8 +25,9 @@ import { MockActivityEnvironment } from '@temporalio/testing';
 import { DefaultLogger } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createActivities, type ActivityDeps } from '../../src/activities/index.js';
-import { createPrepared, createPreparing } from '../support/changesets.js';
+import { createPrepared, createPreparing, startExecutionOf } from '../support/changesets.js';
 import { READ_OPERATION, testConfiguration, WRITE_OPERATION } from '../support/configuration.js';
+import { approvedPlan } from '../support/plans.js';
 import { auditEventsOf, startTestPostgres, type TestPostgres } from '../support/postgres.js';
 
 let postgres: TestPostgres;
@@ -88,6 +92,8 @@ interface Fixture {
   readonly guard?: ExecutionGuard;
   readonly configuration?: LoadedConfiguration;
   readonly now?: () => Date;
+  /** Default: one that fails the test if `advancePlan` starts anything. */
+  readonly executor?: ActivityDeps['executor'];
 }
 
 function activities(fixture: Fixture = {}): ChangesetActivities {
@@ -98,6 +104,7 @@ function activities(fixture: Fixture = {}): ChangesetActivities {
     rollbackWriterFor: fixture.rollbackWriterFor ?? (() => new ScriptedWriter()),
     readerFor: () => fixture.reader ?? new CatalogReader(),
     guardFor: () => fixture.guard ?? allowAllGuard,
+    executor: fixture.executor ?? { start: () => Promise.reject(new Error('no start expected')) },
     tuning: DEFAULT_TUNING,
     newId: randomUUID,
     now: fixture.now ?? (() => new Date()),
@@ -948,6 +955,105 @@ describe('change-set activities', () => {
       expect(await repository.get(broken.id)).toMatchObject({ status: 'failed', errorCode: 'rollback_writer_error' });
       expect((await fromRollingBack(broken.id)).map((e) => [e.actor, e.correlationId, e.details.to])).toEqual([['system', 'corr-rollback', 'failed']]);
       expect(await queued(broken.id)).toEqual([{ kind: 'rollback_result', round: 0, step: 0, target: 'chat' }]);
+    });
+  });
+
+  describe('EXE-13 advancePlan', () => {
+    /** A recording executor that answers `answer` (or throws it). */
+    function recordingExecutor(answer: StartOutcome | Error): { executor: ActivityDeps['executor']; requests: StartRequest[] } {
+      const requests: StartRequest[] = [];
+      return {
+        requests,
+        executor: {
+          start: (req) => {
+            requests.push(req);
+            return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
+          },
+        },
+      };
+    }
+
+    /** Runs step 1 of a fresh plan to `completed` through the activities; step i is approved unless `approve[i]` is false. */
+    async function completedFirstStep(approve: readonly boolean[] = []) {
+      const { steps } = await approvedPlan(repository, [1, 2], approve);
+      const [first, second] = steps;
+      if (first === undefined || second === undefined) throw new Error('two steps expected');
+      await startExecutionOf(repository, first, { correlationId: 'corr-step1' });
+      const a = activities();
+      await attempt(1, () => a.executeBatch(first.id, 0));
+      await expect(attempt(1, () => a.finishExecution(first.id, 'done'))).resolves.toEqual({ status: 'completed' });
+      return { first, second };
+    }
+
+    const submissionOf = (cs: ChangeSetRecord) => {
+      if (cs.submission === undefined) throw new Error('approved step without submission');
+      return cs.submission;
+    };
+
+    it('EXE-13 beginExecution answers inPlan only for a plan step', async () => {
+      const { steps } = await approvedPlan(repository, [1, 1]);
+      const [first] = steps;
+      if (first === undefined) throw new Error('step expected');
+      const executing = await startExecutionOf(repository, first);
+      await expect(attempt(1, () => activities().beginExecution(executing.id, { verified: true }))).resolves.toMatchObject({ ok: true, inPlan: true });
+      const alone = await createPrepared(repository, 1, { execute: {} });
+      const plain = await attempt(1, () => activities().beginExecution(alone.id, { verified: true }));
+      expect(plain.ok && 'inPlan' in plain).toBe(false);
+    });
+
+    it('EXE-13 POL-4 POL-6 starts the approved next step as system with its requester identity, hash and role limits', async () => {
+      const { first, second } = await completedFirstStep();
+      const { executor, requests } = recordingExecutor({ ok: true });
+      const limited = { ...configuration, limits: new Map([['writer', { records_per_day: 7 }]]) };
+      await expect(attempt(1, () => activities({ executor, configuration: limited }).advancePlan(first.id))).resolves.toEqual({ started: true });
+      const next = submissionOf(second);
+      expect(requests).toEqual([
+        {
+          changesetId: second.id,
+          expectedHash: second.hash,
+          actor: 'system',
+          correlationId: 'corr-step1',
+          requester: { subject: next.actor, groups: next.groups },
+          limits: { role: 'writer', recordsPerDay: 7 },
+        },
+      ]);
+    });
+
+    it('EXE-13 a refused start and an unreachable Temporal answer started false; an unexpected error propagates', async () => {
+      const { first } = await completedFirstStep();
+      const refused = recordingExecutor({ ok: false, reason: 'limit_exceeded', limit: 'records_per_operation' });
+      await expect(attempt(1, () => activities({ executor: refused.executor }).advancePlan(first.id))).resolves.toEqual({ started: false });
+      const blocked = recordingExecutor({ ok: false, reason: 'plan_blocked' });
+      await expect(attempt(1, () => activities({ executor: blocked.executor }).advancePlan(first.id))).resolves.toEqual({ started: false });
+      const unavailable = recordingExecutor(new ExecutorUnavailable());
+      await expect(attempt(1, () => activities({ executor: unavailable.executor }).advancePlan(first.id))).resolves.toEqual({ started: false });
+      const broken = recordingExecutor(new Error('database gone'));
+      await expect(attempt(1, () => activities({ executor: broken.executor }).advancePlan(first.id))).rejects.toThrow('database gone');
+    });
+
+    it('EXE-13 starts nothing for a prepared next step, the last step, a step not completed or a change-set outside a plan', async () => {
+      const { executor, requests } = recordingExecutor({ ok: true });
+      const a = activities({ executor });
+      const prepared = await completedFirstStep([true, false]);
+      await expect(attempt(1, () => a.advancePlan(prepared.first.id))).resolves.toEqual({ started: false });
+
+      const { second } = await completedFirstStep();
+      await startExecutionOf(repository, second);
+      await attempt(1, () => a.executeBatch(second.id, 0));
+      await expect(attempt(1, () => a.finishExecution(second.id, 'done'))).resolves.toEqual({ status: 'completed' });
+      await expect(attempt(1, () => a.advancePlan(second.id))).resolves.toEqual({ started: false });
+
+      const { steps } = await approvedPlan(repository, [1, 1]);
+      const [executingStep] = steps;
+      if (executingStep === undefined) throw new Error('step expected');
+      await startExecutionOf(repository, executingStep);
+      await expect(attempt(1, () => a.advancePlan(executingStep.id))).resolves.toEqual({ started: false });
+
+      const alone = await createPrepared(repository, 1, { execute: {} });
+      await attempt(1, () => a.executeBatch(alone.id, 0));
+      await expect(attempt(1, () => a.finishExecution(alone.id, 'done'))).resolves.toEqual({ status: 'completed' });
+      await expect(attempt(1, () => a.advancePlan(alone.id))).resolves.toEqual({ started: false });
+      expect(requests).toEqual([]);
     });
   });
 });

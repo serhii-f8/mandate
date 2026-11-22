@@ -21,7 +21,8 @@ activity signatures and `apps/worker/test/workflow-histories/`.
   reused or renamed. Each carries a comment "remove not before <date>".
 - **Live patches** of `changesetWorkflow` (each with its "remove not before" date in
   `apps/worker/src/workflows/changeset.ts`): `changeset-workflow-rollback-20261118` (EXE-8),
-  `changeset-workflow-verify-after-20261122` (EXE-12).
+  `changeset-workflow-verify-after-20261122` (EXE-12),
+  `changeset-workflow-plan-advance-20261122` (EXE-13).
 - **Lifecycle:** `patched` → `deprecatePatch` only when no execution started before the
   patched deployment is open, and never earlier than change-set expiry plus the
   longest execution time after that deployment → removal only after those executions

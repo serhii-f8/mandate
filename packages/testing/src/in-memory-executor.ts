@@ -25,6 +25,7 @@ import {
   type ChangeSetRepository,
   type ChangeSetStatus,
   type ChangeWriter,
+  type ExecutionLimits,
   type ExecutionProgress,
   type FinishOutcome,
   type ItemOutcome,
@@ -59,6 +60,8 @@ export interface InMemoryExecutorDeps {
   readonly verification?: InMemoryVerification;
   /** The wait before the first look and between looks. Default: resolves at once. */
   readonly sleep?: (ms: number) => Promise<void>;
+  /** EXE-13: the limits of a role when the next plan step starts by itself (POL-4). Default: none. */
+  readonly limitsOf?: (role: string) => ExecutionLimits | undefined;
 }
 
 /** The in-memory executor runs each batch once, so every claim and write uses attempt 1. */
@@ -75,6 +78,9 @@ const SECOND_MS = 1000;
  * fenced rollback batches (EXE-8); it never opens a window itself, so tests open one in the store.
  * With the `verification` option, a run whose batches ended with nothing left is verified with the
  * same core functions as the worker's activities (EXE-12), waiting through the injected `sleep`.
+ * A plan step whose run ended `completed` starts the next step through `start` when that one is
+ * `approved`, with actor `system` and the next step's requester identity, as the worker's
+ * `advancePlan` does (EXE-13); `settled` of the finished step resolves after that start.
  */
 export class InMemoryExecutor implements ChangeSetExecutor {
   private readonly runs = new Map<string, Promise<void>>();
@@ -87,6 +93,7 @@ export class InMemoryExecutor implements ChangeSetExecutor {
   private readonly newId: () => string;
   private readonly verification: InMemoryVerification | undefined;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly limitsOf: ((role: string) => ExecutionLimits | undefined) | undefined;
 
   constructor(deps: InMemoryExecutorDeps) {
     this.repository = deps.repository;
@@ -98,6 +105,7 @@ export class InMemoryExecutor implements ChangeSetExecutor {
     this.newId = deps.newId ?? randomUUID;
     this.verification = deps.verification;
     this.sleep = deps.sleep ?? (() => Promise.resolve());
+    this.limitsOf = deps.limitsOf;
   }
 
   /** Resolves when the run of the change-set has ended (immediately when none is active). */
@@ -151,6 +159,41 @@ export class InMemoryExecutor implements ChangeSetExecutor {
         // Nothing more can be done; the change-set stays `executing` for inspection.
       }
     }
+    try {
+      await this.advancePlan(changeset.id, correlationId);
+    } catch {
+      // As the workflow: the plan simply does not advance by itself; the next step stays approved.
+    }
+  }
+
+  /**
+   * EXE-13: when the finished change-set is a `completed` plan step and the next step is `approved`,
+   * starts it with the next step's stored submission identity and role limits, actor `system`. A
+   * refusal is the start's own answer (audited by the start where it is audited at all).
+   */
+  private async advancePlan(changesetId: string, correlationId: string): Promise<void> {
+    const finished = await this.repository.get(changesetId);
+    const plan = finished?.plan;
+    if (finished?.status !== 'completed' || plan === undefined) return;
+    const step = (await this.repository.planSteps(plan.id))?.steps.find((s) => s.step === plan.step + 1);
+    if (step === undefined) return;
+    const next = await this.repository.get(step.changesetId);
+    // Only an approved step: a prepared one was confirmed by nobody (ADR 0074).
+    if (next?.status !== 'approved' || next.submission === undefined || next.hash === undefined) return;
+    const { submission } = next;
+    const limits = this.limitsOf?.(submission.role);
+    await this.start({
+      changesetId: next.id,
+      expectedHash: next.hash,
+      actor: 'system',
+      correlationId,
+      requester: {
+        subject: submission.actor,
+        groups: submission.groups,
+        ...(submission.clientId === undefined ? {} : { clientId: submission.clientId }),
+      },
+      ...(limits === undefined ? {} : { limits }),
+    });
   }
 
   /** Runs batches until no item is pending; with work remaining, a stored cancel or the failure threshold stops it. */

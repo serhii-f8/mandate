@@ -139,9 +139,12 @@ A requester who prepared several change-sets that must run in order asks for a p
 `create_plan` with a title and the change-set IDs in order, 2 to 20 of them, each prepared by the
 caller, not expired and in no other plan. Each step keeps its own approval, and steps can be
 approved in any order, but a step starts only after the one before it is `completed`; until then a
-start answers `plan_blocked` and the step stays as it is. `get_changeset` of a step shows the plan
-and the status of every step. A step can be rolled back only after every later step that ran was
-rolled back.
+start answers `plan_blocked` and the step stays as it is. When a step ends `completed`, the next
+step starts by itself if it is already approved, under the requester's identity and role limits; a
+next step that is only prepared waits for its requester, even when it needs no approval. A step that
+ends any other way stops the plan: the later steps wait until they expire or are cancelled.
+`get_changeset` of a step shows the plan and the status of every step. A step can be rolled back
+only after every later step that ran was rolled back.
 
 ## Roll back
 

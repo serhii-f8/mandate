@@ -11,10 +11,14 @@ import {
   type ChangeSetRepository,
   type ManifestDefinition,
   type ManifestVerifyAfter,
+  type ExecutionLimits,
+  type PlanRecord,
   type ReadPage,
   type UpstreamReader,
   BatchFenced,
+  planCreatedEvent,
 } from '@mandate/core';
+import { recordApproval, submitChangeSet } from './approval-fixtures.js';
 import { describeExecutorContract, describeRollbackRun, EXECUTOR_CONTRACT_HASH } from './executor-contract.js';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
 import { InMemoryChangeSetRepository } from './in-memory-changeset-repository.js';
@@ -26,6 +30,7 @@ function build(
     wrap?: (r: InMemoryChangeSetRepository) => ChangeSetRepository;
     writer?: ScriptedWriter;
     rollbackWriter?: ScriptedWriter;
+    limitsOf?: (role: string) => ExecutionLimits | undefined;
   } = {},
 ) {
   const audit = new InMemoryAuditLog();
@@ -34,11 +39,12 @@ function build(
   const writer = opts.writer ?? new ScriptedWriter();
   const batchSize = opts.batchSize ?? 2;
   const failureThreshold = 0.5;
-  const rollbackWriter = opts.rollbackWriter;
+  const { rollbackWriter, limitsOf } = opts;
   const executor = new InMemoryExecutor({
     repository,
     writer,
     ...(rollbackWriter === undefined ? {} : { rollbackWriter }),
+    ...(limitsOf === undefined ? {} : { limitsOf }),
     batchSizeOf: () => batchSize,
     failureThreshold,
   });
@@ -343,6 +349,88 @@ describe('EXE-11 in-memory executor', () => {
       const record = await h.repository.get(cs.id);
       expect(record?.status).toBe('completed');
       expect(record?.stats.verification).toBeUndefined();
+    });
+  });
+
+  describe('EXE-13 plan advance', () => {
+    /** Two prepared steps of `alice` in one plan, with `items[i]` items; step i approved unless `approve[i]` is false. */
+    async function plan(h: ReturnType<typeof build>, items: readonly [number, number], approve: readonly [boolean, boolean] = [true, true]) {
+      const prepared = [await h.prepared(items[0]), await h.prepared(items[1])];
+      const id = randomUUID();
+      const now = new Date();
+      const record: PlanRecord = { id, title: 'Launch', requester: 'alice', createdAt: now };
+      const created = await h.repository.createPlan({
+        id,
+        title: record.title,
+        requester: 'alice',
+        changesetIds: prepared.map((cs) => cs.id),
+        now,
+        audit: planCreatedEvent({ id: randomUUID(), plan: record, steps: 2, correlationId: 'corr-plan' }),
+      });
+      if (!created.ok) throw new Error(`plan refused: ${created.reason}`);
+      const steps: ChangeSetRecord[] = [];
+      for (const [i, cs] of prepared.entries()) {
+        if (approve[i] === false) {
+          steps.push(cs);
+          continue;
+        }
+        const pending = await submitChangeSet(h.repository, cs, { steps: ['lead'], groups: ['approvers'] });
+        steps.push(await recordApproval(h.repository, pending, { approver: 'rita' }));
+      }
+      const [first, second] = steps;
+      if (first === undefined || second === undefined) throw new Error('two steps expected');
+      return { first, second };
+    }
+
+    /** Starts step 1 as its approver for alice and waits for both runs. */
+    async function runFirst(h: ReturnType<typeof build>, first: ChangeSetRecord, second: ChangeSetRecord): Promise<void> {
+      const requester = { subject: 'alice', groups: ['approvers'] };
+      await expect(h.executor.start({ changesetId: first.id, expectedHash: EXECUTOR_CONTRACT_HASH, actor: 'rita', correlationId: 'corr-1', requester })).resolves.toEqual({ ok: true });
+      await h.executor.settled(first.id);
+      await h.executor.settled(second.id);
+    }
+
+    it('EXE-13 POL-6 a completed step starts the approved next one as system with its requester identity', async () => {
+      const h = build();
+      const { first, second } = await plan(h, [2, 3]);
+      await runFirst(h, first, second);
+      expect((await h.repository.get(first.id))?.status).toBe('completed');
+      const next = await h.repository.get(second.id);
+      expect(next?.status).toBe('completed');
+      expect(next?.executionRequest).toMatchObject({ actor: 'alice', groups: ['approvers'], correlationId: 'corr-1' });
+      const started = h.audit.events.filter((e) => e.changesetId === second.id && e.action === 'changeset.transition' && e.details.to === 'executing');
+      expect(started.map((e) => [e.actor, e.details.from])).toEqual([['system', 'approved']]);
+    });
+
+    it('EXE-13 a step that ends completed_with_errors leaves the next step approved', async () => {
+      const h = build({ writer: new ScriptedWriter({ outcomes: { 't-0001': 'failed' } }) });
+      const { first, second } = await plan(h, [4, 1]);
+      await runFirst(h, first, second);
+      expect((await h.repository.get(first.id))?.status).toBe('completed_with_errors');
+      expect((await h.repository.get(second.id))?.status).toBe('approved');
+    });
+
+    it('EXE-13 a next step that is only prepared is not started', async () => {
+      const h = build();
+      const { first, second } = await plan(h, [1, 1], [true, false]);
+      await runFirst(h, first, second);
+      expect((await h.repository.get(second.id))?.status).toBe('prepared');
+    });
+
+    it('EXE-13 POL-4 the next step gets its role limits: over them it stays approved with one denial', async () => {
+      const roles: string[] = [];
+      const h = build({
+        limitsOf: (role) => {
+          roles.push(role);
+          return { role, recordsPerOperation: 1 };
+        },
+      });
+      const { first, second } = await plan(h, [1, 2]);
+      await runFirst(h, first, second);
+      expect(roles).toEqual([second.submission?.role]);
+      expect((await h.repository.get(second.id))?.status).toBe('approved');
+      const denials = h.audit.events.filter((e) => e.changesetId === second.id && e.action === 'policy.decision');
+      expect(denials.map((e) => [e.actor, e.details.reason])).toEqual([['alice', 'limit_exceeded']]);
     });
   });
 

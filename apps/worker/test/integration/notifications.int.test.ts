@@ -103,6 +103,7 @@ describe('NTF-3 notification delivery on PostgreSQL', () => {
         throw new Error('no reads in this test');
       },
       guardFor: () => allowAllGuard,
+      executor: { start: () => Promise.reject(new Error('no plan step starts in this test')) },
       tuning: DEFAULT_TUNING,
       newId: randomUUID,
       now: () => new Date(),

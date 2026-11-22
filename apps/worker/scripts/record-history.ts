@@ -51,6 +51,7 @@ import {
   waitForWorkflowStatus,
 } from '../test/support/prepared-by-workflow.js';
 import { startInfrastructure, startTestWorker, type Infra, type TestWorker, type TestWorkerOptions } from '../test/support/harness.js';
+import { approvedPlan, approverStart } from '../test/support/plans.js';
 import { LiveFromReader, withVerifyAfter, type VerifyTiming } from '../test/support/verification.js';
 
 type History = Awaited<ReturnType<WorkflowHandle['fetchHistory']>>;
@@ -723,6 +724,49 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
         const run2 = await infra.client.workflow.getHandle(cs.id, next).fetchHistory();
         if (run2.events?.at(-1)?.workflowExecutionCompletedEventAttributes == null) throw new Error('second run did not complete (more than two runs?)');
         return { 'verify-continued-run1': run1, 'verify-continued-run2': run2 };
+      });
+    },
+  },
+
+  /** EXE-13: a two-step plan, both approved; step 1 completes and its advancePlan starts step 2 (step 1's history). */
+  'plan-advanced': {
+    files: ['plan-advanced'],
+    async run(infra) {
+      const { steps } = await approvedPlan(infra.repository, [2, 2]);
+      const [first, second] = steps;
+      if (first === undefined || second === undefined) throw new Error('two steps expected');
+      return withWorker(infra, {}, async (worker) => {
+        const started = await worker.executor.start(approverStart(first));
+        if (!started.ok) throw new Error(`start refused: ${started.reason}`);
+        await expectResult(infra.client.workflow.getHandle<typeof changesetWorkflow>(first.id), 'completed');
+        await expectResult(infra.client.workflow.getHandle<typeof changesetWorkflow>(second.id), 'completed');
+        const history = await infra.client.workflow.getHandle(first.id).fetchHistory();
+        const advanced = history.events?.some((e) => e.activityTaskScheduledEventAttributes?.activityType?.name === 'advancePlan') ?? false;
+        if (!advanced) throw new Error('step 1 did not advance the plan');
+        return { 'plan-advanced': history };
+      });
+    },
+  },
+
+  /**
+   * EXE-13: a two-step plan whose advancePlan fails every attempt (the executor throws): the
+   * failure is swallowed, the plan does not advance, step 1 settles completed (step 1's history).
+   */
+  'plan-not-advanced': {
+    files: ['plan-not-advanced'],
+    async run(infra) {
+      const { steps } = await approvedPlan(infra.repository, [2, 2]);
+      const [first, second] = steps;
+      if (first === undefined || second === undefined) throw new Error('two steps expected');
+      const advanceExecutor = { start: () => Promise.reject(new Error('start unavailable')) };
+      return withWorker(infra, { advanceExecutor }, async (worker) => {
+        const started = await worker.executor.start(approverStart(first));
+        if (!started.ok) throw new Error(`start refused: ${started.reason}`);
+        await expectResult(infra.client.workflow.getHandle<typeof changesetWorkflow>(first.id), 'completed');
+        const history = await infra.client.workflow.getHandle(first.id).fetchHistory();
+        if (!history.events?.some((e) => e.activityTaskFailedEventAttributes != null)) throw new Error('advancePlan did not fail');
+        if ((await infra.repository.get(second.id))?.status !== 'approved') throw new Error('step 2 left approved');
+        return { 'plan-not-advanced': history };
       });
     },
   },

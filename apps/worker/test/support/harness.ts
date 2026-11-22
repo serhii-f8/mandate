@@ -148,12 +148,17 @@ export interface TestWorkerOptions {
   readonly spy?: (activity: string) => unknown;
   /** Worker plugins, e.g. the tracing plugin (NFR-11). */
   readonly plugins?: readonly WorkerPlugin[];
+  /** Replaces the executor `advancePlan` starts with (default: the returned `executor`), e.g. one that always fails. */
+  readonly advanceExecutor?: ActivityDeps['executor'];
 }
 
 export interface TestWorker {
   readonly taskQueue: string;
   readonly worker: Worker;
-  /** The Temporal executor on this worker's task queue, with the infrastructure's client and repository. */
+  /**
+   * The Temporal executor on this worker's task queue, with the infrastructure's client and
+   * repository; also the one the worker's `advancePlan` starts with (EXE-13).
+   */
   readonly executor: TemporalExecutor;
   /** The workflow starter on this worker's task queue. */
   readonly starter: TemporalWorkflowStarter;
@@ -184,6 +189,7 @@ function spied(a: ChangesetActivities, spy: ((activity: string) => unknown) | un
     beginVerification: async (id) => (await before('beginVerification'), a.beginVerification(id)),
     verifyBatch: async (id, round) => (await before('verifyBatch'), a.verifyBatch(id, round)),
     finishVerification: async (id, end) => (await before('finishVerification'), a.finishVerification(id, end)),
+    advancePlan: async (id) => (await before('advancePlan'), a.advancePlan(id)),
   };
 }
 
@@ -197,6 +203,14 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
   const { guard } = opts;
   const guardFor = guard === undefined ? createExecutionGuard({ repository: infra.repository, audit: infra.audit, newId: randomUUID }) : () => guard;
   const configuration = opts.configuration ?? infra.configuration;
+  // The executor the test drives and the one `advancePlan` starts the next plan step with (EXE-13).
+  const executor = new TemporalExecutor({
+    client: infra.client,
+    taskQueue,
+    repository: infra.repository,
+    newId: randomUUID,
+    now: () => new Date(),
+  });
   const activities = createActivities({
     repository: infra.repository,
     configuration: () => configuration,
@@ -205,6 +219,7 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
     readerFor: opts.readerFor ?? (() => reader),
     guardFor,
     settingsFor: opts.settingsFor ?? (() => settings),
+    executor: opts.advanceExecutor ?? executor,
     tuning: { ...FAST_TUNING, ...opts.tuning },
     newId: randomUUID,
     now: opts.now ?? (() => new Date()),
@@ -226,13 +241,7 @@ export async function startTestWorker(infra: Infra, opts: TestWorkerOptions = {}
   return {
     taskQueue,
     worker,
-    executor: new TemporalExecutor({
-      client: infra.client,
-      taskQueue,
-      repository: infra.repository,
-      newId: randomUUID,
-      now: () => new Date(),
-    }),
+    executor,
     starter: new TemporalWorkflowStarter({ client: infra.client, taskQueue }),
     async stop() {
       if (worker.getState() === 'RUNNING') worker.shutdown();

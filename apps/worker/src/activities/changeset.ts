@@ -7,7 +7,7 @@
  * messages (SEC-3); an unexpected programming error is not rewritten. Activity names and argument
  * shapes are part of workflow history (EXE-10).
  */
-import type { LoadedConfiguration } from '@mandate/config';
+import { executionLimits, type LoadedConfiguration } from '@mandate/config';
 import {
   BatchFenced,
   changesetBatchEvent,
@@ -16,6 +16,7 @@ import {
   changesetVerificationEvent,
   coverBatch,
   executionTerminal,
+  ExecutorUnavailable,
   failureThresholdExceeded,
   hashStoredItems,
   isOpaque,
@@ -31,6 +32,7 @@ import {
   verificationSchedule,
   verifyChunk,
   type BatchContext,
+  type ChangeSetExecutor,
   type ChangeSetRecord,
   type ChangeSetRepository,
   type ChangeSetStats,
@@ -66,6 +68,8 @@ export interface ActivityDeps {
   readonly readerFor: (configuration: LoadedConfiguration, correlationId: string) => UpstreamReader;
   readonly guardFor: (configuration: LoadedConfiguration) => ExecutionGuard;
   readonly settingsFor?: (configuration: LoadedConfiguration, operationId: string) => ExecutionSettings;
+  /** EXE-13: the start the approver's start uses (start checks, limits, move to `executing`, wake). */
+  readonly executor: Pick<ChangeSetExecutor, 'start'>;
   readonly tuning: ActivityTuning;
   readonly newId: () => string;
   readonly now: () => Date;
@@ -269,6 +273,7 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
         itemsPerRun: settings.itemsPerRun,
         cancelRequested: changeset.cancelRequest !== undefined,
         ...(verificationManifest(configuration, changeset.operation) === undefined ? {} : { verifyAfter: true }),
+        ...(changeset.plan === undefined ? {} : { inPlan: true }),
       };
     },
 
@@ -456,6 +461,42 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
           correlationId: cancel?.correlationId ?? executionCorrelation(changeset),
         }),
       );
+    },
+
+    async advancePlan(changesetId) {
+      const finished = await load(changesetId);
+      markActivitySpan(finished, 'execute');
+      const notStarted = { started: false };
+      const { plan } = finished;
+      if (finished.status !== 'completed' || plan === undefined) return notStarted;
+      const step = (await repository.planSteps(plan.id))?.steps.find((s) => s.step === plan.step + 1);
+      if (step === undefined) return notStarted;
+      const next = await repository.get(step.changesetId);
+      // Only an approved step: a prepared one, even one needing no approval, was confirmed by nobody (ADR 0074).
+      if (next?.status !== 'approved' || next.submission === undefined || next.hash === undefined) return notStarted;
+      const { submission } = next;
+      // The requester's identity and the role's limits under the current configuration, as the approver's start (POL-4, POL-6).
+      const limits = executionLimits(deps.configuration(), submission.role);
+      try {
+        const outcome = await deps.executor.start({
+          changesetId: next.id,
+          expectedHash: next.hash,
+          actor: 'system',
+          correlationId: executionCorrelation(finished),
+          requester: {
+            subject: submission.actor,
+            groups: submission.groups,
+            ...(submission.clientId === undefined ? {} : { clientId: submission.clientId }),
+          },
+          ...(limits === undefined ? {} : { limits }),
+        });
+        // A refusal (plan_blocked, limit_exceeded, expired, ...) is audited by the start itself where it is audited at all.
+        return { started: outcome.ok };
+      } catch (error) {
+        // Temporal unreachable: the step stays approved; the requester or the approver can start it later.
+        if (error instanceof ExecutorUnavailable) return notStarted;
+        throw error;
+      }
     },
 
     async openRollbackWindow(changesetId) {

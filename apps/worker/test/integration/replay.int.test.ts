@@ -48,6 +48,8 @@ function converterFor(type: string): DataConverter | undefined {
  * closed by the timer, a failed rollback, one per continue-as-new run of a rollback.
  * The verify-after patch (EXE-12): confirmed, timed out, parked in the wait between looks, cancelled
  * during the wait, one per continue-as-new run of a verification.
+ * The plan-advance patch (EXE-13): a completed step that starts the next one, and one whose
+ * advancePlan fails every attempt and settles anyway.
  */
 const REQUIRED_CHANGESET_FIXTURES = [
   'parked-prepared',
@@ -85,12 +87,14 @@ const REQUIRED_CHANGESET_FIXTURES = [
   'verify-cancelled',
   'verify-continued-run1',
   'verify-continued-run2',
+  'plan-advanced',
+  'plan-not-advanced',
 ];
 
 /**
  * Histories recorded as production runs (`record-history <scenario> --traced`, NFR-11): the
  * `_tracer-data` headers and the OpenTelemetry interceptors' SDK flags. Parked at the wake condition,
- * completed, one per continue-as-new run, rolled back, verified. They replay with the plugin (production) and
+ * completed, one per continue-as-new run, rolled back, verified, a plan advanced. They replay with the plugin (production) and
  * without it (tracing switched off, `WORKFLOW_TRACING` fallback).
  */
 const REQUIRED_TRACED_FIXTURES = [
@@ -100,6 +104,7 @@ const REQUIRED_TRACED_FIXTURES = [
   'completed-continued-run2-traced',
   'rolled-back-traced',
   'verify-confirmed-traced',
+  'plan-advanced-traced',
 ];
 
 const isTraced = (name: string): boolean => name.endsWith('-traced.json');
