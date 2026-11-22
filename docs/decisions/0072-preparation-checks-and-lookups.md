@@ -96,7 +96,8 @@ operation (OPS-5) that reads both systems. Option (a) misses the case that motiv
 - **Failures.** A failed lookup read fails the preparation with the fixed code `lookup_failed` and
   the upstream HTTP status when there was one, never the upstream message. A truncated read, or a
   page with fewer records than the `total` the upstream reports for it (a default page size), fails
-  it with `incomplete_read`, as a truncated `read_before` read and a short selector page do. A lookup
+  it with `incomplete_read`, as a truncated `read_before` read and a short selector page do (for a
+  create or delete also a short `read_before` page, ADR 0071). A lookup
   that could not be read completely is never read as "not found": with `{ not_found: <lookup> }` that
   would let through targets the upstream holds.
 - **Authorization (call).** The operator declared the lookup in the write's manifest, and the write
@@ -156,9 +157,9 @@ and the field list in the read, `lookup_failed` with status 503 and `incomplete_
 read; fix round 1 adds a page with fewer records than its `total` failing `incomplete_read`, a
 lookup on a disabled read operation refused, and a `$param` lookup on a prefixed binding that keeps
 the unprefixed binding's operation the connection named; a preparation test excludes the target the
-lookup does not return with the check's code, finds
-no value of the lookup in the stored items, the audit or the returned change-set, reads only for
-pending items and adds a `{ record }` key to the `read_before` fields. Loader tests cover a lookup on
+lookup does not return with the check's code, finds no value of the lookup in the stored items, the
+audit or the returned change-set, reads only for pending items and adds a `{ record }` key to the
+`read_before` fields. Loader tests cover a lookup on
 another connection and each refusal at its path. A worker integration test runs the prepare activity
 with the production `UpstreamReader` against two fake upstreams: the target the second connection
 does not know is excluded, and the second upstream saw only `GET` requests, each with its own

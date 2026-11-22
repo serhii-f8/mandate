@@ -218,8 +218,9 @@ export class ManifestBatchWriter implements ChangeWriter {
   /**
    * With no field to compare an item would look already applied, so it fails `write_mode_unsupported`
    * instead: every item when an update call touches no field, else each item that touches none (CS-7).
-   * The call-wide rule is for `update` only: a delete call has no values (and the rollback of a create
-   * or delete runs with the arguments of the other action), so there each item's own fields decide.
+   * The call-wide rule is for `update` only: a delete call has no values, and the rollback of a create
+   * or delete runs with the original manifest and the change-set's own arguments through the rollback
+   * binding, so there each item's own fields decide.
    * The other items are written; outcomes keep the input order.
    */
   private async writeForward(input: WriteInput): Promise<readonly ItemOutcome[]> {

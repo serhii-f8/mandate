@@ -147,8 +147,9 @@ connections:
   `test`. A list value replaces the node as a whole (here the whole `enum`); it is not spliced into a
   surrounding list. Any other mapping, including one with `$param` and other keys, stays as it is.
 - The nodes that name an operation or its field list cannot be parameters: `operations[*].id`,
-  `operations[*].fields_arg`, `operations[*].manifest.action`, `operations[*].manifest.values_arg`, `operations[*].manifest.records_arg`, `operations[*].manifest.checks[*].code` and `test.operation`. A
-  `{ $param }` there is refused in the preset file (`must not be a parameter`), so a connection
+  `operations[*].fields_arg`, `operations[*].manifest.action`, `operations[*].manifest.values_arg`,
+  `operations[*].manifest.records_arg`, `operations[*].manifest.checks[*].code` and
+  `test.operation`. A `{ $param }` there is refused in the preset file (`must not be a parameter`), so a connection
   cannot rename an operation, retarget the test, move the fields that grants and approval rules
   read, or rename the reason code approvers see and stats count.
 - Substitution happens before the operation schema is checked, once per connection: two connections
@@ -202,7 +203,8 @@ The argument's items must be closed objects; `ids_arg` and `selector` are not us
 (targets named by `ids_arg` or `selector`, on a `destructive` operation) are available since 1.2.0.
 A delete always needs approval and step-up authentication. A create is undone by naming a delete
 operation as its `inverse_operation` (one without `write.carry_fields`), a delete by naming a create;
-rolling back a delete restores only the manifest's `fields`. `action` is fixed in the preset file and cannot be a `$param`.
+rolling back a delete restores only the manifest's `fields`. `action` is fixed in the preset file
+and cannot be a `$param`.
 The `read_before` of a create or delete must find a record by identifier whatever its scope, so it
 must not pass a scope argument; the platform checks the scope on the record it returns. Bind a
 create to an endpoint that refuses an existing identifier (not an upsert): a create never overwrites

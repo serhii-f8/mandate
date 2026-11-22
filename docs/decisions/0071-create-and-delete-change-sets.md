@@ -100,8 +100,8 @@ option 3 makes the meaning of a configuration depend on its call.
   binding that cannot (an upstream read that always filters by scope) cannot serve a create or delete
   safely. "A create never overwrites an existing record" holds only under such a read, and a create
   binding should still refuse an existing identifier upstream (a plain `POST`, not an upsert).
-- The Magento and Gitea presets do not change; the template preset demonstrates both actions in a
-  later change of this release.
+- The Magento and Gitea presets do not change; the template preset (1.2.0) demonstrates both
+  actions, each naming the other as its inverse.
 
 ## Verified
 
@@ -111,3 +111,13 @@ stored `create` refused under an `update` operation, a stored action-less change
 `create` and a `delete` operation and accepted under an `update`, and matching actions accepted.
 Writer tests send a create through the per-record `POST` binding and roll it back through the
 delete operation's binding against the fake catalog, including the verification after each write.
+
+2026-11-22 (final fix wave): loader tests refuse a scope argument in the `read_before` of a create
+and of a delete at `read_before.args.<key>`, load both without it, and keep the selector of a delete
+and the `read_before` of an update scoped. Core tests with a reader that returns the out-of-scope
+record show a create excluded `already_exists` with `before: null`, a delete excluded `out_of_scope`
+with no values, both `skipped/drift` at execution, and a delete still present out of scope after an
+`ok` answer `failed/not_applied`; with the scope check on the record disabled, the preparation and
+delete-execution tests fail. Worker tests refuse a rollback whose stored action or inverse no longer
+matches. Core tests fail a short or unidentified `read_before` page of a create or delete closed in
+preparation, classify, verify and reverse, while an update keeps today's outcome.

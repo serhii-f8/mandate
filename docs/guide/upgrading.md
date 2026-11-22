@@ -72,8 +72,14 @@ change-set records the version of its hash format, and new change-sets use versi
 prepared before the upgrade keep version 1 and verify, execute and roll back as before. A 1.1
 process that is still running cannot compute a version 2 hash: it refuses such a change-set as
 `hash_mismatch` when it checks the hash before execution or rollback, so the change-set fails
-instead of running. With the single-host Compose setup, `docker compose up -d --wait` replaces both
-containers together and there is nothing more to do.
+instead of running. A 1.1 `api` can still derive a new change-set from a version 2 one: it produces a
+version 1 copy without an action, which runs as before for an update, and which the 1.2.0 execution
+guard refuses for a create or delete operation. With the single-host Compose setup,
+`docker compose up -d --wait` replaces both containers together and there is nothing more to do.
+
+A preset of your own that uses `records_arg`, `action`, `checks` or `lookups` declares
+`"sdk": "^1.2.0"` in its `package.json` (`mandate.sdk`), which an older platform refuses with
+`preset_sdk_incompatible`. The template preset does so.
 
 The migration `0015_change_set_hash_version` adds two columns to `change_set` with defaults and runs
 on start, as every migration does.

@@ -48,8 +48,8 @@ value and defeats the closed-schema check.
 ## Consequences
 
 - A preset may use `records_arg`; the Magento and Gitea presets do not change.
-- Preparation, items, drift, verify and rollback for records are the subject of later changes of this
-  release (the core model already carries `recordsArg`).
+- Preparation, items, drift, verify and rollback handle records: each item holds its own record's
+  values, and drift, the write and the verify compare over the fields that item touches.
 - A caller that sends a call with two records for one target is refused at preparation
   (`duplicate_targets`), never resolved by order.
 

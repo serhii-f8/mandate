@@ -223,8 +223,10 @@ after the built-in exclusions, in chunks of `batch_size`, and indexes the result
 first record with a key wins). A key that is not a string or a number, or that the read does not
 return, makes the lookup "not found" for that item. A failed lookup read fails the preparation with
 `lookup_failed` and the upstream status. A truncated one, or a page with fewer records than the
-total the upstream reports (for example a default page size), fails it with `incomplete_read`. A
-lookup that could not be read completely is never "not found".
+total the upstream reports (for example a default page size), fails it with `incomplete_read`, as a
+truncated `read_before` read does (and, for a create or delete, a `read_before` page shorter than its
+total or holding a record without an identifier). A lookup that could not be read completely is never
+"not found".
 
 ```yaml
     manifest:

@@ -56,10 +56,14 @@ can carry itself.
 ## Consequences
 
 - Change-sets prepared before 1.2.0 keep verifying, executing, deriving and rolling back as before.
-- An old process meeting a version 2 change-set recomputes version 1 and refuses it as
-  `hash_mismatch`. That fails closed, but it also blocks the change-set until every process is
-  upgraded, so the upgrade note says to upgrade every `api` and `worker` before preparing new
-  change-sets.
+- An old (1.1) process meeting a version 2 change-set recomputes version 1 and refuses to verify
+  or execute it (`hash_mismatch`). That fails closed, but it also blocks the change-set until every
+  process is upgraded, so the upgrade note says to upgrade every `api` and `worker` before preparing
+  new change-sets.
+- An old `api` can still derive from a version 2 change-set: it produces a version 1 copy without an
+  action. Such a copy of an update behaves as before; the
+  execution guard refuses a copy of a create or delete, which counts as an update, under an operation
+  that creates or deletes (`policy_denied`).
 - A future format adds a version number and a header branch; the column needs no change. A row
   written by a newer release reads back with its version unchecked and fails verification closed on
   an older one.

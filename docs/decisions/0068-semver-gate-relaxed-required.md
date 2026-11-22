@@ -36,6 +36,9 @@ removed stays breaking for the same reason: its parent frame is gone, so the rul
 - The gate still sees names and shapes, not meaning. A key that becomes optional but that a consumer
   of the schema relied on being present (a generated type, for example) is left to review.
 - A removed key whose property schema stays is additive; the property remains accepted.
+- The rule applies to any JSON `required` frame, including one under `not` or `if`, where removing a
+  key narrows what is accepted instead of widening it. No committed report has such a frame today; a
+  schema that adds one needs a review of this rule.
 
 ## Verified
 
