@@ -199,6 +199,32 @@ describe('NFR-18 semver gate', () => {
       const next = '{\n  "allOf": [\n    {\n      "type": "object"\n    },\n    {\n      "required": [\n        "a"\n      ]\n    }\n  ]\n}\n';
       expect(judge(old, next, '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
     });
+    describe('NFR-18 a key no longer required is additive', () => {
+      const schema = (required: string, props = '"a": {\n      "type": "string"\n    },\n    "b": {\n      "type": "string"\n    }') =>
+        `{\n  "properties": {\n    ${props}\n  },${required}\n  "type": "object"\n}\n`;
+      const req = (...keys: string[]) => `\n  "required": [\n${keys.map((k) => `    "${k}"`).join(',\n')}\n  ],`;
+      it('NFR-18 a key no longer required is additive', () => {
+        const old = schema(req('a', 'b'));
+        expect(judge(old, schema(req('a')), '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
+        expect(judge(old, schema(req('a')), '1.0.0', '1.0.1')).toMatchObject({ ok: false, kind: 'additive' });
+        expect(judge(old, schema(req('b')), '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
+      });
+      it('NFR-18 removing the key from required and from properties stays breaking', () => {
+        const next = schema(req('a'), '"a": {\n      "type": "string"\n    }');
+        expect(judge(schema(req('a', 'b')), next, '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+      });
+      it('NFR-18 a required array removed with its object present is additive, the whole object removed is breaking', () => {
+        expect(judge(schema(req('a')), schema(''), '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
+        expect(judge(schema(req('a', 'b')), schema(''), '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
+        const nest = (inner: string) => `{\n  "properties": {\n    "o": {\n      "type": "object"${inner}\n    }\n  }\n}\n`;
+        const withReq = nest(',\n      "required": [\n        "a"\n      ]');
+        expect(judge(withReq, '{\n  "properties": {}\n}\n', '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+      });
+      it('NFR-18 a removed line in a .d.ts report stays breaking', () => {
+        const dts = (m: string) => `// @mandate/connector-sdk 1.0.0 public API report\nexport interface X {\n    a: string;${m}\n}\n`;
+        expect(judge(dts('\n    b: string;'), dts(''), '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+      });
+    });
     it('NFR-18 a version downgrade without a surface change fails', () => {
       expect(judge(base, base, '1.2.0', '1.1.9')).toMatchObject({ ok: false, kind: 'none' });
       expect(judge(base, base, '1.2.0', '1.2.0-rc.1').ok).toBe(false);

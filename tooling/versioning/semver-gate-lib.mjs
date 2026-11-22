@@ -158,6 +158,22 @@ export function isAppendedLiteralList(oldLine, newLine) {
   return false;
 }
 
+const REQUIRED_OPENER = '"required": [';
+const REQUIRED_ELEMENT = new RegExp(`^${STRING_LITERAL}$`);
+
+/**
+ * True when a removed entry loosens a JSON schema: a key (or the closer) of a `required` array, or the
+ * `"required": [` opener of an array that disappears, while the object that held the array still exists
+ * in the new report (NFR-18, ADR 0068). A `.d.ts` line never matches: only the JSON `required` frame does.
+ */
+function isLoosenedRequired(entry, newFrames) {
+  const { line, frame, parent } = entry;
+  if (line === REQUIRED_OPENER) return newFrames.has(frame.path);
+  if (!frame.label.startsWith(REQUIRED_OPENER)) return false;
+  if (!(REQUIRED_ELEMENT.test(line) || line === ']')) return false;
+  return parent !== undefined && newFrames.has(parent.path);
+}
+
 /** Splits the change into removed entries and added entries, each added one with its narrowing reason. */
 function compare(oldText, newText) {
   const a = surface(oldText);
@@ -194,10 +210,18 @@ function compare(oldText, newText) {
   // as one additive change (NFR-18).
   const removed = [];
   for (const r of removedEntries) {
+    if (isLoosenedRequired(r, b.frames)) {
+      addedEntries.push({ ...r, appended: true });
+      continue;
+    }
     const i = addedEntries.findIndex((e) => e.frame.path === r.frame.path && isAppendedLiteralList(r.line, e.line));
     if (i === -1) removed.push(r.line);
     else addedEntries.splice(i, 1, { ...addedEntries[i], appended: true });
   }
+  // A key removed from a JSON `required` array loosens the schema (NFR-18, ADR 0068). Only the lines of
+  // the `required` frame qualify (its elements, its closer, and its opener when the whole array goes) and
+  // only while the object that held it is still in the new report; the lines of a removed property or
+  // object stay removed lines. Each forgiven line counts as an added (additive) change.
   const added = [];
   const narrowed = [];
   for (const e of addedEntries) {
