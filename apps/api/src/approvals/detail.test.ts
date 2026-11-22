@@ -248,6 +248,35 @@ describe('APR-5 APR-6 detail action', () => {
   });
 });
 
+describe('CS-3 detail reason titles', () => {
+  const withChecks: OperationDefinition = {
+    ...OPERATION,
+    manifest: {
+      idField: 'sku',
+      idsArg: 'skus',
+      valuesArg: 'fields',
+      fields: ['meta_title'],
+      requiredFields: [],
+      scopeArgs: {},
+      readBefore: { operation: 'catalog.get', args: {}, idsArg: 'skus' },
+      batchSize: 50,
+      maxTargets: 100,
+      rollback: { strategy: 'none' },
+      checks: [
+        { code: 'locked', title: 'Note is locked', require: [{ present: { record: 'locked' } }] },
+        { code: 'stale', require: [{ present: { record: 'updated_at' } }] },
+      ],
+    },
+  };
+
+  it('CS-3 reasonTitles maps the titled check codes of the current configuration; none without checks or operation', () => {
+    const d = changesetDetail({ changeset: prepared(), approvals: [], operation: withChecks, viewer: alice, now: NOW, rollback: NO_ROLLBACK });
+    expect(d.reasonTitles).toEqual({ locked: 'Note is locked' });
+    expect(changesetDetail({ changeset: prepared(), approvals: [], operation: OPERATION, viewer: alice, now: NOW, rollback: NO_ROLLBACK }).reasonTitles).toEqual({});
+    expect(changesetDetail({ changeset: prepared(), approvals: [], viewer: alice, now: NOW, rollback: NO_ROLLBACK }).reasonTitles).toEqual({});
+  });
+});
+
 describe('detail additions', () => {
   it('CS-5 the detail carries derivedFrom of a derived change-set', () => {
     const src = '22222222-2222-4222-8222-222222222222';

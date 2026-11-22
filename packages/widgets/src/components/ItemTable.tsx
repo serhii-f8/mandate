@@ -19,10 +19,16 @@ export interface ItemTableProps {
   empty?: string;
   /** The change-set's action; a creation or deletion marks every row. */
   action?: ChangeSetAction;
+  /** CS-3: titles of check codes from the current configuration, shown beside the stored code. */
+  reasonTitles?: Readonly<Record<string, string>>;
 }
 
-function note(row: ItemRowModel): string {
-  if (row.status === 'excluded') return `excluded: ${row.reason ?? ''}`;
+function note(row: ItemRowModel, reasonTitles: Readonly<Record<string, string>> | undefined): string {
+  if (row.status === 'excluded') {
+    const reason = row.reason ?? '';
+    const title = reasonTitles !== undefined && Object.hasOwn(reasonTitles, reason) ? reasonTitles[reason] : undefined;
+    return title === undefined ? `excluded: ${reason}` : `excluded: ${title} (${reason})`;
+  }
   if (row.status === 'failed') return row.error ?? '';
   return '';
 }
@@ -37,12 +43,13 @@ function actionBadge(action: ChangeSetAction | undefined): 'new' | 'delete' | un
 interface RowProps {
   row: ItemRowModel;
   action?: ChangeSetAction;
+  reasonTitles?: Readonly<Record<string, string>>;
   /** Absent without a selection column; otherwise whether the row has a checkbox and its state. */
   box?: { selectable: boolean; checked: boolean; disabled: boolean; toggle: (targetId: string) => void };
 }
 
 /** One item; memoised so a selection change re-renders only the rows whose checkbox changed. */
-const ItemRows = memo(function ItemRows({ row, action, box }: RowProps): ReactElement {
+const ItemRows = memo(function ItemRows({ row, action, reasonTitles, box }: RowProps): ReactElement {
   const excluded = row.status === 'excluded';
   const fields = excluded ? [] : fieldRows(row);
   const span = excluded ? 1 : fields.length;
@@ -80,7 +87,7 @@ const ItemRows = memo(function ItemRows({ row, action, box }: RowProps): ReactEl
         <td />
         <td />
         <td />
-        <td>{note(row)}</td>
+        <td>{note(row, reasonTitles)}</td>
       </tr>
     );
   }
@@ -96,7 +103,7 @@ const ItemRows = memo(function ItemRows({ row, action, box }: RowProps): ReactEl
           <td className="after">
             <Value value={f.after} />
           </td>
-          <td rowSpan={1}>{i === 0 ? note(row) : ''}</td>
+          <td rowSpan={1}>{i === 0 ? note(row, reasonTitles) : ''}</td>
         </tr>
       ))}
     </>
@@ -104,7 +111,7 @@ const ItemRows = memo(function ItemRows({ row, action, box }: RowProps): ReactEl
 }, sameRow);
 
 function sameRow(a: RowProps, b: RowProps): boolean {
-  if (a.row !== b.row || a.action !== b.action) return false;
+  if (a.row !== b.row || a.action !== b.action || a.reasonTitles !== b.reasonTitles) return false;
   if (!a.box || !b.box) return a.box === b.box;
   return (
     a.box.selectable === b.box.selectable &&
@@ -114,7 +121,7 @@ function sameRow(a: RowProps, b: RowProps): boolean {
   );
 }
 
-export function ItemTable({ rows, selection, empty, action }: ItemTableProps): ReactElement {
+export function ItemTable({ rows, selection, empty, action, reasonTitles }: ItemTableProps): ReactElement {
   return (
     <table className="items">
       <thead>
@@ -141,6 +148,7 @@ export function ItemTable({ rows, selection, empty, action }: ItemTableProps): R
             key={row.targetId}
             row={row}
             {...(action === undefined ? {} : { action })}
+            {...(reasonTitles === undefined ? {} : { reasonTitles })}
             {...(selection
               ? {
                   box: {

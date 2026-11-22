@@ -27,9 +27,13 @@ export type {
 export { ANONYMOUS_CALLER, type Caller } from './caller.js';
 export { toolCallAuditEvent, type ToolCallRecord } from './tool-call-audit.js';
 export type {
+  CheckLiteral,
+  CheckPredicate,
+  CheckRef,
   DisabledOperation,
   GrantDefinition,
   ManifestAction,
+  ManifestCheck,
   ManifestDefinition,
   ManifestRead,
   ManifestTemplate,
@@ -77,13 +81,15 @@ export type {
   ChangeSetRecord,
   ChangeSetStats,
   ChangeSetStatus,
+  BuiltinExclusionReason,
   ExclusionReason,
   ItemStatus,
   RollbackCounts,
   RollbackItemStatus,
   RollbackRequest,
 } from './changeset/model.js';
-export { EMPTY_STATS } from './changeset/model.js';
+export { BUILTIN_EXCLUSION_REASONS, EMPTY_STATS } from './changeset/model.js';
+export { checkRecordFields, failedCheck, type CheckContext } from './changeset/checks.js';
 export {
   CANCELLABLE,
   canTransition,
@@ -158,7 +164,7 @@ export {
   type StartEventContext,
 } from './changeset/execution.js';
 export { changesetTransitionEvent, type ChangesetTransitionInput } from './changeset/audit.js';
-export { buildItems, inScope, touchedFields } from './changeset/items.js';
+export { buildItems, inScope, touchedFields, type ItemLookups } from './changeset/items.js';
 export {
   type BulkItemState,
   type BulkWriter,

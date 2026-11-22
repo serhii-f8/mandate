@@ -4,6 +4,7 @@ import type { Caller } from '../caller.js';
 import type { ManifestDefinition, ManifestTemplate, OperationDefinition } from '../policy-model.js';
 import { changesetTransitionEvent } from './audit.js';
 import { normalizeArgs, normalizeRecords } from './canonical.js';
+import { checkRecordFields } from './checks.js';
 import { callRecords, manifestAction } from './fields.js';
 import { CURRENT_HASH_VERSION } from './hash.js';
 import { buildItems, touchedFields } from './items.js';
@@ -240,6 +241,8 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
       ...Object.values(manifest.scopeArgs),
       ...(manifestAction(manifest) === 'delete' ? manifest.fields : touchedFields(manifest, args)),
       ...manifest.requiredFields,
+      // The current-record fields the preparation checks read (CS-3).
+      ...checkRecordFields(manifest.checks ?? []),
     ]),
   ];
   const readArgs = resolveTemplates(manifest.readBefore.args, args);

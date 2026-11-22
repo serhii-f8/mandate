@@ -117,6 +117,14 @@ describe('page adapters', () => {
     expect('drift' in toChangeSetModel(requester, items)).toBe(false);
   });
 
+  it('CS-3 the reason titles reach both models; none or an empty map adds nothing', () => {
+    const titled: ChangeSetDetail = { ...requester, reasonTitles: { locked: 'Note is locked' } };
+    expect(toChangeSetModel(titled, items).reasonTitles).toEqual({ locked: 'Note is locked' });
+    expect(toApprovalModel(titled, items, sample, FRESH).reasonTitles).toEqual({ locked: 'Note is locked' });
+    expect('reasonTitles' in toChangeSetModel({ ...requester, reasonTitles: {} }, items)).toBe(false);
+    expect('reasonTitles' in toApprovalModel(requester, items, sample, FRESH)).toBe(false);
+  });
+
   it('APR-5 the stored action reaches both models; an update carries none', () => {
     const created: ChangeSetDetail = { ...requester, action: 'create' };
     expect(toChangeSetModel(created, items).action).toBe('create');

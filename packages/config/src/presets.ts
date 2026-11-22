@@ -244,6 +244,12 @@ function bindDefaults(raw: Record<string, unknown>, at: (path: readonly Property
         fixed(op.manifest.action, ['operations', index, 'manifest', 'action']);
         fixed(op.manifest.values_arg, ['operations', index, 'manifest', 'values_arg']);
         fixed(op.manifest.records_arg, ['operations', index, 'manifest', 'records_arg']);
+        // A check code is a reason code approvers see and stats count (CS-3): one meaning per preset.
+        if (Array.isArray(op.manifest.checks)) {
+          op.manifest.checks.forEach((check: unknown, c) => {
+            if (isRecord(check)) fixed(check.code, ['operations', index, 'manifest', 'checks', c, 'code']);
+          });
+        }
       }
     });
   }

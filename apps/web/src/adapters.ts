@@ -58,6 +58,12 @@ function actionOf(detail: ChangeSetDetail): { action?: 'create' | 'delete' } {
   return detail.action === 'create' || detail.action === 'delete' ? { action: detail.action } : {};
 }
 
+/** CS-3: the check titles only when there are any, so a model without checks is unchanged. */
+function reasonTitlesOf(detail: ChangeSetDetail): { reasonTitles?: Record<string, string> } {
+  const titles = detail.reasonTitles;
+  return titles === undefined || Object.keys(titles).length === 0 ? {} : { reasonTitles: titles };
+}
+
 /**
  * The requester's model. Permissions come from the server's viewer block; the page has no cancel
  * route in this phase, and it is the page itself, so there is no `pageUrl`.
@@ -69,6 +75,7 @@ export function toChangeSetModel(detail: ChangeSetDetail, items: ItemsPage, filt
     id: detail.id,
     kind,
     ...actionOf(detail),
+    ...reasonTitlesOf(detail),
     ...(kind === 'opaque' ? { args: detail.request.args } : {}),
     operation: { id: operation.id, ...(operation.title === undefined ? {} : { title: operation.title }) },
     status: detail.status,
@@ -109,6 +116,7 @@ export function toApprovalModel(
     id: detail.id,
     kind: detail.kind ?? 'diff',
     ...actionOf(detail),
+    ...reasonTitlesOf(detail),
     status: detail.status,
     ...(detail.hash === undefined ? {} : { hash: detail.hash }),
     operation: detail.operation,

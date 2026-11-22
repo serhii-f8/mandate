@@ -904,6 +904,13 @@ roles:
       ['operations[*].fields_arg', 'fields', '    fields_arg: fields\n', '    fields_arg: { $param: p }\n', 'operations[0].fields_arg'],
       ['operations[*].manifest.action', 'update', '      values_arg: changes\n', '      action: { $param: p }\n      values_arg: changes\n', 'operations[2].manifest.action'],
       ['operations[*].manifest.values_arg', 'changes', '      values_arg: changes\n', '      values_arg: { $param: p }\n', 'operations[2].manifest.values_arg'],
+      [
+        'operations[*].manifest.checks[*].code',
+        'locked',
+        '      values_arg: changes\n',
+        '      values_arg: changes\n      checks: [{ code: { $param: p }, require: [{ present: { after: tags } }] }]\n',
+        'operations[2].manifest.checks[0].code',
+      ],
       ['test.operation', 'fixture.search', 'operations:\n', 'test: { operation: { $param: p }, args: { page: 1, per_page: 1, fields: [id] } }\noperations:\n', 'test.operation'],
     ] as const;
     for (const [node, value, from, to, path] of cases) {

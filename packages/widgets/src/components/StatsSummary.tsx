@@ -4,7 +4,8 @@ import type { ReactElement } from 'react';
 import { formatDateTime, plural, shortHash } from '../format.js';
 import type { StatsModel } from '../model.js';
 
-const REASON_ORDER = ['not_found', 'out_of_scope', 'missing_data', 'no_change', 'requester'];
+/** The built-in exclusion reasons in their fixed order (core `BUILTIN_EXCLUSION_REASONS`); check codes (CS-3) follow by code. */
+const REASON_ORDER = ['not_found', 'out_of_scope', 'missing_data', 'no_change', 'already_exists', 'requester'];
 
 function reasonList(excluded: Record<string, number>): string[] {
   const present = Object.keys(excluded).filter((r) => (excluded[r] ?? 0) > 0);

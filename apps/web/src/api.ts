@@ -110,6 +110,8 @@ export interface ChangeSetDetail {
   kind?: 'opaque' | 'diff';
   /** What the change-set does to its targets; absent means `update`. */
   action?: 'update' | 'create' | 'delete';
+  /** CS-3: titles of the operation's check codes, a label beside an item's stored reason. */
+  reasonTitles?: Record<string, string>;
   operation: { id: string; title?: string; description?: string; risk?: string };
   connection: string;
   request: { args: Record<string, unknown>; requester: string; clientId?: string; createdAt: string; submittedAt?: string };

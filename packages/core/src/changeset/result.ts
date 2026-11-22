@@ -2,17 +2,17 @@
 // Copyright 2026 The Mandate Authors
 import type { InvocationResult } from '../operation-invoker.js';
 import { READ_RESULT_TEXT, readErrorResult } from '../read-result.js';
-import type { ChangeItemRecord, ChangeSetRecord, ExclusionReason } from './model.js';
+import { BUILTIN_EXCLUSION_REASONS, type ChangeItemRecord, type ChangeSetRecord, type ExclusionReason } from './model.js';
 import type { ChangeSetKind } from './opaque.js';
 
-const EXCLUSION_ORDER: readonly ExclusionReason[] = [
-  'not_found',
-  'out_of_scope',
-  'missing_data',
-  'no_change',
-  'already_exists',
-  'requester',
-];
+/** The built-in reasons in their fixed order, then the check codes (CS-3) by code. */
+function exclusionOrder(excluded: Readonly<Record<string, number>>): ExclusionReason[] {
+  const builtin: readonly string[] = BUILTIN_EXCLUSION_REASONS;
+  const custom = Object.keys(excluded)
+    .filter((r) => !builtin.includes(r))
+    .sort();
+  return [...BUILTIN_EXCLUSION_REASONS, ...custom];
+}
 
 /** Fixed change-set result wording (design §6.1), kept in one place so tests compare the same strings. */
 export const CHANGESET_TEXT = {
@@ -54,11 +54,12 @@ export function preparedResult(
   nextCursor?: string,
   kind: ChangeSetKind = 'diff',
 ): InvocationResult {
-  const reasons = EXCLUSION_ORDER.flatMap((r) => {
+  const order = exclusionOrder(cs.stats.excluded);
+  const reasons = order.flatMap((r) => {
     const n = cs.stats.excluded[r] ?? 0;
     return n > 0 ? [`${r} ${String(n)}`] : [];
   });
-  const excludedTotal = EXCLUSION_ORDER.reduce((sum, r) => sum + (cs.stats.excluded[r] ?? 0), 0);
+  const excludedTotal = order.reduce((sum, r) => sum + (cs.stats.excluded[r] ?? 0), 0);
   const reasonPart = reasons.length > 0 ? ` (${reasons.join(', ')})` : '';
   const text =
     `${cs.operation} prepared change-set ${cs.id}: ${String(cs.stats.included)} change(s) to apply, ` +

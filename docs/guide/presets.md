@@ -146,10 +146,10 @@ connections:
   `test`. A list value replaces the node as a whole (here the whole `enum`); it is not spliced into a
   surrounding list. Any other mapping, including one with `$param` and other keys, stays as it is.
 - The nodes that name an operation or its field list cannot be parameters: `operations[*].id`,
-  `operations[*].fields_arg`, `operations[*].manifest.action`, `operations[*].manifest.values_arg`, `operations[*].manifest.records_arg` and `test.operation`. A
+  `operations[*].fields_arg`, `operations[*].manifest.action`, `operations[*].manifest.values_arg`, `operations[*].manifest.records_arg`, `operations[*].manifest.checks[*].code` and `test.operation`. A
   `{ $param }` there is refused in the preset file (`must not be a parameter`), so a connection
-  cannot rename an operation, retarget the test, or move the fields that grants and approval rules
-  read.
+  cannot rename an operation, retarget the test, move the fields that grants and approval rules
+  read, or rename the reason code approvers see and stats count.
 - Substitution happens before the operation schema is checked, once per connection: two connections
   can bind the same preset with different values (with `operation_prefix`). The published preset
   format schema, `packages/config/schema/mandate-preset.v1.json`, describes the file after
@@ -202,6 +202,24 @@ The argument's items must be closed objects; `ids_arg` and `selector` are not us
 A delete always needs approval and step-up authentication. A create is undone by naming a delete
 operation as its `inverse_operation`, a delete by naming a create; rolling back a delete restores only
 the manifest's `fields`. `action` is fixed in the preset file and cannot be a `$param`.
+
+`checks` (since 1.2.0) exclude records that fail a business precondition during preparation, each
+with its own reason code. A check is a `code`, an optional `title` and a list of predicates from a
+closed set (`present`, `absent`, `equals`, `in`, `found`, `not_found`) over the change's values, the
+current record, the call arguments and lookups; there are no expressions:
+
+```yaml
+manifest:
+  # ...
+  checks:
+    - code: archived
+      title: Note is archived
+      require:
+        - { equals: [{ record: archived }, { value: false }] }
+```
+
+A check `code` cannot be a `$param`; the literals a check compares against can. The keys and
+predicates are in the [Configuration reference](configuration.md).
 
 ### Code operations
 

@@ -26,6 +26,11 @@ function actionOf(action: 'update' | 'create' | 'delete' | undefined): { action?
   return action === 'create' || action === 'delete' ? { action } : {};
 }
 
+/** CS-3: the check titles only when there are any, so a model without checks is unchanged. */
+function reasonTitlesOf(titles: Record<string, string> | undefined): { reasonTitles?: Record<string, string> } {
+  return titles === undefined || Object.keys(titles).length === 0 ? {} : { reasonTitles: titles };
+}
+
 function toItemRow(row: ItemAnswer): ItemRowModel {
   return {
     targetId: row.targetId,
@@ -144,6 +149,7 @@ export function fromReviewChangeset(structured: unknown, filter?: ItemFilter): A
     id: detail.id,
     kind: detail.kind ?? 'diff',
     ...actionOf(detail.action),
+    ...reasonTitlesOf(detail.reasonTitles),
     status: detail.status,
     ...(detail.hash === undefined ? {} : { hash: detail.hash }),
     operation: {

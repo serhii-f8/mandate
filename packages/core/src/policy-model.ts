@@ -43,9 +43,42 @@ export interface ManifestRead {
 /** What a manifest operation does to its targets (OPS-2, CS-4); absent on a manifest means `update`. */
 export type ManifestAction = 'update' | 'create' | 'delete';
 
+/** A literal a preparation check compares against (CS-3). */
+export type CheckLiteral = string | number | boolean | null;
+
+/**
+ * What a check predicate reads (CS-3, ADR 0072): a field of the item's `after` or `before` side, of
+ * the current upstream record, a call argument, or a field of a lookup result (OPS-7).
+ */
+export type CheckRef =
+  | { readonly after: string }
+  | { readonly before: string }
+  | { readonly record: string }
+  | { readonly arg: string }
+  | { readonly lookup: string; readonly field: string };
+
+/** One predicate of the closed set (CS-3); no expressions. */
+export type CheckPredicate =
+  | { readonly present: CheckRef }
+  | { readonly absent: CheckRef }
+  | { readonly equals: readonly [CheckRef, CheckRef | { readonly value: CheckLiteral }] }
+  | { readonly in: CheckRef; readonly values: readonly Exclude<CheckLiteral, null>[] }
+  | { readonly found: string }
+  | { readonly not_found: string };
+
+/** A preparation check: an item failing one of `require` is excluded with reason `code` (CS-3). */
+export interface ManifestCheck {
+  readonly code: string;
+  /** Plain text from configuration, shown beside the code. */
+  readonly title?: string;
+  readonly require: readonly CheckPredicate[];
+}
+
 export interface ManifestDefinition {
   /** Absent means `update`. Sealed into the change-set hash from version 2 on (CS-4). */
   readonly action?: ManifestAction;
+  /** Preparation checks in order (CS-3, ADR 0072); absent means none. */
+  readonly checks?: readonly ManifestCheck[];
   readonly idField: string;
   readonly idsArg?: string;
   /** Argument holding one values object for every target (CS-2). The alternative to `recordsArg`. */

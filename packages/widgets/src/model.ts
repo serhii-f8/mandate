@@ -65,6 +65,8 @@ export interface ChangeSetViewModel {
   errorCode?: string;
   derivedFrom?: string;
   rollback: { available: boolean; count?: number; until?: string; stats?: { restored: number; skipped: number; failed: number } };
+  /** CS-3: titles of check codes from the current configuration, shown beside an item's stored reason. */
+  reasonTitles?: Record<string, string>;
   pageUrl?: string;
   permissions: { canExclude: boolean; canSubmit: boolean; canCancel: boolean };
 }
@@ -92,6 +94,8 @@ export interface ApprovalViewModel {
   approval?: ApprovalStateModel;
   sample: { seed: string; items: ItemRowModel[] };
   items: ItemsPageModel;
+  /** CS-3: titles of check codes from the current configuration, shown beside an item's stored reason. */
+  reasonTitles?: Record<string, string>;
   itemFilter?: ItemFilter;
   viewer: {
     channel: 'page' | 'widget';

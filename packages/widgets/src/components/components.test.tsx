@@ -94,6 +94,28 @@ describe('components', () => {
     expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
   });
 
+  it('CS-3 an item excluded by a check shows its title beside the code; without a title the code', () => {
+    render(
+      <>
+        <ItemTable rows={[row({ targetId: 'A', status: 'excluded', reason: 'locked' })]} reasonTitles={{ locked: 'Note is locked' }} />
+        <ItemTable rows={[row({ targetId: 'B', status: 'excluded', reason: 'locked' })]} />
+        <ItemTable rows={[row({ targetId: 'C', status: 'excluded', reason: 'stale' })]} reasonTitles={{ locked: 'Note is locked' }} />
+      </>,
+    );
+    expect(screen.getByText('excluded: Note is locked (locked)')).toBeTruthy();
+    expect(screen.getByText('excluded: locked')).toBeTruthy();
+    expect(screen.getByText('excluded: stale')).toBeTruthy();
+  });
+
+  it('CS-3 the stats summary lists check codes after the built-ins, by code', () => {
+    const { container } = render(
+      <StatsSummary
+        stats={{ total: 7, included: 1, excluded: { stale: 1, locked: 2, requester: 1, already_exists: 1, not_found: 1 }, written: 0, failed: 0, skipped: 0 }}
+      />,
+    );
+    expect(container.textContent).toContain('6 excluded (not_found 1, already_exists 1, requester 1, locked 2, stale 1)');
+  });
+
   it('UI-3 a failed item shows its error code', () => {
     render(<ItemTable rows={[row({ status: 'failed', error: 'UPSTREAM_REJECTED' })]} />);
     expect(screen.getByText('UPSTREAM_REJECTED')).toBeTruthy();

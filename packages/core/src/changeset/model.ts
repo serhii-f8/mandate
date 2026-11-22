@@ -22,15 +22,32 @@ export type ChangeSetStatus =
 export type ItemStatus = 'pending' | 'excluded' | 'written' | 'failed' | 'skipped';
 
 /**
- * `requester`: excluded by the requester when deriving a change-set (CS-5). `already_exists`: a
- * create whose record is already upstream (OPS-2, ADR 0071).
+ * The built-in exclusion reasons, in display order. `requester`: excluded by the requester when
+ * deriving a change-set (CS-5). `already_exists`: a create whose record is already upstream (OPS-2,
+ * ADR 0071).
  */
-export type ExclusionReason = 'not_found' | 'out_of_scope' | 'missing_data' | 'no_change' | 'already_exists' | 'requester';
+export const BUILTIN_EXCLUSION_REASONS = [
+  'not_found',
+  'out_of_scope',
+  'missing_data',
+  'no_change',
+  'already_exists',
+  'requester',
+] as const;
+
+export type BuiltinExclusionReason = (typeof BUILTIN_EXCLUSION_REASONS)[number];
+
+/**
+ * A built-in reason or the `code` of a manifest's preparation check (CS-3, ADR 0072). Code that shows
+ * or counts reasons handles any string: an unknown code is shown as it is.
+ */
+export type ExclusionReason = BuiltinExclusionReason | (string & {});
 
 export interface ChangeSetStats {
   readonly total: number;
   readonly included: number;
-  readonly excluded: Readonly<Partial<Record<ExclusionReason, number>>>;
+  /** Excluded items per reason: the built-ins and any check code (CS-3); a reason with none is absent. */
+  readonly excluded: Readonly<Record<string, number>>;
   readonly written: number;
   readonly failed: number;
   readonly skipped: number;

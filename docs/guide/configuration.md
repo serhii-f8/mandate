@@ -155,6 +155,47 @@ operations:
       rollback: { strategy: replay_previous_state }
 ```
 
+`manifest.checks` (since 1.2.0, optional, at most 20) are preparation checks, evaluated in order on
+every item that passed the built-in exclusions (`not_found`, `out_of_scope`, `missing_data`,
+`no_change`, `already_exists`). The first check with a predicate that does not hold excludes the item
+with its `code`, keeping its `before` and `after`. Checks run at preparation only.
+
+| Key | Type | Default | Bounds / notes |
+| --- | --- | --- | --- |
+| `code` | string | required | `^[a-z][a-z0-9_]{0,62}$`, unique within the manifest, not a built-in reason (`not_found`, `out_of_scope`, `missing_data`, `no_change`, `already_exists`, `requester`). The reason approvers see and stats count; a fixed node in presets |
+| `title` | string | none | 1-120 characters of plain text, shown beside the code on the approval page and in the widget |
+| `require` | list | required | 1-10 predicates, all of which must hold |
+
+Each predicate is an object with exactly one predicate key. A reference is `{ after: f }` or
+`{ before: f }` (a field of `fields`; the side is `null` for a create's `before` and a delete's
+`after`), `{ record: f }` (the current upstream record, which a create does not have; the field is
+added to the `read_before` read and must be one it can return), `{ arg: name }` (a property of
+`input_schema`) or `{ lookup: name, field: f }`.
+
+| Predicate | Holds when |
+| --- | --- |
+| `{ present: <ref> }` | The value is not `null`, not missing and not `''` |
+| `{ absent: <ref> }` | `present` does not hold |
+| `{ equals: [<ref>, <ref> \| { value: <literal> }] }` | Both sides are equal as canonical JSON; `null` and missing are equal. A value that cannot be compared makes it false |
+| `{ in: <ref>, values: [<literal>, ...] }` | The value is strictly one of 1-100 literals (string, number or boolean; no type coercion) |
+| `{ found: <lookup> }` / `{ not_found: <lookup> }` | The lookup has, or has no, result for the item |
+
+Lookups arrive in a later change of 1.2.0; until then a lookup reference, `found` and `not_found` are
+refused as `is not a declared lookup`.
+
+```yaml
+    manifest:
+      # ...
+      checks:
+        - code: locked
+          title: Product is locked for editing
+          require:
+            - { equals: [{ record: locked }, { value: false }] }
+        - code: inactive
+          require:
+            - { in: { record: status }, values: [1] }
+```
+
 The `read_before` operation must be an enabled read operation that declares `fields_arg`; that
 argument must be a required property of its `input_schema` and equal `upstream.response.fields_from_arg`.
 A grant

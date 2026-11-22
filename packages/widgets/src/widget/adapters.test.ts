@@ -54,6 +54,15 @@ describe('widget adapters', () => {
     expect(old.kind === 'view' && 'action' in old.model).toBe(false);
   });
 
+  it('CS-3 the reason titles of a review detail reach the approval model; older answers still parse', () => {
+    const rv = review.structuredContent;
+    const titled = { ...answer(review), structuredContent: { ...rv, detail: { ...rv.detail, reasonTitles: { locked: 'Note is locked' } } } };
+    const a = parseApprovalTrigger(titled);
+    expect(a.kind === 'view' && a.model.reasonTitles).toEqual({ locked: 'Note is locked' });
+    const old = parseApprovalTrigger(answer(review));
+    expect(old.kind === 'view' && 'reasonTitles' in old.model).toBe(false);
+  });
+
   it('UI-1 a prepared result and a get_changeset answer become a view model', () => {
     const fromPrepared = parseChangeSetTrigger(answer(prepared));
     expect(fromPrepared.kind).toBe('view');

@@ -740,3 +740,116 @@ describe('AUD-4 manifest sensitive_fields', () => {
     expect([...config.sensitiveFields]).toEqual(['description']);
   });
 });
+
+describe('CS-3 manifest checks', () => {
+  const withChecks = (t: string, checks: string): string => t.replace('      rollback:', `      checks:\n${checks}      rollback:`);
+  const check = (require: string, code = 'locked'): string => `        - { code: ${code}, require: [${require}] }\n`;
+  const C = `${M}.checks`;
+
+  it('CS-3 converts checks to the core type; a manifest without checks has none', async () => {
+    const text = withChecks(
+      WRITE,
+      '        - code: locked\n' +
+        '          title: Note is locked\n' +
+        '          require:\n' +
+        '            - { equals: [{ record: status }, { value: null }] }\n' +
+        '            - { present: { after: name } }\n' +
+        '            - { absent: { before: description } }\n' +
+        '        - { code: brand_known, require: [{ in: { arg: brand }, values: [acme, 1, true] }, { equals: [{ after: name }, { record: name }] }] }\n',
+    );
+    const config = ok(await load({ 'write.yaml': text }));
+    expect(config.policy.operations.find((o) => o.id === 'catalog.update_content')?.manifest?.checks).toEqual([
+      {
+        code: 'locked',
+        title: 'Note is locked',
+        require: [{ equals: [{ record: 'status' }, { value: null }] }, { present: { after: 'name' } }, { absent: { before: 'description' } }],
+      },
+      { code: 'brand_known', require: [{ in: { arg: 'brand' }, values: ['acme', 1, true] }, { equals: [{ after: 'name' }, { record: 'name' }] }] },
+    ]);
+    const plain = ok(await load());
+    expect(plain.policy.operations.find((o) => o.id === 'catalog.update_content')?.manifest).not.toHaveProperty('checks');
+  });
+
+  it('CS-3 at most 20 checks', async () => {
+    const many = (n: number): string => Array.from({ length: n }, (_, i) => check('{ present: { after: name } }', `c${String(i)}`)).join('');
+    ok(await load({ 'write.yaml': withChecks(WRITE, many(20)) }));
+    await expectIssue((t) => withChecks(t, many(21)), C, 'c20');
+  });
+
+  it('CS-3 a code matches ^[a-z][a-z0-9_]{0,62}$', async () => {
+    ok(await load({ 'write.yaml': withChecks(WRITE, check('{ present: { after: name } }', `a${'b'.repeat(62)}`)) }));
+    for (const code of ['Locked', '1locked', 'lock-ed', `a${'b'.repeat(63)}`]) {
+      await expectIssue((t) => withChecks(t, check('{ present: { after: name } }', code)), `${C}[0].code`, code);
+    }
+  });
+
+  it('CS-3 a code is not a built-in reason', async () => {
+    for (const code of ['not_found', 'out_of_scope', 'missing_data', 'no_change', 'already_exists', 'requester']) {
+      const issue = await expectIssue((t) => withChecks(t, check('{ present: { after: name } }', code)), `${C}[0].code`, code);
+      expect(issue.message).toBe('must not be a built-in exclusion reason');
+    }
+  });
+
+  it('CS-3 codes are unique', async () => {
+    const issue = await expectIssue((t) => withChecks(t, check('{ present: { after: name } }') + check('{ absent: { after: name } }')), `${C}[1].code`, 'locked');
+    expect(issue.message).toBe('must be unique among the checks');
+  });
+
+  it('CS-3 a title has 1 to 120 characters', async () => {
+    const titled = (title: string): string => `        - { code: locked, title: "${title}", require: [{ present: { after: name } }] }\n`;
+    ok(await load({ 'write.yaml': withChecks(WRITE, titled('t'.repeat(120))) }));
+    await expectIssue((t) => withChecks(t, titled('')), `${C}[0].title`, 'locked');
+    await expectIssue((t) => withChecks(t, titled('t'.repeat(121))), `${C}[0].title`, 'ttt');
+  });
+
+  it('CS-3 require has 1 to 10 predicates', async () => {
+    const preds = (n: number): string => Array.from({ length: n }, () => '{ present: { after: name } }').join(', ');
+    ok(await load({ 'write.yaml': withChecks(WRITE, check(preds(10))) }));
+    await expectIssue((t) => withChecks(t, check('')), `${C}[0].require`, 'locked');
+    await expectIssue((t) => withChecks(t, check(preds(11))), `${C}[0].require`, 'locked');
+  });
+
+  it('CS-3 in comes with 1 to 100 literal values', async () => {
+    const values = (n: number): string => Array.from({ length: n }, (_, i) => String(i)).join(', ');
+    ok(await load({ 'write.yaml': withChecks(WRITE, check(`{ in: { record: status }, values: [${values(100)}] }`)) }));
+    await expectIssue((t) => withChecks(t, check('{ in: { record: status }, values: [] }')), `${C}[0].require[0].values`, 'status');
+    await expectIssue((t) => withChecks(t, check(`{ in: { record: status }, values: [${values(101)}] }`)), `${C}[0].require[0]`, 'status');
+    await expectIssue((t) => withChecks(t, check('{ in: { record: status }, values: [null] }')), `${C}[0].require[0]`, 'status');
+    await expectIssue((t) => withChecks(t, check('{ in: { record: status } }')), `${C}[0].require[0]`, 'status');
+    await expectIssue((t) => withChecks(t, check('{ present: { record: status }, values: [1] }')), `${C}[0].require[0]`, 'status');
+  });
+
+  it('CS-3 a predicate object has exactly one predicate key', async () => {
+    await expectIssue((t) => withChecks(t, check('{ present: { after: name }, absent: { after: description } }')), `${C}[0].require[0]`, 'name');
+    await expectIssue((t) => withChecks(t, check('{ matches: { after: name } }')), `${C}[0].require[0]`, 'matches');
+    await expectIssue((t) => withChecks(t, check('{}')), `${C}[0].require[0]`, 'locked');
+  });
+
+  it('CS-3 a record field must be one the read operation can return', async () => {
+    const issue = await expectIssue((t) => withChecks(t, check('{ present: { record: colour } }')), `${C}[0].require[0].present.record`, 'colour');
+    expect(issue.message).toBe('is not a field operation catalog.get_products_by_sku can return');
+    await expectIssue((t) => withChecks(t, check('{ equals: [{ after: name }, { record: colour }] }')), `${C}[0].require[0].equals[1].record`, 'colour');
+    await expectIssue((t) => withChecks(t, check('{ in: { record: colour }, values: [1] }')), `${C}[0].require[0].in.record`, 'colour');
+    // Without an enum on the read's field list nothing is checked.
+    ok(await load({ 'reads.yaml': READS.replace(`items: { enum: ${FIELD_ENUM} }`, 'items: { type: string }'), 'write.yaml': withChecks(WRITE, check('{ present: { record: colour } }')) }));
+  });
+
+  it('CS-3 after and before name one of fields', async () => {
+    const after = await expectIssue((t) => withChecks(t, check('{ present: { after: price } }')), `${C}[0].require[0].present.after`, 'price');
+    expect(after.message).toBe('must be one of fields');
+    await expectIssue((t) => withChecks(t, check('{ absent: { before: price } }')), `${C}[0].require[0].absent.before`, 'price');
+  });
+
+  it('CS-3 an arg names a property of input_schema', async () => {
+    const issue = await expectIssue((t) => withChecks(t, check('{ equals: [{ arg: store }, { value: 1 }] }')), `${C}[0].require[0].equals[0].arg`, 'store');
+    expect(issue.message).toBe('is not a property of input_schema');
+    ok(await load({ 'write.yaml': withChecks(WRITE, check('{ equals: [{ arg: brand }, { value: acme }] }')) }));
+  });
+
+  it('CS-3 OPS-7 lookup references, found and not_found name a declared lookup', async () => {
+    const ref = await expectIssue((t) => withChecks(t, check('{ present: { lookup: erp, field: cost } }')), `${C}[0].require[0].present.lookup`, 'erp');
+    expect(ref.message).toBe('is not a declared lookup');
+    await expectIssue((t) => withChecks(t, check('{ found: erp }')), `${C}[0].require[0].found`, 'erp');
+    await expectIssue((t) => withChecks(t, check('{ not_found: erp }')), `${C}[0].require[0].not_found`, 'erp');
+  });
+});

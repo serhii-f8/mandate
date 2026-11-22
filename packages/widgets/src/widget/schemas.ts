@@ -96,6 +96,8 @@ const detailSchema = z.object({
   hash: z.string().optional(),
   kind: z.enum(['opaque', 'diff']).optional(),
   action: z.enum(['update', 'create', 'delete']).optional(),
+  /** CS-3: absent in answers from before 1.2.0. */
+  reasonTitles: z.record(z.string(), z.string()).optional(),
   operation: z.object({ id: z.string(), title: z.string().optional(), description: z.string().optional(), risk: z.string().optional() }),
   request: z.object({
     args: z.record(z.string(), z.unknown()),

@@ -196,6 +196,82 @@ describe('OPS-2 CS-3 delete items', () => {
   });
 });
 
+describe('CS-3 preparation checks in item building', () => {
+  const locked: ManifestDefinition = {
+    ...manifest,
+    checks: [{ code: 'locked', title: 'Note is locked', require: [{ equals: [{ record: 'locked' }, { value: false }] }] }],
+  };
+
+  it('CS-3 an update item that would be pending and fails a check is excluded with its code, keeping before and after', () => {
+    const items = build(
+      [
+        { sku: 'A', brand: 'acme', description: 'old', locked: true },
+        { sku: 'B', brand: 'acme', description: 'old', locked: false },
+      ],
+      ['A', 'B'],
+      locked,
+    );
+    expect(items).toEqual([
+      { targetId: 'A', status: 'excluded', reason: 'locked', before: { description: 'old' }, after: { description: 'new' } },
+      { targetId: 'B', status: 'pending', before: { description: 'old' }, after: { description: 'new' } },
+    ]);
+  });
+  it('CS-3 the built-in exclusions come first: a no_change item keeps no_change', () => {
+    expect(build([{ sku: 'A', brand: 'acme', description: 'new', locked: true }], ['A'], locked)[0]?.reason).toBe('no_change');
+    expect(build([], ['A'], locked)[0]?.reason).toBe('not_found');
+  });
+  it('CS-3 a create item is checked with no current record and a null before side', () => {
+    const m: ManifestDefinition = {
+      action: 'create',
+      idField: 'sku',
+      recordsArg: 'records',
+      fields: ['name'],
+      requiredFields: [],
+      scopeArgs: {},
+      readBefore: { operation: 'read', args: {}, idsArg: 'ids' },
+      batchSize: 50,
+      maxTargets: 100,
+      rollback: { strategy: 'none' },
+      checks: [
+        { code: 'has_record', require: [{ absent: { record: 'sku' } }, { absent: { before: 'name' } }] },
+        { code: 'named', require: [{ present: { after: 'name' } }] },
+      ],
+    };
+    const items = build([], ['n1', 'n2'], m, { records: [{ sku: 'n1', name: 'N' }, { sku: 'n2', name: '' }] });
+    expect(items).toEqual([
+      { targetId: 'n1', status: 'pending', before: null, after: { name: 'N' } },
+      { targetId: 'n2', status: 'excluded', reason: 'named', before: null, after: { name: '' } },
+    ]);
+  });
+  it('CS-3 a delete item is checked with a null after side and its lookups', () => {
+    const m: ManifestDefinition = {
+      action: 'delete',
+      idField: 'sku',
+      idsArg: 'skus',
+      fields: ['name'],
+      requiredFields: [],
+      scopeArgs: {},
+      readBefore: { operation: 'read', args: {}, idsArg: 'ids' },
+      batchSize: 50,
+      maxTargets: 100,
+      rollback: { strategy: 'none' },
+      checks: [{ code: 'in_erp', require: [{ absent: { after: 'name' } }, { found: 'erp' }] }],
+    };
+    const items = buildItems({
+      manifest: m,
+      args: { skus: ['A', 'B'] },
+      targetIds: ['A', 'B'],
+      records: [{ sku: 'A', name: 'a' }, { sku: 'B', name: 'b' }],
+      lookups: (targetId) => (targetId === 'A' ? { erp: { cost: 1 } } : { erp: undefined }),
+    });
+    expect(items.map((i) => [i.status, i.reason])).toEqual([
+      ['pending', undefined],
+      ['excluded', 'in_erp'],
+    ]);
+    expect(items[1]).toMatchObject({ before: { name: 'b' }, after: null });
+  });
+});
+
 describe('CS-3 excluded targets', () => {
   it('CS-3 not_found', () => {
     expect(build([], ['B'])[0]).toEqual({ targetId: 'B', status: 'excluded', reason: 'not_found', before: null, after: null });

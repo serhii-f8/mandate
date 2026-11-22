@@ -96,6 +96,7 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
         <ItemTable
           rows={pages.page.items}
           {...(data.action === undefined ? {} : { action: data.action })}
+          {...(data.reasonTitles === undefined ? {} : { reasonTitles: data.reasonTitles })}
           {...(loaded.current.has(key) && !pages.busy && pages.error === undefined
             ? { empty: tab === 'failed' ? 'No failed items.' : 'No skipped items.' }
             : {})}

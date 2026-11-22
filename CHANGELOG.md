@@ -22,6 +22,9 @@ Upgrade every `api` and `worker` before preparing new change-sets. See
 - The approval page and widget, the detail answer and the prepared result name the action: a `new` or
   `delete` badge, a dash for the missing side, and `Approve creating N records` / `Approve deleting N
   records` on the approve control (APR-5, APR-6, MCP-4, ADR 0071).
+- `manifest.checks` exclude, during preparation, items that fail a precondition built from a closed
+  predicate set (`present`, `absent`, `equals`, `in`, `found`, `not_found`), with the check's own
+  reason code; the views show its `title` beside the code (CS-3, ADR 0072).
 
 ## 1.1.0
 

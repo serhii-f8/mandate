@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import type { ManifestDefinition } from '../policy-model.js';
+import { failedCheck, type CheckContext } from './checks.js';
 import { callRecords, manifestAction } from './fields.js';
 import type { ChangeItemRecord, ExclusionReason } from './model.js';
 
@@ -60,6 +61,28 @@ export function inScope(
   return true;
 }
 
+/** Each declared lookup's result for one target (OPS-7); supplied by preparation, `{}` without lookups. */
+export type ItemLookups = (targetId: string) => CheckContext['lookups'];
+
+/**
+ * CS-3: an item that passed the built-in exclusions and fails a preparation check is excluded with
+ * the check's code, keeping its values; the check inputs themselves are not stored (SEC-3).
+ */
+function checked(
+  manifest: ManifestDefinition,
+  item: ChangeItemRecord,
+  ctx: Omit<CheckContext, 'before' | 'after'>,
+): ChangeItemRecord {
+  const checks = manifest.checks ?? [];
+  if (item.status !== 'pending' || checks.length === 0) return item;
+  const code = failedCheck(checks, { ...ctx, before: sideOf(item.before), after: sideOf(item.after) });
+  return code === undefined ? item : excluded(item.targetId, code, item.before, item.after);
+}
+
+function sideOf(v: unknown): Readonly<Record<string, unknown>> | null {
+  return isRecord(v) ? v : null;
+}
+
 function excluded(
   targetId: string,
   reason: ExclusionReason,
@@ -105,6 +128,8 @@ export function buildItems(input: {
   args: Readonly<Record<string, unknown>>;
   targetIds: readonly string[];
   records: readonly Record<string, unknown>[];
+  /** Lookup results per target for the checks (OPS-7); absent means none. */
+  lookups?: ItemLookups;
 }): ChangeItemRecord[] {
   const { manifest, args, targetIds, records } = input;
   const byId = new Map<string, Record<string, unknown>>();
@@ -117,30 +142,43 @@ export function buildItems(input: {
   // One values object for every target, or each target's own record (CS-2).
   const perRecord = callRecords(manifest, args);
   const action = manifestAction(manifest);
-  if (action === 'create') return targetIds.map((targetId) => createItem(manifest, args, targetId, byId.get(targetId), perRecord));
-  const shared = valuesOf(manifest, args);
-  const sharedFields = valuesFields(manifest, shared);
-
-  return targetIds.map((targetId): ChangeItemRecord => {
+  const lookups = input.lookups ?? (() => ({}));
+  return targetIds.map((targetId) => {
     const record = byId.get(targetId);
-    if (record === undefined) return excluded(targetId, 'not_found');
-    if (!inScope(manifest, args, record)) return excluded(targetId, 'out_of_scope');
-    if (missingRequired(manifest, record)) return excluded(targetId, 'missing_data');
-    if (action === 'delete') {
-      // What the approver sees and what drift compares: every manifest field, missing as null (OPS-2).
-      const before: Record<string, unknown> = {};
-      for (const f of manifest.fields) before[f] = record[f] ?? null;
-      return { targetId, status: 'pending', before, after: null };
-    }
-    const values = perRecord === undefined ? shared : (perRecord.get(targetId) ?? {});
-    const fields = perRecord === undefined ? sharedFields : valuesFields(manifest, values);
-    const before: Record<string, unknown> = {};
-    const after: Record<string, unknown> = {};
-    for (const f of fields) {
-      before[f] = record[f] ?? null;
-      after[f] = values[f];
-    }
-    if (fields.every((f) => deepEqual(before[f], after[f]))) return excluded(targetId, 'no_change', before, after);
-    return { targetId, status: 'pending', before, after };
+    const item =
+      action === 'create'
+        ? createItem(manifest, args, targetId, record, perRecord)
+        : existingItem(manifest, args, targetId, record, perRecord, action);
+    return checked(manifest, item, { record, args, lookups: lookups(targetId) });
   });
+}
+
+/** The item of one update or delete target, from the current record (CS-2, CS-3, OPS-2). */
+function existingItem(
+  manifest: ManifestDefinition,
+  args: Readonly<Record<string, unknown>>,
+  targetId: string,
+  record: Readonly<Record<string, unknown>> | undefined,
+  perRecord: ReadonlyMap<string, Readonly<Record<string, unknown>>> | undefined,
+  action: 'update' | 'delete',
+): ChangeItemRecord {
+  if (record === undefined) return excluded(targetId, 'not_found');
+  if (!inScope(manifest, args, record)) return excluded(targetId, 'out_of_scope');
+  if (missingRequired(manifest, record)) return excluded(targetId, 'missing_data');
+  if (action === 'delete') {
+    // What the approver sees and what drift compares: every manifest field, missing as null (OPS-2).
+    const before: Record<string, unknown> = {};
+    for (const f of manifest.fields) before[f] = record[f] ?? null;
+    return { targetId, status: 'pending', before, after: null };
+  }
+  const values = perRecord === undefined ? valuesOf(manifest, args) : (perRecord.get(targetId) ?? {});
+  const fields = valuesFields(manifest, values);
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+  for (const f of fields) {
+    before[f] = record[f] ?? null;
+    after[f] = values[f];
+  }
+  if (fields.every((f) => deepEqual(before[f], after[f]))) return excluded(targetId, 'no_change', before, after);
+  return { targetId, status: 'pending', before, after };
 }

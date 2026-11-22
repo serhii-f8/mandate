@@ -7,7 +7,7 @@ import type { ManifestDefinition, OperationDefinition } from '../policy-model.js
 import { compareTargetIds, normalizeArgs } from './canonical.js';
 import { ChangeSetHasher } from './hash.js';
 import { hashStoredItems } from './verify.js';
-import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats, ExclusionReason } from './model.js';
+import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats } from './model.js';
 import type {
   ItemsPageQuery,
   NewChangeSet,
@@ -58,7 +58,7 @@ class FakeRepository implements PreparationRepository {
     return Promise.resolve(n);
   }
   stats(id: string): Promise<ChangeSetStats> {
-    const excluded: Partial<Record<ExclusionReason, number>> = {};
+    const excluded: Record<string, number> = {};
     let included = 0;
     let total = 0;
     for (const item of this.items.get(id)?.values() ?? []) {
@@ -306,6 +306,20 @@ describe('CS-1 CS-2 CS-4 preparation', () => {
     if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
     expect(reader.calls[0]?.args.fields).toEqual(['sku', 'brand', 'description', 'name']);
     expect(out.firstItems.map((i) => i.status)).toEqual(['pending']);
+  });
+
+  it('CS-3 the read requests the record fields of the checks; stats count the custom code', async () => {
+    const reader = new ScriptedReader({ A: { ...product('A'), status: 'locked' }, B: { ...product('B'), status: 'open' } });
+    const { deps } = setup(reader);
+    const checks = [{ code: 'locked', require: [{ in: { record: 'status' }, values: ['open'] }] }];
+    const out = await prepareChangeSet(deps, request(explicitArgs, { checks }));
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(reader.calls[0]?.args.fields).toEqual(['sku', 'brand', 'description', 'status']);
+    expect(out.changeset.stats).toMatchObject({ total: 2, included: 1, excluded: { locked: 1 } });
+    expect(out.firstItems.map((i) => [i.targetId, i.status, i.reason])).toEqual([
+      ['A', 'excluded', 'locked'],
+      ['B', 'pending', undefined],
+    ]);
   });
 
   it('CS-2 firstItems holds at most 20 items in item order', async () => {

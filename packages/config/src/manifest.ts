@@ -5,7 +5,16 @@
  * conversion to the core `ManifestDefinition`, and the loader checks 1–7 that need
  * the registry (enabled read operations and their final input schemas).
  */
-import type { ManifestDefinition, ManifestRead, ManifestTemplate, RollbackStrategy } from '@mandate/core';
+import {
+  BUILTIN_EXCLUSION_REASONS,
+  type CheckPredicate,
+  type CheckRef,
+  type ManifestCheck,
+  type ManifestDefinition,
+  type ManifestRead,
+  type ManifestTemplate,
+  type RollbackStrategy,
+} from '@mandate/core';
 import { z } from 'zod';
 import type { At, RegisteredOperation } from './registry.js';
 import { propertiesOf, requiredOf } from './registry.js';
@@ -23,6 +32,39 @@ const rollback = z.discriminatedUnion('strategy', [
   z.strictObject({ strategy: z.literal('none') }),
   z.strictObject({ strategy: z.literal('inverse_operation'), operation: operationId }),
 ]);
+
+/** What a check predicate reads (CS-3, ADR 0072). */
+const checkRef = z.union([
+  z.strictObject({ after: name }),
+  z.strictObject({ before: name }),
+  z.strictObject({ record: name }),
+  z.strictObject({ arg: name }),
+  z.strictObject({ lookup: name, field: name }),
+]);
+/** A non-null literal of a check; `equals` also takes `null`. */
+const checkLiteral = z.union([z.string().max(4000), z.number(), z.boolean()]);
+
+/** The closed predicate set (CS-3): each a strict object with exactly one predicate key. */
+const checkPredicate = z.union([
+  z.strictObject({ present: checkRef }),
+  z.strictObject({ absent: checkRef }),
+  z.strictObject({ equals: z.tuple([checkRef, z.union([checkRef, z.strictObject({ value: checkLiteral.nullable() })])]) }),
+  z.strictObject({ in: checkRef, values: z.array(checkLiteral).min(1).max(100) }),
+  z.strictObject({ found: name }),
+  z.strictObject({ not_found: name }),
+]);
+
+const builtinReasons: readonly string[] = BUILTIN_EXCLUSION_REASONS;
+
+const manifestCheck = z.strictObject({
+  /** The exclusion reason shown to approvers and counted in stats; a fixed node in presets. */
+  code: z
+    .string()
+    .regex(/^[a-z][a-z0-9_]{0,62}$/)
+    .refine((code) => !builtinReasons.includes(code), 'must not be a built-in exclusion reason'),
+  title: z.string().min(1).max(120).optional(),
+  require: z.array(checkPredicate).min(1).max(10),
+});
 
 export const manifestSchema = z.strictObject({
   /** What the call does to its targets (OPS-2, ADR 0071); a fixed node in presets. */
@@ -54,6 +96,8 @@ export const manifestSchema = z.strictObject({
   max_targets: z.number().int().min(1).max(100_000).default(10_000),
   /** Required: choosing a strategy is a deliberate act (OPS-3). */
   rollback,
+  /** Preparation checks in order (CS-3, ADR 0072): the first failing one excludes the item with its code. */
+  checks: z.array(manifestCheck).max(20).optional(),
 });
 
 export type ManifestConfig = z.output<typeof manifestSchema>;
@@ -85,6 +129,36 @@ function toTemplates(args: Readonly<Record<string, TemplateConfig>>): Record<str
   );
 }
 
+type CheckRefConfig = z.output<typeof checkRef>;
+type CheckPredicateConfig = z.output<typeof checkPredicate>;
+
+function toCheckRef(ref: CheckRefConfig): CheckRef {
+  if ('after' in ref) return { after: ref.after };
+  if ('before' in ref) return { before: ref.before };
+  if ('record' in ref) return { record: ref.record };
+  if ('arg' in ref) return { arg: ref.arg };
+  return { lookup: ref.lookup, field: ref.field };
+}
+
+function toCheckPredicate(p: CheckPredicateConfig): CheckPredicate {
+  if ('present' in p) return { present: toCheckRef(p.present) };
+  if ('absent' in p) return { absent: toCheckRef(p.absent) };
+  if ('equals' in p) {
+    const [left, right] = p.equals;
+    return { equals: [toCheckRef(left), 'value' in right ? { value: right.value } : toCheckRef(right)] };
+  }
+  if ('in' in p) return { in: toCheckRef(p.in), values: [...p.values] };
+  if ('found' in p) return { found: p.found };
+  return { not_found: p.not_found };
+}
+
+function toChecks(checks: ManifestConfig['checks']): { checks?: ManifestCheck[] } {
+  if (checks === undefined) return {};
+  return {
+    checks: checks.map((c) => ({ code: c.code, ...(c.title === undefined ? {} : { title: c.title }), require: c.require.map(toCheckPredicate) })),
+  };
+}
+
 export function toManifestDefinition(m: ManifestConfig): ManifestDefinition {
   const readBefore: ManifestRead & { idsArg: string } = { operation: m.read_before.operation, idsArg: m.read_before.ids_arg, args: toTemplates(m.read_before.args) };
   const strategy: RollbackStrategy = m.rollback.strategy === 'inverse_operation' ? { strategy: 'inverse_operation', operation: m.rollback.operation } : { strategy: m.rollback.strategy };
@@ -113,6 +187,7 @@ export function toManifestDefinition(m: ManifestConfig): ManifestDefinition {
     batchSize: m.batch_size,
     maxTargets: m.max_targets,
     rollback: strategy,
+    ...toChecks(m.checks),
   };
 }
 
@@ -165,6 +240,47 @@ function inverseMessage(wanted: 'create' | 'delete'): string {
   return wanted === 'delete'
     ? 'must name an enabled delete operation of the same connection with the same id_field'
     : 'must name an enabled create operation of the same connection whose manifest lists every field of this one';
+}
+
+/** Every reference of the checks with its path below `manifest` (CS-3). */
+function checkRefsOf(checks: ManifestConfig['checks']): { ref: CheckRefConfig; path: PropertyKey[] }[] {
+  const out: { ref: CheckRefConfig; path: PropertyKey[] }[] = [];
+  (checks ?? []).forEach((check, i) => {
+    check.require.forEach((p, j) => {
+      const at = ['checks', i, 'require', j];
+      if ('present' in p) out.push({ ref: p.present, path: [...at, 'present'] });
+      else if ('absent' in p) out.push({ ref: p.absent, path: [...at, 'absent'] });
+      else if ('in' in p) out.push({ ref: p.in, path: [...at, 'in'] });
+      else if ('equals' in p) {
+        const [left, right] = p.equals;
+        out.push({ ref: left, path: [...at, 'equals', 0] });
+        if (!('value' in right)) out.push({ ref: right, path: [...at, 'equals', 1] });
+      }
+    });
+  });
+  return out;
+}
+
+/**
+ * The cross-checks of the preparation checks that need no registry (CS-3): unique codes, `after` and
+ * `before` within `fields`, and lookups declared (none can be in this version: `lookups` arrives with
+ * OPS-7). Messages never quote configuration values.
+ */
+function checkChecks(manifest: ManifestConfig, mAt: (sub: readonly PropertyKey[], message: string) => void): void {
+  const seen = new Set<string>();
+  (manifest.checks ?? []).forEach((check, i) => {
+    if (seen.has(check.code)) mAt(['checks', i, 'code'], 'must be unique among the checks');
+    seen.add(check.code);
+    check.require.forEach((p, j) => {
+      if ('found' in p) mAt(['checks', i, 'require', j, 'found'], 'is not a declared lookup');
+      if ('not_found' in p) mAt(['checks', i, 'require', j, 'not_found'], 'is not a declared lookup');
+    });
+  });
+  for (const { ref, path } of checkRefsOf(manifest.checks)) {
+    if ('after' in ref && !manifest.fields.includes(ref.after)) mAt([...path, 'after'], 'must be one of fields');
+    if ('before' in ref && !manifest.fields.includes(ref.before)) mAt([...path, 'before'], 'must be one of fields');
+    if ('lookup' in ref) mAt([...path, 'lookup'], 'is not a declared lookup');
+  }
 }
 
 export interface ManifestCheckInput {
@@ -236,6 +352,7 @@ export function checkManifests(input: ManifestCheckInput): void {
     manifest.sensitive_fields.forEach((f, index) => {
       if (!manifest.fields.includes(f)) mAt(['sensitive_fields', index], 'must be one of fields');
     });
+    checkChecks(manifest, mAt);
     if (!op.enabled) continue;
 
     const schema = op.definition.inputSchema;
@@ -277,6 +394,10 @@ export function checkManifests(input: ManifestCheckInput): void {
       // Check 4 (write side): scope arguments are write arguments.
       for (const arg of Object.keys(manifest.scope_args)) {
         if (!writeProps.has(arg)) mAt(['scope_args', arg], 'is not a property of input_schema');
+      }
+      // CS-3: a check reads call arguments the schema declares.
+      for (const { ref, path } of checkRefsOf(manifest.checks)) {
+        if ('arg' in ref && !writeProps.has(ref.arg)) mAt([...path, 'arg'], 'is not a property of input_schema');
       }
     }
 
@@ -334,6 +455,10 @@ export function checkManifests(input: ManifestCheckInput): void {
         });
         for (const [arg, field] of Object.entries(manifest.scope_args)) {
           if (!known.has(field)) mAt(['scope_args', arg], notReturned);
+        }
+        // CS-3: the current-record fields of the checks are added to this read.
+        for (const { ref, path } of checkRefsOf(manifest.checks)) {
+          if ('record' in ref && !known.has(ref.record)) mAt([...path, 'record'], notReturned);
         }
       }
     }

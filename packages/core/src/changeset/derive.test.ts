@@ -5,7 +5,7 @@ import type { AuditEventInput } from '../audit.js';
 import type { Caller } from '../caller.js';
 import { compareTargetIds } from './canonical.js';
 import { deriveChangeSet, isValidTargetId, MAX_DERIVE_TARGETS, type DeriveRepository, type DeriveRequest } from './derive.js';
-import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats, ChangeSetStatus, ExclusionReason } from './model.js';
+import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats, ChangeSetStatus } from './model.js';
 import { ChangeSetHasher, type HashVersion } from './hash.js';
 import type { ItemsPageQuery, NewChangeSet, PreparationCompletion } from './ports.js';
 import { hashStoredItems } from './verify.js';
@@ -44,7 +44,7 @@ class FakeDeriveRepository implements DeriveRepository {
     return Promise.resolve(this.sets.get(id));
   }
   stats(id: string): Promise<ChangeSetStats> {
-    const excluded: Partial<Record<ExclusionReason, number>> = {};
+    const excluded: Record<string, number> = {};
     let included = 0;
     let total = 0;
     for (const it of this.items.get(id)?.values() ?? []) {

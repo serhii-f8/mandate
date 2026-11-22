@@ -120,7 +120,18 @@ export interface ChangeSetDetail {
   drift?: number;
   /** Rollback availability for this viewer and, once present, its counts (UI-4, EXE-8). */
   rollback: RollbackBlock;
+  /**
+   * CS-3: the titles of the operation's check codes under the current configuration, a label shown
+   * beside an item's stored reason code (display only; an untitled or unknown code shows the code).
+   */
+  reasonTitles: Record<string, string>;
   viewer: ViewerBlock;
+}
+
+function reasonTitlesOf(op: OperationDefinition | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const check of op?.manifest?.checks ?? []) if (check.title !== undefined) out[check.code] = check.title;
+  return out;
 }
 
 export function toApprover(v: PageViewer): Approver {
@@ -293,6 +304,7 @@ export function changesetDetailWith(input: {
     ...(approval === undefined ? {} : { approval }),
     ...(input.drift === undefined ? {} : { drift: input.drift }),
     rollback: input.rollback,
+    reasonTitles: reasonTitlesOf(input.operation),
     // CS-5: an opaque change-set has no items to exclude.
     viewer: kind === 'opaque' ? { ...input.viewer, canExclude: false } : input.viewer,
   };

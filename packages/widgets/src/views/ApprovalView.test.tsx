@@ -443,6 +443,18 @@ describe('ApprovalView', () => {
     expect(screen.getByRole('button', { name: 'Approve deleting 1 record' })).toBeTruthy();
   });
 
+  it('CS-3 an item excluded by a check shows the configured title beside its code in the sample and the item list', () => {
+    const locked = item('sku-9', { status: 'excluded', reason: 'locked' });
+    render(
+      <ApprovalView
+        data={detail({ reasonTitles: { locked: 'Note is locked' }, sample: { seed: 's', items: [locked] }, items: { items: [locked] } })}
+        actions={actionsWith()}
+        onData={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByText('excluded: Note is locked (locked)')).toHaveLength(2);
+  });
+
   it('APR-6 an update approval keeps its text', () => {
     const viewer: Viewer = { channel: 'page', canDecide: true, reason: null, needsFreshLogin: false, canStart: false };
     render(<ApprovalView data={detail({ action: 'update', viewer })} actions={actionsWith()} onData={vi.fn()} />);

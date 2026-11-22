@@ -141,6 +141,7 @@ export function PreviewView({ data, actions, onData }: ViewProps<ChangeSetViewMo
       <ItemTable
         rows={pages.page.items}
         {...(data.action === undefined ? {} : { action: data.action })}
+        {...(data.reasonTitles === undefined ? {} : { reasonTitles: data.reasonTitles })}
         {...(canEdit
           ? {
               selection: {

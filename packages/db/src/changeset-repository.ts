@@ -16,7 +16,6 @@ import type {
   ChangeSetRepository,
   ChangeSetStats,
   ChangeSetStatus,
-  ExclusionReason,
   ExecutionUsage,
   HashVersion,
   ItemOutcome,
@@ -1321,7 +1320,7 @@ async function computeStats(db: Db | DbExecutor, changesetId: string): Promise<C
     .from(changeItem)
     .where(eq(changeItem.changesetId, changesetId))
     .groupBy(changeItem.status, changeItem.reason, changeItem.rollbackStatus);
-  const excluded: Partial<Record<ExclusionReason, number>> = {};
+  const excluded: Record<string, number> = {};
   let total = 0;
   let included = 0;
   let written = 0;

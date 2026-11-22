@@ -62,6 +62,11 @@ describe('MCP-4 SEC-5 prepared result', () => {
     expect(r.text).toContain('3 excluded (already_exists 2, requester 1).');
   });
 
+  it('CS-3 the prepared text counts check codes and lists them after the built-ins, by code', () => {
+    const r = preparedResult({ ...record, stats: { ...record.stats, excluded: { stale: 1, locked: 2, requester: 1, not_found: 1 } } }, []);
+    expect(r.text).toContain('5 excluded (not_found 1, requester 1, locked 2, stale 1).');
+  });
+
   it('MCP-4 structured content carries the change-set summary, at most 20 items and the cursor; dataText repeats it', () => {
     const r = preparedResult(record, items, 'cursor-1');
     const s = r.structured as { changeset: Record<string, unknown>; items: unknown[]; nextCursor?: string };

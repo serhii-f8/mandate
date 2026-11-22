@@ -257,7 +257,11 @@ export function ApprovalView({ data, actions, onData }: Props): ReactElement {
         >
           Re-sample
         </button>
-        <ItemTable rows={data.sample.items} {...(data.action === undefined ? {} : { action: data.action })} />
+        <ItemTable
+          rows={data.sample.items}
+          {...(data.action === undefined ? {} : { action: data.action })}
+          {...(data.reasonTitles === undefined ? {} : { reasonTitles: data.reasonTitles })}
+        />
         {origin === 'sample' && action.message !== undefined ? <Notice kind="error">{action.message}</Notice> : null}
       </section>
       <section aria-label="Items">
@@ -279,7 +283,11 @@ export function ApprovalView({ data, actions, onData }: Props): ReactElement {
             ))}
           </select>
         </label>
-        <ItemTable rows={pages.page.items} {...(data.action === undefined ? {} : { action: data.action })} />
+        <ItemTable
+          rows={pages.page.items}
+          {...(data.action === undefined ? {} : { action: data.action })}
+          {...(data.reasonTitles === undefined ? {} : { reasonTitles: data.reasonTitles })}
+        />
         <Pager
           hasPrevious={pages.hasPrevious}
           hasNext={pages.page.next !== undefined}

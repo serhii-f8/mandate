@@ -13,7 +13,6 @@ import type {
   ChangeSetRepository,
   ChangeSetStats,
   ChangeSetStatus,
-  ExclusionReason,
   ExecutionUsage,
   ItemOutcome,
   ItemsPageQuery,
@@ -821,7 +820,7 @@ function isRollbackable(it: ChangeItemRecord): boolean {
 }
 
 function computeStats(items: ReadonlyMap<string, ChangeItemRecord>): ChangeSetStats {
-  const excluded: Partial<Record<ExclusionReason, number>> = {};
+  const excluded: Record<string, number> = {};
   let included = 0;
   let written = 0;
   let failed = 0;
