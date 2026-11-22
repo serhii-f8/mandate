@@ -218,8 +218,11 @@ manifest:
         - { equals: [{ record: archived }, { value: false }] }
 ```
 
-A check `code` cannot be a `$param`; the literals a check compares against can. The keys and
-predicates are in the [Configuration reference](configuration.md).
+A check `code` cannot be a `$param`; the literals a check compares against can. `lookups` (since
+1.2.0) let checks read another system; a lookup's `operation` usually names an operation of another
+connection, which a preset cannot know, so it may be a `$param` that the binding sets. A lookup on one
+of the preset's own reads follows `operation_prefix`. The keys and predicates are in the
+[Configuration reference](configuration.md).
 
 ### Code operations
 

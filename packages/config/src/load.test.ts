@@ -759,6 +759,24 @@ role_mapping:
     ]);
   });
 
+  it('CONN-8 OPS-7 a lookup on an own read follows the prefix; one on an operation outside the preset stays', async () => {
+    const lookups =
+      '      lookups:\n' +
+      '        own: { operation: fixture.get_many, ids_arg: ids, key_field: id, key: { target: true }, fields: [state] }\n' +
+      '        other: { operation: shop_b.get_many, ids_arg: ids, key_field: id, key: { target: true }, fields: [state] }\n' +
+      '      checks: [{ code: unknown_item, require: [{ found: own }, { found: other }] }]\n';
+    const text = await presetWithoutUpdate();
+    const at = text.indexOf('  - id: fixture.set_tags\n');
+    const preset = text.slice(0, at) + text.slice(at).replace('      rollback: { strategy: replay_previous_state }', () => `${lookups}      rollback: { strategy: replay_previous_state }`);
+    const result = await loadAliased(PREFIXED, preset);
+    if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+    const operations = result.configuration.policy.operations.filter((o) => o.id.endsWith('.set_tags'));
+    expect(operations.map((o) => [o.manifest?.lookups?.own?.operation, o.manifest?.lookups?.other?.operation])).toEqual([
+      ['shop_a.get_many', 'shop_b.get_many'],
+      ['shop_b.get_many', 'shop_b.get_many'],
+    ]);
+  });
+
   it('CONN-8 the preset test operation follows the prefix', async () => {
     const preset = (await presetWithoutUpdate()).replace('operations:\n', 'test: { operation: fixture.search, args: { page: 1, per_page: 1, fields: [id] } }\noperations:\n');
     const result = await loadAliased(PREFIXED, preset);
@@ -919,6 +937,17 @@ roles:
         expect(found).toEqual([expect.objectContaining({ file: FIXTURE_PRESET_FILE, path, message: 'must not be a parameter' })]);
       });
     }
+
+    it('CONN-8 OPS-7 a lookup operation may be a parameter: it names an operation of another connection', async () => {
+      const lookup =
+        '      values_arg: changes\n' +
+        '      lookups: { known: { operation: { $param: p }, ids_arg: ids, key_field: id, key: { target: true }, fields: [state] } }\n' +
+        '      checks: [{ code: unknown_item, require: [{ found: known }] }]\n';
+      const result = await loadWith(oneShop(), await withIdentityParam('fixture.get_many', '      values_arg: changes\n', lookup));
+      if (!result.ok) throw new Error(result.issues.map(formatIssue).join('\n'));
+      const manifest = result.configuration.policy.operations.find((o) => o.id === 'fixture.set_tags')?.manifest;
+      expect(manifest?.lookups?.known?.operation).toBe('fixture.get_many');
+    });
   });
 
   it('CONN-8 a declaration whose default does not match its type fails in the preset file', async () => {

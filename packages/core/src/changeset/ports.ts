@@ -28,6 +28,7 @@ export type PrepareFailure =
   | 'incomplete_read'
   | 'cancelled'
   | 'duplicate_targets'
+  | 'lookup_failed'
   | (string & {});
 
 export interface NewChangeSet {

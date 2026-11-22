@@ -203,6 +203,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 - **OPS-4** Support a selector form of input, for example brand plus filter, that the platform resolves to a concrete list of target IDs during preparation.
 - **OPS-5** Allow an operation to be implemented in code through the connector SDK when a manifest is insufficient.
 - **OPS-6** Mark upstream bulk endpoints in the manifest so the executor uses them instead of per-record calls. The manifest declares the bulk route, the status route and how per-item results are mapped (index or key).
+- **OPS-7** A manifest may declare up to 5 `lookups`: reads of an enabled read operation with `fields_arg` on any connection, keyed per item by the target ID, a field of the item's `after` or `before`, or a field of the current record. During preparation each lookup reads the distinct keys of the pending items of a read chunk; its results feed the preparation checks (CS-3) and are never stored, shown, audited or returned (SEC-3). A failed lookup read fails the preparation with `lookup_failed` and the upstream status, a truncated one with `incomplete_read`; neither is read as "not found". The write operation's policy decision covers its lookups; the requester needs no grant on the lookup operation. A lookup read uses the egress rules, pacing and credential of its own connection (ADR 0072).
 
 ### 5.6 Change-sets
 

@@ -6,7 +6,7 @@ import { itemFields, manifestAction } from './fields.js';
 import { inScope, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord } from './model.js';
 import type { BatchContext, ChangeWriter, ItemOutcome, PlanEntry, ReadPage, UpstreamReader } from './ports.js';
-import { resolveTemplates } from './prepare.js';
+import { resolveTemplates } from './templates.js';
 
 export type WriteOutcomeCode =
   | 'already_applied'

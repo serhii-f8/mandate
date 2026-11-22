@@ -74,11 +74,39 @@ export interface ManifestCheck {
   readonly require: readonly CheckPredicate[];
 }
 
+/**
+ * What a lookup is keyed by for one item (OPS-7): the target ID, a field of the item's `after` or
+ * `before` side, or a field of the current upstream record.
+ */
+export type ManifestLookupKey =
+  | { readonly target: true }
+  | { readonly after: string }
+  | { readonly before: string }
+  | { readonly record: string };
+
+/**
+ * A read of an enabled read operation on any connection, keyed per item, whose results feed the
+ * preparation checks (OPS-7, ADR 0072). Its values are used by checks only, never stored (SEC-3).
+ */
+export interface ManifestLookup {
+  readonly operation: string;
+  /** The read operation's argument that takes the keys. */
+  readonly idsArg: string;
+  /** The result field the keys are matched against. */
+  readonly keyField: string;
+  readonly key: ManifestLookupKey;
+  /** The result fields the checks may read; requested with `keyField`. */
+  readonly fields: readonly string[];
+  readonly args: Readonly<Record<string, ManifestTemplate>>;
+}
+
 export interface ManifestDefinition {
   /** Absent means `update`. Sealed into the change-set hash from version 2 on (CS-4). */
   readonly action?: ManifestAction;
   /** Preparation checks in order (CS-3, ADR 0072); absent means none. */
   readonly checks?: readonly ManifestCheck[];
+  /** Lookups by name that the checks read (OPS-7, ADR 0072); absent means none. */
+  readonly lookups?: Readonly<Record<string, ManifestLookup>>;
   readonly idField: string;
   readonly idsArg?: string;
   /** Argument holding one values object for every target (CS-2). The alternative to `recordsArg`. */

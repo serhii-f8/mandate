@@ -181,8 +181,8 @@ only the fields this item touches; for any other field of the record use `{ reco
 | `{ in: <ref>, values: [<literal>, ...] }` | The value is strictly one of 1-100 literals (string, number or boolean; no type coercion) |
 | `{ found: <lookup> }` / `{ not_found: <lookup> }` | The lookup has, or has no, result for the item |
 
-Lookups arrive in a later change of 1.2.0; until then a lookup reference, `found` and `not_found` are
-refused as `is not a declared lookup`.
+A lookup reference, `found` and `not_found` must name a declared lookup, and `{ lookup: name,
+field: f }` one of that lookup's `fields`.
 
 ```yaml
     manifest:
@@ -195,6 +195,48 @@ refused as `is not a declared lookup`.
         - code: inactive
           require:
             - { in: { record: status }, values: [1] }
+```
+
+`manifest.lookups` (since 1.2.0, optional, at most 5) read another system during preparation, so
+that checks can test what it holds. Each lookup is a read of an enabled `read` operation with
+`fields_arg` on any connection, keyed per item; the checks read it with `{ found: name }`,
+`{ not_found: name }` and `{ lookup: name, field: f }`. Lookup values are used by the checks only:
+they are never stored, shown, audited or returned. The write's policy decision covers its lookups, so
+a requester needs no grant on the lookup operation, and learns one exclusion code per target. A
+lookup read uses its own connection's egress rules, pacing and credential.
+
+| Key | Type | Default | Bounds / notes |
+| --- | --- | --- | --- |
+| name (map key) | string | required | `^[a-z][a-z0-9_]{0,62}$`, not a reserved name; every lookup must be used by a check |
+| `operation` | operation ID | required | An enabled `read` operation with `fields_arg`, on any connection. May be a `$param` in a preset |
+| `ids_arg` | string | required | An array property of the operation, with string items or items without a type; its `maxItems`, if set, must be at least `batch_size` |
+| `key_field` | string | required | The result field matched against the key; a field the operation can return |
+| `key` | object | required | `{ target: true }` (the target ID), `{ after: f }` or `{ before: f }` (one of `fields`, from the item's side) or `{ record: f }` (a field of the current record, added to the `read_before` read and one it can return) |
+| `fields` | list | required | 1-50 fields the operation can return; the checks may read these |
+| `args` | map | `{}` | Templates as in `read_before`: each key an argument of the operation, each `{ arg }` a property of `input_schema` |
+
+During preparation each lookup reads, per read chunk, the distinct keys of the items still pending
+after the built-in exclusions, in chunks of `batch_size`, and indexes the results by `key_field` (the
+first record with a key wins). A key that is not a string or a number, or that the read does not
+return, makes the lookup "not found" for that item. A failed lookup read fails the preparation with
+`lookup_failed` and the upstream status; a truncated one fails it with `incomplete_read`.
+
+```yaml
+    manifest:
+      # ...
+      lookups:
+        erp:
+          operation: erp.get_parts
+          ids_arg: codes
+          key_field: code
+          key: { target: true }
+          fields: [state]
+      checks:
+        - code: not_in_erp
+          title: Part is not in the ERP
+          require:
+            - { found: erp }
+            - { in: { lookup: erp, field: state }, values: [released] }
 ```
 
 The `read_before` operation must be an enabled read operation that declares `fields_arg`; that

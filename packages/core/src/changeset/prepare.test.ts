@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AuditEventInput } from '../audit.js';
 import type { Caller } from '../caller.js';
-import type { ManifestDefinition, OperationDefinition } from '../policy-model.js';
+import type { ManifestDefinition, ManifestLookup, OperationDefinition } from '../policy-model.js';
 import { compareTargetIds, normalizeArgs } from './canonical.js';
 import { ChangeSetHasher } from './hash.js';
 import { hashStoredItems } from './verify.js';
@@ -499,6 +499,103 @@ describe('CS-2 per-record values', () => {
     const out = await prepareChangeSet(deps, recordsRequest(recordArgs, { maxTargets: 1 }));
     expect(out).toEqual({ ok: false, changesetId: 'id-1', code: 'too_many_targets' });
     expect(reader.calls).toHaveLength(0);
+  });
+});
+
+describe('OPS-7 lookups in preparation', () => {
+  const SENTINEL = 'erp-sentinel-cost-7f3a';
+  /** The catalog of `ScriptedReader`, plus an ERP on another connection that knows only some codes. */
+  class CatalogAndErp extends ScriptedReader {
+    constructor(
+      products: Record<string, Record<string, unknown>>,
+      private readonly erp: Record<string, Record<string, unknown>>,
+      private readonly erpPage?: ReadPage,
+    ) {
+      super(products);
+    }
+    override async read(op: string, args: Readonly<Record<string, unknown>>): Promise<ReadPage> {
+      if (op !== 'erp.get_parts') return super.read(op, args);
+      this.calls.push({ op, args });
+      if (this.erpPage !== undefined) return this.erpPage;
+      const codes = args.codes as string[];
+      return { ok: true, items: codes.flatMap((c) => (this.erp[c] ? [this.erp[c]] : [])), truncated: false };
+    }
+  }
+  const erpLookup: ManifestLookup = { operation: 'erp.get_parts', idsArg: 'codes', keyField: 'code', key: { target: true }, fields: ['cost'], args: {} };
+  const lookups = { erp: erpLookup };
+  const checks = [{ code: 'not_in_erp', require: [{ found: 'erp' }] }];
+  const products = { A: product('A'), B: product('B'), C: product('C') };
+  const erpRecord = (code: string) => ({ code, cost: SENTINEL });
+  const args = { brand: 'acme', skus: ['A', 'B', 'C'], changes: { description: 'new' } };
+  const lookupRequest = (patch: Partial<ManifestDefinition> = {}): PrepareRequest => ({
+    ...request(args, { lookups, checks, batchSize: 10, ...patch }),
+    readFieldsArg: (op) => (op === 'catalog.update_content' ? undefined : 'fields'),
+  });
+
+  it('OPS-7 CS-3 SEC-3 of three targets the one the ERP does not return is excluded not_in_erp; no ERP value is stored, audited or returned', async () => {
+    const reader = new CatalogAndErp(products, { A: erpRecord('A'), C: erpRecord('C') });
+    const { deps, repository } = setup(reader);
+    const out = await prepareChangeSet(deps, lookupRequest());
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(reader.readsOf('erp.get_parts').map((c) => c.args)).toEqual([{ codes: ['A', 'B', 'C'], fields: ['code', 'cost'] }]);
+    expect(out.firstItems.map((i) => [i.targetId, i.status, i.reason])).toEqual([
+      ['A', 'pending', undefined],
+      ['B', 'excluded', 'not_in_erp'],
+      ['C', 'pending', undefined],
+    ]);
+    expect(out.changeset.stats).toMatchObject({ total: 3, included: 2, excluded: { not_in_erp: 1 } });
+    const stored = [...(repository.items.get(out.changeset.id)?.values() ?? [])];
+    expect(stored).toHaveLength(3);
+    for (const leaked of [stored, repository.audit, out.changeset, out.firstItems, [...repository.sets.values()]]) {
+      expect(JSON.stringify(leaked)).not.toContain(SENTINEL);
+    }
+  });
+
+  it('OPS-7 a lookup reads only for items still pending, keyed by a record field the read_before read requests', async () => {
+    const reader = new CatalogAndErp(
+      { A: { ...product('A'), mpn: 'M-A' }, B: { ...product('B', 'new'), mpn: 'M-B' }, C: { ...product('C'), mpn: 'M-C' } },
+      { 'M-A': erpRecord('M-A') },
+    );
+    const { deps } = setup(reader);
+    const out = await prepareChangeSet(deps, lookupRequest({ lookups: { erp: { ...erpLookup, key: { record: 'mpn' } } } }));
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(reader.readsOf('catalog.get_products_by_sku')[0]?.args.fields).toEqual(['sku', 'brand', 'description', 'mpn']);
+    // B would not change (no_change), so only A and C are looked up.
+    expect(reader.readsOf('erp.get_parts').map((c) => c.args.codes)).toEqual([['M-A', 'M-C']]);
+    expect(out.firstItems.map((i) => [i.targetId, i.status, i.reason])).toEqual([
+      ['A', 'pending', undefined],
+      ['B', 'excluded', 'no_change'],
+      ['C', 'excluded', 'not_in_erp'],
+    ]);
+  });
+
+  it('OPS-7 a lookup field reference reads the result of the item', async () => {
+    const reader = new CatalogAndErp(products, { A: { code: 'A', cost: 5 }, B: { code: 'B', cost: 0 }, C: { code: 'C', cost: 5 } });
+    const { deps } = setup(reader);
+    const priced = [{ code: 'no_cost', require: [{ in: { lookup: 'erp', field: 'cost' }, values: [5] }] }];
+    const out = await prepareChangeSet(deps, lookupRequest({ checks: priced }));
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(out.firstItems.map((i) => i.reason)).toEqual([undefined, 'no_cost', undefined]);
+  });
+
+  it('OPS-7 a failing ERP read fails the change-set lookup_failed with the upstream status', async () => {
+    const reader = new CatalogAndErp(products, {}, { ok: false, code: 'http_status', status: 503 });
+    const { deps, repository } = setup(reader);
+    const out = await prepareChangeSet(deps, lookupRequest());
+    expect(out).toEqual({ ok: false, changesetId: 'id-1', code: 'lookup_failed', status: 503 });
+    const record = repository.sets.get('id-1');
+    expect(record?.status).toBe('failed');
+    expect(record?.errorCode).toBe('lookup_failed');
+    expect(record?.errorStatus).toBe(503);
+    expect(record?.hash).toBeUndefined();
+  });
+
+  it('OPS-7 a truncated ERP read fails the change-set incomplete_read instead of excluding', async () => {
+    const reader = new CatalogAndErp(products, {}, { ok: true, items: [], truncated: true });
+    const { deps, repository } = setup(reader);
+    const out = await prepareChangeSet(deps, lookupRequest());
+    expect(out).toEqual({ ok: false, changesetId: 'id-1', code: 'incomplete_read' });
+    expect(repository.sets.get('id-1')?.status).toBe('failed');
   });
 });
 

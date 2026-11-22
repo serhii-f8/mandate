@@ -1,19 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import type { Caller } from '../caller.js';
-import type { ManifestDefinition, ManifestTemplate, OperationDefinition } from '../policy-model.js';
+import type { ManifestDefinition, OperationDefinition } from '../policy-model.js';
 import { changesetTransitionEvent } from './audit.js';
 import { normalizeArgs, normalizeRecords } from './canonical.js';
 import { checkRecordFields } from './checks.js';
+import { PreparationFailure } from './failure.js';
 import { callRecords, manifestAction } from './fields.js';
 import { CURRENT_HASH_VERSION } from './hash.js';
 import { buildItems, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStatus } from './model.js';
+import { chunkLookups } from './lookups.js';
 import { isOpaque } from './opaque.js';
 import type { PreparationRepository, PrepareFailure, ReadPage, UpstreamReader } from './ports.js';
+import { resolveTemplates } from './templates.js';
 import { hashStoredItems } from './verify.js';
 
 export type { PrepareFailure } from './ports.js';
+export { resolveTemplates } from './templates.js';
 
 export interface PrepareDeps {
   readonly repository: PreparationRepository;
@@ -64,33 +68,11 @@ export interface RunPreparationRequest {
 const FIRST_ITEMS = 20;
 const HOUR_MS = 3_600_000;
 
-/** A fixed-code preparation failure that marks the change-set `failed`. */
-class Failure extends Error {
-  constructor(
-    readonly code: string,
-    readonly status?: number,
-  ) {
-    super(`preparation failed: ${code}`);
-  }
-}
-
 /** Raised when the change-set left `preparing` under us (cancelled or expired). */
 class LostRace extends Error {
   constructor() {
     super('change-set left preparing');
   }
-}
-
-export function resolveTemplates(
-  templates: Readonly<Record<string, ManifestTemplate>>,
-  args: Readonly<Record<string, unknown>>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, t] of Object.entries(templates)) {
-    const value = typeof t === 'object' ? (args[t.arg] ?? t.default) : t;
-    if (value !== undefined) out[key] = value;
-  }
-  return out;
 }
 
 function chunks<T>(list: readonly T[], size: number): T[][] {
@@ -100,8 +82,8 @@ function chunks<T>(list: readonly T[], size: number): T[][] {
 }
 
 function okPage(page: ReadPage): Extract<ReadPage, { ok: true }> {
-  if (!page.ok) throw new Failure(page.code, page.status);
-  if (page.truncated) throw new Failure('incomplete_read');
+  if (!page.ok) throw new PreparationFailure(page.code, page.status);
+  if (page.truncated) throw new PreparationFailure('incomplete_read');
   return page;
 }
 
@@ -241,8 +223,8 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
       ...Object.values(manifest.scopeArgs),
       ...(manifestAction(manifest) === 'delete' ? manifest.fields : touchedFields(manifest, args)),
       ...manifest.requiredFields,
-      // The current-record fields the preparation checks read (CS-3).
-      ...checkRecordFields(manifest.checks ?? []),
+      // The current-record fields the preparation checks and their lookup keys read (CS-3, OPS-7).
+      ...checkRecordFields(manifest.checks ?? [], manifest.lookups),
     ]),
   ];
   const readArgs = resolveTemplates(manifest.readBefore.args, args);
@@ -257,7 +239,9 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
         ...(readFieldsArg === undefined ? {} : { [readFieldsArg]: readFields }),
       }),
     );
-    const items = buildItems({ manifest, args, targetIds, records: page.items });
+    // OPS-7: the lookups of this chunk's items, read during preparation only and dropped after the checks.
+    const lookups = await chunkLookups({ manifest, args, targetIds, records: page.items, reader, readFieldsArg: req.readFieldsArg });
+    const items = buildItems({ manifest, args, targetIds, records: page.items, ...(lookups === undefined ? {} : { lookups }) });
     let inserted: number;
     try {
       inserted = await repository.appendItems(id, items);
@@ -267,7 +251,7 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
       throw err;
     }
     stored += inserted;
-    if (stored > manifest.maxTargets) throw new Failure('too_many_targets');
+    if (stored > manifest.maxTargets) throw new PreparationFailure('too_many_targets');
     return inserted;
   };
 
@@ -275,8 +259,8 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
   try {
     if (explicitIds !== undefined) {
       // createChangeSet refused a call without records; a stored one without any fails closed.
-      if (records !== undefined && explicitIds.length === 0) throw new Failure('targets_missing');
-      if (explicitIds.length > manifest.maxTargets) throw new Failure('too_many_targets');
+      if (records !== undefined && explicitIds.length === 0) throw new PreparationFailure('targets_missing');
+      if (explicitIds.length > manifest.maxTargets) throw new PreparationFailure('too_many_targets');
       for (const chunk of chunks(explicitIds, manifest.batchSize)) await processChunk(chunk);
     } else if (manifest.selector !== undefined) {
       const selector = manifest.selector;
@@ -298,7 +282,7 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
             page.items.map((r) => {
               const v = r[manifest.idField];
               // A row we cannot identify would silently shorten the target list.
-              if (typeof v !== 'string' && typeof v !== 'number') throw new Failure('incomplete_read');
+              if (typeof v !== 'string' && typeof v !== 'number') throw new PreparationFailure('incomplete_read');
               return String(v);
             }),
           ),
@@ -313,9 +297,9 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
         }
         if (unique >= page.total) break;
         // The list ended (short, empty or nothing new) before the reported total: never a silently short set.
-        if (lastPage) throw new Failure('incomplete_read');
+        if (lastPage) throw new PreparationFailure('incomplete_read');
       }
-      if (stored === 0) throw new Failure('targets_missing');
+      if (stored === 0) throw new PreparationFailure('targets_missing');
     }
 
     const stats = await repository.stats(id);
@@ -331,8 +315,8 @@ export async function runPreparation(deps: PrepareDeps, req: RunPreparationReque
   } catch (err) {
     if (err instanceof LostRace) return { ok: false, changesetId: id, code: 'cancelled' };
     // Design §4.1: any failure after creation marks the change-set failed with a fixed code.
-    const code = err instanceof Failure ? err.code : 'internal';
-    const status = err instanceof Failure ? err.status : undefined;
+    const code = err instanceof PreparationFailure ? err.code : 'internal';
+    const status = err instanceof PreparationFailure ? err.status : undefined;
     let failed: ChangeSetRecord | undefined;
     try {
       failed = await repository.completePreparation(

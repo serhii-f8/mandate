@@ -860,3 +860,147 @@ describe('CS-3 manifest checks', () => {
     await expectIssue((t) => withChecks(t, check('{ not_found: erp }')), `${C}[0].require[0].not_found`, 'erp');
   });
 });
+
+describe('OPS-7 manifest lookups', () => {
+  const ERP = `version: 1
+operations:
+  - id: erp.get_parts
+    connection: other
+    risk: read
+    description: Parts.
+    upstream: { method: GET, path: /parts, query: { codes: { arg: codes, join: ',' }, plant: { arg: plant }, fields: { arg: fields, join: ',' } }, response: { items: items, fields_from_arg: fields } }
+    input_schema:
+      type: object
+      properties:
+        codes: { type: array, items: { type: string }, maxItems: 100 }
+        numbers: { type: array, items: { type: integer } }
+        plant: { type: string }
+        fields: { type: array, items: { enum: [code, cost, state] } }
+      required: [codes, fields]
+    fields_arg: fields
+  - id: erp.get_plain
+    connection: other
+    risk: read
+    description: No field list.
+    upstream: { method: GET, path: /plain, query: { codes: { arg: codes, join: ',' } } }
+    input_schema:
+      type: object
+      properties: { codes: { type: array, items: { type: string } } }
+`;
+  const L = `${M}.lookups`;
+  const lookup = (body: string, name = 'erp'): string => `        ${name}: { ${body} }\n`;
+  const ERP_LOOKUP = 'operation: erp.get_parts, ids_arg: codes, key_field: code, key: { target: true }, fields: [cost], args: { plant: { arg: brand } }';
+  const USES = '        - { code: not_in_erp, require: [{ found: erp }] }\n';
+  /** The write with `lookups` and `checks` before its rollback. */
+  const withLookups = (t: string, lookups: string, checks = USES): string =>
+    t.replace('      rollback:', `      lookups:\n${lookups}      checks:\n${checks}      rollback:`);
+  const loadWith = (lookups: string, checks = USES): Promise<LoadResult> => load({ 'write.yaml': withLookups(WRITE, lookups, checks), 'erp.yaml': ERP });
+  /** Exactly one issue at `path`, not quoting `value`. */
+  async function expectLookupIssue(lookups: string, path: string, value: string, checks = USES): Promise<ConfigIssue> {
+    const found = issues(await loadWith(lookups, checks));
+    const match = found.filter((i) => i.path === path);
+    expect(match, JSON.stringify(found)).toHaveLength(1);
+    const [issue] = match;
+    if (issue === undefined) throw new Error('unreachable: length checked above');
+    expect(issue.message).not.toContain(value);
+    return issue;
+  }
+
+  it('OPS-7 a lookup on another connection loads and converts to the core type', async () => {
+    const checks = USES + '        - { code: no_cost, require: [{ present: { lookup: erp, field: cost } }, { not_found: erp }] }\n';
+    const config = ok(await loadWith(lookup(ERP_LOOKUP), checks));
+    const manifest = config.policy.operations.find((o) => o.id === 'catalog.update_content')?.manifest;
+    expect(manifest?.lookups).toEqual({
+      erp: { operation: 'erp.get_parts', idsArg: 'codes', keyField: 'code', key: { target: true }, fields: ['cost'], args: { plant: { arg: 'brand' } } },
+    });
+    expect(config.policy.operations.find((o) => o.id === 'erp.get_parts')?.connection).toBe('other');
+    const plain = ok(await load());
+    expect(plain.policy.operations.find((o) => o.id === 'catalog.update_content')?.manifest).not.toHaveProperty('lookups');
+  });
+
+  it('OPS-7 each key form loads: target, after, before and a record field the read_before read can return', async () => {
+    for (const key of ['{ after: name }', '{ before: description }', '{ record: price }']) {
+      ok(await loadWith(lookup(ERP_LOOKUP.replace('{ target: true }', key))));
+    }
+  });
+
+  it('OPS-7 the operation is an enabled read operation', async () => {
+    const write = await expectLookupIssue(lookup(ERP_LOOKUP.replace('erp.get_parts', 'catalog.update_content')), `${L}.erp.operation`, 'catalog.update_content');
+    expect(write.message).toBe('must name an enabled read operation');
+    await expectLookupIssue(lookup(ERP_LOOKUP.replace('erp.get_parts', 'erp.unknown')), `${L}.erp.operation`, 'erp.unknown');
+  });
+
+  it('OPS-7 the operation declares fields_arg', async () => {
+    const plain = ERP_LOOKUP.replace('erp.get_parts', 'erp.get_plain').replace(', args: { plant: { arg: brand } }', '');
+    const issue = await expectLookupIssue(lookup(plain), `${L}.erp.operation`, 'erp.get_plain');
+    expect(issue.message).toBe('must name an operation with fields_arg');
+  });
+
+  it('OPS-7 ids_arg is an array of strings of the operation, within its maxItems', async () => {
+    const scalar = await expectLookupIssue(lookup(ERP_LOOKUP.replace('ids_arg: codes', 'ids_arg: plant')), `${L}.erp.ids_arg`, 'plant');
+    expect(scalar.message).toBe('must name an array property of operation erp.get_parts');
+    const ints = await expectLookupIssue(lookup(ERP_LOOKUP.replace('ids_arg: codes', 'ids_arg: numbers')), `${L}.erp.ids_arg`, 'numbers');
+    expect(ints.message).toBe('must be an array of strings: lookup keys are passed as strings');
+    const small = await load({ 'write.yaml': withLookups(WRITE, lookup(ERP_LOOKUP)), 'erp.yaml': ERP.replace('maxItems: 100', 'maxItems: 10') });
+    expect(issues(small).filter((i) => i.path === `${M}.batch_size`)).toHaveLength(1);
+  });
+
+  it('OPS-7 key_field and every fields entry are fields the operation can return', async () => {
+    const key = await expectLookupIssue(lookup(ERP_LOOKUP.replace('key_field: code', 'key_field: price')), `${L}.erp.key_field`, 'price');
+    expect(key.message).toBe('is not a field operation erp.get_parts can return');
+    await expectLookupIssue(lookup(ERP_LOOKUP.replace('fields: [cost]', 'fields: [cost, colour]')), `${L}.erp.fields[1]`, 'colour');
+  });
+
+  it('OPS-7 fields has 1 to 50 entries', async () => {
+    await expectLookupIssue(lookup(ERP_LOOKUP.replace('fields: [cost]', 'fields: []')), `${L}.erp.fields`, 'erp');
+    const many = `fields: [${Array.from({ length: 51 }, () => 'cost').join(', ')}]`;
+    await expectLookupIssue(lookup(ERP_LOOKUP.replace('fields: [cost]', many)), `${L}.erp.fields`, 'erp');
+  });
+
+  it('OPS-7 an args key is an argument of the operation and a template names a write argument', async () => {
+    const key = await expectLookupIssue(lookup(ERP_LOOKUP.replace('plant: { arg: brand }', 'store: 1')), `${L}.erp.args.store`, 'store');
+    expect(key.message).toBe('is not an argument of operation erp.get_parts');
+    const arg = await expectLookupIssue(lookup(ERP_LOOKUP.replace('{ arg: brand }', '{ arg: plant }')), `${L}.erp.args.plant.arg`, 'plant');
+    expect(arg.message).toBe('names an argument that is not in input_schema');
+  });
+
+  it('OPS-7 an after or before key is one of fields; a record key one the read_before read can return', async () => {
+    const after = await expectLookupIssue(lookup(ERP_LOOKUP.replace('{ target: true }', '{ after: price }')), `${L}.erp.key.after`, 'price');
+    expect(after.message).toBe('must be one of fields');
+    await expectLookupIssue(lookup(ERP_LOOKUP.replace('{ target: true }', '{ before: price }')), `${L}.erp.key.before`, 'price');
+    const record = await expectLookupIssue(lookup(ERP_LOOKUP.replace('{ target: true }', '{ record: colour }')), `${L}.erp.key.record`, 'colour');
+    expect(record.message).toBe('is not a field operation catalog.get_products_by_sku can return');
+    await expectLookupIssue(lookup(ERP_LOOKUP.replace('{ target: true }', '{ target: false }')), `${L}.erp.key`, 'erp');
+  });
+
+  it('OPS-7 at most 5 lookups, each named ^[a-z][a-z0-9_]{0,62}$', async () => {
+    const names = ['erp', 'b', 'c', 'd', 'e', 'f'];
+    const usesAll = (list: readonly string[]): string => `        - { code: uses_all, require: [${list.map((n) => `{ found: ${n} }`).join(', ')}] }\n`;
+    ok(await loadWith(names.slice(0, 5).map((n) => lookup(ERP_LOOKUP, n)).join(''), usesAll(names.slice(0, 5))));
+    await expectLookupIssue(names.map((n) => lookup(ERP_LOOKUP, n)).join(''), L, 'erp', usesAll(names));
+    for (const name of ['Erp', '1erp', 'e-rp', `a${'b'.repeat(63)}`]) {
+      const found = issues(await loadWith(lookup(ERP_LOOKUP, name), `        - { code: not_in_erp, require: [{ found: '${name}' }] }\n`));
+      expect(found.some((i) => i.path.startsWith(L)), JSON.stringify(found)).toBe(true);
+    }
+    // A name is a key of plain objects: `constructor` is refused, and never resolves through the prototype.
+    const reserved = issues(await loadWith(lookup(ERP_LOOKUP, 'constructor'), '        - { code: not_in_erp, require: [{ found: constructor }] }\n'));
+    expect(reserved.map((i) => i.path)).toContain(`${L}.constructor`);
+    const undeclared = await expectLookupIssue(lookup(ERP_LOOKUP), `${M}.checks[1].require[0].found`, 'constructor', USES + '        - { code: proto, require: [{ found: constructor }] }\n');
+    expect(undeclared.message).toBe('is not a declared lookup');
+  });
+
+  it('OPS-7 every lookup is used by a check', async () => {
+    const issue = await expectLookupIssue(lookup(ERP_LOOKUP), `${L}.erp`, 'erp', '        - { code: locked, require: [{ present: { after: name } }] }\n');
+    expect(issue.message).toBe('is not used by any check');
+  });
+
+  it('OPS-7 a lookup field reference names one of the fields of that lookup; an undeclared lookup stays refused', async () => {
+    const C = `${M}.checks`;
+    const noState = USES + '        - { code: no_state, require: [{ present: { lookup: erp, field: state } }] }\n';
+    const field = await expectLookupIssue(lookup(ERP_LOOKUP), `${C}[1].require[0].present.field`, 'state', noState);
+    expect(field.message).toBe('must be one of the fields of the lookup');
+    const noPim = USES + '        - { code: no_pim, require: [{ found: pim }] }\n';
+    const undeclared = await expectLookupIssue(lookup(ERP_LOOKUP), `${C}[1].require[0].found`, 'pim', noPim);
+    expect(undeclared.message).toBe('is not a declared lookup');
+  });
+});

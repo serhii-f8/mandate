@@ -8,13 +8,17 @@
 import { randomUUID } from 'node:crypto';
 import { createChangeSet, ExecutorUnavailable, type ChangeSetRecord, type ReadPage, type UpstreamReader } from '@mandate/core';
 import { clientDataConverter, parseTemporalKeys, TemporalExecutor } from '@mandate/temporal';
-import { ScriptedWriter } from '@mandate/testing';
+import { createOpenApiAdapter } from '@mandate/adapters';
+import { loadConfigurationSources } from '@mandate/config';
+import { ScriptedWriter, startFakeUpstream, type RecordedRequest } from '@mandate/testing';
+import { createUpstreamReader } from '@mandate/upstream';
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPrepared } from '../support/changesets.js';
 import { EDITOR_GROUP, OPAQUE_OPERATION, WRITE_OPERATION } from '../support/configuration.js';
 import { startInfrastructure, startTestWorker, type Infra, type TestWorker } from '../support/harness.js';
 import { TEST_TEMPORAL_KEYS } from '../support/keys.js';
+import { MemoryVault } from '../support/magento.js';
 
 let infra: Infra;
 
@@ -341,5 +345,142 @@ describe('preparation and start on Temporal', () => {
     expect(record?.status).toBe('failed');
     expect(record?.errorCode).toBe('workflow_closed');
     expect(writer.calls).toBe(0);
+  });
+});
+
+describe('OPS-7 lookups on another connection', () => {
+  const SHOP_TOKEN = 'shop-test-only-token';
+  const ERP_TOKEN = 'erp-test-only-token';
+  const SENTINEL = 'erp-sentinel-state-91c2';
+
+  /** Two connections, each with its own credential; the shop's write looks targets up in the ERP. */
+  function sources(shopUrl: string, erpUrl: string): { file: string; text: string }[] {
+    const connections = `version: 1
+connections:
+  - { id: shop, adapter: openapi, base_url: '${shopUrl}', credential_ref: shop-token, auth: { scheme: bearer }, allow_private_network: true }
+  - { id: erp, adapter: openapi, base_url: '${erpUrl}', credential_ref: erp-token, auth: { scheme: bearer }, allow_private_network: true }
+`;
+    const operations = `version: 1
+operations:
+  - id: shop.get_products
+    connection: shop
+    risk: read
+    description: Products by SKU.
+    upstream: { method: GET, path: /products, query: { skus: { arg: skus, join: ',' }, fields: { arg: fields, join: ',' } }, response: { items: items, fields_from_arg: fields } }
+    input_schema:
+      type: object
+      properties:
+        skus: { type: array, items: { type: string } }
+        fields: { type: array, items: { enum: [sku, name] } }
+      required: [skus, fields]
+    fields_arg: fields
+  - id: erp.get_parts
+    connection: erp
+    risk: read
+    description: Parts by code.
+    upstream: { method: GET, path: /parts, query: { codes: { arg: codes, join: ',' }, fields: { arg: fields, join: ',' } }, response: { items: items, fields_from_arg: fields } }
+    input_schema:
+      type: object
+      properties:
+        codes: { type: array, items: { type: string } }
+        fields: { type: array, items: { enum: [code, state] } }
+      required: [codes, fields]
+    fields_arg: fields
+  - id: shop.update_products
+    connection: shop
+    risk: write
+    description: Update product names.
+    upstream: { method: POST, path: /products }
+    input_schema:
+      type: object
+      properties:
+        skus: { type: array, items: { type: string } }
+        changes: { type: object, properties: { name: { type: string } }, additionalProperties: false }
+      required: [skus, changes]
+      additionalProperties: false
+    manifest:
+      id_field: sku
+      ids_arg: skus
+      values_arg: changes
+      fields: [name]
+      read_before: { operation: shop.get_products, ids_arg: skus }
+      lookups:
+        erp: { operation: erp.get_parts, ids_arg: codes, key_field: code, key: { target: true }, fields: [state] }
+      checks:
+        - { code: not_in_erp, require: [{ found: erp }] }
+      rollback: { strategy: none }
+`;
+    return [
+      { file: 'connections.yaml', text: connections },
+      { file: 'operations.yaml', text: operations },
+    ];
+  }
+
+  it('OPS-7 CS-1 SEC-3 the prepare activity excludes the target the other connection does not know, reading it with GET and its own credential', async () => {
+    const shop = await startFakeUpstream();
+    const erp = await startFakeUpstream();
+    try {
+      const listed = (req: RecordedRequest, key: string): string[] => (req.query.get(key) ?? '').split(',').filter((v) => v !== '');
+      shop.route('GET', '/products', (req) => ({ status: 200, body: { items: listed(req, 'skus').map((sku) => ({ sku, name: `old ${sku}` })) } }));
+      erp.route('GET', '/parts', (req) => ({
+        status: 200,
+        body: { items: listed(req, 'codes').filter((c) => c !== 'p-2').map((code) => ({ code, state: SENTINEL })) },
+      }));
+      const loaded = await loadConfigurationSources(sources(shop.url, erp.url), { resolver: createOpenApiAdapter().resolver });
+      if (!loaded.ok) throw new Error(`configuration did not load: ${JSON.stringify(loaded.issues)}`);
+      const configuration = loaded.configuration;
+      const vault = new MemoryVault();
+      await vault.put({ ref: 'shop-token', scheme: 'bearer', secret: { token: SHOP_TOKEN }, actor: 'test' });
+      await vault.put({ ref: 'erp-token', scheme: 'bearer', secret: { token: ERP_TOKEN }, actor: 'test' });
+
+      const operation = configuration.policy.operations.find((o) => o.id === 'shop.update_products');
+      const manifest = operation?.manifest;
+      if (operation === undefined || manifest === undefined) throw new Error('test operation missing');
+      const createdSet = await createChangeSet(
+        { repository: infra.repository, newId: randomUUID, now: () => new Date() },
+        {
+          operation: { ...operation, manifest },
+          args: { skus: ['p-1', 'p-2', 'p-3'], changes: { name: 'new' } },
+          caller: { subject: 'alice', groups: [EDITOR_GROUP] },
+          correlationId: 'corr-lookup',
+          configHash: configuration.hash,
+          expireAfterHours: 1,
+        },
+      );
+      if (!createdSet.ok) throw new Error(`test change-set not created: ${createdSet.code}`);
+      const cs = createdSet.changeset;
+
+      await withWorker(
+        {
+          configuration,
+          readerFor: (current, correlationId) => createUpstreamReader({ configuration: current, vault, adapter: createOpenApiAdapter(), correlationId }),
+        },
+        async (worker) => {
+          await worker.starter.start(cs.id);
+          await expect.poll(() => statusOf(cs.id), { timeout: 20_000 }).toBe('prepared');
+          await worker.executor.cancel({ changesetId: cs.id, actor: 'alice', correlationId: 'corr-cleanup' });
+          await worker.executor.settled(cs.id);
+        },
+      );
+
+      const items = await infra.repository.itemsPage(cs.id, { limit: 10 });
+      expect(items.map((i) => [i.targetId, i.status, i.reason])).toEqual([
+        ['p-1', 'pending', undefined],
+        ['p-2', 'excluded', 'not_in_erp'],
+        ['p-3', 'pending', undefined],
+      ]);
+      expect((await infra.repository.get(cs.id))?.stats).toMatchObject({ total: 3, included: 2, excluded: { not_in_erp: 1 } });
+      expect(JSON.stringify(items)).not.toContain(SENTINEL);
+
+      // CS-1: the ERP saw reads only, each with the ERP's own credential and never the shop's.
+      expect(erp.requests.length).toBeGreaterThan(0);
+      expect(erp.requests.map((r) => r.method)).toEqual(erp.requests.map(() => 'GET'));
+      expect(erp.requests.map((r) => r.headers.authorization)).toEqual(erp.requests.map(() => `Bearer ${ERP_TOKEN}`));
+      expect(erp.requests.map((r) => listed(r, 'codes'))).toEqual([['p-1', 'p-2', 'p-3']]);
+      expect(shop.requests.map((r) => r.headers.authorization)).toEqual(shop.requests.map(() => `Bearer ${SHOP_TOKEN}`));
+    } finally {
+      await shop.close();
+      await erp.close();
+    }
   });
 });

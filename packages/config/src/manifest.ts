@@ -11,6 +11,8 @@ import {
   type CheckRef,
   type ManifestCheck,
   type ManifestDefinition,
+  type ManifestLookup,
+  type ManifestLookupKey,
   type ManifestRead,
   type ManifestTemplate,
   type RollbackStrategy,
@@ -68,6 +70,31 @@ const manifestCheck = z.strictObject({
   require: z.array(checkPredicate).min(1).max(10),
 });
 
+/** A lookup name: what the checks reference (OPS-7). */
+const lookupName = z
+  .string()
+  .regex(/^[a-z][a-z0-9_]{0,62}$/, { abort: true })
+  // Names are keys of plain objects; `constructor` is the one prototype member the pattern admits.
+  .refine((n) => !(n in Object.prototype), 'must not be a reserved name');
+
+/** What a lookup is keyed by for one item (OPS-7, ADR 0072). */
+const lookupKey = z.union([
+  z.strictObject({ target: z.literal(true) }),
+  z.strictObject({ after: name }),
+  z.strictObject({ before: name }),
+  z.strictObject({ record: name }),
+]);
+
+/** A read of an enabled read operation on any connection whose results feed the checks (OPS-7). */
+const manifestLookup = z.strictObject({
+  operation: operationId,
+  ids_arg: name,
+  key_field: name,
+  key: lookupKey,
+  fields: z.array(name).min(1).max(50),
+  args: templateMap,
+});
+
 export const manifestSchema = z.strictObject({
   /** What the call does to its targets (OPS-2, ADR 0071); a fixed node in presets. */
   action: z.enum(['update', 'create', 'delete']).default('update'),
@@ -100,6 +127,11 @@ export const manifestSchema = z.strictObject({
   rollback,
   /** Preparation checks in order (CS-3, ADR 0072): the first failing one excludes the item with its code. */
   checks: z.array(manifestCheck).max(20).optional(),
+  /** Lookups by name that the checks read (OPS-7, ADR 0072); each must be used by a check. */
+  lookups: z
+    .record(lookupName, manifestLookup)
+    .refine((lookups) => Object.keys(lookups).length <= 5, 'must declare at most 5 lookups')
+    .optional(),
 });
 
 export type ManifestConfig = z.output<typeof manifestSchema>;
@@ -161,6 +193,27 @@ function toChecks(checks: ManifestConfig['checks']): { checks?: ManifestCheck[] 
   };
 }
 
+type LookupConfig = z.output<typeof manifestLookup>;
+
+function toLookupKey(key: LookupConfig['key']): ManifestLookupKey {
+  if ('target' in key) return { target: true };
+  if ('after' in key) return { after: key.after };
+  if ('before' in key) return { before: key.before };
+  return { record: key.record };
+}
+
+function toLookups(lookups: ManifestConfig['lookups']): { lookups?: Record<string, ManifestLookup> } {
+  if (lookups === undefined) return {};
+  return {
+    lookups: Object.fromEntries(
+      Object.entries(lookups).map(([lookupName, l]): [string, ManifestLookup] => [
+        lookupName,
+        { operation: l.operation, idsArg: l.ids_arg, keyField: l.key_field, key: toLookupKey(l.key), fields: [...l.fields], args: toTemplates(l.args) },
+      ]),
+    ),
+  };
+}
+
 export function toManifestDefinition(m: ManifestConfig): ManifestDefinition {
   const readBefore: ManifestRead & { idsArg: string } = { operation: m.read_before.operation, idsArg: m.read_before.ids_arg, args: toTemplates(m.read_before.args) };
   const strategy: RollbackStrategy = m.rollback.strategy === 'inverse_operation' ? { strategy: 'inverse_operation', operation: m.rollback.operation } : { strategy: m.rollback.strategy };
@@ -190,6 +243,7 @@ export function toManifestDefinition(m: ManifestConfig): ManifestDefinition {
     maxTargets: m.max_targets,
     rollback: strategy,
     ...toChecks(m.checks),
+    ...toLookups(m.lookups),
   };
 }
 
@@ -264,24 +318,41 @@ function checkRefsOf(checks: ManifestConfig['checks']): { ref: CheckRefConfig; p
 }
 
 /**
- * The cross-checks of the preparation checks that need no registry (CS-3): unique codes, `after` and
- * `before` within `fields`, and lookups declared (none can be in this version: `lookups` arrives with
- * OPS-7). Messages never quote configuration values.
+ * The cross-checks of the preparation checks and lookups that need no registry (CS-3, OPS-7): unique
+ * codes, `after` and `before` within `fields`, every lookup reference declared and naming one of its
+ * `fields`, and every lookup used by a check. Messages never quote configuration values.
  */
 function checkChecks(manifest: ManifestConfig, mAt: (sub: readonly PropertyKey[], message: string) => void): void {
+  const lookups = manifest.lookups ?? {};
+  // Own keys only: a name such as `constructor` must not resolve through Object.prototype.
+  const declared = (lookupName: string): LookupConfig | undefined => (Object.hasOwn(lookups, lookupName) ? lookups[lookupName] : undefined);
+  const used = new Set<string>();
   const seen = new Set<string>();
   (manifest.checks ?? []).forEach((check, i) => {
     if (seen.has(check.code)) mAt(['checks', i, 'code'], 'must be unique among the checks');
     seen.add(check.code);
     check.require.forEach((p, j) => {
-      if ('found' in p) mAt(['checks', i, 'require', j, 'found'], 'is not a declared lookup');
-      if ('not_found' in p) mAt(['checks', i, 'require', j, 'not_found'], 'is not a declared lookup');
+      const named = 'found' in p ? { key: 'found', lookup: p.found } : 'not_found' in p ? { key: 'not_found', lookup: p.not_found } : undefined;
+      if (named === undefined) return;
+      used.add(named.lookup);
+      if (declared(named.lookup) === undefined) mAt(['checks', i, 'require', j, named.key], 'is not a declared lookup');
     });
   });
   for (const { ref, path } of checkRefsOf(manifest.checks)) {
     if ('after' in ref && !manifest.fields.includes(ref.after)) mAt([...path, 'after'], 'must be one of fields');
     if ('before' in ref && !manifest.fields.includes(ref.before)) mAt([...path, 'before'], 'must be one of fields');
-    if ('lookup' in ref) mAt([...path, 'lookup'], 'is not a declared lookup');
+    if ('lookup' in ref) {
+      used.add(ref.lookup);
+      const lookup = declared(ref.lookup);
+      if (lookup === undefined) mAt([...path, 'lookup'], 'is not a declared lookup');
+      else if (!lookup.fields.includes(ref.field)) mAt([...path, 'field'], 'must be one of the fields of the lookup');
+    }
+  }
+  for (const [lookupName, lookup] of Object.entries(lookups)) {
+    if (!used.has(lookupName)) mAt(['lookups', lookupName], 'is not used by any check');
+    const key = lookup.key;
+    if ('after' in key && !manifest.fields.includes(key.after)) mAt(['lookups', lookupName, 'key', 'after'], 'must be one of fields');
+    if ('before' in key && !manifest.fields.includes(key.before)) mAt(['lookups', lookupName, 'key', 'before'], 'must be one of fields');
   }
 }
 
@@ -462,6 +533,10 @@ export function checkManifests(input: ManifestCheckInput): void {
         for (const { ref, path } of checkRefsOf(manifest.checks)) {
           if ('record' in ref && !known.has(ref.record)) mAt([...path, 'record'], notReturned);
         }
+        // OPS-7: so are the record fields that key a lookup.
+        for (const [lookupName, lookup] of Object.entries(manifest.lookups ?? {})) {
+          if ('record' in lookup.key && !known.has(lookup.key.record)) mAt(['lookups', lookupName, 'key', 'record'], notReturned);
+        }
       }
     }
 
@@ -474,6 +549,45 @@ export function checkManifests(input: ManifestCheckInput): void {
       if (known !== undefined) {
         carry.forEach((f, index) => {
           if (!known.has(f)) mAt(['write', 'carry_fields', index], `is not a field operation ${read.definition.id} can return`);
+        });
+      }
+    }
+
+    // OPS-7: a lookup reads an enabled read operation with fields_arg on any connection.
+    for (const [lookupName, lookup] of Object.entries(manifest.lookups ?? {})) {
+      const lAt = (sub: readonly PropertyKey[], message: string): void => {
+        mAt(['lookups', lookupName, ...sub], message);
+      };
+      const target = all.get(lookup.operation);
+      let lookupRead: RegisteredOperation | undefined;
+      if (target === undefined) {
+        if (!input.operationsIncomplete) lAt(['operation'], 'must name an enabled read operation');
+      } else if (!target.enabled || target.definition.risk !== 'read') lAt(['operation'], 'must name an enabled read operation');
+      else if (target.definition.fieldsArg === undefined) lAt(['operation'], 'must name an operation with fields_arg');
+      else lookupRead = target;
+      for (const [key, tpl] of Object.entries(lookup.args)) {
+        if (typeof tpl === 'object' && op.schemaKnown && !writeProps.has(tpl.arg)) lAt(['args', key, 'arg'], 'names an argument that is not in input_schema');
+        if (lookupRead?.schemaKnown === true && !propertiesOf(lookupRead.definition.inputSchema).has(key)) {
+          lAt(['args', key], `is not an argument of operation ${lookupRead.definition.id}`);
+        }
+      }
+      if (lookupRead?.schemaKnown !== true) continue;
+      const lookupId = lookupRead.definition.id;
+      const ids = propertySchema(lookupRead.definition.inputSchema, lookup.ids_arg);
+      const items = ids?.items;
+      const itemType = typeof items === 'object' && items !== null ? (items as Record<string, unknown>).type : undefined;
+      if (ids?.type !== 'array') lAt(['ids_arg'], `must name an array property of operation ${lookupId}`);
+      else if (itemType !== undefined && itemType !== 'string') lAt(['ids_arg'], 'must be an array of strings: lookup keys are passed as strings');
+      // The keys of one read chunk (batch_size items) are read in one request.
+      else if (typeof ids.maxItems === 'number' && ids.maxItems < manifest.batch_size) {
+        mAt(['batch_size'], `exceeds the maxItems of a lookup's ids_arg in operation ${lookupId}`);
+      }
+      const known = fieldEnum(lookupRead);
+      if (known !== undefined) {
+        const notReturned = `is not a field operation ${lookupId} can return`;
+        if (!known.has(lookup.key_field)) lAt(['key_field'], notReturned);
+        lookup.fields.forEach((f, index) => {
+          if (!known.has(f)) lAt(['fields', index], notReturned);
         });
       }
     }

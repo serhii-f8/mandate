@@ -35,6 +35,8 @@ export type {
   ManifestAction,
   ManifestCheck,
   ManifestDefinition,
+  ManifestLookup,
+  ManifestLookupKey,
   ManifestRead,
   ManifestTemplate,
   RollbackStrategy,
@@ -90,6 +92,7 @@ export type {
 } from './changeset/model.js';
 export { BUILTIN_EXCLUSION_REASONS, countExclusions, EMPTY_STATS } from './changeset/model.js';
 export { checkRecordFields, failedCheck, type CheckContext } from './changeset/checks.js';
+export { lookupKey, readLookups } from './changeset/lookups.js';
 export {
   CANCELLABLE,
   canTransition,

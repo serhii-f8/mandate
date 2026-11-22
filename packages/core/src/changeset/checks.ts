@@ -5,7 +5,7 @@
  * upstream record, the call arguments and lookup results. Pure and deterministic; no expressions.
  * The inputs are only read here: what leaves is the code of the first failing check (SEC-3).
  */
-import type { CheckPredicate, CheckRef, ManifestCheck } from '../policy-model.js';
+import type { CheckPredicate, CheckRef, ManifestCheck, ManifestLookup } from '../policy-model.js';
 import { CanonicalJsonError, canonicalJson } from './canonical.js';
 
 type Fields = Readonly<Record<string, unknown>>;
@@ -106,13 +106,21 @@ function refsOf(p: CheckPredicate): CheckRef[] {
   return [];
 }
 
-/** The distinct `{ record }` fields of the checks, in order of appearance, to add to the `read_before` fields. */
-export function checkRecordFields(checks: readonly ManifestCheck[]): string[] {
+/**
+ * The distinct current-record fields the checks read, in order of appearance, to add to the
+ * `read_before` fields: the `{ record }` references of the checks, then the `{ record }` keys of the
+ * lookups that feed them (OPS-7).
+ */
+export function checkRecordFields(
+  checks: readonly ManifestCheck[],
+  lookups: Readonly<Record<string, ManifestLookup>> = {},
+): string[] {
   const out = new Set<string>();
   for (const check of checks) {
     for (const p of check.require) {
       for (const ref of refsOf(p)) if ('record' in ref) out.add(ref.record);
     }
   }
+  for (const lookup of Object.values(lookups)) if ('record' in lookup.key) out.add(lookup.key.record);
   return [...out];
 }

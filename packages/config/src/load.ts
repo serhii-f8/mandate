@@ -903,6 +903,10 @@ function presetAlias(
         ...m,
         read_before: { ...m.read_before, operation: id(m.read_before.operation) },
         ...(m.selector === undefined ? {} : { selector: { ...m.selector, operation: id(m.selector.operation) } }),
+        // OPS-7: a lookup on one of the preset's own reads follows the prefix; one on another connection stays.
+        ...(m.lookups === undefined
+          ? {}
+          : { lookups: Object.fromEntries(Object.entries(m.lookups).map(([name, l]) => [name, { ...l, operation: id(l.operation) }])) }),
         rollback: m.rollback.strategy === 'inverse_operation' ? { ...m.rollback, operation: id(m.rollback.operation) } : m.rollback,
       },
     };

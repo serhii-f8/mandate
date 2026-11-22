@@ -123,6 +123,21 @@ function createItem(
   return { targetId, status: 'pending', before: null, after: { ...values } };
 }
 
+/** The read records by their `idField` as a string; a record without one is skipped and the first wins. */
+export function recordsById(
+  manifest: ManifestDefinition,
+  records: readonly Record<string, unknown>[],
+): Map<string, Record<string, unknown>> {
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const record of records) {
+    const id = record[manifest.idField];
+    if (typeof id !== 'string' && typeof id !== 'number') continue;
+    const key = String(id);
+    if (!byId.has(key)) byId.set(key, record);
+  }
+  return byId;
+}
+
 export function buildItems(input: {
   manifest: ManifestDefinition;
   args: Readonly<Record<string, unknown>>;
@@ -132,13 +147,7 @@ export function buildItems(input: {
   lookups?: ItemLookups;
 }): ChangeItemRecord[] {
   const { manifest, args, targetIds, records } = input;
-  const byId = new Map<string, Record<string, unknown>>();
-  for (const record of records) {
-    const id = record[manifest.idField];
-    if (typeof id !== 'string' && typeof id !== 'number') continue;
-    const key = String(id);
-    if (!byId.has(key)) byId.set(key, record);
-  }
+  const byId = recordsById(manifest, records);
   // One values object for every target, or each target's own record (CS-2).
   const perRecord = callRecords(manifest, args);
   const action = manifestAction(manifest);

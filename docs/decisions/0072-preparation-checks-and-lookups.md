@@ -15,8 +15,9 @@ The trust path admits no model and no evaluated configuration code (SEC-5): perm
 approval views and execution are deterministic server code. A precondition language therefore has to
 be data the server interprets, small enough to review, and unable to leak what it reads.
 
-This record has two halves: the checks (CS-3, this change) and the lookups that feed them (OPS-7, a
-later change of the same release).
+This record has two halves: the checks (CS-3) and the lookups that feed them (OPS-7). A precondition
+often lives in another system: a part must exist in the ERP before the shop lists it, a cost the ERP
+holds bounds a price. The checks alone see only the write's own connection.
 
 ## Options considered
 
@@ -69,12 +70,52 @@ preconditions and moves a policy decision into code an operator cannot read in t
 
 ## Lookups
 
-To be written with OPS-7 (manifest `lookups`, at most 5; a read operation on any connection; key
-`{ target: true }`, `{ after: f }`, `{ before: f }` or `{ record: f }`; one read per chunk and lookup;
-`lookup_failed` on a failed or truncated read; authorization covered by the write's policy decision).
-Until then the loader refuses every lookup reference, `found` and `not_found` as
-`is not a declared lookup`, while core already evaluates them over the per-target results that
-preparation will supply.
+Options considered for reading another system: (a) a lookup only on the write's own connection, like
+`read_before`; (b) a lookup on any connection, through that connection's own read path; (c) a code
+operation (OPS-5) that reads both systems. Option (a) misses the case that motivates lookups; option
+(c) hides a precondition in code an operator cannot read in the YAML. Decision: option (b).
+
+- **Manifest.** `lookups: { <name>: { operation, ids_arg, key_field, key, fields, args } }`, at most 5,
+  each name matching `^[a-z][a-z0-9_]{0,62}$` and not a reserved name. `operation` is an enabled `read`
+  operation with `fields_arg` on **any** connection; `ids_arg` names an array property of it (string
+  items, or items without a type) whose `maxItems`, if any, is at least `batch_size`; `key_field` and
+  the 1 to 50 `fields` are fields it can return (when its field list declares an enum); `args` are
+  templates as in `read_before`, each key an argument of the lookup operation and each `{ arg }` a
+  property of the write's `input_schema`. Every lookup must be used by a check
+  (`is not used by any check`), and a reference `{ lookup: name, field: f }` must name one of that
+  lookup's `fields`.
+- **Key.** `{ target: true }` (the target ID), `{ after: f }` or `{ before: f }` (a field of `fields`,
+  read from the item's side) or `{ record: f }` (a field of the current record, added to the
+  `read_before` read like the `{ record }` references of the checks, and refused when that read cannot
+  return it). A key value that is not a string or a number, a missing field or a `null` side gives
+  the item no key, and the lookup is "not found" for it.
+- **Reads.** Per read chunk and per lookup, after the `read_before` read: one read of the distinct
+  keys of the items that are still pending after the built-in exclusions, in chunks of `batch_size`,
+  asking for `key_field` and `fields`. Results are indexed by `key_field` as a string, the first
+  record with a key winning. Items that are already excluded run no check and cause no lookup read.
+- **Failures.** A failed lookup read fails the preparation with the fixed code `lookup_failed` and
+  the upstream HTTP status when there was one, never the upstream message. A truncated read fails it
+  with `incomplete_read`, as a truncated `read_before` read does. A lookup that could not be read
+  completely is never read as "not found".
+- **Authorization (call).** The operator declared the lookup in the write's manifest, and the write
+  operation's policy decision covers it, as it already covers `read_before` and `selector`. The
+  requester needs no grant on the lookup operation. A requester can therefore cause reads on a
+  connection they hold no grant for, but only the reads the operator wrote into the manifest, keyed
+  by the targets of a call the policy allowed. What the requester can learn is one exclusion code per
+  target: whether a key was found, or whether a field compared as the check says. An operator who
+  does not want that leak must not declare the lookup.
+- **Secrecy (SEC-3).** Lookup values are used by checks only: they are read during preparation,
+  dropped after the chunk's checks, and never stored, shown, audited, logged or returned. They are not
+  in workflow history: the prepare activity takes the change-set identifier only.
+- **Connection.** A lookup read goes through the lookup operation's own connection: its egress rules,
+  its pacing and its credential, never the write connection's and never the user's access token
+  (AUTH-7). It is a read bound to `GET` (CS-1); the reader refuses any other operation.
+- **Presets.** A lookup's `operation` may be a `{ $param }`: a preset cannot know the operations of
+  another connection, so the binding names one. Lookup names are not fixed nodes: they are mapping
+  keys, which a `{ $param }` cannot replace, and are never shown or counted; a reference to them is
+  checked after substitution. A lookup on one of the preset's own reads follows `operation_prefix`
+  like `read_before`.
+- Versions: configuration schema 1.2.0, additive (`lookups` is optional).
 
 ## Consequences
 
@@ -84,6 +125,10 @@ preparation will supply.
   code; a code that no longer exists in the configuration still shows as itself.
 - A precondition that the closed set cannot express needs a code operation (OPS-5) or a later
   extension of the set, which is an additive configuration schema change.
+- A lookup adds one read per chunk and lookup to a preparation; an unavailable lookup connection
+  fails the preparation (`lookup_failed`) instead of letting records through unchecked.
+- An operator who declares a lookup on a connection lets every requester of the write learn, per
+  target, the outcome of the checks that read it, without a grant on that connection.
 
 ## Verified
 
@@ -98,3 +143,14 @@ built-ins in the stats summary and the prepared result text. Fix round 1: a repo
 (PostgreSQL and in-memory) stores items excluded with `locked`, `valueOf` and `constructor` and reads
 numeric counts; a core test shows the `prepared` audit event counting a `constructor` code as a number;
 a loader test refuses `constructor`; core tests show an unknown predicate or reference shape failing.
+
+2026-11-22 (lookups): core unit tests cover each key form, a key that is an object, missing or on a
+`null` side, three reads for 250 keys in chunks of 100, duplicate keys sent once, the template values
+and the field list in the read, `lookup_failed` with status 503 and `incomplete_read` on a truncated
+read; a preparation test excludes the target the lookup does not return with the check's code, finds
+no value of the lookup in the stored items, the audit or the returned change-set, reads only for
+pending items and adds a `{ record }` key to the `read_before` fields. Loader tests cover a lookup on
+another connection and each refusal at its path. A worker integration test runs the prepare activity
+with the production `UpstreamReader` against two fake upstreams: the target the second connection
+does not know is excluded, and the second upstream saw only `GET` requests, each with its own
+connection's bearer credential and none with the first's. The reader needed no change.
