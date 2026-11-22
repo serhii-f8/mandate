@@ -197,6 +197,8 @@ describe('NFR-6 evaluation from in-memory configuration', () => {
   it('needs nothing but the configuration and is fast', () => {
     const started = performance.now();
     for (let i = 0; i < 10_000; i++) search({ brand: i % 2 === 0 ? 'acme' : 'umbrella', fields: ['name'] });
-    expect(performance.now() - started).toBeLessThan(200);
+    // 0.2 ms per evaluation: loose enough for a shared CI runner (391 ms was seen there for the
+    // 10,000), far below what any I/O per evaluation would cost.
+    expect(performance.now() - started).toBeLessThan(2000);
   });
 });
