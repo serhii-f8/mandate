@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@mandate/widgets": "workspace:*",
-    "@fontsource-variable/public-sans": "5.2.6",
+    "@fontsource-variable/public-sans": "5.3.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

@@ -28,8 +28,8 @@
   },
   "dependencies": {
     "@mandate/core": "workspace:*",
-    "@temporalio/client": "1.25.0",
-    "@temporalio/common": "1.25.0",
-    "@temporalio/proto": "1.25.0"
+    "@temporalio/client": "1.26.0",
+    "@temporalio/common": "1.26.0",
+    "@temporalio/proto": "1.26.0"
   }
 }
