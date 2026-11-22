@@ -45,6 +45,32 @@ describe('components', () => {
     expect(container.querySelectorAll('tbody tr:first-child td[rowspan="2"]')).toHaveLength(2);
   });
 
+  it('APR-6 a create row shows a dash in every before cell and a new badge', () => {
+    const { container } = render(
+      <ItemTable rows={[row({ before: null, after: { name: 'x', price: 2 } })]} />,
+    );
+    const befores = [...container.querySelectorAll('td.before')];
+    expect(befores).toHaveLength(2);
+    expect(befores.map((c) => c.textContent)).toEqual(['—', '—']);
+    expect([...container.querySelectorAll('td.after')].map((c) => c.textContent)).toEqual(['x', '2']);
+    expect(container.querySelector('.action-badge')?.textContent).toBe('new');
+  });
+
+  it('APR-6 a delete row shows a dash in every after cell and a delete badge', () => {
+    const { container } = render(
+      <ItemTable rows={[row({ before: { name: 'x', price: 2 }, after: null })]} />,
+    );
+    expect([...container.querySelectorAll('td.after')].map((c) => c.textContent)).toEqual(['—', '—']);
+    expect([...container.querySelectorAll('td.before')].map((c) => c.textContent)).toEqual(['x', '2']);
+    expect(container.querySelector('.action-badge')?.textContent).toBe('delete');
+  });
+
+  it('APR-6 an update row has no action badge and no dash', () => {
+    const { container } = render(<ItemTable rows={[row({ before: { name: 'a' }, after: { name: 'b' } })]} />);
+    expect(container.querySelector('.action-badge')).toBeNull();
+    expect(container.textContent).not.toContain('—');
+  });
+
   it('UI-3 an excluded item shows its reason', () => {
     const { container } = render(<ItemTable rows={[row({ status: 'excluded', reason: 'no_change' })]} />);
     expect(screen.getByText('excluded: no_change')).toBeTruthy();

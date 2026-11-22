@@ -143,6 +143,24 @@
   color: var(--color-text-secondary, light-dark(#555555, #b0b0b0));
 }
 
+/* Action badges (APR-6): a created or deleted record beside its target */
+.mandate .action-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  font-size: 0.75em;
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.mandate .action-new {
+  color: var(--color-text-success, light-dark(#1a7f37, #4ac26b));
+}
+.mandate .action-delete {
+  color: var(--color-text-danger, light-dark(#c62828, #ff6b6b));
+}
+
 /* Controls */
 .mandate button {
   font: inherit;

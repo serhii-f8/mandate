@@ -34,6 +34,9 @@ export function formatDateTime(iso: string, timeZone?: string): string {
   }).format(d);
 }
 
+/** Shown for the side a creation or deletion does not have. */
+export const ABSENT = '—';
+
 export interface FieldRow {
   field?: string;
   before: string;
@@ -46,6 +49,20 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 export function fieldRows(item: Pick<ItemRowModel, 'before' | 'after'>): FieldRow[] {
   const { before, after } = item;
+  // APR-6: a creation has no before, a deletion no after; the missing side shows a dash in every row.
+  if (before === null || after === null) {
+    const present = before === null ? after : before;
+    const side = (v: unknown): string => (v === null ? ABSENT : displayValue(v));
+    if (before === null && after === null) return [{ before: ABSENT, after: ABSENT }];
+    if (!isPlainObject(present)) return [{ before: side(before), after: side(after) }];
+    return Object.keys(present)
+      .sort((a, b) => a.localeCompare(b))
+      .map((k) => ({
+        field: k,
+        before: before === null ? ABSENT : displayValue(present[k]),
+        after: after === null ? ABSENT : displayValue(present[k]),
+      }));
+  }
   if (!isPlainObject(before) || !isPlainObject(after)) {
     return [{ before: displayValue(before), after: displayValue(after) }];
   }

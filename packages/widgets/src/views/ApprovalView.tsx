@@ -29,6 +29,14 @@ function reasonText(reason: string | null): string {
   return (reason === null ? undefined : REASON_TEXT[reason]) ?? 'You cannot decide this change-set.';
 }
 
+/** APR-6: the approve control states what is approved; an update keeps its text. */
+function approveText(data: ApprovalViewModel, n: number): string {
+  if (data.kind === 'opaque') return 'Approve 1 call';
+  if (data.action === 'create') return `Approve creating ${plural(n, 'record')}`;
+  if (data.action === 'delete') return `Approve deleting ${plural(n, 'record')}`;
+  return `Approve ${plural(n, 'change')}`;
+}
+
 /** Which section started the running or last action, so its message shows there. */
 type Origin = 'sample' | 'decision';
 
@@ -88,7 +96,7 @@ function DecisionPanel(props: Props & { action: Action; origin: Origin | undefin
             send('approve');
           }}
         >
-          {data.kind === 'opaque' ? 'Approve 1 call' : `Approve ${plural(n, 'change')}`}
+          {approveText(data, n)}
         </button>
         <button
           type="button"

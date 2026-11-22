@@ -61,6 +61,8 @@ export function preparedResult(
       id: cs.id,
       operation: cs.operation,
       kind,
+      // APR-6: a creation or deletion says so; an update, the common case, adds nothing.
+      ...(cs.action === 'create' || cs.action === 'delete' ? { action: cs.action } : {}),
       status: cs.status,
       hash: cs.hash,
       stats: cs.stats,

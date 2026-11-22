@@ -17,6 +17,7 @@ import {
   type Approver,
   type ChangeItemRecord,
   type ChangeSetKind,
+  type ManifestAction,
   type ChangeSetRecord,
   type ChangeSetStats,
   type ChangeSetStatus,
@@ -90,6 +91,8 @@ export interface ChangeSetDetail {
   id: string;
   /** `opaque`: one raw upstream call with no diff (R7); `request.args` holds the arguments. */
   kind: ChangeSetKind;
+  /** What the change-set does to its targets, as stored at preparation (APR-5); `update` when none was stored. */
+  action: ManifestAction;
   status: ChangeSetStatus;
   hash?: string;
   derivedFrom?: string;
@@ -251,6 +254,7 @@ export function changesetDetailWith(input: {
   return {
     id: cs.id,
     kind,
+    action: cs.action ?? 'update',
     status: cs.status,
     ...(cs.hash === undefined ? {} : { hash: cs.hash }),
     ...(cs.derivedFrom === undefined ? {} : { derivedFrom: cs.derivedFrom }),

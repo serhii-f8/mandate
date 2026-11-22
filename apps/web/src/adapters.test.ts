@@ -117,6 +117,15 @@ describe('page adapters', () => {
     expect('drift' in toChangeSetModel(requester, items)).toBe(false);
   });
 
+  it('APR-5 the stored action reaches both models; an update carries none', () => {
+    const created: ChangeSetDetail = { ...requester, action: 'create' };
+    expect(toChangeSetModel(created, items).action).toBe('create');
+    expect(toApprovalModel(created, items, sample, FRESH).action).toBe('create');
+    expect('action' in toChangeSetModel({ ...requester, action: 'update' }, items)).toBe(false);
+    expect('action' in toApprovalModel({ ...requester, action: 'update' }, items, sample, FRESH)).toBe(false);
+    expect('action' in toApprovalModel(requester, items, sample, FRESH)).toBe(false);
+  });
+
   it('UI-2 APR-5 an opaque detail maps kind and arguments; a diff detail has none', () => {
     const opaque: ChangeSetDetail = { ...requester, kind: 'opaque', request: { ...requester.request, args: { text: 'x' } } };
     expect(toChangeSetModel(opaque, items)).toMatchObject({ kind: 'opaque', args: { text: 'x' } });

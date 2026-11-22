@@ -21,6 +21,11 @@ export function textOf(result: CallToolResult): string {
   return '';
 }
 
+/** The action only when it is not the default, so an update's model is unchanged (APR-6). */
+function actionOf(action: 'update' | 'create' | 'delete' | undefined): { action?: 'create' | 'delete' } {
+  return action === 'create' || action === 'delete' ? { action } : {};
+}
+
 function toItemRow(row: ItemAnswer): ItemRowModel {
   return {
     targetId: row.targetId,
@@ -76,6 +81,7 @@ export function fromGetChangeset(structured: unknown, filter?: ItemFilter): Chan
   return {
     id: cs.id,
     kind,
+    ...actionOf(cs.action),
     ...(kind === 'opaque' && cs.args !== undefined ? { args: cs.args } : {}),
     operation: { id: cs.operation.id, ...(cs.operation.title === undefined ? {} : { title: cs.operation.title }) },
     status: cs.status,
@@ -137,6 +143,7 @@ export function fromReviewChangeset(structured: unknown, filter?: ItemFilter): A
   return {
     id: detail.id,
     kind: detail.kind ?? 'diff',
+    ...actionOf(detail.action),
     status: detail.status,
     ...(detail.hash === undefined ? {} : { hash: detail.hash }),
     operation: {

@@ -54,6 +54,7 @@ export const changeSetAnswerSchema = z.object({
     expiresAt: z.string(),
     errorCode: z.string().optional(),
     kind: z.enum(['opaque', 'diff']).optional(),
+    action: z.enum(['update', 'create', 'delete']).optional(),
     args: z.record(z.string(), z.unknown()).optional(),
   }),
   progress: progressSchema.optional(),
@@ -94,6 +95,7 @@ const detailSchema = z.object({
   status: z.string(),
   hash: z.string().optional(),
   kind: z.enum(['opaque', 'diff']).optional(),
+  action: z.enum(['update', 'create', 'delete']).optional(),
   operation: z.object({ id: z.string(), title: z.string().optional(), description: z.string().optional(), risk: z.string().optional() }),
   request: z.object({
     args: z.record(z.string(), z.unknown()),

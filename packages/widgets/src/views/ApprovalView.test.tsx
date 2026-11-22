@@ -433,6 +433,22 @@ describe('ApprovalView', () => {
     await flush();
   });
 
+  it('APR-6 a create approval says what is approved, with the record count', () => {
+    const viewer: Viewer = { channel: 'page', canDecide: true, reason: null, needsFreshLogin: false, canStart: false };
+    render(<ApprovalView data={detail({ action: 'create', viewer })} actions={actionsWith()} onData={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Approve creating 3 records' })).toBeTruthy();
+    cleanup();
+    const one = detail({ action: 'delete', viewer, stats: { total: 1, included: 1, excluded: {}, written: 0, failed: 0, skipped: 0 } });
+    render(<ApprovalView data={one} actions={actionsWith()} onData={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Approve deleting 1 record' })).toBeTruthy();
+  });
+
+  it('APR-6 an update approval keeps its text', () => {
+    const viewer: Viewer = { channel: 'page', canDecide: true, reason: null, needsFreshLogin: false, canStart: false };
+    render(<ApprovalView data={detail({ action: 'update', viewer })} actions={actionsWith()} onData={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Approve 3 changes' })).toBeTruthy();
+  });
+
   it('APR-6 the opaque approval view says Approve 1 call and hides sample and items', () => {
     const data = detail({ kind: 'opaque', viewer: { channel: 'page', canDecide: true, reason: null, needsFreshLogin: false, canStart: false }, request: { ...detail().request, args: { text: HOSTILE } } });
     const { container } = render(<ApprovalView data={data} actions={actionsWith()} onData={vi.fn()} />);

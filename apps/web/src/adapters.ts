@@ -53,6 +53,11 @@ function toApproval(approval: NonNullable<ChangeSetDetail['approval']>): Approva
   };
 }
 
+/** The action only when it is not the default, so an update's model is unchanged (APR-6). */
+function actionOf(detail: ChangeSetDetail): { action?: 'create' | 'delete' } {
+  return detail.action === 'create' || detail.action === 'delete' ? { action: detail.action } : {};
+}
+
 /**
  * The requester's model. Permissions come from the server's viewer block; the page has no cancel
  * route in this phase, and it is the page itself, so there is no `pageUrl`.
@@ -63,6 +68,7 @@ export function toChangeSetModel(detail: ChangeSetDetail, items: ItemsPage, filt
   return {
     id: detail.id,
     kind,
+    ...actionOf(detail),
     ...(kind === 'opaque' ? { args: detail.request.args } : {}),
     operation: { id: operation.id, ...(operation.title === undefined ? {} : { title: operation.title }) },
     status: detail.status,
@@ -102,6 +108,7 @@ export function toApprovalModel(
   return {
     id: detail.id,
     kind: detail.kind ?? 'diff',
+    ...actionOf(detail),
     status: detail.status,
     ...(detail.hash === undefined ? {} : { hash: detail.hash }),
     operation: detail.operation,

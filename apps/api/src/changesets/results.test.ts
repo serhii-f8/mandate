@@ -41,6 +41,16 @@ describe('change-set answers', () => {
     expect(exact.structured).not.toHaveProperty('nextCursor');
   });
 
+  it('APR-5 MCP-4 a create or delete prepared answer carries its action; an update carries none', async () => {
+    const repo = { itemsPage: () => Promise.resolve([]) };
+    const changeset = async (extra: Partial<ChangeSetRecord>): Promise<Record<string, unknown>> =>
+      ((await preparedAnswer(repo, record('prepared', extra))).structured as { changeset: Record<string, unknown> }).changeset;
+    expect((await changeset({ action: 'create' })).action).toBe('create');
+    expect((await changeset({ action: 'delete' })).action).toBe('delete');
+    expect('action' in (await changeset({ action: 'update' }))).toBe(false);
+    expect('action' in (await changeset({}))).toBe(false);
+  });
+
   it('SEC-5 CS-7 executionSummaryText counts only', () => {
     expect(executionSummaryText('completed_with_errors', stats, 1)).toBe(
       'completed_with_errors: 2 written, 0 failed, 1 skipped (1 changed upstream since preparation).',

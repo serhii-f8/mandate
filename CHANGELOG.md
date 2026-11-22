@@ -19,6 +19,9 @@ Upgrade every `api` and `worker` before preparing new change-sets. See
 - `manifest.action: update | create | delete` lets a change-set create or delete records, with the same
   diff, drift check, verification and rollback; a delete needs a `destructive` operation. Execution
   refuses a change-set whose stored action differs from the operation's (OPS-2, EXE-8, ADR 0071).
+- The approval page and widget, the detail answer and the prepared result name the action: a `new` or
+  `delete` badge, a dash for the missing side, and `Approve creating N records` / `Approve deleting N
+  records` on the approve control (APR-5, APR-6, MCP-4, ADR 0071).
 
 ## 1.1.0
 

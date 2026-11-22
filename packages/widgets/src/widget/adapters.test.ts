@@ -39,6 +39,21 @@ describe('widget adapters', () => {
     }
   });
 
+  it('APR-6 MCP-4 the action of a prepared result and of a review detail reaches the models; older answers still parse', () => {
+    const base = prepared.structuredContent;
+    const create = { ...answer(prepared), structuredContent: { ...base, changeset: { ...base.changeset, action: 'create' } } };
+    const t = parseChangeSetTrigger(create);
+    expect(t.kind === 'view' && t.model.action).toBe('create');
+    const plain = parseChangeSetTrigger(answer(prepared));
+    expect(plain.kind === 'view' && 'action' in plain.model).toBe(false);
+    const rv = review.structuredContent;
+    const del = { ...answer(review), structuredContent: { ...rv, detail: { ...rv.detail, action: 'delete' } } };
+    const a = parseApprovalTrigger(del);
+    expect(a.kind === 'view' && a.model.action).toBe('delete');
+    const old = parseApprovalTrigger(answer(review));
+    expect(old.kind === 'view' && 'action' in old.model).toBe(false);
+  });
+
   it('UI-1 a prepared result and a get_changeset answer become a view model', () => {
     const fromPrepared = parseChangeSetTrigger(answer(prepared));
     expect(fromPrepared.kind).toBe('view');

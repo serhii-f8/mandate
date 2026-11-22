@@ -43,9 +43,12 @@ export interface ApprovalStateModel {
 }
 /** `opaque`: a single upstream call with no preview; absent means `diff`. */
 export type ChangeSetKind = 'opaque' | 'diff';
+/** What a change-set does to its targets; absent means `update`. */
+export type ChangeSetAction = 'update' | 'create' | 'delete';
 export interface ChangeSetViewModel {
   id: string;
   kind?: ChangeSetKind;
+  action?: ChangeSetAction;
   /** The stored arguments of an opaque change-set. */
   args?: Record<string, unknown>;
   operation: { id: string; title?: string };
@@ -68,6 +71,7 @@ export interface ChangeSetViewModel {
 export interface ApprovalViewModel {
   id: string;
   kind?: ChangeSetKind;
+  action?: ChangeSetAction;
   status: string;
   hash?: string;
   operation: { id: string; title?: string; description?: string; risk?: string };

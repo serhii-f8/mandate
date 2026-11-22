@@ -231,6 +231,23 @@ describe('APR-5 UI-3 detail kind', () => {
   });
 });
 
+describe('APR-5 APR-6 detail action', () => {
+  it('APR-5 the action comes from the stored change-set, not the current configuration', () => {
+    // The configuration says update (OPERATION has no action); the stored change-set was prepared as a create.
+    const created = { ...prepared(), action: 'create' as const };
+    const d = changesetDetail({ changeset: created, approvals: [], operation: OPERATION, viewer: alice, now: NOW, rollback: NO_ROLLBACK });
+    expect(d.action).toBe('create');
+    const gone = changesetDetail({ changeset: { ...prepared(), action: 'delete' }, approvals: [], viewer: alice, now: NOW, rollback: NO_ROLLBACK });
+    expect(gone.action).toBe('delete');
+  });
+
+  it('APR-5 a change-set stored without an action is an update', () => {
+    const d = changesetDetail({ changeset: prepared(), approvals: [], operation: OPERATION, viewer: alice, now: NOW, rollback: NO_ROLLBACK });
+    expect(d.action).toBe('update');
+    expect(d.kind).toBe('diff');
+  });
+});
+
 describe('detail additions', () => {
   it('CS-5 the detail carries derivedFrom of a derived change-set', () => {
     const src = '22222222-2222-4222-8222-222222222222';

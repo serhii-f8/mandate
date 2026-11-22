@@ -108,6 +108,8 @@ export interface ChangeSetDetail {
   derivedFrom?: string;
   /** Absent means `diff`. */
   kind?: 'opaque' | 'diff';
+  /** What the change-set does to its targets; absent means `update`. */
+  action?: 'update' | 'create' | 'delete';
   operation: { id: string; title?: string; description?: string; risk?: string };
   connection: string;
   request: { args: Record<string, unknown>; requester: string; clientId?: string; createdAt: string; submittedAt?: string };

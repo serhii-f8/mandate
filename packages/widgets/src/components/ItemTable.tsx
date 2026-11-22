@@ -25,6 +25,13 @@ function note(row: ItemRowModel): string {
   return '';
 }
 
+/** APR-6: a row with no before is a creation, with no after a deletion; an update has no badge. */
+function actionBadge(row: ItemRowModel): 'new' | 'delete' | undefined {
+  if (row.before === null && row.after !== null) return 'new';
+  if (row.after === null && row.before !== null) return 'delete';
+  return undefined;
+}
+
 interface RowProps {
   row: ItemRowModel;
   /** Absent without a selection column; otherwise whether the row has a checkbox and its state. */
@@ -36,6 +43,7 @@ const ItemRows = memo(function ItemRows({ row, box }: RowProps): ReactElement {
   const excluded = row.status === 'excluded';
   const fields = excluded ? [] : fieldRows(row);
   const span = excluded ? 1 : fields.length;
+  const badge = excluded ? undefined : actionBadge(row);
   const head = (
     <>
       {box ? (
@@ -55,6 +63,7 @@ const ItemRows = memo(function ItemRows({ row, box }: RowProps): ReactElement {
       ) : null}
       <td rowSpan={span} className="target">
         {row.targetId}
+        {badge ? <span className={`action-badge action-${badge}`}>{badge}</span> : null}
       </td>
       <td rowSpan={span}>
         <StatusBadge status={row.status} />
