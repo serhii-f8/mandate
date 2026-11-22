@@ -3,7 +3,7 @@
 import { ApplicationFailure } from '@temporalio/common';
 import { describe, expect, it } from 'vitest';
 import { OPAQUE_OPERATION, testConfiguration, WRITE_OPERATION } from '../../test/support/configuration.js';
-import { executionSettings } from './settings.js';
+import { executionSettings, verificationManifest } from './settings.js';
 
 const configuration = await testConfiguration();
 
@@ -41,5 +41,20 @@ describe('EXE-4 executionSettings', () => {
       expect(error).toBeInstanceOf(ApplicationFailure);
       expect(error).toMatchObject({ message: 'operation_unavailable', nonRetryable: true });
     }
+  });
+});
+
+describe('EXE-12 verificationManifest', () => {
+  it('EXE-12 verificationManifest answers a manifest with verify_after only', () => {
+    const verifyAfter = { afterSeconds: 0, everySeconds: 30, timeoutSeconds: 600, checks: [{ code: 'not_live', require: [{ present: { record: 'name' } }] }] };
+    const verifying = {
+      ...configuration,
+      policy: {
+        ...configuration.policy,
+        operations: configuration.policy.operations.map((o) => (o.id === WRITE_OPERATION && o.manifest !== undefined ? { ...o, manifest: { ...o.manifest, verifyAfter } } : o)),
+      },
+    };
+    expect(verificationManifest(verifying, WRITE_OPERATION)).toMatchObject({ batchSize: 2, verifyAfter });
+    for (const id of [WRITE_OPERATION, OPAQUE_OPERATION, 'catalog.gone']) expect(verificationManifest(configuration, id)).toBeUndefined();
   });
 });

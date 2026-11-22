@@ -7,6 +7,7 @@ import {
   changesetBatchEvent,
   changesetRollbackBatchEvent,
   changesetTransitionEvent,
+  changesetVerificationEvent,
   coverBatch,
   executionTerminal,
   failureThresholdExceeded,
@@ -15,6 +16,8 @@ import {
   rollbackRequestEvents,
   rollbackTerminal,
   startEventFactory,
+  verificationSchedule,
+  verifyChunk,
   type BatchContext,
   type ChangeItemRecord,
   type ChangeSetExecutor,
@@ -25,12 +28,22 @@ import {
   type ExecutionProgress,
   type FinishOutcome,
   type ItemOutcome,
+  type ManifestDefinition,
   type RollbackOutcome,
   type RollbackRequestInput,
   type RollbackRequestOutcome,
   type StartOutcome,
   type StartRequest,
+  type UpstreamReader,
+  type VerificationEnd,
 } from '@mandate/core';
+
+/** EXE-12: what the in-memory executor verifies with; the reader is the only way upstream. */
+export interface InMemoryVerification {
+  readonly manifestOf: (operationId: string) => ManifestDefinition | undefined;
+  readonly reader: UpstreamReader;
+  readonly readFieldsArg: (operationId: string) => string | undefined;
+}
 
 export interface InMemoryExecutorDeps {
   readonly repository: ChangeSetRepository;
@@ -42,10 +55,17 @@ export interface InMemoryExecutorDeps {
   readonly failureThreshold?: number;
   readonly now?: () => Date;
   readonly newId?: () => string;
+  /** EXE-12: verify after the last batch when the operation's manifest has `verify_after`. Absent: never verify. */
+  readonly verification?: InMemoryVerification;
+  /** The wait before the first look and between looks. Default: resolves at once. */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 /** The in-memory executor runs each batch once, so every claim and write uses attempt 1. */
 const ATTEMPT = 1;
+/** The repository's page limit: a verification chunk is the manifest's batch size, at most this. */
+const VERIFY_PAGE_MAX = 500;
+const SECOND_MS = 1000;
 
 /**
  * In-process executor (EXE-11) on the same repository port as the durable one: the start checks
@@ -53,6 +73,8 @@ const ATTEMPT = 1;
  * fenced batch rows (EXE-3), a stored cancel request ends the run after the current batch (EXE-7),
  * and the failure threshold stops remaining batches (EXE-5). A rollback request runs at once in
  * fenced rollback batches (EXE-8); it never opens a window itself, so tests open one in the store.
+ * With the `verification` option, a run whose batches ended with nothing left is verified with the
+ * same core functions as the worker's activities (EXE-12), waiting through the injected `sleep`.
  */
 export class InMemoryExecutor implements ChangeSetExecutor {
   private readonly runs = new Map<string, Promise<void>>();
@@ -63,6 +85,8 @@ export class InMemoryExecutor implements ChangeSetExecutor {
   private readonly failureThreshold: number;
   private readonly now: () => Date;
   private readonly newId: () => string;
+  private readonly verification: InMemoryVerification | undefined;
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(deps: InMemoryExecutorDeps) {
     this.repository = deps.repository;
@@ -72,6 +96,8 @@ export class InMemoryExecutor implements ChangeSetExecutor {
     this.failureThreshold = deps.failureThreshold ?? 0.5;
     this.now = deps.now ?? (() => new Date());
     this.newId = deps.newId ?? randomUUID;
+    this.verification = deps.verification;
+    this.sleep = deps.sleep ?? (() => Promise.resolve());
   }
 
   /** Resolves when the run of the change-set has ended (immediately when none is active). */
@@ -114,6 +140,8 @@ export class InMemoryExecutor implements ChangeSetExecutor {
       const size = this.batchSizeOf(changeset.operation);
       if (!Number.isInteger(size) || size < 1) throw new Error('invalid batch size');
       const outcome = await this.runBatches(changeset.id, size, correlationId);
+      // EXE-12: only a run that ended with nothing left is verified.
+      if (outcome === 'done') await this.verify(changeset, correlationId);
       await this.finish(changeset.id, outcome, correlationId);
     } catch {
       // Unexpected error: best effort to leave a terminal state; the run has no caller to report to.
@@ -170,6 +198,64 @@ export class InMemoryExecutor implements ChangeSetExecutor {
       );
       if (!completed.ok) throw new Error('batch fenced');
     }
+  }
+
+  /**
+   * EXE-12: looks at the pending items round by round, in chunks of the batch size, waiting
+   * `after_seconds` before the first look and `every_seconds` between looks, until nothing is pending,
+   * the stored deadline passed or a cancel is stored; then finishes verification once. The number of
+   * looks is also bounded by the schedule, so a sleep that does not move the clock cannot spin.
+   */
+  private async verify(changeset: ChangeSetRecord, correlationId: string): Promise<void> {
+    const found = this.verification?.manifestOf(changeset.operation);
+    const verifyAfter = found?.verifyAfter;
+    if (this.verification === undefined || found === undefined || verifyAfter === undefined) return;
+    const manifest = { ...found, verifyAfter };
+    const { reader, readFieldsArg } = this.verification;
+    const id = changeset.id;
+    const begun = await this.repository.beginVerification(id, verificationSchedule(verifyAfter, this.now()));
+    if (begun === undefined) return;
+    const everyMs = verifyAfter.everySeconds * SECOND_MS;
+    const looks = Math.floor((begun.until.getTime() - begun.firstAt.getTime()) / everyMs) + 1;
+    const limit = Math.min(manifest.batchSize, VERIFY_PAGE_MAX);
+    const first = begun.firstAt.getTime() - this.now().getTime();
+    if (first > 0) await this.sleep(first);
+
+    let pending = begun.pending;
+    let cancel: ChangeSetRecord['cancelRequest'];
+    let end: VerificationEnd | undefined = pending === 0 ? 'done' : undefined;
+    for (let round = begun.round + 1, look = 1; end === undefined; round++, look++) {
+      const current = await this.repository.get(id);
+      if (current === undefined) throw new Error('change-set vanished');
+      cancel = current.cancelRequest;
+      if (cancel !== undefined) {
+        end = 'cancelled';
+        break;
+      }
+      for (;;) {
+        const items = await this.repository.verificationItems(id, round, limit);
+        if (items.length === 0) break;
+        const outcomes = await verifyChunk({ manifest, args: current.args, items, reader, readFieldsArg });
+        const recorded = await this.repository.recordVerification(id, round, outcomes);
+        pending = recorded.pending;
+        if (recorded.left === 0) break;
+      }
+      if (pending === 0) end = 'done';
+      else if (this.now().getTime() >= begun.until.getTime() || look >= looks) end = 'timeout';
+      else await this.sleep(everyMs);
+    }
+
+    // EXE-7: the stored request's actor and correlation ID stop verification.
+    await this.repository.finishVerification(id, end === 'cancelled' ? 'verify_cancelled' : 'verify_timeout', (counts) =>
+      changesetVerificationEvent({
+        id: this.newId(),
+        changeset,
+        end,
+        counts,
+        actor: cancel?.actor ?? 'system',
+        correlationId: cancel?.correlationId ?? correlationId,
+      }),
+    );
   }
 
   /** Terminal transition (EXE-6); a cancel carries the stored request's actor and correlation ID (EXE-7). */

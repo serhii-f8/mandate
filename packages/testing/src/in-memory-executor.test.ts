@@ -9,6 +9,10 @@ import {
   type ChangeItemRecord,
   type ChangeSetRecord,
   type ChangeSetRepository,
+  type ManifestDefinition,
+  type ManifestVerifyAfter,
+  type ReadPage,
+  type UpstreamReader,
   BatchFenced,
 } from '@mandate/core';
 import { describeExecutorContract, describeRollbackRun, EXECUTOR_CONTRACT_HASH } from './executor-contract.js';
@@ -201,6 +205,145 @@ describe('EXE-11 in-memory executor', () => {
     const record = await h.repository.get(cs.id);
     expect(record?.status).toBe('failed');
     expect(record?.errorCode).toBe('executor_error');
+  });
+
+  describe('EXE-12 EXE-11 verify-after', () => {
+    // Now: the prepared change-sets expire a day after the real clock.
+    const T0 = Date.now();
+    const verifyAfter: ManifestVerifyAfter = {
+      afterSeconds: 0,
+      everySeconds: 30,
+      timeoutSeconds: 600,
+      checks: [{ code: 'not_live', require: [{ equals: [{ record: 'v' }, { after: 'v' }] }] }],
+    };
+    const manifest: ManifestDefinition = {
+      idField: 'id',
+      idsArg: 'ids',
+      fields: ['v'],
+      requiredFields: [],
+      scopeArgs: {},
+      readBefore: { operation: 'catalog.get', idsArg: 'ids', args: {} },
+      batchSize: 2,
+      maxTargets: 1000,
+      rollback: { strategy: 'replay_previous_state' },
+      verifyAfter,
+    };
+
+    /** Answers `v: 2` (the written value) from the `liveFromLook`-th look on, `v: 1` before. */
+    class LookReader implements UpstreamReader {
+      looks = 0;
+      constructor(private readonly liveFromLook: number) {}
+      read(_operationId: string, args: Readonly<Record<string, unknown>>): Promise<ReadPage> {
+        const ids = Array.isArray(args.ids) ? (args.ids as string[]) : [];
+        // One read per chunk; a look over two chunks counts once, at its first chunk.
+        if (ids.includes('t-0001')) this.looks += 1;
+        const v = this.looks >= this.liveFromLook ? 2 : 1;
+        return Promise.resolve({ ok: true, items: ids.map((id) => ({ id, v })), truncated: false });
+      }
+    }
+
+    /** A clock that only the injected sleep moves. */
+    const fakeTime = () => {
+      let t = T0;
+      const sleeps: number[] = [];
+      return {
+        sleeps,
+        now: () => new Date(t),
+        sleep: (ms: number) => {
+          sleeps.push(ms);
+          t += ms;
+          return Promise.resolve();
+        },
+      };
+    };
+
+    const verifyingBuild = (reader: UpstreamReader, time: ReturnType<typeof fakeTime>) => {
+      const audit = new InMemoryAuditLog();
+      const repository = new InMemoryChangeSetRepository(audit);
+      const executor = new InMemoryExecutor({
+        repository,
+        writer: new ScriptedWriter(),
+        batchSizeOf: () => 2,
+        now: time.now,
+        sleep: (ms) => time.sleep(ms),
+        verification: { manifestOf: (op) => (op === 'catalog.update' ? manifest : undefined), reader, readFieldsArg: () => 'fields' },
+      });
+      return { audit, repository, executor };
+    };
+
+    const prepare = async (repository: ChangeSetRepository, items: number): Promise<ChangeSetRecord> => {
+      const h = build({ wrap: () => repository });
+      return h.prepared(items);
+    };
+
+    it('EXE-12 EXE-11 an item confirmed on the second look ends completed after one sleep of every_seconds', async () => {
+      const time = fakeTime();
+      const h = verifyingBuild(new LookReader(2), time);
+      const cs = await prepare(h.repository, 3);
+      await h.executor.start({ changesetId: cs.id, ...START });
+      await h.executor.settled(cs.id);
+      const record = await h.repository.get(cs.id);
+      expect(record?.status).toBe('completed');
+      expect(record?.stats.verification).toEqual({ pending: 0, confirmed: 3, unconfirmed: 0 });
+      expect(time.sleeps).toEqual([verifyAfter.everySeconds * 1000]);
+      const events = h.audit.events.filter((e) => e.changesetId === cs.id && e.action === 'changeset.verification');
+      expect(events.map((e) => [e.actor, e.correlationId, e.details])).toEqual([
+        ['system', 'c', { end: 'done', pending: 0, confirmed: 3, unconfirmed: 0, operation: 'catalog.update' }],
+      ]);
+    });
+
+    it('EXE-12 EXE-11 an item never confirmed is unconfirmed once the clock passes the deadline: completed_with_errors', async () => {
+      const time = fakeTime();
+      const h = verifyingBuild(new LookReader(Number.POSITIVE_INFINITY), time);
+      const cs = await prepare(h.repository, 2);
+      await h.executor.start({ changesetId: cs.id, ...START });
+      await h.executor.settled(cs.id);
+      const record = await h.repository.get(cs.id);
+      expect(record?.status).toBe('completed_with_errors');
+      expect(record?.stats.verification).toEqual({ pending: 0, confirmed: 0, unconfirmed: 2 });
+      expect(time.now().getTime()).toBeGreaterThanOrEqual(T0 + verifyAfter.timeoutSeconds * 1000);
+      const items = await h.repository.itemsPage(cs.id, { limit: 10 });
+      expect(items.map((i) => [i.status, i.verificationStatus, i.verificationCode])).toEqual([
+        ['written', 'unconfirmed', 'not_live'],
+        ['written', 'unconfirmed', 'not_live'],
+      ]);
+      const events = h.audit.events.filter((e) => e.changesetId === cs.id && e.action === 'changeset.verification');
+      expect(events.map((e) => e.details.end)).toEqual(['timeout']);
+    });
+
+    it('EXE-12 EXE-7 a cancel stored during verification stops it: verify_cancelled, status from the items', async () => {
+      const time = fakeTime();
+      const reader = new LookReader(Number.POSITIVE_INFINITY);
+      const h = verifyingBuild(reader, time);
+      const cs = await prepare(h.repository, 2);
+      const sleep = time.sleep;
+      // The cancel arrives while the executor waits between looks.
+      time.sleep = async (ms) => {
+        await h.executor.cancel({ changesetId: cs.id, actor: 'bob', correlationId: 'corr-cancel' });
+        return sleep(ms);
+      };
+      await h.executor.start({ changesetId: cs.id, ...START });
+      await h.executor.settled(cs.id);
+      expect(reader.looks).toBe(1);
+      expect((await h.repository.get(cs.id))?.status).toBe('completed_with_errors');
+      const items = await h.repository.itemsPage(cs.id, { limit: 10 });
+      expect(items.map((i) => [i.verificationStatus, i.verificationCode])).toEqual([
+        ['unconfirmed', 'not_live'],
+        ['unconfirmed', 'not_live'],
+      ]);
+      const events = h.audit.events.filter((e) => e.changesetId === cs.id && e.action === 'changeset.verification');
+      expect(events.map((e) => [e.actor, e.correlationId, e.details.end])).toEqual([['bob', 'corr-cancel', 'cancelled']]);
+    });
+
+    it('EXE-11 without the verification option nothing is verified', async () => {
+      const h = build();
+      const cs = await h.prepared(2);
+      await h.executor.start({ changesetId: cs.id, ...START });
+      await h.executor.settled(cs.id);
+      const record = await h.repository.get(cs.id);
+      expect(record?.status).toBe('completed');
+      expect(record?.stats.verification).toBeUndefined();
+    });
   });
 
   it('EXE-11 fills a batch larger than the repository page limit from several pages', async () => {

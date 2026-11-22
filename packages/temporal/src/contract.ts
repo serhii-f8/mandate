@@ -6,9 +6,9 @@
  * type-only imports, so the workflow bundle pulls in nothing non-deterministic (EXE-10).
  * Workflow code imports the core types it needs from here, never from `@mandate/core`.
  */
-import type { ChangeSetStatus, FinishOutcome, RollbackCounts, RollbackOutcome } from '@mandate/core';
+import type { ChangeSetStatus, FinishOutcome, RollbackCounts, RollbackOutcome, VerificationEnd } from '@mandate/core';
 
-export type { ChangeSetStatus, FinishOutcome, RollbackCounts, RollbackOutcome } from '@mandate/core';
+export type { ChangeSetStatus, FinishOutcome, RollbackCounts, RollbackOutcome, VerificationEnd } from '@mandate/core';
 
 export const CHANGESET_WORKFLOW = 'changesetWorkflow';
 export const DEFAULT_TASK_QUEUE = 'mandate-operations';
@@ -27,6 +27,8 @@ export interface ExecutionResume {
   readonly nextBatch: number;
   readonly counts: ExecutionCounts;
   readonly verified: true;
+  /** EXE-12: the last verification round a previous run looked at; absent before verification began. */
+  readonly verificationRound?: number;
 }
 
 export interface ChangesetWorkflowInput {
@@ -79,6 +81,8 @@ export type BeginResult =
       readonly batchSize: number;
       readonly itemsPerRun: number;
       readonly cancelRequested: boolean;
+      /** EXE-12: true when the operation's manifest has `verify_after`; absent means no verification. */
+      readonly verifyAfter?: boolean;
     } & ExecutionCounts)
   | { readonly ok: false; readonly outcome: 'hash_mismatch' | 'policy_denied' | 'approval_missing' };
 
@@ -106,6 +110,34 @@ export interface RollbackBatchResult extends RollbackCounts {
   readonly empty: boolean;
 }
 
+/**
+ * EXE-12: the stored verification schedule in epoch milliseconds, the wait between looks, the last
+ * round in which an item missed (0 when none) and the pending count; `ok: false` when there is
+ * nothing to verify (the change-set is no longer executing, or the operation lost `verify_after`).
+ */
+export type BeginVerificationResult =
+  | {
+      readonly ok: true;
+      readonly firstAtMs: number;
+      readonly untilMs: number;
+      readonly everyMs: number;
+      readonly round: number;
+      readonly pending: number;
+    }
+  | { readonly ok: false };
+
+/** EXE-12: one chunk of a verification round. */
+export interface VerifyBatchResult {
+  /** Items this chunk confirmed. */
+  readonly confirmed: number;
+  /** Pending items this round has not looked at yet. */
+  readonly left: number;
+  /** Pending items in total. */
+  readonly pending: number;
+  /** A stored cancel request: nothing was read, verification stops (EXE-7). */
+  readonly cancelRequested: boolean;
+}
+
 export interface ChangesetActivities {
   inspect(changesetId: string): Promise<InspectResult>;
   prepare(changesetId: string): Promise<{ status: ChangeSetStatus }>;
@@ -117,4 +149,7 @@ export interface ChangesetActivities {
   beginRollback(changesetId: string): Promise<BeginRollbackResult>;
   rollbackBatch(changesetId: string, batchNo: number): Promise<RollbackBatchResult>;
   finishRollback(changesetId: string, outcome: RollbackOutcome): Promise<{ status: ChangeSetStatus }>;
+  beginVerification(changesetId: string): Promise<BeginVerificationResult>;
+  verifyBatch(changesetId: string, round: number): Promise<VerifyBatchResult>;
+  finishVerification(changesetId: string, end: VerificationEnd): Promise<void>;
 }

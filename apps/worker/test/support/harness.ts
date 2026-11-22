@@ -181,6 +181,9 @@ function spied(a: ChangesetActivities, spy: ((activity: string) => unknown) | un
     beginRollback: async (id) => (await before('beginRollback'), a.beginRollback(id)),
     rollbackBatch: async (id, batchNo) => (await before('rollbackBatch'), a.rollbackBatch(id, batchNo)),
     finishRollback: async (id, outcome) => (await before('finishRollback'), a.finishRollback(id, outcome)),
+    beginVerification: async (id) => (await before('beginVerification'), a.beginVerification(id)),
+    verifyBatch: async (id, round) => (await before('verifyBatch'), a.verifyBatch(id, round)),
+    finishVerification: async (id, end) => (await before('finishVerification'), a.finishVerification(id, end)),
   };
 }
 

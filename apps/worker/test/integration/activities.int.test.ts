@@ -10,6 +10,7 @@ import {
   type ChangeWriter,
   type ExecutionGuard,
   type ItemOutcome,
+  type ManifestVerifyAfter,
   type ReadPage,
   type RollbackStrategy,
   type UpstreamReader,
@@ -486,6 +487,222 @@ describe('change-set activities', () => {
       batchSize: 2,
       itemsPerRun: 100,
       cancelRequested: false,
+    });
+  });
+
+  describe('EXE-12 verification activities', () => {
+    const T0 = Date.parse('2026-11-22T10:00:00Z');
+    /** A record value read upstream: it must never reach an item, the audit or a result (SEC-3). */
+    const SECRET_NAME = 'upstream-secret-name';
+    const verifyAfter: ManifestVerifyAfter = {
+      afterSeconds: 5,
+      everySeconds: 10,
+      timeoutSeconds: 60,
+      checks: [{ code: 'name_not_live', require: [{ equals: [{ record: 'name' }, { after: 'name' }] }] }],
+    };
+    /** The test configuration with `verify_after` on the write operation's manifest. */
+    const verifying = (): LoadedConfiguration => ({
+      ...configuration,
+      policy: {
+        ...configuration.policy,
+        operations: configuration.policy.operations.map((o) =>
+          o.id === WRITE_OPERATION && o.manifest !== undefined ? { ...o, manifest: { ...o.manifest, verifyAfter } } : o,
+        ),
+      },
+    });
+
+    /** Answers the SKUs in `live` with the written name, every other SKU with a value that fails the check. */
+    class LiveReader implements UpstreamReader {
+      readonly calls: { operationId: string; args: Readonly<Record<string, unknown>> }[] = [];
+      constructor(private readonly live: readonly string[]) {}
+      read(operationId: string, args: Readonly<Record<string, unknown>>): Promise<ReadPage> {
+        this.calls.push({ operationId, args });
+        const skus = Array.isArray(args.skus) ? (args.skus as string[]) : [];
+        return Promise.resolve({
+          ok: true,
+          items: skus.map((sku) => ({ sku, brand: 'acme', name: this.live.includes(sku) ? 'new' : SECRET_NAME })),
+          truncated: false,
+        });
+      }
+    }
+
+    /** Two items written in one batch; the change-set stays `executing`. */
+    const written = async (): Promise<ChangeSetRecord> => {
+      const cs = await createPrepared(repository, 2, { execute: { correlationId: 'corr-exec' } });
+      await attempt(1, () => activities().executeBatch(cs.id, 0));
+      return cs;
+    };
+
+    const verificationOf = async (changesetId: string) =>
+      (await repository.itemsPage(changesetId, { limit: 100 })).map((i) => [i.targetId, i.verificationStatus, i.verificationCode]);
+
+    const verificationEvents = async (changesetId: string) =>
+      (await auditEventsOf(postgres.database, changesetId)).filter((e) => e.action === 'changeset.verification');
+
+    it('EXE-12 beginExecution answers verifyAfter only for an operation whose manifest has verify_after', async () => {
+      const cs = await createPrepared(repository, 2, { execute: {} });
+      await expect(attempt(1, () => activities({ configuration: verifying() }).beginExecution(cs.id, { verified: true }))).resolves.toMatchObject({
+        ok: true,
+        verifyAfter: true,
+      });
+      const plain = await attempt(1, () => activities().beginExecution(cs.id, { verified: true }));
+      expect(plain).toMatchObject({ ok: true });
+      expect(plain).not.toHaveProperty('verifyAfter');
+    });
+
+    it('EXE-12 NFR-2 beginVerification stores the schedule once and answers it again later', async () => {
+      const cs = await written();
+      const first = await attempt(1, () => activities({ configuration: verifying(), now: () => new Date(T0) }).beginVerification(cs.id));
+      expect(first).toEqual({ ok: true, firstAtMs: T0 + 5_000, untilMs: T0 + 60_000, everyMs: 10_000, round: 0, pending: 2 });
+      // A retry or a continued run an hour later keeps the stored schedule.
+      const later = activities({ configuration: verifying(), now: () => new Date(T0 + 3_600_000) });
+      await expect(attempt(2, () => later.beginVerification(cs.id))).resolves.toEqual(first);
+      expect(await verificationOf(cs.id)).toEqual([
+        ['t-0001', 'pending', undefined],
+        ['t-0002', 'pending', undefined],
+      ]);
+    });
+
+    it('EXE-12 beginVerification answers ok false without verify_after or when the change-set is not executing', async () => {
+      const cs = await written();
+      await expect(attempt(1, () => activities().beginVerification(cs.id))).resolves.toEqual({ ok: false });
+      const prepared = await createPrepared(repository, 1);
+      await expect(attempt(1, () => activities({ configuration: verifying() }).beginVerification(prepared.id))).resolves.toEqual({ ok: false });
+      expect((await repository.get(cs.id))?.verificationUntil).toBeUndefined();
+    });
+
+    it('EXE-12 SEC-3 verifyBatch confirms what holds and keeps the rest pending with the code only', async () => {
+      const cs = await written();
+      const reader = new LiveReader(['t-0001']);
+      const a = activities({ configuration: verifying(), reader });
+      await attempt(1, () => a.beginVerification(cs.id));
+      const env = environment(1);
+      let heartbeats = 0;
+      env.on('heartbeat', () => {
+        heartbeats += 1;
+      });
+      const result = await env.run(() => a.verifyBatch(cs.id, 1));
+      expect(result).toEqual({ confirmed: 1, left: 0, pending: 1, cancelRequested: false });
+      expect(heartbeats).toBeGreaterThanOrEqual(1);
+      expect(reader.calls.map((c) => [c.operationId, c.args.skus])).toEqual([[READ_OPERATION, ['t-0001', 't-0002']]]);
+      expect(await verificationOf(cs.id)).toEqual([
+        ['t-0001', 'confirmed', undefined],
+        ['t-0002', 'pending', 'name_not_live'],
+      ]);
+      // The round is through: a retry of it claims nothing and reads nothing.
+      await expect(attempt(2, () => a.verifyBatch(cs.id, 1))).resolves.toEqual({ confirmed: 0, left: 0, pending: 1, cancelRequested: false });
+      expect(reader.calls).toHaveLength(1);
+      const stored = JSON.stringify([await repository.itemsPage(cs.id, { limit: 100 }), await repository.get(cs.id)]);
+      expect(stored).not.toContain(SECRET_NAME);
+    });
+
+    it('EXE-12 verifyBatch fails closed when the operation lost verify_after since the start', async () => {
+      const cs = await written();
+      await attempt(1, () => activities({ configuration: verifying() }).beginVerification(cs.id));
+      const reader = new LiveReader(['t-0001', 't-0002']);
+      await expect(attempt(1, () => activities({ reader }).verifyBatch(cs.id, 1))).resolves.toEqual({
+        confirmed: 0,
+        left: 0,
+        pending: 2,
+        cancelRequested: false,
+      });
+      expect(reader.calls).toEqual([]);
+      expect(await verificationOf(cs.id)).toEqual([
+        ['t-0001', 'pending', 'verify_read_failed'],
+        ['t-0002', 'pending', 'verify_read_failed'],
+      ]);
+    });
+
+    it('EXE-12 EXE-7 verifyBatch with a stored cancel request reads nothing upstream', async () => {
+      const cs = await written();
+      const reader = new LiveReader(['t-0001', 't-0002']);
+      const a = activities({ configuration: verifying(), reader });
+      await attempt(1, () => a.beginVerification(cs.id));
+      await repository.requestCancel(cs.id, { actor: 'bob', correlationId: 'corr-cancel', requestedAt: new Date() });
+      await expect(attempt(1, () => a.verifyBatch(cs.id, 1))).resolves.toEqual({ confirmed: 0, left: 0, pending: 2, cancelRequested: true });
+      expect(reader.calls).toEqual([]);
+      expect(await verificationOf(cs.id)).toEqual([
+        ['t-0001', 'pending', undefined],
+        ['t-0002', 'pending', undefined],
+      ]);
+    });
+
+    it('EXE-12 AUD-1 SEC-3 finishVerification timeout leaves the pending item unconfirmed and audits counts once', async () => {
+      const cs = await written();
+      const a = activities({ configuration: verifying(), reader: new LiveReader(['t-0001']) });
+      await attempt(1, () => a.beginVerification(cs.id));
+      await attempt(1, () => a.verifyBatch(cs.id, 1));
+      await expect(attempt(1, () => a.finishVerification(cs.id, 'timeout'))).resolves.toBeUndefined();
+      // A retry appends nothing (NFR-2).
+      await attempt(2, () => a.finishVerification(cs.id, 'timeout'));
+      await expect(attempt(1, () => a.finishExecution(cs.id, 'done'))).resolves.toEqual({ status: 'completed_with_errors' });
+      expect(await verificationOf(cs.id)).toEqual([
+        ['t-0001', 'confirmed', undefined],
+        ['t-0002', 'unconfirmed', 'name_not_live'],
+      ]);
+      const events = await verificationEvents(cs.id);
+      expect(events).toEqual([
+        {
+          actor: 'system',
+          clientId: null,
+          action: 'changeset.verification',
+          decision: null,
+          outcome: 'error',
+          correlationId: 'corr-exec',
+          changesetId: cs.id,
+          details: { end: 'timeout', pending: 0, confirmed: 1, unconfirmed: 1, operation: cs.operation },
+        },
+      ]);
+      expect(JSON.stringify(await auditEventsOf(postgres.database, cs.id))).not.toContain(SECRET_NAME);
+    });
+
+    it('EXE-12 finishVerification timeout before any look gives every pending item verify_timeout', async () => {
+      const cs = await written();
+      const a = activities({ configuration: verifying() });
+      await attempt(1, () => a.beginVerification(cs.id));
+      await attempt(1, () => a.finishVerification(cs.id, 'timeout'));
+      expect(await verificationOf(cs.id)).toEqual([
+        ['t-0001', 'unconfirmed', 'verify_timeout'],
+        ['t-0002', 'unconfirmed', 'verify_timeout'],
+      ]);
+    });
+
+    it('EXE-12 EXE-7 finishVerification cancelled ends with the status the items give, audited as the cancel actor', async () => {
+      const cs = await written();
+      const a = activities({ configuration: verifying(), reader: new LiveReader(['t-0001']) });
+      await attempt(1, () => a.beginVerification(cs.id));
+      await attempt(1, () => a.verifyBatch(cs.id, 1));
+      await repository.requestCancel(cs.id, { actor: 'bob', correlationId: 'corr-cancel', requestedAt: new Date() });
+      await attempt(1, () => a.finishVerification(cs.id, 'cancelled'));
+      await expect(attempt(1, () => a.finishExecution(cs.id, 'done'))).resolves.toEqual({ status: 'completed_with_errors' });
+      expect(await verificationOf(cs.id)).toEqual([
+        ['t-0001', 'confirmed', undefined],
+        // The remembered check code is kept; verify_cancelled is the code of an item without one.
+        ['t-0002', 'unconfirmed', 'name_not_live'],
+      ]);
+      expect((await verificationEvents(cs.id)).map((e) => [e.actor, e.correlationId, e.details.end])).toEqual([['bob', 'corr-cancel', 'cancelled']]);
+
+      const unseen = await written();
+      await attempt(1, () => a.beginVerification(unseen.id));
+      await repository.requestCancel(unseen.id, { actor: 'bob', correlationId: 'corr-cancel', requestedAt: new Date() });
+      await attempt(1, () => a.finishVerification(unseen.id, 'cancelled'));
+      await expect(attempt(1, () => a.finishExecution(unseen.id, 'done'))).resolves.toEqual({ status: 'completed_with_errors' });
+      expect(await verificationOf(unseen.id)).toEqual([
+        ['t-0001', 'unconfirmed', 'verify_cancelled'],
+        ['t-0002', 'unconfirmed', 'verify_cancelled'],
+      ]);
+    });
+
+    it('EXE-12 finishVerification done after everything confirmed audits ok and the run completes', async () => {
+      const cs = await written();
+      const a = activities({ configuration: verifying(), reader: new LiveReader(['t-0001', 't-0002']) });
+      await attempt(1, () => a.beginVerification(cs.id));
+      await expect(attempt(1, () => a.verifyBatch(cs.id, 1))).resolves.toEqual({ confirmed: 2, left: 0, pending: 0, cancelRequested: false });
+      await attempt(1, () => a.finishVerification(cs.id, 'done'));
+      await expect(attempt(1, () => a.finishExecution(cs.id, 'done'))).resolves.toEqual({ status: 'completed' });
+      expect((await verificationEvents(cs.id)).map((e) => [e.outcome, e.details])).toEqual([
+        ['ok', { end: 'done', pending: 0, confirmed: 2, unconfirmed: 0, operation: cs.operation }],
+      ]);
     });
   });
 

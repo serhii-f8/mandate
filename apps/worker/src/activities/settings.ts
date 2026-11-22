@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import type { LoadedConfiguration } from '@mandate/config';
-import { isOpaque } from '@mandate/core';
+import { isOpaque, type ManifestDefinition, type ManifestVerifyAfter } from '@mandate/core';
 import { ApplicationFailure } from '@temporalio/common';
 
 /** How one execution and its rollback run, from the worker's current configuration (EXE-3, EXE-5, EXE-8, EXE-9). */
@@ -32,4 +32,18 @@ export function executionSettings(configuration: LoadedConfiguration, operationI
     itemsPerRun: configuration.changesets.itemsPerWorkflowRun,
     rollbackWindowHours: configuration.changesets.rollbackWindowHours,
   };
+}
+
+/**
+ * EXE-12: the manifest of the operation in the worker's current configuration when it has
+ * `verify_after`; undefined when the operation is gone, has no manifest or verifies nothing.
+ */
+export function verificationManifest(
+  configuration: LoadedConfiguration,
+  operationId: string,
+): (ManifestDefinition & { verifyAfter: ManifestVerifyAfter }) | undefined {
+  const manifest = configuration.policy.operations.find((o) => o.id === operationId)?.manifest;
+  const verifyAfter = manifest?.verifyAfter;
+  if (manifest === undefined || verifyAfter === undefined) return undefined;
+  return { ...manifest, verifyAfter };
 }
