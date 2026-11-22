@@ -8,7 +8,7 @@
  * approved one starts with the identity it was submitted under. The caller maps the outcome to its
  * own answer; texts and audit details stay with the channel.
  */
-import { executionLimits } from '@mandate/config';
+import { approvalRuleFor, executionLimits } from '@mandate/config';
 import {
   allowingRole,
   approvalRequestedEvent,
@@ -118,9 +118,10 @@ export class SubmitService {
 
     // 6. Prepared: the allowing rule's role decides approval (POL-5), as it decides limits (ADR 0027).
     const role = allowingRole(decision.rule);
-    const rule = role === undefined ? undefined : snapshot.configuration.approval.get(role);
     // An operation the engine allowed is in the snapshot; the strictest risk and opaque stand in otherwise.
     const operation = snapshot.configuration.policy.operations.find((op) => op.id === record.operation);
+    // The allowing grant's rule, or the role's, then the field rule of a touched field (POL-5).
+    const rule = approvalRuleFor(snapshot.configuration, decision.rule, operation, record.args);
     const risk = operation?.risk ?? 'destructive';
     const opaque = operation === undefined ? true : isOpaque(operation);
     const requirement = approvalRequirement({ risk, opaque, ...(rule === undefined ? {} : { rule }), included: record.stats.included });

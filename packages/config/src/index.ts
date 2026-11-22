@@ -23,6 +23,7 @@ export {
   type RateLimits,
   type RoleLimits,
 } from './schema.js';
+export { allApprovalRules, approvalRuleFor } from './approval-rule.js';
 export { createSchemaCompiler, type ArgumentCheck, type ArgumentValidator } from './argument-validators.js';
 export {
   ConfigurationError,

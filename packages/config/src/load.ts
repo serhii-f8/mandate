@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { CodeOperation, ConnectionSettings, CredentialScheme, SpecIssue, ToolListOutcome, UpstreamResolver } from '@mandate/connector-sdk';
-import type { DisabledOperation, GrantDefinition, PolicyConfiguration, RoleApprovalRule, RoleDefinition, RoleNotifyTargets } from '@mandate/core';
+import type { DisabledOperation, FieldApprovalRule, GrantDefinition, PolicyConfiguration, RoleApprovalRule, RoleDefinition, RoleNotifyTargets } from '@mandate/core';
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN, DEFAULT_ROLLBACK_WINDOW_HOURS } from './manifest.js';
@@ -29,6 +29,7 @@ import {
   type OperationConfig,
   type OverrideConfig,
   type PresetConfig,
+  type FieldApprovalConfig,
   type RoleApproval,
   type RoleConfig,
   type RateLimits,
@@ -79,6 +80,8 @@ export interface LoadedConfiguration {
   readonly notifications: readonly NotificationConfig[];
   readonly limits: ReadonlyMap<string, RoleLimits>;
   readonly approval: ReadonlyMap<string, RoleApprovalRule>;
+  /** POL-5: the approval rule of a grant that sets one, keyed by the rule reference `role:<role>/grant:<id|index>`. */
+  readonly grantApproval: ReadonlyMap<string, RoleApprovalRule>;
   /** NTF-1: notification targets per role; an entry only for roles that set `notify`. */
   readonly notify: RoleNotifyTargets;
   /** Upstream binding per enabled operation ID; absent while its spec was not resolved. */
@@ -511,6 +514,40 @@ export async function loadConfigurationSources(sources: readonly { file: string;
   ]);
 
   const credentialManagers = new Map<string, readonly string[]>();
+  // POL-5: checks of one approval rule (the role's, a grant's or a field rule's) and of its field rules.
+  const checkApprovalRule = (source: SourceDocument, path: readonly PropertyKey[], rule: RoleApproval | FieldApprovalConfig): void => {
+    rule.steps?.forEach((step, index) => {
+      if (!roleById.has(step.role)) at(source, [...path, 'steps', index, 'role'], 'names a role that is not defined');
+    });
+    if (rule.required === 'above_threshold' && rule.record_threshold === undefined) {
+      at(source, [...path, 'record_threshold'], 'is required with required: above_threshold');
+    }
+    if (rule.required !== 'above_threshold' && rule.record_threshold !== undefined) {
+      at(source, [...path, 'record_threshold'], 'is allowed only with required: above_threshold');
+    }
+    if ('field_rules' in rule) rule.field_rules?.forEach((fieldRule, index) => { checkApprovalRule(source, [...path, 'field_rules', index], fieldRule); });
+  };
+  // POL-5: a rule that can require approval of a write needs someone to approve it. write_opaque
+  // counts as a write: without steps its calls could never be approved.
+  const checkStepsPresent = (
+    source: SourceDocument,
+    path: readonly PropertyKey[],
+    rule: RoleApproval | FieldApprovalConfig | undefined,
+    risks: readonly string[],
+  ): void => {
+    const destructive = risks.includes('destructive');
+    const writes = destructive || risks.includes('write') || risks.includes('write_opaque');
+    const check = (candidate: RoleApproval | FieldApprovalConfig | undefined, where: readonly PropertyKey[]): void => {
+      const stepless = (candidate?.steps ?? []).length === 0;
+      if (writes && stepless && (destructive || candidate?.required !== 'never')) {
+        const message = 'needs at least one step: a write or destructive grant requires approval by default (set steps, or required: never for write operations)';
+        at(source, candidate === undefined ? where : [...where, 'steps'], message);
+      }
+    };
+    check(rule, path);
+    if (rule !== undefined && 'field_rules' in rule) rule.field_rules?.forEach((fieldRule, index) => { check(fieldRule, [...path, 'field_rules', index]); });
+  };
+
   for (const { value: role, source, path } of roles) {
     const grantIds = new Set<string>();
     role.grants.forEach((grant, index) => {
@@ -519,6 +556,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
         if (grantIds.has(grant.id)) at(source, [...gPath, 'id'], 'duplicate grant ID in this role');
         grantIds.add(grant.id);
       }
+      if (grant.approval !== undefined) checkApprovalRule(source, [...gPath, 'approval'], grant.approval);
       const op = registry.all.get(grant.operation);
       if (op === undefined) {
         if (!operationsIncomplete) at(source, [...gPath, 'operation'], 'names an operation that is not defined');
@@ -545,33 +583,30 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       if (definition.fieldsArg === undefined) {
         if (grant.deny_fields.length > 0) at(source, [...gPath, 'deny_fields'], `operation ${definition.id} declares no fields_arg`);
         if (grant.allow_fields !== undefined) at(source, [...gPath, 'allow_fields'], `operation ${definition.id} declares no fields_arg`);
+        if (grant.approval?.field_rules !== undefined) at(source, [...gPath, 'approval', 'field_rules'], `operation ${definition.id} declares no fields_arg`);
       }
+      // POL-5: the grant's own rule replaces the role's; a write needs someone to approve it.
+      if (grant.approval !== undefined) checkStepsPresent(source, [...gPath, 'approval'], grant.approval, [definition.risk]);
     });
     const approval = role.approval;
-    if (approval !== undefined) {
-      approval.steps?.forEach((step, index) => {
-        if (!roleById.has(step.role)) at(source, [...path, 'approval', 'steps', index, 'role'], 'names a role that is not defined');
-      });
-      if (approval.required === 'above_threshold' && approval.record_threshold === undefined) {
-        at(source, [...path, 'approval', 'record_threshold'], 'is required with required: above_threshold');
-      }
-      if (approval.required !== 'above_threshold' && approval.record_threshold !== undefined) {
-        at(source, [...path, 'approval', 'record_threshold'], 'is allowed only with required: above_threshold');
-      }
-    }
-    // POL-5: a grant whose approval can be required needs someone to approve it.
-    const risks = role.grants.flatMap((grant) => {
+    if (approval !== undefined) checkApprovalRule(source, [...path, 'approval'], approval);
+    // POL-5: the role's rule covers the grants that carry none of their own.
+    const covered = role.grants.filter((grant) => grant.approval === undefined);
+    const risks = covered.flatMap((grant) => {
       const risk = registry.all.get(grant.operation)?.definition.risk;
       return risk === undefined ? [] : [risk];
     });
-    const destructive = risks.includes('destructive');
-    // write_opaque counts as a write: without steps its calls could never be approved.
-    const writes = destructive || risks.includes('write') || risks.includes('write_opaque');
-    const stepless = (approval?.steps ?? []).length === 0;
-    if (writes && stepless && (destructive || approval?.required !== 'never')) {
-      const message = 'needs at least one step: a write or destructive grant requires approval by default (set steps, or required: never for write operations)';
-      at(source, approval === undefined ? [...path, 'approval'] : [...path, 'approval', 'steps'], message);
+    // POL-5: the role's field rules need fields_arg on every write the role's rule covers.
+    if (approval?.field_rules !== undefined) {
+      role.grants.forEach((grant, index) => {
+        if (grant.approval !== undefined) return;
+        const definition = registry.all.get(grant.operation)?.definition;
+        if (definition !== undefined && definition.risk !== 'read' && definition.fieldsArg === undefined) {
+          at(source, [...path, 'grants', index, 'operation'], `operation ${definition.id} declares no fields_arg, which the approval field_rules of role ${role.id} need`);
+        }
+      });
     }
+    checkStepsPresent(source, [...path, 'approval'], approval, risks);
     if (role.manage_credentials !== undefined) {
       role.manage_credentials.forEach((ref, index) => {
         if (ref !== '*' && !declaredRefs.has(ref)) {
@@ -663,6 +698,13 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       notifications: notifications.map((n) => n.value),
       limits: new Map(roles.flatMap(({ value }) => (value.limits === undefined ? [] : [[value.id, value.limits] as const]))),
       approval: new Map(roles.flatMap(({ value }) => (value.approval === undefined ? [] : [[value.id, toApprovalRule(value.approval)] as const]))),
+      grantApproval: new Map(
+        roles.flatMap(({ value: role }) =>
+          role.grants.flatMap((grant, index) =>
+            grant.approval === undefined ? [] : [[`role:${role.id}/grant:${grant.id ?? String(index)}`, toApprovalRule(grant.approval)] as const],
+          ),
+        ),
+      ),
       notify: new Map(
         roles.flatMap(({ value: { id, notify } }) =>
           notify === undefined ? [] : [[id, { approvalRequests: [...notify.approval_requests], results: [...notify.results] }] as const],
@@ -771,8 +813,11 @@ function locateSpecIssue(state: ConnectionState, issue: SpecIssue, at: (source: 
 }
 
 
-function toApprovalRule(approval: RoleApproval): RoleApprovalRule {
+function toApprovalRule(approval: RoleApproval | FieldApprovalConfig): RoleApprovalRule {
   return {
+    ...('field_rules' in approval && approval.field_rules !== undefined
+      ? { fieldRules: approval.field_rules.map((rule): FieldApprovalRule => ({ ...toApprovalRule(rule), fields: [...rule.fields] })) }
+      : {}),
     ...(approval.required === undefined ? {} : { required: approval.required }),
     ...(approval.record_threshold === undefined ? {} : { recordThreshold: approval.record_threshold }),
     steps: (approval.steps ?? []).map((step) => step.role),

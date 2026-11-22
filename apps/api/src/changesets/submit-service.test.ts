@@ -36,13 +36,13 @@ operations:
       properties:
         brand: { type: string }
         skus: { type: array, items: { type: string } }
-        changes: { type: object, properties: { name: { type: string } }, additionalProperties: false }
+        changes: { type: object, properties: { name: { type: string }, price: { type: string } }, additionalProperties: false }
       required: [brand, changes]
     manifest:
       id_field: sku
       ids_arg: skus
       values_arg: changes
-      fields: [name]
+      fields: [name, price]
       scope_args: { brand: brand }
       read_before:
         operation: catalog.get_products
@@ -78,7 +78,15 @@ roles:
     grants:
       - { operation: notes.create, id: notes }
     approval: { required: above_threshold, record_threshold: 25, steps: [{ role: content_manager }] }
+  - id: pricing_editor
+    grants:
+      - { operation: catalog.update_content, id: all }
+    approval:
+      required: always
+      steps: [{ role: content_manager }]
+      field_rules: [{ fields: [price], required: always, steps: [{ role: other_role }] }]
 role_mapping:
+  - { group: pricing, roles: [pricing_editor] }
   - { group: content, roles: [content_manager] }
   - { group: other, roles: [other_role] }
   - { group: always, roles: [always_role] }
@@ -99,6 +107,7 @@ const NARROWED = snapshotOf(await configuration('globex'));
 
 const alice: Caller = { subject: 'alice', clientId: 'mandate-mcp', groups: ['content'] };
 const aliceAlways: Caller = { subject: 'alice', groups: ['always'] };
+const alicePricing: Caller = { subject: 'alice', groups: ['pricing'] };
 const aliceOpaque: Caller = { subject: 'alice', groups: ['opaque'] };
 const bob: Caller = { subject: 'bob', groups: ['content'] };
 const ID = '11111111-1111-4111-8111-111111111111';
@@ -158,7 +167,7 @@ class RefusingRepository extends InMemoryChangeSetRepository {
 
 type Stage = 'prepared' | 'pending_approval' | 'approved';
 
-async function setup(options: { stage?: Stage; racing?: boolean; refusing?: 'hash_mismatch' | 'expired'; opaque?: boolean } = {}) {
+async function setup(options: { stage?: Stage; racing?: boolean; refusing?: 'hash_mismatch' | 'expired'; opaque?: boolean; changes?: Record<string, string> } = {}) {
   const opaque = options.opaque === true;
   const audit = new InMemoryAuditLog();
   const repository =
@@ -175,7 +184,7 @@ async function setup(options: { stage?: Stage; racing?: boolean; refusing?: 'has
       operation: opaque ? 'notes.create' : 'catalog.update_content',
       connection: 'magento',
       requester: 'alice',
-      args: opaque ? { text: 'hello' } : { brand: 'acme', skus: ['a', 'b', 'c'], changes: { name: 'New' } },
+      args: opaque ? { text: 'hello' } : { brand: 'acme', skus: ['a', 'b', 'c'], changes: options.changes ?? { name: 'New' } },
       configHash: 'h',
       correlationId: 'c0',
       createdAt: NOW,
@@ -258,6 +267,19 @@ describe('MCP-8 SubmitService', () => {
     expect(executor.starts).toEqual([]);
     expect(policyRows()).toHaveLength(1);
     expect(policyRows()[0]).toMatchObject({ subject: 'submit_for_approval', changesetId: ID, decision: 'allow' });
+  });
+
+  it('POL-5 a change-set touching price is routed to the field rule, any other to the role rule', async () => {
+    const priced = await setup({ changes: { name: 'New', price: '9' } });
+    const outcome = await priced.submit(alicePricing);
+    expect(outcome.kind).toBe('pending_approval');
+    if (outcome.kind !== 'pending_approval') return;
+    expect(outcome.plan.steps).toEqual(['other_role']);
+    const plain = await setup();
+    const other = await plain.submit(alicePricing);
+    expect(other.kind).toBe('pending_approval');
+    if (other.kind !== 'pending_approval') return;
+    expect(other.plan.steps).toEqual(['content_manager']);
   });
 
   it('POL-5 an opaque change-set under above_threshold is submitted for approval', async () => {

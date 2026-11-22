@@ -61,3 +61,4 @@ Requirements cited in the records (`MCP-1`, `POL-3`, `NFR-18`) are defined in th
 | [0063](0063-semver-gate-appended-literals.md) | The semver gate judges an appended literal additive | 2026-11-22 |
 | [0064](0064-connection-pacing.md) | Per-connection pacing of upstream requests | 2026-11-22 |
 | [0065](0065-upstream-auth-schemes.md) | Upstream auth schemes: OAuth password grant and OAuth 1.0a | 2026-11-22 |
+| [0066](0066-approval-routing-per-grant-and-field.md) | Approval routing per grant and per touched field | 2026-11-22 |

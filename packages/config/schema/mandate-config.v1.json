@@ -1121,6 +1121,68 @@
                 "default": false,
                 "type": "boolean"
               },
+              "field_rules": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "allow_widget": {
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "fields": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "record_threshold": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    "required": {
+                      "enum": [
+                        "always",
+                        "never",
+                        "above_threshold"
+                      ],
+                      "type": "string"
+                    },
+                    "step_up_max_age_seconds": {
+                      "maximum": 3600,
+                      "minimum": 30,
+                      "type": "integer"
+                    },
+                    "steps": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "role": {
+                            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "role"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 5,
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "fields"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "type": "array"
+              },
               "record_threshold": {
                 "exclusiveMinimum": 0,
                 "maximum": 9007199254740991,
@@ -1174,6 +1236,114 @@
                     "type": "string"
                   },
                   "type": "array"
+                },
+                "approval": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "allow_widget": {
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "field_rules": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "allow_widget": {
+                            "default": false,
+                            "type": "boolean"
+                          },
+                          "fields": {
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array"
+                          },
+                          "record_threshold": {
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991,
+                            "type": "integer"
+                          },
+                          "required": {
+                            "enum": [
+                              "always",
+                              "never",
+                              "above_threshold"
+                            ],
+                            "type": "string"
+                          },
+                          "step_up_max_age_seconds": {
+                            "maximum": 3600,
+                            "minimum": 30,
+                            "type": "integer"
+                          },
+                          "steps": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "role": {
+                                  "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "role"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 5,
+                            "minItems": 1,
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "fields"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 20,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "record_threshold": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    "required": {
+                      "enum": [
+                        "always",
+                        "never",
+                        "above_threshold"
+                      ],
+                      "type": "string"
+                    },
+                    "step_up_max_age_seconds": {
+                      "maximum": 3600,
+                      "minimum": 30,
+                      "type": "integer"
+                    },
+                    "steps": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "role": {
+                            "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "role"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 5,
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
                 },
                 "deny_fields": {
                   "default": [],

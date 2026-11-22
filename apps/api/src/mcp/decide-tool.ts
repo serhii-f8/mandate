@@ -8,7 +8,7 @@
  * or step-up change-sets included) is refused there (SEC-8). Answers carry IDs and statuses only (SEC-5).
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
-import { createSchemaCompiler, type LoadedConfiguration } from '@mandate/config';
+import { allApprovalRules, createSchemaCompiler, type LoadedConfiguration } from '@mandate/config';
 import { callerKind, rolesOf, type Approver, type Caller, type DecisionRequest } from '@mandate/core';
 import type { DecideResult } from '../approvals/approval-service.js';
 import { DECISION_REFUSAL_TEXT } from '../approvals/texts.js';
@@ -34,7 +34,7 @@ const DECIDE_SCHEMA = {
 /** The step roles of every role whose approval allows widget decisions (APR-8). */
 export function widgetApproverRoles(configuration: LoadedConfiguration): ReadonlySet<string> {
   const roles = new Set<string>();
-  for (const rule of configuration.approval.values()) {
+  for (const rule of allApprovalRules(configuration)) {
     if (rule.allowWidget) for (const role of rule.steps) roles.add(role);
   }
   return roles;

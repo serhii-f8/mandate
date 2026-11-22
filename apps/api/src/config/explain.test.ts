@@ -121,6 +121,70 @@ role_mapping:
     ]);
   });
 
+  it('POL-5 POL-7 explain names the field rule step when the arguments touch its field', async () => {
+    const loaded = await loadConfigurationSources(
+      Object.entries({
+        'connections.yaml': `version: 1
+connections:
+  - { id: magento, adapter: openapi, base_url: https://shop.example.test/rest, credential_ref: magento-integration, auth: { scheme: bearer } }
+`,
+        'operations.yaml': `version: 1
+operations:
+  - id: catalog.get_products
+    connection: magento
+    risk: read
+    description: Products by SKU.
+    upstream: { method: GET, path: /V1/products, query: { skus: { arg: skus, join: ',' } }, response: { items: items, fields_from_arg: fields } }
+    input_schema:
+      type: object
+      properties: { skus: { type: array, items: { type: string } }, fields: { type: array, items: { type: string } } }
+      required: [skus, fields]
+    fields_arg: fields
+  - id: catalog.update
+    connection: magento
+    risk: write
+    description: Update.
+    upstream: { method: POST, path: /async/bulk/V1/products }
+    input_schema:
+      type: object
+      properties:
+        skus: { type: array, items: { type: string } }
+        changes: { type: object, properties: { name: { type: string }, price: { type: string } }, additionalProperties: false }
+      required: [changes]
+    manifest:
+      id_field: sku
+      ids_arg: skus
+      values_arg: changes
+      fields: [name, price]
+      scope_args: {}
+      read_before: { operation: catalog.get_products, ids_arg: skus }
+      rollback: { strategy: replay_previous_state }
+`,
+        'roles.yaml': `version: 1
+roles:
+  - id: editor
+    grants:
+      - { operation: catalog.update, id: all }
+    approval:
+      required: always
+      steps: [{ role: content_lead }]
+      field_rules: [{ fields: [price], required: always, steps: [{ role: pricing_owner }] }]
+  - id: content_lead
+    grants: []
+  - id: pricing_owner
+    grants: []
+role_mapping:
+  - { group: content, roles: [editor] }
+`,
+      }).map(([file, text]) => ({ file, text })),
+    );
+    if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
+    const approval = (changes: Record<string, string>) =>
+      explain({ operationId: 'catalog.update', groups: ['content'], args: { skus: ['a'], changes } }, loaded.configuration).at(-1);
+    expect(approval({ price: '1' })).toBe('approval: required: steps pricing_owner; reason role_always');
+    expect(approval({ name: 'x' })).toBe('approval: required: steps content_lead; reason role_always');
+  });
+
   it('MCP-3 POL-7 arguments are checked against the input schema before the policy', () => {
     // support has no grant: the schema answers first, as on a real call.
     const lines = explain({ operationId: 'catalog.search_products', groups: ['support'], args: { brand: 'acme' } });

@@ -316,6 +316,119 @@ operations:
   });
 });
 
+describe('POL-5 approval routing configuration', () => {
+  const PRICES = `version: 1
+operations:
+  - id: catalog.get_products
+    connection: magento
+    risk: read
+    description: Products by SKU.
+    upstream: { method: GET, path: /V1/products, query: { skus: { arg: skus, join: ',' } }, response: { items: items, fields_from_arg: fields } }
+    input_schema:
+      type: object
+      properties: { skus: { type: array, items: { type: string } }, fields: { type: array, items: { type: string } } }
+      required: [skus, fields]
+    fields_arg: fields
+  - id: catalog.update
+    connection: magento
+    risk: write
+    description: Update.
+    upstream: { method: POST, path: /async/bulk/V1/products }
+    input_schema:
+      type: object
+      properties:
+        skus: { type: array, items: { type: string } }
+        changes: { type: object, properties: { name: { type: string }, price: { type: string } }, additionalProperties: false }
+      required: [changes]
+    manifest:
+      id_field: sku
+      ids_arg: skus
+      values_arg: changes
+      fields: [name, price]
+      scope_args: {}
+      read_before: { operation: catalog.get_products, ids_arg: skus }
+      rollback: { strategy: replay_previous_state }
+`;
+  const rolesYaml = (editor: string, grant = '{ operation: catalog.update }') => `version: 1
+roles:
+  - id: editor
+    grants:
+      - ${grant}
+${editor}
+  - id: pricing_owner
+    grants: []
+  - id: content_lead
+    grants: []
+role_mapping:
+  - { group: content, roles: [editor] }
+`;
+  const FIELD_RULE = '{ fields: [price], required: always, steps: [{ role: pricing_owner }] }';
+  const loadRoles = (roles: string, extra: Record<string, string> = {}) => load({ 'prices.yaml': PRICES, 'roles.yaml': roles, ...extra });
+
+  it('POL-5 a grant approval is keyed by the rule reference, by index or by grant ID', async () => {
+    const approval = '{ required: always, steps: [{ role: pricing_owner }] }';
+    const byIndex = await loadRoles(rolesYaml('    approval: { required: never }', `{ operation: catalog.update, approval: ${approval} }`));
+    if (!byIndex.ok) throw new Error(JSON.stringify(byIndex.issues));
+    expect(byIndex.configuration.grantApproval.get('role:editor/grant:0')?.steps).toEqual(['pricing_owner']);
+    const byId = await loadRoles(rolesYaml('    approval: { required: never }', `{ operation: catalog.update, id: prices, approval: ${approval} }`));
+    if (!byId.ok) throw new Error(JSON.stringify(byId.issues));
+    expect(byId.configuration.grantApproval.get('role:editor/grant:prices')?.steps).toEqual(['pricing_owner']);
+    expect(byId.configuration.grantApproval.has('role:editor/grant:0')).toBe(false);
+  });
+
+  it('POL-5 field rules map onto the core rule, on the role and on a grant', async () => {
+    const role = await loadRoles(rolesYaml(`    approval: { required: never, field_rules: [${FIELD_RULE}] }`));
+    if (!role.ok) throw new Error(JSON.stringify(role.issues));
+    expect(role.configuration.approval.get('editor')?.fieldRules?.[0]).toMatchObject({ fields: ['price'], required: 'always', steps: ['pricing_owner'] });
+    const grant = await loadRoles(rolesYaml('', `{ operation: catalog.update, approval: { required: never, field_rules: [${FIELD_RULE}] } }`));
+    if (!grant.ok) throw new Error(JSON.stringify(grant.issues));
+    expect(grant.configuration.grantApproval.get('role:editor/grant:0')?.fieldRules?.[0]?.fields).toEqual(['price']);
+  });
+
+  it('POL-5 a field-rule step naming an undefined role', async () => {
+    const found = issues(await loadRoles(rolesYaml('    approval: { required: never, field_rules: [{ fields: [price], required: always, steps: [{ role: nobody }] }] }')));
+    expect(found).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.field_rules[0].steps[0].role', message: 'names a role that is not defined' }));
+    const grant = issues(await loadRoles(rolesYaml('', '{ operation: catalog.update, approval: { required: never, steps: [{ role: nobody }] } }')));
+    expect(grant).toContainEqual(expect.objectContaining({ path: 'roles[0].grants[0].approval.steps[0].role', message: 'names a role that is not defined' }));
+  });
+
+  it('POL-5 field_rules on a grant whose operation has no fields_arg', async () => {
+    const without = `version: 1
+operations:
+  - id: catalog.update
+    connection: magento
+    risk: write_opaque
+    description: Update.
+    upstream: { method: POST, path: /V1/products }
+    input_schema: { type: object, properties: { changes: { type: object } } }
+`;
+    const grant = issues(await loadRoles(rolesYaml('', `{ operation: catalog.update, approval: { required: never, field_rules: [${FIELD_RULE}] } }`), { 'prices.yaml': without }));
+    expect(grant).toContainEqual(expect.objectContaining({ path: 'roles[0].grants[0].approval.field_rules', message: 'operation catalog.update declares no fields_arg' }));
+    const role = issues(await loadRoles(rolesYaml(`    approval: { required: never, field_rules: [${FIELD_RULE}] }`), { 'prices.yaml': without }));
+    expect(role).toContainEqual(expect.objectContaining({ path: 'roles[0].grants[0].operation', message: 'operation catalog.update declares no fields_arg, which the approval field_rules of role editor need' }));
+  });
+
+  it('POL-5 an empty fields list, a threshold without above_threshold and a nested field_rules are refused', async () => {
+    expect(issues(await loadRoles(rolesYaml('    approval: { required: never, field_rules: [{ fields: [], required: never }] }'))).map((i) => i.path)).toContain('roles[0].approval.field_rules[0].fields');
+    const threshold = issues(await loadRoles(rolesYaml('    approval: { required: never, field_rules: [{ fields: [price], record_threshold: 3, steps: [{ role: pricing_owner }] }] }')));
+    expect(threshold).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.field_rules[0].record_threshold', message: 'is allowed only with required: above_threshold' }));
+    const noThreshold = issues(await loadRoles(rolesYaml('    approval: { required: never, field_rules: [{ fields: [price], required: above_threshold, steps: [{ role: pricing_owner }] }] }')));
+    expect(noThreshold).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.field_rules[0].record_threshold', message: 'is required with required: above_threshold' }));
+    const nested = issues(await loadRoles(rolesYaml('    approval: { required: never, field_rules: [{ fields: [price], field_rules: [] }] }')));
+    expect(nested.map((i) => i.path).some((path) => path.startsWith('roles[0].approval.field_rules[0]'))).toBe(true);
+  });
+
+  it('POL-5 a write grant approval without steps is refused unless required: never; the role rule does not cover it', async () => {
+    const message = 'needs at least one step: a write or destructive grant requires approval by default (set steps, or required: never for write operations)';
+    const stepless = issues(await loadRoles(rolesYaml('    approval: { steps: [{ role: pricing_owner }] }', '{ operation: catalog.update, approval: { required: always } }')));
+    expect(stepless).toContainEqual(expect.objectContaining({ path: 'roles[0].grants[0].approval.steps', message }));
+    const never = await loadRoles(rolesYaml('    approval: { steps: [{ role: pricing_owner }] }', '{ operation: catalog.update, approval: { required: never } }'));
+    expect(never.ok, JSON.stringify(never.ok ? [] : never.issues)).toBe(true);
+    const field = issues(await loadRoles(rolesYaml('    approval: { required: never, field_rules: [{ fields: [price], required: always }] }')));
+    expect(field).toContainEqual(expect.objectContaining({ path: 'roles[0].approval.field_rules[0].steps', message }));
+  });
+});
+
 describe('AUD-7 SEC-1 audit configuration in the loaded configuration', () => {
   it('AUD-7 audit settings come from one document only', async () => {
     const none = await load();

@@ -19,6 +19,9 @@ only. Nothing needs to change on upgrade.
   for upstreams such as Magento 2 integrations. Not available on `mcp` connections. The credential scheme
   `oauth1` is appended to `CREDENTIAL_SCHEMES` and `AuthSettings` and `SecretMaterial` gain variants
   (CONN-3, ADR 0065).
+- `grants[].approval` and `approval.field_rules` route approval per grant and per touched field: a grant's
+  rule replaces the role's, and the first field rule naming a touched field replaces that. Submission, the
+  execution guard and `config explain` use the same resolution (POL-5, ADR 0066).
 
 ## 1.0.1
 

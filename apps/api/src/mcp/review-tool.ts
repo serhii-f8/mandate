@@ -9,7 +9,7 @@
  * The text carries IDs, counts, statuses, roles and the hash only (SEC-5).
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
-import { createSchemaCompiler, type LoadedConfiguration } from '@mandate/config';
+import { allApprovalRules, createSchemaCompiler, type LoadedConfiguration } from '@mandate/config';
 import { callerKind, canView, currentStep, encodeCursor, rolesOf, type ApprovalRecord, type Approver, type Caller, type ChangeSetRecord, type ItemStatus } from '@mandate/core';
 import { changesetDetailWith, itemRow, widgetViewerBlock, type ViewerBlock } from '../approvals/detail.js';
 import { decodeCursor, newSeed } from '../approvals/page-query.js';
@@ -39,7 +39,7 @@ const REVIEW_SCHEMA = {
 /** Every role named in any role's approval steps. */
 export function approvalStepRoles(configuration: LoadedConfiguration): ReadonlySet<string> {
   const roles = new Set<string>();
-  for (const rule of configuration.approval.values()) for (const role of rule.steps) roles.add(role);
+  for (const rule of allApprovalRules(configuration)) for (const role of rule.steps) roles.add(role);
   return roles;
 }
 

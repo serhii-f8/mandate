@@ -119,6 +119,33 @@ role_mapping:
     roles: [content_lead]
 ```
 
+## Route price changes to another approver
+
+One role can send different changes to different approvers. `field_rules` lists fields and the
+rule that applies when a call touches one of them; the first matching entry replaces the role's
+rule. A content change goes to the content lead, a change that touches `price` to the pricing
+owner:
+
+```yaml
+  - id: content_editor
+    grants:
+      - operation: catalog.update_content
+        scope: { brand: [acme] }
+    approval:
+      required: always
+      steps: [{ role: content_lead }]
+      field_rules:
+        - fields: [price]
+          required: always
+          steps: [{ role: pricing_owner }]
+```
+
+A change of `name` alone waits for `content_lead`; a change that includes `price` waits for
+`pricing_owner` only. A grant can carry its own `approval`, which replaces the role's for the calls
+that grant allows. The operation needs `fields_arg` (a manifest operation uses its `values_arg`).
+`config explain` with `--args` naming `price` in `changes` prints the approval line with the steps
+that apply. If the fields of a call cannot be read, the first field rule applies.
+
 ## Review and apply
 
 See what would change:

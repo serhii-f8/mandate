@@ -61,6 +61,12 @@ function fieldsOf(record: object): Fields {
   return fields;
 }
 
+function grantApprovalOf(configuration: LoadedConfiguration, roleId: string): object | undefined {
+  const prefix = `role:${roleId}/grant:`;
+  const rules = [...configuration.grantApproval].filter(([reference]) => reference.startsWith(prefix));
+  return rules.length === 0 ? undefined : Object.fromEntries(rules);
+}
+
 function entitiesOf(configuration: LoadedConfiguration): ReadonlyMap<EntityKind, Entities> {
   const kinds = new Map<EntityKind, Map<string, Fields>>(KIND_ORDER.map((kind) => [kind, new Map()]));
   const put = (kind: EntityKind, id: string, record: object): void => {
@@ -77,6 +83,8 @@ function entitiesOf(configuration: LoadedConfiguration): ReadonlyMap<EntityKind,
       ...role,
       limits: configuration.limits.get(role.id),
       approval: configuration.approval.get(role.id),
+      // POL-5: a grant's own approval rule is part of the role it belongs to.
+      grant_approval: grantApprovalOf(configuration, role.id),
       notify: configuration.notify.get(role.id),
       manage_credentials: configuration.credentialManagers.get(role.id),
       view_audit: configuration.auditViewers.has(role.id) ? true : undefined,

@@ -76,13 +76,6 @@ const override = z.strictObject({
 });
 
 const scopeValue = z.union([z.string(), z.number(), z.boolean()]);
-const grant = z.strictObject({
-  operation: operationId,
-  id: id.optional(),
-  scope: z.record(z.string().min(1), z.array(scopeValue).min(1)).default({}),
-  deny_fields: z.array(z.string().min(1)).default([]),
-  allow_fields: z.array(z.string().min(1)).optional(),
-});
 
 const limits = z.strictObject({
   records_per_operation: positiveInt.optional(),
@@ -91,12 +84,28 @@ const limits = z.strictObject({
   concurrent_executions: positiveInt.optional(),
 });
 
-const approval = z.strictObject({
+const approvalFields = {
   required: z.enum(['always', 'never', 'above_threshold']).optional(),
   record_threshold: positiveInt.optional(),
   steps: z.array(z.strictObject({ role: id })).min(1).max(5).optional(),
   step_up_max_age_seconds: z.number().int().min(30).max(3600).optional(),
   allow_widget: z.boolean().default(false),
+};
+
+/** POL-5: an approval rule that applies when a call touches one of `fields`; it never nests. */
+const fieldRule = z.strictObject({ ...approvalFields, fields: z.array(z.string().min(1)).min(1) });
+
+/** POL-5: the approval rule of a role or of one grant, with optional per-field rules. */
+const approval = z.strictObject({ ...approvalFields, field_rules: z.array(fieldRule).min(1).max(20).optional() });
+
+const grant = z.strictObject({
+  operation: operationId,
+  id: id.optional(),
+  scope: z.record(z.string().min(1), z.array(scopeValue).min(1)).default({}),
+  deny_fields: z.array(z.string().min(1)).default([]),
+  allow_fields: z.array(z.string().min(1)).optional(),
+  /** POL-5: replaces the role's approval rule for calls this grant allows. */
+  approval: approval.optional(),
 });
 
 const role = z.strictObject({
@@ -185,6 +194,7 @@ export type RoleConfig = z.output<typeof role>;
 export type RoleLimits = z.output<typeof limits>;
 export type ServiceAccountConfig = z.output<typeof serviceAccount>;
 export type RoleApproval = z.output<typeof approval>;
+export type FieldApprovalConfig = z.output<typeof fieldRule>;
 export type PresetConfig = z.output<typeof preset>;
 export type PresetOperationConfig = z.output<typeof presetOperationSchema>;
 export type OverrideConfig = z.output<typeof override>;

@@ -5,8 +5,8 @@
  * Arguments are checked against the operation's input schema first, as on a real call
  * (MCP-3); an allowed write states the approval it would need (POL-5). Pure: no I/O.
  */
-import { createSchemaCompiler, pinStateOf, type LoadedConfiguration, type PinState } from '@mandate/config';
-import { allowingRole, approvalRequirement, createPolicyEngine, isOpaque, serviceSubject, type ApprovalRequirement, type PolicyDecision } from '@mandate/core';
+import { approvalRuleFor, createSchemaCompiler, pinStateOf, type LoadedConfiguration, type PinState } from '@mandate/config';
+import { approvalRequirement, createPolicyEngine, isOpaque, serviceSubject, type ApprovalRequirement, type PolicyDecision } from '@mandate/core';
 
 export interface ExplainInput {
   readonly operationId: string;
@@ -51,8 +51,7 @@ export function explainCall(configuration: LoadedConfiguration, input: ExplainIn
   if (operation === undefined || operation.risk === 'read') return { kind: 'decision', decision, ...pin };
 
   // The allowing rule's role decides approval, as on submission (ADR 0027).
-  const role = allowingRole(decision.rule);
-  const rule = role === undefined ? undefined : configuration.approval.get(role);
+  const rule = approvalRuleFor(configuration, decision.rule, operation, args);
   const approval = approvalRequirement({
     risk: operation.risk,
     opaque: isOpaque(operation),

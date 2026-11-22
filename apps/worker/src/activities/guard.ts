@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
-import type { LoadedConfiguration } from '@mandate/config';
+import { approvalRuleFor, type LoadedConfiguration } from '@mandate/config';
 import {
-  allowingRole,
   approvalRequirement,
   changesetKind,
   createPolicyEngine,
@@ -76,10 +75,10 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
     decision: PolicyDecision,
     hash: string,
   ): Promise<boolean> {
-    const role = allowingRole(decision.rule);
-    const rule = role === undefined ? undefined : configuration.approval.get(role);
     // The engine allowed the operation, so it is configured; the strictest risk and opaque stand in otherwise.
     const operation = configuration.policy.operations.find((o) => o.id === changeset.operation);
+    // The allowing grant's rule, or the role's, then the field rule of a touched field (POL-5).
+    const rule = approvalRuleFor(configuration, decision.rule, operation, changeset.args);
     const risk = operation?.risk ?? 'destructive';
     const requirement = approvalRequirement({
       risk,

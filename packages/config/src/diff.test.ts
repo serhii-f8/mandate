@@ -47,6 +47,14 @@ describe('CFG-3 configuration diff', () => {
     expect(formatDiff(diffConfigurations(before, after))).toEqual(['~ role content_manager: grants', hashLine(before, after)]);
   });
 
+  it('CFG-3 POL-5 a grant approval rule is a change of its role, key grant_approval', async () => {
+    const before = await load(VALID_DIR);
+    const after = await edited(async (file) => {
+      await file('roles.yaml', (t) => t.replace('        deny_fields: [cost]\n', '        deny_fields: [cost]\n        approval: { required: never }\n'));
+    });
+    expect(formatDiff(diffConfigurations(before, after))).toEqual(['~ role content_manager: grant_approval', hashLine(before, after)]);
+  });
+
   it('CFG-3 added and removed entities, in kind order then id order', async () => {
     const before = await load(VALID_DIR);
     const after = await edited(async (file) => {
