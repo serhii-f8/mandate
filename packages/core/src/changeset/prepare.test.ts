@@ -669,6 +669,59 @@ describe('OPS-2 CS-4 create and delete', () => {
   });
 });
 
+describe('OPS-2 CS-7 POL-2 create and delete read existence without the scope filter', () => {
+  /** What the loader admits for a create or delete: a read_before without the scope argument (ADR 0071). */
+  const unscopedRead = { operation: 'catalog.get_products_by_sku', idsArg: 'skus', args: {} };
+  const createManifest: ManifestDefinition = {
+    action: 'create',
+    idField: 'sku',
+    recordsArg: 'records',
+    fields: ['brand', 'name'],
+    requiredFields: [],
+    scopeArgs: { brand: 'brand' },
+    readBefore: unscopedRead,
+    batchSize: 10,
+    maxTargets: 10_000,
+    rollback: { strategy: 'none' },
+  };
+  const deleteManifest: ManifestDefinition = {
+    action: 'delete',
+    idField: 'sku',
+    idsArg: 'skus',
+    fields: ['name', 'description'],
+    requiredFields: [],
+    scopeArgs: { brand: 'brand' },
+    readBefore: unscopedRead,
+    batchSize: 10,
+    maxTargets: 10_000,
+    rollback: { strategy: 'none' },
+  };
+  const prepare = async (reader: ScriptedReader, args: Record<string, unknown>, manifest: ManifestDefinition, fieldsArg: string) => {
+    const { deps } = setup(reader);
+    const req = request(args);
+    const out = await prepareChangeSet(deps, { ...req, operation: { ...req.operation, fieldsArg, manifest } });
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    return out;
+  };
+
+  it('OPS-2 SEC-3 a create of an identifier that exists outside the scope is already_exists with before null', async () => {
+    const reader = new ScriptedReader({ n1: { sku: 'n1', brand: 'other', name: 'Foreign' } });
+    const out = await prepare(reader, { brand: 'acme', records: [{ sku: 'n1', brand: 'acme', name: 'N1' }] }, createManifest, 'records');
+    expect(reader.calls[0]?.args).toEqual({ skus: ['n1'], fields: ['sku', 'brand', 'name'] });
+    expect(out.firstItems).toEqual([
+      { targetId: 'n1', status: 'excluded', reason: 'already_exists', before: null, after: { brand: 'acme', name: 'N1' } },
+    ]);
+    expect(JSON.stringify(out.firstItems)).not.toContain('Foreign');
+  });
+
+  it('POL-2 a delete of a target outside the scope is out_of_scope and stores no values', async () => {
+    const reader = new ScriptedReader({ A: { sku: 'A', brand: 'other', name: 'Foreign', description: 'd' } });
+    const out = await prepare(reader, { brand: 'acme', skus: ['A'] }, deleteManifest, 'changes');
+    expect(reader.calls[0]?.args).toEqual({ skus: ['A'], fields: ['sku', 'brand', 'name', 'description'] });
+    expect(out.firstItems).toEqual([{ targetId: 'A', status: 'excluded', reason: 'out_of_scope', before: null, after: null }]);
+  });
+});
+
 describe('OPS-4 selector targets', () => {
   const selectorArgs = { brand: 'acme', changes: { description: 'new' } };
   const page = (ids: string[], total?: number): ReadPage => ({

@@ -20,8 +20,10 @@ record: `notes.update_title` (`PATCH /notes/{id}`, `replay_previous_state` rollb
   the item is excluded with that reason code and never written.
 - **`notes.create`** takes `notes: [{ id, title, body? }]` (`records_arg`): every record carries its
   own values. A note whose id already exists is excluded with `already_exists`; one that appears
-  between approval and execution is skipped as drift, never overwritten. Its rollback is
-  `notes.delete`.
+  between approval and execution is skipped as drift and not sent. That holds because
+  `notes.search` finds a note by id whatever else it has: the `read_before` of a create or delete
+  must not filter by scope (the template has none), and `POST /notes` should refuse an existing id.
+  Its rollback is `notes.delete`.
 - **`notes.delete`** takes `ids` and is `destructive`: it always needs approval with step-up
   authentication. The change-set keeps each note's `title` and `body`, so its rollback,
   `notes.create`, can put them back. The two operations name each other as the inverse; the loader

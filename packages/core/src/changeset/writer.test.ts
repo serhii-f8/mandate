@@ -1216,7 +1216,8 @@ describe('CS-7 OPS-2 create and delete', () => {
     fields: ['name', 'price'],
     requiredFields: [],
     scopeArgs: { brand: 'brand' },
-    readBefore: { operation: 'catalog.get_products_by_sku', args: { brand: { arg: 'brand' } }, idsArg: 'skus' },
+    // Existence is read without the scope filter; the scope is checked on the record (ADR 0071).
+    readBefore: { operation: 'catalog.get_products_by_sku', args: {}, idsArg: 'skus' },
     batchSize: 100,
     maxTargets: 1000,
     rollback: { strategy: 'inverse_operation', operation: 'catalog.create_products' },
@@ -1305,6 +1306,40 @@ describe('CS-7 OPS-2 create and delete', () => {
       { targetId: 'n1', status: 'written', error: 'already_applied' },
       { targetId: 'n2', status: 'written' },
     ]);
+  });
+
+  describe('OPS-2 CS-7 POL-2 the scope is checked on the record that the unscoped read returns', () => {
+    const scopedCreate = {
+      ...createOperation,
+      manifest: { ...createManifest, fields: ['name', 'price', 'brand'], scopeArgs: { brand: 'brand' } },
+    };
+    const scopedCreateChangeset: ChangeSetRecord = { ...createChangeset(), args: { brand: 'acme', records: [{ sku: 'n1', name: 'N', brand: 'acme' }] } };
+    const scopedCreated: ChangeItemRecord = { targetId: 'n1', status: 'pending', before: null, after: { name: 'N', brand: 'acme' } };
+
+    it('CS-7 a create whose identifier appeared outside the scope after approval is skipped drift and nothing is sent', async () => {
+      const { reader, direct, batch, writer } = directSetup(undefined, scopedCreate);
+      // The same values, another scope: never written over, never already_applied.
+      reader.pages = [page({ sku: 'n1', name: 'N', brand: 'other' })];
+      const outcomes = await writer.writeBatch({ changeset: scopedCreateChangeset, items: [scopedCreated], batch });
+      expect(direct.written).toEqual([]);
+      expect(outcomes).toEqual([{ targetId: 'n1', status: 'skipped', error: 'drift' }]);
+    });
+
+    it('CS-7 a delete whose target moved out of the scope after approval is skipped drift, never already_applied', async () => {
+      const { reader, direct, batch, writer } = directSetup(undefined, deleteOperation);
+      reader.pages = [page({ sku: 'A', brand: 'other', name: 'N', price: 1 })];
+      const outcomes = await writer.writeBatch({ changeset: deleteChangeset, items: [deleted], batch });
+      expect(direct.written).toEqual([]);
+      expect(reader.calls[0]?.args).not.toHaveProperty('brand');
+      expect(outcomes).toEqual([{ targetId: 'A', status: 'skipped', error: 'drift' }]);
+    });
+
+    it('CS-7 a delete answered ok whose verify read still finds the record outside the scope ends failed not_applied', async () => {
+      const { reader, batch, writer } = directSetup(undefined, deleteOperation);
+      reader.pages = [page({ sku: 'A', brand: 'acme', name: 'N', price: 1 }), page({ sku: 'A', brand: 'other', name: 'N', price: 1 })];
+      const outcomes = await writer.writeBatch({ changeset: deleteChangeset, items: [deleted], batch });
+      expect(outcomes).toEqual([{ targetId: 'A', status: 'failed', error: 'not_applied' }]);
+    });
   });
 
   it('EXE-8 reverse of a written create sends a delete-shaped record and ends written once the record is gone', async () => {

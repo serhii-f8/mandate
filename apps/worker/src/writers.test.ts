@@ -576,9 +576,33 @@ describe('CONN-4 worker writerFor of opaque MCP operations', () => {
   });
 });
 
-/** A create and the delete that undoes it, both per-record bindings on the preset's connection (OPS-2, EXE-8). */
+/**
+ * A create and the delete that undoes it, both per-record bindings on the preset's connection (OPS-2, EXE-8).
+ * Their read_before finds a product by SKU in any brand: existence is read without the scope filter (ADR 0071).
+ */
 const CREATE_AND_DELETE = `version: 1
 operations:
+  - id: catalog.find_products_by_sku
+    connection: magento
+    risk: read
+    description: Products by SKU in any brand.
+    input_schema:
+      type: object
+      properties:
+        skus: { type: array, items: { type: string }, maxItems: 100 }
+        fields: { type: array, items: { type: string } }
+      required: [skus, fields]
+      additionalProperties: false
+    fields_arg: fields
+    upstream:
+      method: GET
+      path: /V1/products
+      query:
+        searchCriteria[filter_groups][0][filters][0][field]: sku
+        searchCriteria[filter_groups][0][filters][0][value]: { arg: skus, join: ',' }
+        searchCriteria[filter_groups][0][filters][0][condition_type]: in
+        searchCriteria[pageSize]: 100
+      response: { items: items, total: total_count, flatten: { path: custom_attributes, key: attribute_code, value: value }, fields_from_arg: fields, max_items: 100 }
   - id: catalog.create_product
     connection: magento
     risk: write
@@ -604,9 +628,8 @@ operations:
       fields: [description, brand]
       scope_args: { brand: brand }
       read_before:
-        operation: catalog.get_products_by_sku
+        operation: catalog.find_products_by_sku
         ids_arg: skus
-        args: { brand: { arg: brand } }
       rollback: { strategy: inverse_operation, operation: catalog.delete_product }
   - id: catalog.delete_product
     connection: magento
@@ -627,9 +650,8 @@ operations:
       fields: [description, brand]
       scope_args: { brand: brand }
       read_before:
-        operation: catalog.get_products_by_sku
+        operation: catalog.find_products_by_sku
         ids_arg: skus
-        args: { brand: { arg: brand } }
       rollback: { strategy: none }
 `;
 

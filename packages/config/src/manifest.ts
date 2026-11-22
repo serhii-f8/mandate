@@ -487,17 +487,25 @@ export function checkManifests(input: ManifestCheckInput): void {
       else return read;
       return undefined;
     };
+    // A read filtered by scope answers "not found" for a record of another scope. The read_before of a
+    // create or delete decides existence, so it reads without the scope filter and the platform checks
+    // the scope on the record itself (OPS-2, CS-7, ADR 0071). A selector only proposes targets: it is scoped.
+    const unscopedRead = (sub: 'read_before' | 'selector'): boolean => sub === 'read_before' && action !== 'update';
     const checkArgs = (sub: 'read_before' | 'selector', args: Readonly<Record<string, TemplateConfig>>, read: RegisteredOperation | undefined): void => {
       const referenced = new Set<string>();
       for (const [key, tpl] of Object.entries(args)) {
         if (typeof tpl === 'object') {
           referenced.add(tpl.arg);
           if (op.schemaKnown && !writeProps.has(tpl.arg)) mAt([sub, 'args', key, 'arg'], 'names an argument that is not in input_schema');
+          if (unscopedRead(sub) && Object.hasOwn(manifest.scope_args, tpl.arg)) {
+            mAt([sub, 'args', key], `must not pass scope argument ${tpl.arg} for action ${action}: existence is read without the scope filter`);
+          }
         }
         if (read?.schemaKnown === true && !propertiesOf(read.definition.inputSchema).has(key)) {
           mAt([sub, 'args', key], `is not an argument of operation ${read.definition.id}`);
         }
       }
+      if (unscopedRead(sub)) return;
       for (const arg of Object.keys(manifest.scope_args)) {
         if (!referenced.has(arg)) mAt([sub, 'args'], `must pass scope argument ${arg} as { arg: ${arg} }`);
       }

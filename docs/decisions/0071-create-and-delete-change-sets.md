@@ -37,6 +37,20 @@ option 3 makes the meaning of a configuration depend on its call.
 - **delete** needs `ids_arg` or `selector`, takes no `values_arg` or `records_arg`, and needs risk
   `destructive` (`action delete needs risk destructive`), so it always needs approval and step-up
   authentication. The item holds the current values of all `fields` as `before` and `after: null`.
+- **Existence is read without the scope filter.** **(controller ruling, amends design 2.3)** An update's
+  `read_before` passes every scope argument, and an upstream that filters by it answers a record of
+  another scope as "not found". For a create that turns a foreign record with the same identifier into
+  "absent": the item would be pending as new, and an upsert-style endpoint would rewrite the other
+  scope's record. For a delete a target that moved out of scope would read as already deleted. So the
+  `read_before` of a create or delete must not reference a scope argument (`must not pass scope argument
+  <arg> for action <action>: existence is read without the scope filter`, at
+  `manifest.read_before.args.<key>`), and the loader no longer demands one there. The platform checks
+  the scope on the returned record instead (every `scope_args` field is in the read's field list and,
+  where the read declares its fields, must be one it can return): a create of an identifier that exists
+  in another scope is `already_exists` with `before: null`, a delete of a target outside the scope is
+  `out_of_scope`; at execution either case is `skipped` with `drift`, and after an `ok` answer a delete
+  whose record is still there, in or out of scope, is `failed` with `not_applied`. The selector of a
+  delete stays scoped: it only proposes targets.
 - **Classifier.** With `null` meaning absent: the current state equals `after` is `already_applied`;
   equals `before` is written; otherwise `gone` when neither side is `null` and the record is missing or
   out of scope, else `drift`. A record that appeared with other values is not overwritten by a create,
@@ -64,6 +78,10 @@ option 3 makes the meaning of a configuration depend on its call.
   execution makes those change-sets unexecutable (`policy_denied`); they are cancelled or expire.
 - Deleting is as safe as the operator makes the `fields`: they are what an approver sees and what
   drift compares, and all that a rollback restores.
+- The `read_before` of a create or delete must find a record by identifier whatever its scope; a
+  binding that cannot (an upstream read that always filters by scope) cannot serve a create or delete
+  safely. "A create never overwrites an existing record" holds only under such a read, and a create
+  binding should still refuse an existing identifier upstream (a plain `POST`, not an upsert).
 - The Magento and Gitea presets do not change; the template preset demonstrates both actions in a
   later change of this release.
 

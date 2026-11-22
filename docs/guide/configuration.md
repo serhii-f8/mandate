@@ -123,7 +123,7 @@ connections:
 
 | Key | Type | Default | Bounds / notes |
 | --- | --- | --- | --- |
-| `action` | `update`, `create` or `delete` | `update` | Since 1.2.0. What the call does to its targets; a fixed node in presets. `create` needs `records_arg`, no `write.carry_fields`, and every `scope_args` field in `fields`. `delete` needs `ids_arg` or `selector`, neither `values_arg` nor `records_arg`, and `risk: destructive`, so it always needs approval and step-up authentication. `replay_previous_state` is not available for either |
+| `action` | `update`, `create` or `delete` | `update` | Since 1.2.0. What the call does to its targets; a fixed node in presets. `create` needs `records_arg`, no `write.carry_fields`, and every `scope_args` field in `fields`. `delete` needs `ids_arg` or `selector`, neither `values_arg` nor `records_arg`, and `risk: destructive`, so it always needs approval and step-up authentication. `replay_previous_state` is not available for either. The `read_before` of a create or delete must find a record by identifier whatever its scope, so its `args` must not pass a scope argument (the platform checks the scope on the returned record); a create binding should refuse an existing identifier upstream. "Never overwritten" holds only under such a read |
 | `id_field` | string | required | |
 | `ids_arg` | string | none | With `values_arg`: give `ids_arg`, `selector` or both |
 | `values_arg` | string | one of two | Since 1.2.0 optional: declare exactly one of `values_arg` and `records_arg`. A required object property of `input_schema` with `additionalProperties: false`; one set of values for every target |
@@ -132,7 +132,7 @@ connections:
 | `required_fields` | list | `[]` | |
 | `sensitive_fields` | list | `[]` | Each must be in `fields`; the audit trail redacts their values |
 | `scope_args` | map | `{}` | Scope name to argument name |
-| `read_before` | object | required | `operation`, `ids_arg`, `args` |
+| `read_before` | object | required | `operation`, `ids_arg`, `args`. For an update `args` passes every scope argument as `{ arg: <name> }`; for a create or delete it must pass none, so the read finds a record by identifier whatever its scope |
 | `selector` | object | none | `operation`, `args`, `page_arg`, `page_size_arg`, `page_size` (1-1000, default 100) |
 | `write.carry_fields` | list | none | At least 1 |
 | `batch_size` | integer | 100 | 1-1000 |

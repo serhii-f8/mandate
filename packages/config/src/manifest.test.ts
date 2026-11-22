@@ -380,11 +380,15 @@ describe('OPS-2 manifest action', () => {
   const CHANGES_PROP = 'changes: { type: object, properties: { name: { type: string }, description: { type: string } }, additionalProperties: false }';
   const NO_SELECTOR = / {6}selector:\n(?: {8}.*\n)+/;
   const HEADER = 'version: 1\noperations:\n';
+  /** The read_before of an update passes the scope argument; a create's or delete's reads existence without it (C1). */
+  const SCOPED_READ = '        ids_arg: skus\n        args: { brand: { arg: brand } }\n';
+  const UNSCOPED_READ = '        ids_arg: skus\n';
   /** A create: records with their own values, the caller supplies the identifier. */
   const CREATE = WRITE.replace(CHANGES_PROP, `records: { type: array, items: ${ITEM} }`)
     .replace('required: [brand, changes]', 'required: [brand, records]')
     .replace('      ids_arg: skus\n      values_arg: changes\n      fields: [name, description]\n', '      action: create\n      records_arg: records\n      fields: [name, description, brand]\n')
     .replace(NO_SELECTOR, '')
+    .replace(SCOPED_READ, UNSCOPED_READ)
     .replace('rollback: { strategy: replay_previous_state }', 'rollback: { strategy: none }');
   /** A delete: names its targets, takes no values. */
   const DELETE = WRITE.replace('risk: write', 'risk: destructive')
@@ -392,6 +396,7 @@ describe('OPS-2 manifest action', () => {
     .replace('required: [brand, changes]', 'required: [brand]')
     .replace('      values_arg: changes\n', '      action: delete\n')
     .replace('fields: [name, description]\n', 'fields: [name, description, brand]\n')
+    .replace(SCOPED_READ, UNSCOPED_READ)
     .replace('rollback: { strategy: replay_previous_state }', 'rollback: { strategy: none }');
   /** Two operations in one file; the second is renamed so the role's grant keeps naming the first. */
   const both = (first: string, second: string): string => first + second.replace(HEADER, '').replace('id: catalog.update_content', 'id: catalog.delete_content');
@@ -470,6 +475,34 @@ describe('OPS-2 manifest action', () => {
   it('OPS-2 a delete on a write operation is refused at action', async () => {
     const text = DELETE.replace('risk: destructive', 'risk: write');
     expect((await at(text, `${M}.action`)).message).toBe('action delete needs risk destructive');
+  });
+
+  it('OPS-2 CS-7 a create or delete whose read_before passes a scope argument is refused at read_before.args.<key>', async () => {
+    expect(CREATE).not.toContain(SCOPED_READ);
+    expect(DELETE).not.toContain(SCOPED_READ);
+    const c = await at(CREATE.replace(UNSCOPED_READ, SCOPED_READ), `${M}.read_before.args.brand`);
+    expect(c.message).toBe('must not pass scope argument brand for action create: existence is read without the scope filter');
+    const d = await at(DELETE.replace(UNSCOPED_READ, SCOPED_READ), `${M}.read_before.args.brand`);
+    expect(d.message).toBe('must not pass scope argument brand for action delete: existence is read without the scope filter');
+    // A literal under the same key is no scope argument.
+    ok(await load({ 'write.yaml': CREATE.replace(UNSCOPED_READ, '        ids_arg: skus\n        args: { brand: any }\n') }));
+  });
+
+  it('OPS-2 CS-7 a create or delete with scope_args loads without passing the scope argument to read_before', async () => {
+    const create = ok(await load({ 'write.yaml': CREATE }));
+    expect(create.policy.operations.find((o) => o.id === 'catalog.update_content')?.manifest).toMatchObject({ scopeArgs: { brand: 'brand' }, readBefore: { args: {} } });
+    const del = ok(await loadDelete(DELETE));
+    expect(del.policy.operations.find((o) => o.id === 'catalog.update_content')?.manifest).toMatchObject({ scopeArgs: { brand: 'brand' }, readBefore: { args: {} } });
+  });
+
+  it('OPS-2 POL-2 the selector of a delete still must pass the scope argument', async () => {
+    const text = DELETE.replace('args: { brand: { arg: brand }, name_like: { arg: name_like } }', 'args: { name_like: { arg: name_like } }');
+    expect((await at(text, `${M}.selector.args`)).message).toBe('must pass scope argument brand as { arg: brand }');
+  });
+
+  it('OPS-2 POL-2 the scope field of a delete must be a field read_before can return (check 6)', async () => {
+    const text = DELETE.replace('scope_args: { brand: brand }', 'scope_args: { brand: manufacturer }');
+    expect((await at(text, `${M}.scope_args.brand`)).message).toBe('is not a field operation catalog.get_products_by_sku can return');
   });
 
   it('OPS-2 replay_previous_state is not available for create or delete', async () => {

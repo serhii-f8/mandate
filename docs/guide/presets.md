@@ -203,6 +203,10 @@ The argument's items must be closed objects; `ids_arg` and `selector` are not us
 A delete always needs approval and step-up authentication. A create is undone by naming a delete
 operation as its `inverse_operation`, a delete by naming a create; rolling back a delete restores only
 the manifest's `fields`. `action` is fixed in the preset file and cannot be a `$param`.
+The `read_before` of a create or delete must find a record by identifier whatever its scope, so it
+must not pass a scope argument; the platform checks the scope on the record it returns. Bind a
+create to an endpoint that refuses an existing identifier (not an upsert): a create never overwrites
+an existing record only when its `read_before` can see every record.
 
 `checks` (since 1.2.0) exclude records that fail a business precondition during preparation, each
 with its own reason code. A check is a `code`, an optional `title` and a list of predicates from a
