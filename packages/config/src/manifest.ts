@@ -383,6 +383,9 @@ export function checkManifests(input: ManifestCheckInput): void {
           inverseAction === wanted &&
           (wanted === 'delete' ? inverse.definition.risk === 'destructive' && inverseManifest.id_field === manifest.id_field : inverse.definition.risk === 'write' && inverseManifest.id_field === manifest.id_field && covers);
         if (!matches) mAt(['rollback', 'operation'], inverseMessage(wanted));
+      } else if ((inverse.located.value.manifest?.action ?? 'update') !== 'update') {
+        // A create or delete writes records of another shape: it undoes only its own action (ADR 0071).
+        mAt(['rollback', 'operation'], 'must name an update operation');
       } else if (!inverse.enabled || inverse.definition.risk !== 'write') mAt(['rollback', 'operation'], 'must name an enabled write operation');
       else if (inverse.definition.connection !== op.definition.connection) mAt(['rollback', 'operation'], 'must name an operation of the same connection');
       else {

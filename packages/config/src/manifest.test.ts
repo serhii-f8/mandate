@@ -494,6 +494,16 @@ describe('OPS-2 manifest action', () => {
     expect((await at(both(inverse('catalog.delete_content'), otherKey), path)).message).toBe(message);
   });
 
+  it('OPS-3 the inverse of an update must be an update operation', async () => {
+    const updateInverse = WRITE.replace('rollback: { strategy: replay_previous_state }', 'rollback: { strategy: inverse_operation, operation: catalog.delete_content }');
+    const path = `${M}.rollback.operation`;
+    const message = 'must name an update operation';
+    expect((await at(both(updateInverse, CREATE), path)).message).toBe(message);
+    expect((await at(both(updateInverse, DELETE), path)).message).toBe(message);
+    // Another update operation still loads.
+    ok(await load({ 'write.yaml': both(updateInverse, WRITE) }));
+  });
+
   it('OPS-2 the inverse of a delete must be a create whose fields cover its fields', async () => {
     const inverse = (text: string): string => DELETE.replace('rollback: { strategy: none }', 'rollback: { strategy: inverse_operation, operation: catalog.update_content }').replace('fields: [name, description, brand]', text);
     const message = 'must name an enabled create operation of the same connection whose manifest lists every field of this one';

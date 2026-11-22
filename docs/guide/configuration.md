@@ -137,7 +137,7 @@ connections:
 | `write.carry_fields` | list | none | At least 1 |
 | `batch_size` | integer | 100 | 1-1000 |
 | `max_targets` | integer | 10000 | 1-100000 |
-| `rollback` | object | required | `strategy: replay_previous_state`, `none`, or `inverse_operation` with `operation`. The inverse of a `create` is a `delete` operation of the same connection and `id_field`; the inverse of a `delete` is a `create` whose `fields` cover this one's. Rolling back a delete restores only the manifest's `fields` |
+| `rollback` | object | required | `strategy: replay_previous_state`, `none`, or `inverse_operation` with `operation`. The inverse of a `create` is a `delete` operation of the same connection and `id_field`; the inverse of a `delete` is a `create` whose `fields` cover this one's. Rolling back a delete restores only the manifest's `fields`. The inverse of an `update` must be an `update` operation |
 
 ```yaml
 operations:

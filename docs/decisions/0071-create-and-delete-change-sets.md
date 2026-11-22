@@ -50,6 +50,8 @@ option 3 makes the meaning of a configuration depend on its call.
   an enabled `create` of the same connection whose `fields` cover the delete's. The loader's rule that
   an inverse is a `write` operation accepts `destructive` for the inverse of a create. **(call)**
   Rolling back a delete restores only the manifest's `fields`, not other attributes of the record.
+  The inverse of an `update` must itself be an update (`must name an update operation`), so a create or
+  delete operation never receives update-shaped records of existing targets.
 - **Guard.** The stored action must equal the action of the operation under the current configuration,
   else `policy_denied`, as for diff versus opaque. A change-set stored without an action counts as
   `update`, so a copy derived by an older process from a create or a delete never executes against
