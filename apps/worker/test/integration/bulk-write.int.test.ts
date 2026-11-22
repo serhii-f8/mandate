@@ -2,7 +2,7 @@
 // Copyright 2026 The Mandate Authors
 /**
  * Bulk writes end to end (EXE-4, CS-7, NFR-2; design part 2): a real `changesetWorkflow` prepares
- * a change-set through the Magento preset 1.0.0 against the fake catalog, then executes it with
+ * a change-set through the Magento preset 1.1.0 against the fake catalog, then executes it with
  * the production `createWriterFor`: one async bulk submission, recorded before the first status
  * poll, verified by a read, with drift, already applied, gone and failed items reported per item.
  * The worker runs on the real clock, so a batch takes about 2.5 s (1 s + 1.5 s polls).

@@ -18,7 +18,7 @@ import { z } from 'zod';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { loadPresetCode, type ImportModule, type LoadedPresetCode } from './preset-code.js';
 import { parseMandateField, selectPackage } from './preset-package.js';
-import { PRESET_PARAM_NAME, presetParamsSchema, resolveParamValues, substituteParams, type ParamIssue, type PresetParamDecl, type PresetParamValue } from './preset-params.js';
+import { isParamNode, PRESET_PARAM_NAME, presetParamsSchema, resolveParamValues, substituteParams, type ParamIssue, type PresetParamDecl, type PresetParamValue } from './preset-params.js';
 import { OPERATION_ID, PARSE_PARAMS, presetOperationSchema, schemaIssues, type PresetConfig, type PresetOperationConfig } from './schema.js';
 import { findSecretKeys, SECRET_MESSAGE } from './secrets.js';
 import { authSchema, connectionTestSchema, isSpecUrl, type AuthConfig, type ConnectionTestConfig } from './upstream-schema.js';
@@ -230,6 +230,20 @@ function bindDefaults(raw: Record<string, unknown>, at: (path: readonly Property
   const declared = presetParamsSchema.safeParse(raw.params ?? {}, PARSE_PARAMS);
   for (const issue of schemaIssues(declared)) at(['params', ...issue.path], issue.message);
   if (!declared.success) return undefined;
+  // The nodes that name an operation or its field list stay fixed: a binding cannot rename an
+  // operation, retarget its test, or move the fields its policy and approval rules read.
+  const fixed = (node: unknown, path: readonly PropertyKey[]): void => {
+    if (isRecord(node) && isParamNode(node)) at(path, 'must not be a parameter');
+  };
+  if (Array.isArray(raw.operations)) {
+    raw.operations.forEach((op: unknown, index) => {
+      if (!isRecord(op)) return;
+      fixed(op.id, ['operations', index, 'id']);
+      fixed(op.fields_arg, ['operations', index, 'fields_arg']);
+      if (isRecord(op.manifest)) fixed(op.manifest.values_arg, ['operations', index, 'manifest', 'values_arg']);
+    });
+  }
+  if (isRecord(raw.test)) fixed(raw.test.operation, ['test', 'operation']);
   const defaults = resolveParamValues(declared.data, undefined);
   // Defaults alone cannot fail; kept total for the type.
   if (!defaults.ok) return undefined;

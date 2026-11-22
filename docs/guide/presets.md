@@ -73,7 +73,8 @@ for:
 ```
 
 `preset` defaults to `preset.yaml`. `sdk` is a semver range; if the SDK the platform provides does
-not satisfy it, the configuration is refused with `preset_sdk_incompatible`. A preset with code adds
+not satisfy it, the configuration is refused with `preset_sdk_incompatible`. A preset that declares
+[parameters](#parameters) needs `"sdk": "^1.1.0"`. A preset with code adds
 `"code": "dist/index.js"`, see [Code operations](#code-operations). Keep `files` to what must ship:
 `preset.yaml`, `spec`, `README.md` and, for code, `dist`.
 
@@ -144,10 +145,16 @@ connections:
 - A mapping whose only key is `$param` is replaced by the value, anywhere inside `operations` and
   `test`. A list value replaces the node as a whole (here the whole `enum`); it is not spliced into a
   surrounding list. Any other mapping, including one with `$param` and other keys, stays as it is.
+- The nodes that name an operation or its field list cannot be parameters: `operations[*].id`,
+  `operations[*].fields_arg`, `operations[*].manifest.values_arg` and `test.operation`. A
+  `{ $param }` there is refused in the preset file (`must not be a parameter`), so a connection
+  cannot rename an operation, retarget the test, or move the fields that grants and approval rules
+  read.
 - Substitution happens before the operation schema is checked, once per connection: two connections
   can bind the same preset with different values (with `operation_prefix`). The published preset
   format schema, `packages/config/schema/mandate-preset.v1.json`, describes the file after
-  substitution.
+  substitution. An editor that validates a raw `preset.yaml` against it flags every `{ $param }`
+  node; the platform's own check (`mandate validate`) substitutes first.
 - Values are data. They are never coerced (`"5"` is not a number), never searched for another
   `$param`, and the result must pass the same checks as the preset's own values: the operation
   schema, the input schema, the manifest checks and the connection test's arguments. When a
@@ -270,7 +277,7 @@ Extract it into a directory that is on `MANDATE_PRESET_DIRS`, one subdirectory p
 
 ```bash
 mkdir -p /srv/mandate-presets/notes
-tar -xzf mandate-examples-preset-template-1.0.0.tgz --strip-components=1 -C /srv/mandate-presets/notes
+tar -xzf mandate-examples-preset-template-1.1.0.tgz --strip-components=1 -C /srv/mandate-presets/notes
 ```
 
 Reference it by its package name and apply the configuration. The running api and worker pick up an

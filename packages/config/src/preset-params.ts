@@ -99,7 +99,8 @@ export function resolveParamValues(
   return { ok: true, values: Object.freeze(values) };
 }
 
-function isParamNode(node: object): node is { $param: string } {
+/** True for a `{ $param: <name> }` mapping: its only key, a string name. */
+export function isParamNode(node: object): node is { $param: string } {
   const keys = Object.keys(node);
   return keys.length === 1 && keys[0] === '$param' && typeof (node as { $param: unknown }).$param === 'string';
 }

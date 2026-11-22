@@ -838,6 +838,27 @@ roles:
     expect(found).toEqual([expect.objectContaining({ file: FIXTURE_PRESET_FILE, path: 'operations', message: 'names undeclared preset parameters: x' })]);
   });
 
+  describe('CONN-8 identity nodes must not be parameters', () => {
+    /** The parameterized preset with `p` (default `value`) declared and `from` replaced by `to`. */
+    async function withIdentityParam(value: string, from: string, to: string): Promise<string> {
+      const text = (await parameterized()).replace('params:\n', `params:\n  p: { type: string, default: ${value} }\n`);
+      if (!text.includes(from)) throw new Error(`the fixture preset has no ${from}`);
+      return text.replace(from, to);
+    }
+    const cases = [
+      ['operations[*].id', 'fixture.search', '  - id: fixture.search\n', '  - id: { $param: p }\n', 'operations[0].id'],
+      ['operations[*].fields_arg', 'fields', '    fields_arg: fields\n', '    fields_arg: { $param: p }\n', 'operations[0].fields_arg'],
+      ['operations[*].manifest.values_arg', 'changes', '      values_arg: changes\n', '      values_arg: { $param: p }\n', 'operations[2].manifest.values_arg'],
+      ['test.operation', 'fixture.search', 'operations:\n', 'test: { operation: { $param: p }, args: { page: 1, per_page: 1, fields: [id] } }\noperations:\n', 'test.operation'],
+    ] as const;
+    for (const [node, value, from, to, path] of cases) {
+      it(`CONN-8 a parameter under ${node} is refused in the preset file`, async () => {
+        const found = issues(await loadWith(oneShop(), await withIdentityParam(value, from, to)));
+        expect(found).toEqual([expect.objectContaining({ file: FIXTURE_PRESET_FILE, path, message: 'must not be a parameter' })]);
+      });
+    }
+  });
+
   it('CONN-8 a declaration whose default does not match its type fails in the preset file', async () => {
     const preset = (await parameterized()).replace('limit: { type: number, default: 50 }', 'limit: { type: number, default: "50" }');
     const found = issues(await loadWith(oneShop(), preset));

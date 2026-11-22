@@ -106,6 +106,8 @@ A preset package declares the SDK range it was built for in its `package.json`:
 When the configuration loader loads a preset it checks the SDK version of the running platform against
 that range. A mismatch is a configuration error, `preset_sdk_incompatible`, and the configuration is
 refused before anything runs. A preset with `^1.0.0` loads on every 1.x platform and is refused on 2.0.
+A preset that uses a feature added in a minor declares that minor: one that declares `params` needs
+SDK 1.1.0 and says `"sdk": "^1.1.0"` (see [Presets](presets.md#parameters)).
 Presets before 1.0 declared `^0.6.0`; that range does not match 1.0.0, so a preset you wrote earlier
 needs its range changed, and a rebuild, after you upgrade. See [Presets](presets.md).
 

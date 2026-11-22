@@ -36,7 +36,11 @@ Option 3.
   string) is replaced by the parameter's value. A list value stays one node (a whole `enum`, never
   spliced into a surrounding list). The walk covers the preset's own nodes once: a substituted value is
   never searched for `$param`, so a value cannot introduce another substitution. A `$param` naming an
-  undeclared parameter is an issue in the preset file.
+  undeclared parameter is an issue in the preset file. The nodes that identify an operation or its
+  field list are not parameters: a `{ $param }` under `operations[*].id`, `operations[*].fields_arg`,
+  `operations[*].manifest.values_arg` or `test.operation` is an issue in the preset file at that node
+  (`must not be a parameter`). A binding could otherwise rename an operation that grants name, point
+  the test elsewhere, or move the field list that deny and allow fields and approval field rules read.
 - `resolvePreset` substitutes the defaults and validates the result with the unchanged preset schema;
   `LoadedPreset.operations` is that default-bound form, and the raw nodes are kept
   (`rawOperations`, `rawTest`). A binding without `preset_params` reuses the default-bound operations.
@@ -82,7 +86,7 @@ Option 3.
 Unit tests of declaration parsing, value resolution and substitution (`preset-params.test.ts`); loader
 tests for defaults, two bindings of one preset with different values, a wrong type, an unknown name, an
 object and a nested list, a value that breaks the operation schema, `preset_params` without `preset`, an
-undeclared `$param`, a default of the wrong type, per-binding substitution of the test, the
+undeclared `$param`, a `$param` under each identity node, a default of the wrong type, per-binding substitution of the test, the
 configuration hash and the secret scan, and the location of issues the later checks find: test args and
 an uncompilable input schema caused by a value land at `preset_params`, only the offending binding of
 two is named, and a preset broken by its defaults reports in the preset file (`load.test.ts`); code runner tests for `ctx.params` on read,

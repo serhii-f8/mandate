@@ -1,4 +1,4 @@
-# Preset template 1.0.0 (CONN-8, OPS-2, OPS-3, OPS-6). Copy this directory, rename the package,
+# Preset template 1.1.0 (CONN-8, OPS-2, OPS-3, OPS-6). Copy this directory, rename the package,
 # replace the spec and the two operations, and keep the contract test green (NFR-17).
 # Bind it to an openapi connection:   base_url: https://notes.example.com/api
 version: 1
