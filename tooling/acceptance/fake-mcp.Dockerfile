@@ -5,7 +5,7 @@
 # GET /_control/requests (packages/testing/src/fake-mcp-main.ts). Built from the repository root:
 #   docker build -f tooling/acceptance/fake-mcp.Dockerfile .
 # Test tooling only; never part of a deployment.
-FROM node:22-bookworm-slim
+FROM node:26-bookworm-slim
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /repo
