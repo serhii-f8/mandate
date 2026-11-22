@@ -2,6 +2,17 @@
 
 All notable changes are recorded here. The project follows [semantic versioning](docs/guide/versioning.md).
 
+## 1.1.0
+
+Additive release: the connector SDK (1.1.0) and the configuration schema (1.1.0) gain optional members
+only. Nothing needs to change on upgrade.
+
+### Added
+
+- `rate.requests_per_second` on a connection paces its upstream requests, retries included, and a
+  `Retry-After` the client honours holds the whole connection (CONN-6, ADR 0064).
+  `ConnectionSettings.minIntervalMs` carries it to adapters.
+
 ## 1.0.1
 
 A maintenance release. No upgrade steps: the connector SDK, the configuration schema and both

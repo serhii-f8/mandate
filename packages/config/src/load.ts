@@ -360,6 +360,8 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       timeoutMs: c.timeout_ms,
       retry: { maxAttempts: c.retry.max_attempts, initialBackoffMs: c.retry.initial_backoff_ms },
       maxConcurrency: c.max_concurrency,
+      // Rounded up so the pace never exceeds the configured rate (CONN-6).
+      ...(c.rate === undefined ? {} : { minIntervalMs: Math.ceil(1000 / c.rate.requests_per_second) }),
       allowPrivateNetwork: c.allow_private_network,
       extraHosts: spec?.kind === 'url' && URL.canParse(spec.url) ? [new URL(spec.url).hostname] : [],
     };

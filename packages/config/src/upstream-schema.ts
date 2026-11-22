@@ -69,6 +69,7 @@ export const connectionSettingsFields = {
     })
     .default({ max_attempts: 3, initial_backoff_ms: 200 }),
   max_concurrency: z.number().int().min(1).max(1000).default(4),
+  rate: z.strictObject({ requests_per_second: z.number().min(0.01).max(1000) }).optional(),
   allow_private_network: z.boolean().default(false),
   test: connectionTestSchema.optional(),
 };

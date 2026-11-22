@@ -220,6 +220,28 @@ describe('CONN-1 CONN-4 MCP tool adapter', () => {
     expect(sleeps).toEqual([100, 200]);
   });
 
+  it('CONN-6 pauses between two tool calls of a paced connection and answers busy for a slot beyond timeoutMs', async () => {
+    const server = await start();
+    const connection = settings(server, { minIntervalMs: 300 });
+    const sleeps: number[] = [];
+    const adapter = createMcpToolAdapter({
+      now: () => 1_000_000,
+      sleep: (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect((await adapter.callTool({ connection, tool: 'echo', args: { text: 'a' }, retryable: false })).ok).toBe(true);
+    expect(sleeps).toEqual([]);
+    expect((await adapter.callTool({ connection, tool: 'echo', args: { text: 'b' }, retryable: false })).ok).toBe(true);
+    expect(sleeps).toEqual([300]);
+    // The booked slot is now 300 ms ahead; a budget of 100 ms refuses without sending.
+    const before = server.requests.length;
+    const busy = await adapter.callTool({ connection: { ...connection, timeoutMs: 100 }, tool: 'echo', args: { text: 'c' }, retryable: false });
+    expect(busy).toMatchObject({ ok: false, code: 'busy', message: 'upstream tool call failed (busy)' });
+    expect(server.requests).toHaveLength(before);
+  });
+
   it('CONN-6 holds one semaphore slot per operation', async () => {
     const events: string[] = [];
     const gates = new Map<string, () => void>();

@@ -1,4 +1,4 @@
-// @mandate/connector-sdk 1.0.0 public API report — generated, do not edit
+// @mandate/connector-sdk 1.1.0 public API report — generated, do not edit
 
 // file: code.d.ts
 import type { HttpMethod } from './mapping.js';
@@ -98,6 +98,7 @@ export interface ConnectionSettings {
         initialBackoffMs: number;
     };
     maxConcurrency: number;
+    minIntervalMs?: number;
     allowPrivateNetwork: boolean;
     extraHosts: readonly string[];
 }
@@ -361,7 +362,7 @@ export interface UpstreamResolver {
 }
 
 // file: version.d.ts
-export declare const CONNECTOR_SDK_VERSION = "1.0.0";
+export declare const CONNECTOR_SDK_VERSION = "1.1.0";
 
 // file: write.d.ts
 import type { ConnectionSettings } from './connection.js';

@@ -515,5 +515,5 @@
   },
   "$id": "https://mandate.invalid/schema/mandate-preset.v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "x-mandate-sdk-version": "1.0.0"
+  "x-mandate-sdk-version": "1.1.0"
 }

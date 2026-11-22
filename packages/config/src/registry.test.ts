@@ -251,6 +251,20 @@ describe('CONN-2 derived input schema from the spec', () => {
     });
   });
 
+  it('CONN-6 converts rate.requests_per_second to minIntervalMs and omits the key without rate', async () => {
+    const yaml = (rate: string) => `version: 1
+connections:
+  - id: shop
+    adapter: openapi
+    base_url: https://shop.example.test/api
+    openapi: { spec: https://specs.example.test/shop.json }${rate}
+`;
+    const paced = ok(await sources({ 'base.yaml': yaml('\n    rate: { requests_per_second: 2 }') }));
+    expect(paced.connectionSettings.get('shop')?.minIntervalMs).toBe(500);
+    const plain = ok(await sources({ 'base.yaml': yaml('') }));
+    expect(plain.connectionSettings.get('shop')).not.toHaveProperty('minIntervalMs');
+  });
+
   it('keeps a placeholder schema and reports skipped spec checks without a resolver', async () => {
     const config = ok(await loadConfigurationDirectory(join(FIXTURES, 'derived')));
     expect(config.specChecksSkipped).toBe(true);

@@ -14,6 +14,7 @@ import {
 import type { HttpRequestSpec } from '../openapi/request.js';
 import { assertEgressAllowed, createGuardedLookup, EgressDeniedError } from './egress.js';
 import { prepareAuth } from './auth.js';
+import { pacerFor } from './pacer.js';
 import { semaphoreFor } from './semaphore.js';
 
 /** Response body limit (spec §4.5). */
@@ -273,6 +274,8 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
     });
 
     const semaphore = semaphoreFor(settings.id, settings.maxConcurrency);
+    // Also for a connection without a rate: an honoured Retry-After holds the whole connection.
+    const pacer = pacerFor(settings.id, settings.minIntervalMs);
     const transportOpts: TransportOptions = opts.discardBody === true ? { discardBody: true } : {};
     const beforeSend = opts.beforeSend;
     const attemptOnce = async (): Promise<RawResult | 'busy'> => {
@@ -282,6 +285,11 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
       try {
         // Waiting for the slot counts against the timeout (CONN-6); the hook's own time does not.
         const remaining = Math.max(1, settings.timeoutMs - Math.max(0, now() - waitStart));
+        // Pacing (CONN-6): the slot is booked per attempt, retries included; the wait does not count
+        // against the attempt's own timeout. A slot further away than the timeout is `busy`.
+        const paceWait = pacer.reserve(now(), settings.timeoutMs);
+        if (paceWait === undefined) return 'busy';
+        if (paceWait > 0) await sleep(paceWait);
         if (beforeSend) {
           // The allow-list refuses before the hook, so a refused call records nothing (R4, F4); the
           // transport checks again. The resolved address is still checked at connect.
@@ -347,11 +355,13 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
         if (refresh?.ok === true) continue;
         if (refresh) return { ...refresh, durationMs: Math.max(0, now() - start) };
       }
+      // An honoured Retry-After holds every request of the connection, not only this call (CONN-6).
+      const hinted = r.kind === 'status' && RETRYABLE_STATUS.has(r.status) ? retryAfterMs(r.headers, now) : undefined;
+      if (hinted !== undefined) pacer.holdUntil(now() + hinted);
       const failure =
         r.kind === 'status' ? fail('http_status', `upstream returned status ${r.status}`, r.status) : fail(r.code, r.message);
       const retryable = r.kind === 'status' ? RETRYABLE_STATUS.has(r.status) : r.code === 'timeout' || r.code === 'network';
       if (!retryable || retries + 1 >= maxAttempts) return failure;
-      const hinted = r.kind === 'status' ? retryAfterMs(r.headers, now) : undefined;
       const backoff = hinted ?? settings.retry.initialBackoffMs * 2 ** retries * random();
       retries += 1;
       await sleep(backoff);

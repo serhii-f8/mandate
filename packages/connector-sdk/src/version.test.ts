@@ -41,13 +41,13 @@ import {
   type WriteErrorCode,
 } from './index.js';
 
-describe('NFR-18 connector SDK 1.0.0', () => {
-  it('NFR-18 reports version 1.0.0', () => {
-    expect(CONNECTOR_SDK_VERSION).toBe('1.0.0');
+describe('NFR-18 connector SDK 1.1.0', () => {
+  it('NFR-18 reports version 1.1.0', () => {
+    expect(CONNECTOR_SDK_VERSION).toBe('1.1.0');
   });
   it('NFR-18 the connector SDK package version equals CONNECTOR_SDK_VERSION', () => {
     const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
-    expect(manifest.version).toBe('1.0.0');
+    expect(manifest.version).toBe('1.1.0');
     expect(manifest.version).toBe(CONNECTOR_SDK_VERSION);
   });
 });

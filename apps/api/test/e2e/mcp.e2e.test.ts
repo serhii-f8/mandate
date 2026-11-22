@@ -142,7 +142,7 @@ describe('MCP endpoint HTTP edges', () => {
   it('NFR-10 /readyz reports database, configuration revision and hash, and temporal unavailable with the executor replaced', async () => {
     const health = await fetch(`${api.url}/healthz`);
     expect(health.status).toBe(200);
-    expect(await health.json()).toEqual({ ok: true, version: '1.0.1' });
+    expect(await health.json()).toEqual({ ok: true, version: '1.1.0' });
     const ready = await fetch(`${api.url}/readyz`);
     expect(ready.status).toBe(200);
     expect(ready.headers.get('cache-control')).toBe('no-store');

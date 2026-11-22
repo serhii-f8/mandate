@@ -59,3 +59,4 @@ Requirements cited in the records (`MCP-1`, `POL-3`, `NFR-18`) are defined in th
 | [0060](0060-visual-design-of-pages-and-widgets.md) | Visual design of the trusted pages and widgets | 2026-11-21 |
 | [0062](0062-project-name-mandate.md) | The project is named Mandate | 2026-11-22 |
 | [0063](0063-semver-gate-appended-literals.md) | The semver gate judges an appended literal additive | 2026-11-22 |
+| [0064](0064-connection-pacing.md) | Per-connection pacing of upstream requests | 2026-11-22 |

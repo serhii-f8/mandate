@@ -191,7 +191,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 - **CONN-3** Inject the stored credential into upstream calls. Supported schemes: bearer token, API key header, basic, OAuth client credentials.
 - **CONN-4** Pin upstream MCP servers by recorded tool-list hash. A changed tool name, schema or description disables the affected operations until re-approved in configuration.
 - **CONN-5** Restrict outbound calls to hosts declared in connections. Block private and link-local address ranges unless explicitly allowed per connection.
-- **CONN-6** Apply per-connection timeout, retry policy and concurrency limit.
+- **CONN-6** Apply per-connection timeout, retry policy, concurrency limit and, when `rate.requests_per_second` is set, a minimum interval between requests (retries included). A `Retry-After` the client honours also holds later requests of the connection. A request whose turn is further away than the connection timeout fails as `busy`. The interval is kept per process (ADR 0064).
 - **CONN-7** Provide a connection test that performs one declared read call and reports the result.
 - **CONN-8** Load presets as versioned packages that contribute operations and manifests for a connection.
 

@@ -34,6 +34,7 @@ import { prepareAuth } from '../http/auth.js';
 import { createTransport, RETRYABLE_STATUS } from '../http/client.js';
 import { createGuardedLookup } from '../http/egress.js';
 import { createGuardedFetch, GuardedFetchError, type GuardedFetch } from '../http/guarded-fetch.js';
+import { pacerFor } from '../http/pacer.js';
 import { semaphoreFor } from '../http/semaphore.js';
 import { outcomeAfterSend, outcomeOfResult } from './call-once.js';
 import { mapToolResult } from './result.js';
@@ -184,6 +185,10 @@ export function createMcpToolAdapter(deps: McpAdapterDeps = {}): McpAdapter {
     const release = await semaphoreFor(connection.id, connection.maxConcurrency).acquire(connection.timeoutMs);
     if (!release) return fail('busy');
     try {
+      // Pacing (CONN-6), as in the HTTP client: one slot per operation; too far away is `busy`.
+      const paceWait = pacerFor(connection.id, connection.minIntervalMs).reserve(now(), connection.timeoutMs);
+      if (paceWait === undefined) return fail('busy');
+      if (paceWait > 0) await sleep(paceWait);
       const lookup = deps.lookup ?? createGuardedLookup(connection);
       const prepared = await prepareAuth(connection, credential, { now, transport: createTransport(connection, lookup) });
       if (!prepared.ok) return fail(prepared.code, prepared.status);

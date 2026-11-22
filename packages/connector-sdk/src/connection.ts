@@ -16,6 +16,8 @@ export interface ConnectionSettings {
   timeoutMs: number;
   retry: { maxAttempts: number; initialBackoffMs: number };
   maxConcurrency: number;
+  /** Minimum time between two requests of the connection, in milliseconds; absent means unpaced (since 1.1.0, additive). */
+  minIntervalMs?: number;
   allowPrivateNetwork: boolean;
   /** Extra hosts allowed for egress: the spec URL host. The token URL host is derived from `auth`. */
   extraHosts: readonly string[];

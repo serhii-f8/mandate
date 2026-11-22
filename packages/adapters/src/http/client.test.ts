@@ -3,7 +3,7 @@
 import type { ConnectionSettings, CredentialSource, RequestAttempt, RequestAttemptEnd, RequestInstrumentation } from '@mandate/connector-sdk';
 import { startFakeUpstream, type FakeUpstream } from '@mandate/testing';
 import { createServer, type Server } from 'node:net';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HttpRequestSpec } from '../openapi/request.js';
 import { createConnectionClient } from './client.js';
 import { createGuardedLookup } from './egress.js';
@@ -232,9 +232,13 @@ describe('CONN-6 timeout, retry and concurrency', () => {
       return n === 1 ? { status: 429, headers: { 'retry-after': header }, body: {} } : { status: 200, body: {} };
     });
     const sleeps: number[] = [];
-    const c = createConnectionClient(settings(), {
+    // The sleep advances the injected clock, so the Retry-After hold is over when the retry is paced.
+    let t = 1_000_000;
+    const c = createConnectionClient(settings({ timeoutMs: 20_000 }), {
+      now: () => t,
       sleep: (ms) => {
         sleeps.push(ms);
+        t += ms;
         return Promise.resolve();
       },
     });
@@ -323,6 +327,83 @@ describe('CONN-6 timeout, retry and concurrency', () => {
     held?.();
     expect(r).toMatchObject({ ok: false, code: 'busy' });
     expect(up.requests).toHaveLength(0);
+  });
+});
+
+describe('CONN-6 pacing', () => {
+  const recorder = (): { sleeps: number[]; sleep: (ms: number) => Promise<void> } => {
+    const sleeps: number[] = [];
+    return {
+      sleeps,
+      sleep: (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    };
+  };
+
+  it('CONN-6 the second request of a paced connection waits for the interval', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const { sleeps, sleep } = recorder();
+    const c = createConnectionClient(settings({ minIntervalMs: 200 }), { now: () => 1_000_000, sleep });
+    expect((await c.send(get(), { retryable: false })).ok).toBe(true);
+    expect(sleeps).toEqual([]);
+    expect((await c.send(get(), { retryable: false })).ok).toBe(true);
+    expect(sleeps).toEqual([200]);
+  });
+
+  it('CONN-6 a slot further away than timeout_ms ends as busy and sends nothing', async () => {
+    up.route('GET', '/items', () => ({ status: 200, body: {} }));
+    const { sleeps, sleep } = recorder();
+    const c = createConnectionClient(settings({ minIntervalMs: 1000, timeoutMs: 100 }), { now: () => 1_000_000, sleep });
+    expect((await c.send(get(), { retryable: false })).ok).toBe(true);
+    const r = await c.send(get(), { retryable: false });
+    expect(r).toMatchObject({ ok: false, code: 'busy' });
+    expect(sleeps).toEqual([]);
+    expect(up.requests).toHaveLength(1);
+  });
+
+  it('CONN-6 a retry attempt is paced like a first attempt', async () => {
+    let n = 0;
+    up.route('GET', '/items', () => {
+      n += 1;
+      return n === 1 ? { status: 503, body: {} } : { status: 200, body: {} };
+    });
+    const { sleeps, sleep } = recorder();
+    const c = createConnectionClient(settings({ minIntervalMs: 200 }), { now: () => 1_000_000, sleep, random: () => 0 });
+    expect((await c.send(get(), { retryable: true })).ok).toBe(true);
+    // The backoff (0 with this jitter), then the pacing wait before the second attempt.
+    expect(sleeps).toEqual([0, 200]);
+  });
+
+  it('CONN-6 an honoured Retry-After holds a concurrent call on the same connection', async () => {
+    let n = 0;
+    up.route('GET', '/items', () => {
+      n += 1;
+      return n === 1 ? { status: 429, headers: { 'retry-after': '2' }, body: {} } : { status: 200, body: {} };
+    });
+    let t = 1_000_000;
+    const sleeps: number[] = [];
+    const pending: (() => void)[] = [];
+    const sleep = (ms: number): Promise<void> => {
+      sleeps.push(ms);
+      return new Promise((resolve) => pending.push(resolve));
+    };
+    const s = settings({ retry: { maxAttempts: 2, initialBackoffMs: 100 } });
+    const a = createConnectionClient(s, { now: () => t, sleep }).send(get(), { retryable: true });
+    await vi.waitFor(() => {
+      expect(sleeps).toEqual([2000]);
+    });
+    // The pacer is shared by every client of the connection id, as in the process.
+    const b = createConnectionClient(s, { now: () => t, sleep }).send(get(), { retryable: false });
+    await vi.waitFor(() => {
+      expect(sleeps).toEqual([2000, 2000]);
+    });
+    t += 2000;
+    for (const release of pending) release();
+    expect((await a).ok).toBe(true);
+    expect((await b).ok).toBe(true);
+    expect(sleeps).toEqual([2000, 2000]);
   });
 });
 

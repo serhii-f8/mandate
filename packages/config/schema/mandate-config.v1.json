@@ -184,6 +184,20 @@
                 "pattern": "^[a-z][a-z0-9_-]{0,62}$",
                 "type": "string"
               },
+              "rate": {
+                "additionalProperties": false,
+                "properties": {
+                  "requests_per_second": {
+                    "maximum": 1000,
+                    "minimum": 0.01,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "requests_per_second"
+                ],
+                "type": "object"
+              },
               "retry": {
                 "additionalProperties": false,
                 "default": {
@@ -361,6 +375,20 @@
               "preset": {
                 "pattern": "^[a-z][a-z0-9_-]{0,62}$",
                 "type": "string"
+              },
+              "rate": {
+                "additionalProperties": false,
+                "properties": {
+                  "requests_per_second": {
+                    "maximum": 1000,
+                    "minimum": 0.01,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "requests_per_second"
+                ],
+                "type": "object"
               },
               "retry": {
                 "additionalProperties": false,
@@ -1200,5 +1228,5 @@
     "version"
   ],
   "type": "object",
-  "x-mandate-schema-version": "1.0.0"
+  "x-mandate-schema-version": "1.1.0"
 }

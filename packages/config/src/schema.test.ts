@@ -81,6 +81,24 @@ function issuesOf(yaml: string) {
   return schemaIssues(configDocumentSchema.safeParse(parse(yaml)));
 }
 
+describe('CONN-6 connection rate', () => {
+  const conn = (rate: string) => `version: 1\nconnections:\n  - { id: m, adapter: openapi, base_url: https://x.test, credential_ref: c${rate} }\n`;
+
+  it('CONN-6 accepts requests_per_second between 0.01 and 1000', () => {
+    for (const ok of ['0.01', '2', '1000']) expect(issuesOf(conn(`, rate: { requests_per_second: ${ok} }`)), ok).toEqual([]);
+  });
+
+  it('CONN-6 refuses requests_per_second of 0 and 1001 at the key', () => {
+    for (const bad of ['0', '1001']) {
+      expect(issuesOf(conn(`, rate: { requests_per_second: ${bad} }`))[0]?.path, bad).toEqual(['connections', 0, 'rate', 'requests_per_second']);
+    }
+  });
+
+  it('CONN-6 refuses an unknown key under rate', () => {
+    expect(issuesOf(conn(', rate: { requests_per_second: 1, burst: 3 }'))).not.toEqual([]);
+  });
+});
+
 describe('CFG-1 configuration document schema', () => {
   it('accepts the full example', () => {
     const result = configDocumentSchema.safeParse(parse(FULL_EXAMPLE));
