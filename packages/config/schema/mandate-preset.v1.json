@@ -145,6 +145,27 @@
                 "token_url"
               ],
               "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "scheme": {
+                  "const": "oauth1",
+                  "type": "string"
+                },
+                "signature_method": {
+                  "default": "HMAC-SHA256",
+                  "enum": [
+                    "HMAC-SHA256",
+                    "HMAC-SHA1"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "scheme"
+              ],
+              "type": "object"
             }
           ]
         },

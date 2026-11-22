@@ -298,6 +298,8 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
           await beforeSend();
         }
         const headers: Record<string, string> = { ...req.headers };
+        // Signed per attempt, over the exact URL the transport sends: a retry has a fresh nonce.
+        const authHeader = auth.header({ method: req.method, url: req.url });
         let span: RequestSpan | undefined;
         if (instrumentation) {
           // A failing hook leaves the request exactly as without one: a throwing `start` gives no
@@ -309,8 +311,7 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
           }
           if (span) {
             const taken = new Set(Object.keys(req.headers).map((n) => n.toLowerCase()));
-            const authName = auth.header()?.[0];
-            if (authName !== undefined) taken.add(authName.toLowerCase());
+            if (authHeader !== undefined) taken.add(authHeader[0].toLowerCase());
             try {
               Object.assign(headers, hookHeaders(span, taken));
             } catch {
@@ -318,7 +319,6 @@ export function createConnectionClient(settings: ConnectionSettings, deps: Conne
             }
           }
         }
-        const authHeader = auth.header();
         if (authHeader) headers[authHeader[0]] = authHeader[1];
         let result: RawResult | undefined;
         try {

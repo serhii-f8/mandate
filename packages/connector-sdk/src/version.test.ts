@@ -57,7 +57,10 @@ describe('NFR-18 connector SDK 0.6.0 is additive', () => {
     expect(CREDENTIAL_SCHEMES.slice(0, 5)).toEqual(['bearer', 'api_key', 'basic', 'oauth_client_credentials', 'webhook_url']);
   });
   it('NFR-18 CONN-3 oauth_password is appended after webhook_url (1.1.0)', () => {
-    expect(CREDENTIAL_SCHEMES).toEqual(['bearer', 'api_key', 'basic', 'oauth_client_credentials', 'webhook_url', 'oauth_password']);
+    expect(CREDENTIAL_SCHEMES.slice(0, 6)).toEqual(['bearer', 'api_key', 'basic', 'oauth_client_credentials', 'webhook_url', 'oauth_password']);
+  });
+  it('NFR-18 CONN-3 oauth1 is appended after oauth_password (1.1.0)', () => {
+    expect(CREDENTIAL_SCHEMES).toEqual(['bearer', 'api_key', 'basic', 'oauth_client_credentials', 'webhook_url', 'oauth_password', 'oauth1']);
   });
   it('NFR-18 OPS-6 UpstreamMapping.bulk is optional and WriteErrorCode extends ReadErrorCode', () => {
     expectTypeOf<UpstreamMapping['bulk']>().toEqualTypeOf<BulkMapping | undefined>();

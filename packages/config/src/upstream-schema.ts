@@ -43,6 +43,10 @@ export const authSchema = z.discriminatedUnion('scheme', [
     scopes: z.array(z.string().min(1).max(256)).default([]),
     client_auth: z.enum(['basic', 'body']).default('basic'),
   }),
+  z.strictObject({
+    scheme: z.literal('oauth1'),
+    signature_method: z.enum(['HMAC-SHA256', 'HMAC-SHA1']).default('HMAC-SHA256'),
+  }),
 ]);
 export type AuthConfig = z.output<typeof authSchema>;
 
@@ -395,5 +399,7 @@ export function toAuthSettings(a: AuthConfig): AuthSettings {
       return { scheme: 'oauth_client_credentials', tokenUrl: a.token_url, scopes: [...a.scopes] };
     case 'oauth_password':
       return { scheme: 'oauth_password', tokenUrl: a.token_url, scopes: [...a.scopes], clientAuth: a.client_auth };
+    case 'oauth1':
+      return { scheme: 'oauth1', signatureMethod: a.signature_method };
   }
 }

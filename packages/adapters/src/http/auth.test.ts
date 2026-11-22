@@ -7,6 +7,7 @@ import { prepareAuth, type PreparedAuth } from './auth.js';
 import { createTransport } from './client.js';
 import { createGuardedLookup } from './egress.js';
 import { clearTokenCache } from './oauth.js';
+import { percentEncode } from './oauth1.js';
 import { REDACTED } from './scrub.js';
 
 let up: FakeUpstream;
@@ -19,6 +20,8 @@ beforeEach(async () => {
 afterEach(async () => {
   await up.close();
 });
+
+const REQ = { method: 'GET', url: new URL('https://x.test/a?b=1') };
 
 function settings(over: Partial<ConnectionSettings> = {}): ConnectionSettings {
   seq += 1;
@@ -52,14 +55,14 @@ describe('CONN-3 SEC-3 prepared credential injection', () => {
   it('CONN-3 SEC-3 bearer gives Authorization: Bearer and scrubs the token', async () => {
     const s = settings({ auth: { scheme: 'bearer' } });
     const auth = await prepared(s, cred('bearer', { token: 'tok-1' }));
-    expect(auth.header()).toEqual(['authorization', 'Bearer tok-1']);
+    expect(auth.header(REQ)).toEqual(['authorization', 'Bearer tok-1']);
     expect(auth.scrubber.text('tok-1')).toBe(REDACTED);
   });
 
   it('CONN-3 SEC-3 api_key gives the configured header in lower case and scrubs the key', async () => {
     const s = settings({ auth: { scheme: 'api_key', header: 'X-Api-Key' } });
     const auth = await prepared(s, cred('api_key', { key: 'key-1' }));
-    expect(auth.header()).toEqual(['x-api-key', 'key-1']);
+    expect(auth.header(REQ)).toEqual(['x-api-key', 'key-1']);
     expect(auth.scrubber.text('key-1')).toBe(REDACTED);
   });
 
@@ -67,7 +70,7 @@ describe('CONN-3 SEC-3 prepared credential injection', () => {
     const s = settings({ auth: { scheme: 'basic' } });
     const auth = await prepared(s, cred('basic', { username: 'admin', password: 'p:w' }));
     const encoded = Buffer.from('admin:p:w').toString('base64');
-    expect(auth.header()).toEqual(['authorization', `Basic ${encoded}`]);
+    expect(auth.header(REQ)).toEqual(['authorization', `Basic ${encoded}`]);
     expect(auth.scrubber.text('p:w')).toBe(REDACTED);
     expect(auth.scrubber.text(encoded)).toBe(REDACTED);
     expect(auth.scrubber.text('admin')).toBe('admin');
@@ -77,7 +80,7 @@ describe('CONN-3 SEC-3 prepared credential injection', () => {
     up.route('POST', '/token', () => ({ status: 200, body: { access_token: 'issued-1', expires_in: 3600 } }));
     const s = settings({ auth: { scheme: 'oauth_client_credentials', tokenUrl: `${up.url}/token`, scopes: [] } });
     const auth = await prepared(s, cred('oauth_client_credentials', { client_id: 'cid', client_secret: 'csecret' }));
-    expect(auth.header()).toEqual(['authorization', 'Bearer issued-1']);
+    expect(auth.header(REQ)).toEqual(['authorization', 'Bearer issued-1']);
     expect(auth.scrubber.text('issued-1')).toBe(REDACTED);
     expect(auth.scrubber.text('csecret')).toBe(REDACTED);
     expect(up.requests.filter((r) => r.path === '/token')).toHaveLength(1);
@@ -87,7 +90,7 @@ describe('CONN-3 SEC-3 prepared credential injection', () => {
     up.route('POST', '/token', () => ({ status: 200, body: { access_token: 'issued-pw', expires_in: 3600 } }));
     const s = settings({ auth: { scheme: 'oauth_password', tokenUrl: `${up.url}/token`, scopes: [], clientAuth: 'basic' } });
     const auth = await prepared(s, cred('oauth_password', { client_id: 'cid', client_secret: 'c secret&', username: 'alice', password: 'p +w&' }));
-    expect(auth.header()).toEqual(['authorization', 'Bearer issued-pw']);
+    expect(auth.header(REQ)).toEqual(['authorization', 'Bearer issued-pw']);
     for (const secret of ['issued-pw', 'c secret&', 'p +w&', 'p+%2Bw%26', 'c+secret%26']) expect(auth.scrubber.text(`x ${secret} y`), secret).toBe(`x ${REDACTED} y`);
     expect(auth.scrubber.text('alice')).toBe('alice');
     expect(auth.scrubber.text(Buffer.from('cid:c+secret%26').toString('base64'))).toBe(REDACTED);
@@ -114,16 +117,16 @@ describe('CONN-3 SEC-3 prepared credential injection', () => {
     });
     const s = settings({ auth: { scheme: 'oauth_password', tokenUrl: `${up.url}/token`, scopes: [], clientAuth: 'basic' } });
     const auth = await prepared(s, cred('oauth_password', { client_id: 'cid', client_secret: 'cs', username: 'u', password: 'pw' }));
-    expect(auth.header()).toEqual(['authorization', 'Bearer pw-issued-1']);
+    expect(auth.header(REQ)).toEqual(['authorization', 'Bearer pw-issued-1']);
     expect(await auth.refreshAfter401()).toEqual({ ok: true });
-    expect(auth.header()).toEqual(['authorization', 'Bearer pw-issued-2']);
+    expect(auth.header(REQ)).toEqual(['authorization', 'Bearer pw-issued-2']);
     expect(await auth.refreshAfter401()).toBeUndefined();
     expect(up.requests.filter((r) => r.path === '/token')).toHaveLength(2);
   });
 
   it('CONN-3 no auth configured gives no header and an empty scrubber', async () => {
     const auth = await prepared(settings(), undefined);
-    expect(auth.header()).toBeUndefined();
+    expect(auth.header(REQ)).toBeUndefined();
     expect(auth.scrubber.text('anything')).toBe('anything');
     expect(await auth.refreshAfter401()).toBeUndefined();
   });
@@ -162,9 +165,9 @@ describe('CONN-3 SEC-3 prepared credential injection', () => {
     });
     const s = settings({ auth: { scheme: 'oauth_client_credentials', tokenUrl: `${up.url}/token`, scopes: [] } });
     const auth = await prepared(s, cred('oauth_client_credentials', { client_id: 'cid', client_secret: 'csecret' }));
-    expect(auth.header()).toEqual(['authorization', 'Bearer issued-1']);
+    expect(auth.header(REQ)).toEqual(['authorization', 'Bearer issued-1']);
     expect(await auth.refreshAfter401()).toEqual({ ok: true });
-    expect(auth.header()).toEqual(['authorization', 'Bearer issued-2']);
+    expect(auth.header(REQ)).toEqual(['authorization', 'Bearer issued-2']);
     expect(auth.scrubber.text('issued-2')).toBe(REDACTED);
     expect(await auth.refreshAfter401()).toBeUndefined();
     expect(up.requests.filter((r) => r.path === '/token')).toHaveLength(2);
@@ -174,6 +177,37 @@ describe('CONN-3 SEC-3 prepared credential injection', () => {
     const s = settings({ auth: { scheme: 'bearer' } });
     const auth = await prepared(s, cred('bearer', { token: 'tok-1' }));
     expect(await auth.refreshAfter401()).toBeUndefined();
-    expect(auth.header()).toEqual(['authorization', 'Bearer tok-1']);
+    expect(auth.header(REQ)).toEqual(['authorization', 'Bearer tok-1']);
+  });
+
+  it('CONN-3 oauth1 signs per request: another URL and another call give another header, secrets are scrubbed', async () => {
+    const material = { consumer_key: 'sentinel-ck', consumer_secret: 'sentinel cs&', token: 'sentinel-tk', token_secret: 'sentinel-ts/' };
+    const s = settings({ auth: { scheme: 'oauth1', signatureMethod: 'HMAC-SHA256' } });
+    let n = 0;
+    const r = await prepareAuth(s, cred('oauth1', material), { ...deps(s), nonce: () => `nonce-${++n}` });
+    if (!r.ok) throw new Error(r.message);
+    const auth = r.auth;
+    const a = auth.header({ method: 'GET', url: new URL('https://x.test/a?b=1') });
+    const same = auth.header({ method: 'GET', url: new URL('https://x.test/a?b=1') });
+    const other = auth.header({ method: 'GET', url: new URL('https://x.test/a?b=2') });
+    expect(a?.[0]).toBe('authorization');
+    expect(a?.[1]).toMatch(/^OAuth oauth_consumer_key="sentinel-ck", oauth_nonce="nonce-1", oauth_signature_method="HMAC-SHA256"/);
+    expect(same?.[1]).not.toBe(a?.[1]);
+    expect(other?.[1]).not.toBe(same?.[1]);
+    const key = `${percentEncode(material.consumer_secret)}&${percentEncode(material.token_secret)}`;
+    for (const secret of [material.consumer_key, material.consumer_secret, material.token, material.token_secret, key, percentEncode(material.consumer_secret), percentEncode(material.token_secret)]) {
+      expect(auth.scrubber.text(`echo ${secret}`)).toBe(`echo ${REDACTED}`);
+    }
+    expect(await auth.refreshAfter401()).toBeUndefined();
+  });
+
+  it('CONN-3 oauth1 with a missing secret field is credential_unusable and echoes nothing', async () => {
+    const s = settings({ auth: { scheme: 'oauth1', signatureMethod: 'HMAC-SHA1' } });
+    const r = await prepareAuth(s, cred('oauth1', { consumer_key: 'sentinel-ck', consumer_secret: 'sentinel-cs', token: 'sentinel-tk' }), deps(s));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe('credential_unusable');
+      expect(r.message).not.toContain('sentinel');
+    }
   });
 });

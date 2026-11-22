@@ -15,6 +15,10 @@ only. Nothing needs to change on upgrade.
 - `auth.scheme: oauth_password` (with `client_auth: basic | body`) fetches upstream tokens with the OAuth
   password grant, for upstreams that offer nothing else. The credential scheme `oauth_password`
   is appended to `CREDENTIAL_SCHEMES` and `AuthSettings` gains the matching variant (CONN-3, ADR 0065).
+- `auth.scheme: oauth1` signs each upstream request with OAuth 1.0a (`signature_method: HMAC-SHA256 | HMAC-SHA1`),
+  for upstreams such as Magento 2 integrations. Not available on `mcp` connections. The credential scheme
+  `oauth1` is appended to `CREDENTIAL_SCHEMES` and `AuthSettings` and `SecretMaterial` gain variants
+  (CONN-3, ADR 0065).
 
 ## 1.0.1
 

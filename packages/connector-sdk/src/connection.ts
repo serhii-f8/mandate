@@ -5,7 +5,8 @@ export type AuthSettings =
   | { scheme: 'api_key'; header: string }
   | { scheme: 'basic' }
   | { scheme: 'oauth_client_credentials'; tokenUrl: string; scopes: readonly string[] }
-  | { scheme: 'oauth_password'; tokenUrl: string; scopes: readonly string[]; clientAuth: 'basic' | 'body' };
+  | { scheme: 'oauth_password'; tokenUrl: string; scopes: readonly string[]; clientAuth: 'basic' | 'body' }
+  | { scheme: 'oauth1'; signatureMethod: 'HMAC-SHA256' | 'HMAC-SHA1' };
 
 export interface ConnectionSettings {
   id: string;

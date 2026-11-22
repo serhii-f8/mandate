@@ -2,7 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import { z } from 'zod';
 
-export const CREDENTIAL_SCHEMES = ['bearer', 'api_key', 'basic', 'oauth_client_credentials', 'webhook_url', 'oauth_password'] as const;
+export const CREDENTIAL_SCHEMES = ['bearer', 'api_key', 'basic', 'oauth_client_credentials', 'webhook_url', 'oauth_password', 'oauth1'] as const;
 export type CredentialScheme = (typeof CREDENTIAL_SCHEMES)[number];
 
 /** Secret material per scheme (SEC-2). */
@@ -12,7 +12,8 @@ export type SecretMaterial =
   | { readonly username: string; readonly password: string }
   | { readonly client_id: string; readonly client_secret: string }
   | { readonly url: string }
-  | { readonly client_id: string; readonly client_secret: string; readonly username: string; readonly password: string };
+  | { readonly client_id: string; readonly client_secret: string; readonly username: string; readonly password: string }
+  | { readonly consumer_key: string; readonly consumer_secret: string; readonly token: string; readonly token_secret: string };
 
 const FIELDS: Record<CredentialScheme, readonly string[]> = {
   bearer: ['token'],
@@ -21,6 +22,7 @@ const FIELDS: Record<CredentialScheme, readonly string[]> = {
   oauth_client_credentials: ['client_id', 'client_secret'],
   webhook_url: ['url'],
   oauth_password: ['client_id', 'client_secret', 'username', 'password'],
+  oauth1: ['consumer_key', 'consumer_secret', 'token', 'token_secret'],
 };
 
 const secretString = z.string().min(1).max(8192);

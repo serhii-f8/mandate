@@ -119,6 +119,8 @@ export function createGuardedFetch(settings: ConnectionSettings, auth: PreparedA
         return;
       }
       const headers: Record<string, string> = { ...base };
+      // Per exchange, over the exact URL sent (CONN-3).
+      const authHeader = auth.header({ method, url });
       let span: RequestSpan | undefined;
       if (instrumentation) {
         try {
@@ -128,8 +130,7 @@ export function createGuardedFetch(settings: ConnectionSettings, auth: PreparedA
         }
         if (span) {
           const taken = new Set(Object.keys(headers));
-          const authName = auth.header()?.[0];
-          if (authName !== undefined) taken.add(authName.toLowerCase());
+          if (authHeader !== undefined) taken.add(authHeader[0].toLowerCase());
           try {
             Object.assign(headers, hookHeaders(span, taken));
           } catch {
@@ -137,7 +138,6 @@ export function createGuardedFetch(settings: ConnectionSettings, auth: PreparedA
           }
         }
       }
-      const authHeader = auth.header();
       // Set last: nothing from init or the hook can replace it (CONN-3).
       if (authHeader) headers[authHeader[0].toLowerCase()] = authHeader[1];
       if (body !== undefined) headers['content-length'] = String(body.length);

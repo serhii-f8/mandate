@@ -355,7 +355,7 @@ describe('CONN-5 CONN-6 SEC-3 guarded fetch', () => {
     const inner = await prepared(s, cred('bearer', { token: 'tok-1' }));
     const controller = new AbortController();
     const auth: PreparedAuth = {
-      header: () => inner.header(),
+      header: (request) => inner.header(request),
       get scrubber() {
         return inner.scrubber;
       },

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import { parseSecret, type ConnectionSettings, type CredentialSource, type ReadErrorCode } from '@mandate/connector-sdk';
+import { randomBytes } from 'node:crypto';
 import type { Transport } from './client.js';
 import { clientSecretBasicValue, formEncode, HEADER_SAFE, oauthToken, type OAuthTokenParams } from './oauth.js';
+import { oauth1Header, oauth1SigningKey, percentEncode } from './oauth1.js';
 import { createScrubber, type Scrubber } from './scrub.js';
 
 /** A credential failure; the message is already scrubbed and names no secret (SEC-3). */
@@ -15,8 +17,12 @@ export interface AuthFailure {
 
 /** The credential of one connection, opened and ready to inject into one client operation (CONN-3). */
 export interface PreparedAuth {
-  /** The header to set last, if the connection has auth. */
-  header(): readonly [name: string, value: string] | undefined;
+  /**
+   * The header to set last, if the connection has auth. `request` is the exact request about to be
+   * sent (final URL, after query templating); OAuth 1.0a signs it, the other schemes ignore it. Call
+   * it once per attempt: a signed header carries a fresh nonce and timestamp.
+   */
+  header(request: { method: string; url: URL }): readonly [name: string, value: string] | undefined;
   /** Scrubs every secret known so far, including a token fetched by `refreshAfter401` (SEC-3). */
   readonly scrubber: Scrubber;
   /** OAuth only: refresh once after a 401 with the rejected token; undefined when nothing to refresh. */
@@ -26,6 +32,8 @@ export interface PreparedAuth {
 export interface PrepareAuthDeps {
   now: () => number;
   transport: Transport;
+  /** OAuth 1.0a nonce source; default 16 random bytes, hex. */
+  nonce?: () => string;
 }
 
 function failure(code: ReadErrorCode, message: string, scrubber: Scrubber, status?: number): AuthFailure {
@@ -69,6 +77,7 @@ export async function prepareAuth(
   secrets.push(...Object.entries(s).filter(([k]) => !isUserName(k)).map(([, v]) => v));
   const unsendable = (): AuthFailure => failure('credential_unusable', `credential ${credential.ref} contains characters not allowed in a header`, empty);
   let authHeader: readonly [string, string] | undefined;
+  let signer: ((request: { method: string; url: URL }) => readonly [string, string]) | undefined;
   let oauth: OAuthTokenParams | undefined;
   switch (auth.scheme) {
     case 'bearer':
@@ -116,6 +125,29 @@ export async function prepareAuth(
       };
       break;
     }
+    case 'oauth1': {
+      const consumerSecret = s.consumer_secret ?? '';
+      const tokenSecret = s.token_secret ?? '';
+      // The signing key and the encoded forms are what a debugging endpoint might echo (SEC-3).
+      secrets.push(oauth1SigningKey(consumerSecret, tokenSecret), percentEncode(consumerSecret), percentEncode(tokenSecret));
+      const nonce = deps.nonce ?? (() => randomBytes(16).toString('hex'));
+      const signatureMethod = auth.signatureMethod;
+      signer = (request) => [
+        'authorization',
+        oauth1Header({
+          method: request.method,
+          url: request.url,
+          consumerKey: s.consumer_key ?? '',
+          consumerSecret,
+          token: s.token ?? '',
+          tokenSecret,
+          signatureMethod,
+          nonce: nonce(),
+          timestamp: Math.floor(deps.now() / 1000),
+        }),
+      ];
+      break;
+    }
   }
   let scrubber = createScrubber(secrets);
 
@@ -137,7 +169,7 @@ export async function prepareAuth(
   if (tokenFailure) return tokenFailure;
 
   const prepared: PreparedAuth = {
-    header: () => authHeader,
+    header: (request) => (signer ? signer(request) : authHeader),
     get scrubber() {
       return scrubber;
     },

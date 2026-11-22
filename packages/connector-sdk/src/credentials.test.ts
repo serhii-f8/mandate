@@ -45,6 +45,20 @@ describe('CONN-3 oauth_password secret', () => {
   });
 });
 
+describe('CONN-3 oauth1 secret', () => {
+  it('CONN-3 lists the four field names', () => {
+    expect(secretFieldNames('oauth1')).toEqual(['consumer_key', 'consumer_secret', 'token', 'token_secret']);
+  });
+  it('CONN-3 SEC-3 a missing token secret fails naming the field and quoting no value', () => {
+    const r = parseSecret('oauth1', { consumer_key: 'sentinel-ck', consumer_secret: 'sentinel-cs', token: 'sentinel-tk' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.message).toContain('token_secret');
+      expect(r.message).not.toContain('sentinel');
+    }
+  });
+});
+
 describe('SEC-2 webhook_url secret', () => {
   it('SEC-2 accepts an https webhook URL', () => {
     const r = parseSecret('webhook_url', { url: 'https://hooks.slack.com/services/T/B/x' });

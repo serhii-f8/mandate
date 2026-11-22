@@ -33,13 +33,18 @@ const connectionBase = {
 };
 const connection = z.discriminatedUnion('adapter', [
   z.strictObject({ ...connectionBase, adapter: z.literal('openapi'), base_url: httpUrl, openapi: openApiSchema.optional() }),
-  z.strictObject({
-    ...connectionBase,
-    adapter: z.literal('mcp'),
-    mcp_url: httpUrl,
-    /** CONN-4: seconds between checks of the pinned tools. */
-    pin_check_seconds: z.number().int().min(10).max(86_400).default(300),
-  }),
+  z
+    .strictObject({
+      ...connectionBase,
+      adapter: z.literal('mcp'),
+      mcp_url: httpUrl,
+      /** CONN-4: seconds between checks of the pinned tools. */
+      pin_check_seconds: z.number().int().min(10).max(86_400).default(300),
+    })
+    .superRefine((c, ctx) => {
+      // Request signing needs the final request; the MCP client's transport is not signed (CONN-3, ADR 0065).
+      if (c.auth?.scheme === 'oauth1') ctx.addIssue({ code: 'custom', path: ['auth', 'scheme'], message: 'oauth1 is not supported on an mcp connection' });
+    }),
 ]);
 
 const title = z.string().min(1).max(200);

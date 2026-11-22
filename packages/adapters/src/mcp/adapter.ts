@@ -182,6 +182,8 @@ export function createMcpToolAdapter(deps: McpAdapterDeps = {}): McpAdapter {
       message: `upstream tool ${kind} failed (${code})`,
     });
 
+    // The loader refuses oauth1 on an mcp connection; if it ever got here, nothing is sent (CONN-3).
+    if (connection.auth?.scheme === 'oauth1') return fail('credential_unusable');
     const release = await semaphoreFor(connection.id, connection.maxConcurrency).acquire(connection.timeoutMs);
     if (!release) return fail('busy');
     try {

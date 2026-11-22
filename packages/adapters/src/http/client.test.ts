@@ -72,6 +72,25 @@ describe('CONN-3 credential injection', () => {
     expect(up.requests[0]?.headers.authorization).toBe(`Basic ${Buffer.from('user:p:w').toString('base64')}`);
   });
 
+  it('CONN-3 oauth1 signs the exact URL sent and a retry gets a fresh nonce and the same signed URL', async () => {
+    let calls = 0;
+    up.route('GET', '/items', () => {
+      calls += 1;
+      return calls === 1 ? { status: 503, body: {} } : { status: 200, body: { ok: 1 } };
+    });
+    const c = createConnectionClient(settings({ auth: { scheme: 'oauth1', signatureMethod: 'HMAC-SHA256' } }), noSleep);
+    const material = { consumer_key: 'ck-1', consumer_secret: 'sentinel-cs', token: 'tk-1', token_secret: 'sentinel-ts' };
+    const r = await c.send(get('/items?q=a b&z=1'), { credential: cred('oauth1', material), retryable: true });
+    expect(r.ok).toBe(true);
+    const headers = up.requests.map((q) => q.headers.authorization ?? '');
+    expect(headers).toHaveLength(2);
+    expect(up.requests.every((q) => q.path === '/items')).toBe(true);
+    const nonce = (h: string): string | undefined => /oauth_nonce="([^"]+)"/.exec(h)?.[1];
+    expect(nonce(headers[0] ?? '')).toBeDefined();
+    expect(nonce(headers[0] ?? '')).not.toBe(nonce(headers[1] ?? ''));
+    expect(headers.join('\n')).not.toContain('sentinel');
+  });
+
   it('CONN-3 no auth configured sends no credential', async () => {
     const c = createConnectionClient(settings());
     const r = await c.send(get(), { retryable: false });

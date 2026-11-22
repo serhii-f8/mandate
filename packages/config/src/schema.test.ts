@@ -104,6 +104,29 @@ describe('CONN-3 oauth_password auth', () => {
   });
 });
 
+describe('CONN-3 oauth1 auth', () => {
+  const conn = (adapter: string, auth: string) =>
+    `version: 1\nconnections:\n  - { id: m, adapter: ${adapter}, ${adapter === 'mcp' ? 'mcp_url: https://x.test/mcp' : 'base_url: https://x.test'}, credential_ref: c, auth: ${auth} }\n`;
+
+  it('CONN-3 signature_method defaults to HMAC-SHA256', () => {
+    const parsed = configDocumentSchema.safeParse(parse(conn('openapi', '{ scheme: oauth1 }')));
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const auth = parsed.data.connections?.[0]?.auth;
+      expect(auth && toAuthSettings(auth)).toEqual({ scheme: 'oauth1', signatureMethod: 'HMAC-SHA256' });
+    }
+  });
+
+  it('CONN-3 accepts HMAC-SHA1 and refuses PLAINTEXT at the key', () => {
+    expect(issuesOf(conn('openapi', '{ scheme: oauth1, signature_method: HMAC-SHA1 }'))).toEqual([]);
+    expect(issuesOf(conn('openapi', '{ scheme: oauth1, signature_method: PLAINTEXT }'))[0]?.path).toEqual(['connections', 0, 'auth', 'signature_method']);
+  });
+
+  it('CONN-3 oauth1 on an mcp connection is an issue at the scheme', () => {
+    expect(issuesOf(conn('mcp', '{ scheme: oauth1 }'))[0]?.path).toEqual(['connections', 0, 'auth', 'scheme']);
+  });
+});
+
 describe('CONN-6 connection rate', () => {
   const conn = (rate: string) => `version: 1\nconnections:\n  - { id: m, adapter: openapi, base_url: https://x.test, credential_ref: c${rate} }\n`;
 

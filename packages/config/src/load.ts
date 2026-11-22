@@ -346,6 +346,8 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     const presetFailed = c.preset !== undefined && presetById.has(c.preset) && (!resolvedPresets.has(c.preset) || binding === undefined);
     if (c.credential_ref !== undefined && auth === undefined && !presetFailed) at(source, [...path, 'credential_ref'], 'credential_ref requires auth');
     if (c.credential_ref === undefined && auth !== undefined) at(source, [...path, 'credential_ref'], 'is required when auth is set');
+    // The same refusal as the schema's, for auth that comes from the preset (CONN-3).
+    if (c.adapter === 'mcp' && c.auth === undefined && auth?.scheme === 'oauth1') at(source, [...path, 'auth', 'scheme'], 'oauth1 is not supported on an mcp connection');
     const declared = c.adapter === 'openapi' ? c.openapi?.spec : undefined;
     let spec: SpecSource | undefined;
     if (declared !== undefined) {

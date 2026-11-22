@@ -90,6 +90,9 @@ export type AuthSettings = {
     tokenUrl: string;
     scopes: readonly string[];
     clientAuth: 'basic' | 'body';
+} | {
+    scheme: 'oauth1';
+    signatureMethod: 'HMAC-SHA256' | 'HMAC-SHA1';
 };
 export interface ConnectionSettings {
     id: string;
@@ -109,7 +112,7 @@ export interface ConnectionSettings {
 }
 
 // file: credentials.d.ts
-export declare const CREDENTIAL_SCHEMES: readonly ["bearer", "api_key", "basic", "oauth_client_credentials", "webhook_url", "oauth_password"];
+export declare const CREDENTIAL_SCHEMES: readonly ["bearer", "api_key", "basic", "oauth_client_credentials", "webhook_url", "oauth_password", "oauth1"];
 export type CredentialScheme = (typeof CREDENTIAL_SCHEMES)[number];
 export type SecretMaterial = {
     readonly token: string;
@@ -128,6 +131,11 @@ export type SecretMaterial = {
     readonly client_secret: string;
     readonly username: string;
     readonly password: string;
+} | {
+    readonly consumer_key: string;
+    readonly consumer_secret: string;
+    readonly token: string;
+    readonly token_secret: string;
 };
 export declare function secretFieldNames(scheme: CredentialScheme): readonly string[];
 export declare function parseSecret(scheme: CredentialScheme, value: unknown): {
