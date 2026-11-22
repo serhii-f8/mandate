@@ -39,6 +39,14 @@ export const CHANGESET_TEXT = {
   },
 } as const;
 
+/**
+ * APR-6: the stored action of a creation or deletion, for the `changeset` block of an answer; an update,
+ * the common case, adds nothing. Taken from the stored record, never from the configuration (APR-5).
+ */
+export function actionMember(cs: Pick<ChangeSetRecord, 'action'>): { action?: 'create' | 'delete' } {
+  return cs.action === 'create' || cs.action === 'delete' ? { action: cs.action } : {};
+}
+
 /** MCP-4: counts-only summary text (SEC-5), the change-set summary and first items as structured data and JSON text. */
 export function preparedResult(
   cs: ChangeSetRecord,
@@ -61,8 +69,7 @@ export function preparedResult(
       id: cs.id,
       operation: cs.operation,
       kind,
-      // APR-6: a creation or deletion says so; an update, the common case, adds nothing.
-      ...(cs.action === 'create' || cs.action === 'delete' ? { action: cs.action } : {}),
+      ...actionMember(cs),
       status: cs.status,
       hash: cs.hash,
       stats: cs.stats,

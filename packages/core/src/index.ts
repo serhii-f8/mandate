@@ -209,6 +209,7 @@ export {
   encodeCursor,
   preparationErrorResult,
   preparedResult,
+  actionMember,
 } from './changeset/result.js';
 export {
   OPAQUE_TARGET_ID,

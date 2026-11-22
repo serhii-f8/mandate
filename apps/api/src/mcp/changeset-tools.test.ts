@@ -84,7 +84,7 @@ function stubSnapshot(effect: PolicyDecision['effect'] = 'allow', risk: 'write' 
 
 const SNAPSHOT = stubSnapshot();
 
-async function setup(expiresAt = new Date('2026-01-02T12:00:00Z')) {
+async function setup(expiresAt = new Date('2026-01-02T12:00:00Z'), action?: 'create' | 'delete') {
   const repository = new InMemoryChangeSetRepository();
   const base = { operation: 'shop.update_content', connection: 'shop', requester: 'alice', args: {}, configHash: 'h', correlationId: 'c0', createdAt: NOW, expiresAt };
   const audit = { id: 'a0', actor: 'alice', action: 'changeset.transition' as const, outcome: 'ok' as const, correlationId: 'c0', details: {} };
@@ -92,7 +92,7 @@ async function setup(expiresAt = new Date('2026-01-02T12:00:00Z')) {
   await repository.appendItems(ID, ['a', 'b', 'c'].map((targetId) => ({ targetId, status: 'pending' as const, before: null, after: null })));
   await repository.completePreparation(
     ID,
-    { status: 'prepared', hashVersion: 1, hash: 'sha256:x', stats: { total: 3, included: 3, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+    { status: 'prepared', hashVersion: action === undefined ? 1 : 2, ...(action === undefined ? {} : { action }), hash: 'sha256:x', stats: { total: 3, included: 3, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
     { ...audit, id: 'a1' },
   );
   let n = 0;
@@ -306,6 +306,18 @@ describe('MCP-8 CS-6 built-in change-set tools', () => {
     const d = diff.structuredContent as { changeset: Record<string, unknown> };
     expect(d.changeset.kind).toBe('diff');
     expect('args' in d.changeset).toBe(false);
+  });
+
+  it('APR-5 MCP-4 get_changeset carries the stored action of a create or delete, and none for an update', async () => {
+    for (const action of ['create', 'delete'] as const) {
+      const { get, ctx } = await setup(undefined, action);
+      // The current configuration says update (no action); the stored one wins.
+      const answer = plain(await get.handler({ changeset_id: ID }, ctx(alice)));
+      expect((answer.structuredContent as { changeset: Record<string, unknown> }).changeset.action).toBe(action);
+    }
+    const { get, ctx } = await setup();
+    const update = plain(await get.handler({ changeset_id: ID }, ctx(alice)));
+    expect('action' in (update.structuredContent as { changeset: Record<string, unknown> }).changeset).toBe(false);
   });
 
   it('MCP-4 the text and the existing fields are unchanged', async () => {

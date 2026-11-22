@@ -45,24 +45,41 @@ describe('components', () => {
     expect(container.querySelectorAll('tbody tr:first-child td[rowspan="2"]')).toHaveLength(2);
   });
 
-  it('APR-6 a create row shows a dash in every before cell and a new badge', () => {
+  it('APR-6 a create change-set shows a dash in every before cell and a new badge', () => {
     const { container } = render(
-      <ItemTable rows={[row({ before: null, after: { name: 'x', price: 2 } })]} />,
+      <ItemTable action="create" rows={[row({ before: null, after: { name: 'x', price: 2 } })]} />,
     );
-    const befores = [...container.querySelectorAll('td.before')];
-    expect(befores).toHaveLength(2);
-    expect(befores.map((c) => c.textContent)).toEqual(['—', '—']);
+    expect([...container.querySelectorAll('td.before')].map((c) => c.textContent)).toEqual(['—', '—']);
     expect([...container.querySelectorAll('td.after')].map((c) => c.textContent)).toEqual(['x', '2']);
     expect(container.querySelector('.action-badge')?.textContent).toBe('new');
   });
 
-  it('APR-6 a delete row shows a dash in every after cell and a delete badge', () => {
+  it('APR-6 a delete change-set shows a dash in every after cell and a delete badge', () => {
     const { container } = render(
-      <ItemTable rows={[row({ before: { name: 'x', price: 2 }, after: null })]} />,
+      <ItemTable action="delete" rows={[row({ before: { name: 'x', price: 2 }, after: null })]} />,
     );
     expect([...container.querySelectorAll('td.after')].map((c) => c.textContent)).toEqual(['—', '—']);
     expect([...container.querySelectorAll('td.before')].map((c) => c.textContent)).toEqual(['x', '2']);
     expect(container.querySelector('.action-badge')?.textContent).toBe('delete');
+  });
+
+  it('APR-6 the badge follows the action: an excluded already_exists item of a create carries new', () => {
+    const { container } = render(
+      <ItemTable action="create" rows={[row({ status: 'excluded', reason: 'already_exists', before: { name: 'old' }, after: { name: 'x' } })]} />,
+    );
+    expect(container.querySelector('.action-badge')?.textContent).toBe('new');
+  });
+
+  it('APR-6 an update change-set item with null sides shows dashes and no badge', () => {
+    const { container } = render(
+      <>
+        <ItemTable rows={[row({ before: null, after: null })]} />
+        <ItemTable action="update" rows={[row({ status: 'excluded', reason: 'not_found', before: null, after: null })]} />
+      </>,
+    );
+    expect(container.querySelector('.action-badge')).toBeNull();
+    expect(container.querySelector('td.before')?.textContent).toBe('—');
+    expect(container.querySelector('td.after')?.textContent).toBe('—');
   });
 
   it('APR-6 an update row has no action badge and no dash', () => {

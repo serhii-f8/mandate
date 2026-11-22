@@ -2,7 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import { memo, type ReactElement } from 'react';
 import { fieldRows } from '../format.js';
-import type { ItemRowModel } from '../model.js';
+import type { ChangeSetAction, ItemRowModel } from '../model.js';
 import { StatusBadge } from './StatusBadge.js';
 import { Value } from './Value.js';
 
@@ -17,6 +17,8 @@ export interface ItemTableProps {
   };
   /** Shown as the only row when there are no rows; absent: the table stays empty (the page may still load). */
   empty?: string;
+  /** The change-set's action; a creation or deletion marks every row. */
+  action?: ChangeSetAction;
 }
 
 function note(row: ItemRowModel): string {
@@ -25,25 +27,26 @@ function note(row: ItemRowModel): string {
   return '';
 }
 
-/** APR-6: a row with no before is a creation, with no after a deletion; an update has no badge. */
-function actionBadge(row: ItemRowModel): 'new' | 'delete' | undefined {
-  if (row.before === null && row.after !== null) return 'new';
-  if (row.after === null && row.before !== null) return 'delete';
+/** APR-6: the badge follows the change-set's action, not the nullness of a side; an update has none. */
+function actionBadge(action: ChangeSetAction | undefined): 'new' | 'delete' | undefined {
+  if (action === 'create') return 'new';
+  if (action === 'delete') return 'delete';
   return undefined;
 }
 
 interface RowProps {
   row: ItemRowModel;
+  action?: ChangeSetAction;
   /** Absent without a selection column; otherwise whether the row has a checkbox and its state. */
   box?: { selectable: boolean; checked: boolean; disabled: boolean; toggle: (targetId: string) => void };
 }
 
 /** One item; memoised so a selection change re-renders only the rows whose checkbox changed. */
-const ItemRows = memo(function ItemRows({ row, box }: RowProps): ReactElement {
+const ItemRows = memo(function ItemRows({ row, action, box }: RowProps): ReactElement {
   const excluded = row.status === 'excluded';
   const fields = excluded ? [] : fieldRows(row);
   const span = excluded ? 1 : fields.length;
-  const badge = excluded ? undefined : actionBadge(row);
+  const badge = actionBadge(action);
   const head = (
     <>
       {box ? (
@@ -101,7 +104,7 @@ const ItemRows = memo(function ItemRows({ row, box }: RowProps): ReactElement {
 }, sameRow);
 
 function sameRow(a: RowProps, b: RowProps): boolean {
-  if (a.row !== b.row) return false;
+  if (a.row !== b.row || a.action !== b.action) return false;
   if (!a.box || !b.box) return a.box === b.box;
   return (
     a.box.selectable === b.box.selectable &&
@@ -111,7 +114,7 @@ function sameRow(a: RowProps, b: RowProps): boolean {
   );
 }
 
-export function ItemTable({ rows, selection, empty }: ItemTableProps): ReactElement {
+export function ItemTable({ rows, selection, empty, action }: ItemTableProps): ReactElement {
   return (
     <table className="items">
       <thead>
@@ -137,6 +140,7 @@ export function ItemTable({ rows, selection, empty }: ItemTableProps): ReactElem
           <ItemRows
             key={row.targetId}
             row={row}
+            {...(action === undefined ? {} : { action })}
             {...(selection
               ? {
                   box: {
