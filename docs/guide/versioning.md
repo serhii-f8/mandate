@@ -60,7 +60,8 @@ the change as:
   literal of the SDK;
 - **additive** for any other added line: a new optional key or member, a new value in an existing
   `enum`, a string literal appended to a one-line literal list (the last element of a `readonly [...]`
-  tuple or the last member of a `|` union, the rest of the line unchanged), a new property schema, a member added to a class, a new export;
+  tuple or the last member of a `|` union, the rest of the line unchanged), a variant appended to the
+  end of a multi-line union type (every existing variant unchanged), a new property schema, a member added to a class, a new export;
 - **none** when the report did not move apart from its version.
 
 | Change to a report | Required version change |

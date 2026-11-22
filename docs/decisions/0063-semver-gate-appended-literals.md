@@ -27,6 +27,14 @@ Everything else on a changed line stays breaking: reordering, insertion before t
 a differing name, non-literal members. `isAppendedLiteralList` in
 `tooling/versioning/semver-gate-lib.mjs` implements the check.
 
+A second rule covers a union printed over several lines (`AuthSettings`, `SecretMaterial`). Appending
+a variant turns the closing `};` of the last variant into `} | {` and adds the new variant's lines
+and a new `};`. The line rule saw the old `};` as removed, although no line of the union changed
+meaning, so the first rule was not enough. The gate now tolerates exactly that: a removed `};` that
+closes a root `type` declaration, paired with an added `} | {` in the same frame. Every other line of
+the union is compared as before, so a removed or changed member or variant, a variant inserted before
+the last, and a changed closing line of an interface or class stay breaking.
+
 ## Consequences
 
 - Appending a credential scheme is a minor change, as the guide says.
@@ -36,5 +44,5 @@ a differing name, non-literal members. `isAppendedLiteralList` in
 
 ## Verified
 
-2026-11-22: unit tests in `tooling/test/semver-gate.unit.test.ts` cover appended, reordered,
+2026-11-22: unit tests (tuple and union lines, and appended union variants against an `AuthSettings`-shaped fixture, with the breaking counter-cases) in `tooling/test/semver-gate.unit.test.ts` cover appended, reordered,
 removed, renamed and non-literal changes, and a report whose only change is an appended element.

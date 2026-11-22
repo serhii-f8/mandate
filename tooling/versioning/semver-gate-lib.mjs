@@ -176,6 +176,17 @@ function compare(oldText, newText) {
     if (left > 0) ca.set(e.key, left - 1);
     else addedEntries.push(e);
   }
+  // The closing `};` of a root type declaration (a union's last variant) that became `} | {` in the same
+  // frame: a variant appended to the union. Every other line of the union is compared as usual, so a
+  // changed or removed member or variant still counts (NFR-18).
+  for (let i = removedEntries.length - 1; i >= 0; i -= 1) {
+    const r = removedEntries[i];
+    if (r.line !== '};' || r.frame.kind !== 'literal' || r.frame.path.split(SEP).length !== 2) continue;
+    const at = addedEntries.findIndex((e) => e.line === '} | {' && e.frame.path === r.frame.path);
+    if (at === -1) continue;
+    addedEntries.splice(at, 1, { ...addedEntries[at], appended: true });
+    removedEntries.splice(i, 1);
+  }
   // A removed line and an added line of the same context that differ only by appended literals pair up
   // as one additive change (NFR-18).
   const removed = [];

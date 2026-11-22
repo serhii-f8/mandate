@@ -85,6 +85,36 @@ describe('NFR-18 semver gate', () => {
     });
   });
 
+  describe('appended union variants', () => {
+    const sdk = (body: string) => `// @mandate/connector-sdk 1.0.0 public API report — generated, do not edit\n${body}`;
+    const v = (scheme: string, extra = '') => `    scheme: '${scheme}';\n    tokenUrl: string;${extra}\n`;
+    const bearer = "    scheme: 'bearer';\n";
+    const cc = v('oauth_client_credentials', '\n    scopes: readonly string[];');
+    const pw = v('oauth_password', '\n    scopes: readonly string[];\n    clientAuth: \'basic\' | \'body\';');
+    const other = v('other');
+    const union = (...variants: string[]) => sdk(`export type AuthSettings = {\n${variants.join('} | {\n')}};\nexport interface Tail {\n    id: string;\n}\n`);
+    it('NFR-18 appended union variant is additive', () => {
+      expect(judge(union(bearer, cc), union(bearer, cc, pw), '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
+      expect(judge(union(bearer, cc), union(bearer, cc, pw, other), '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
+      expect(judge(union(bearer, cc), union(bearer, cc, pw), '1.0.0', '1.0.1')).toMatchObject({ ok: false, kind: 'additive' });
+    });
+    it('NFR-18 appended union variant: other changes stay breaking', () => {
+      // a variant removed
+      expect(judge(union(bearer, cc, pw), union(bearer, cc), '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+      // a variant inserted before the last one changes the variants after it
+      expect(judge(union(bearer, cc), union(bearer, pw, cc), '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+      // an existing variant loses a member while another is appended
+      const trimmed = v('oauth_client_credentials');
+      expect(judge(union(bearer, cc), union(bearer, trimmed, pw), '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+      // an existing variant changes a member while another is appended
+      const changed = v('oauth_client_credentials', '\n    scopes: string[];');
+      expect(judge(union(bearer, cc), union(bearer, changed, pw), '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+      // an interface whose closing line changes is not a union
+      const iface = (end: string) => sdk(`export interface I {\n    id: string;\n${end}\nexport type T = 1;\n`);
+      expect(judge(iface('};'), iface('} | {\n    x: string;\n};'), '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+    });
+  });
+
   describe('context-keyed classification', () => {
     const sdk = (body: string) => `// @mandate/connector-sdk 1.0.0 public API report — generated, do not edit\n${body}`;
     const iface = 'export interface Ctx {\n    readonly id: string;\n    run(): void;\n}\nexport declare class Impl {\n    x: number;\n}\n';
