@@ -1,0 +1,517 @@
+{
+  "policy": {
+    "operations": [
+      {
+        "id": "catalog.search_products",
+        "toolName": "catalog.search_products",
+        "source": "preset:magento-catalog",
+        "connection": "magento",
+        "risk": "read",
+        "title": "Search products",
+        "description": "Search the catalog for products of one brand, optionally by name pattern. Returns only the requested fields of each product, at most 100 per page.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "brand": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "description": "The product brand (exact match)."
+            },
+            "fields": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "description": "Product fields to return.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "sku",
+                  "name",
+                  "price",
+                  "status",
+                  "visibility",
+                  "type_id",
+                  "description",
+                  "short_description",
+                  "brand",
+                  "cost",
+                  "url_key",
+                  "meta_title",
+                  "meta_keyword",
+                  "meta_description",
+                  "updated_at"
+                ]
+              }
+            },
+            "page_size": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Products per page (1-100, default 20)."
+            },
+            "current_page": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number, starting at 1 (default 1)."
+            },
+            "name_like": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "description": "Product name pattern; use % as wildcard, e.g. %lamp% (default %, any name)."
+            }
+          },
+          "required": [
+            "brand",
+            "fields"
+          ],
+          "additionalProperties": false
+        },
+        "fieldsArg": "fields"
+      },
+      {
+        "id": "catalog.get_product",
+        "toolName": "catalog.get_product",
+        "source": "preset:magento-catalog",
+        "connection": "magento",
+        "risk": "read",
+        "title": "Get a product",
+        "description": "Look up one product of a brand by SKU. A SKU of another brand is not found. Returns only the requested fields.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "brand": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "description": "The product brand (exact match)."
+            },
+            "sku": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The product SKU (exact match)."
+            },
+            "fields": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "description": "Product fields to return.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "sku",
+                  "name",
+                  "price",
+                  "status",
+                  "visibility",
+                  "type_id",
+                  "description",
+                  "short_description",
+                  "brand",
+                  "cost",
+                  "url_key",
+                  "meta_title",
+                  "meta_keyword",
+                  "meta_description",
+                  "updated_at"
+                ]
+              }
+            }
+          },
+          "required": [
+            "brand",
+            "sku",
+            "fields"
+          ],
+          "additionalProperties": false
+        },
+        "fieldsArg": "fields"
+      },
+      {
+        "id": "catalog.get_products_by_sku",
+        "toolName": "catalog.get_products_by_sku",
+        "source": "preset:magento-catalog",
+        "connection": "magento",
+        "risk": "read",
+        "title": "Get products by SKU",
+        "description": "Look up up to 100 products of one brand by SKU in one call. SKUs of another brand are not found. SKUs containing a comma are not supported. Returns only the requested fields.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "brand": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "description": "The product brand (exact match)."
+            },
+            "skus": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "uniqueItems": true,
+              "description": "Product SKUs (exact match, no commas).",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^,]+$"
+              }
+            },
+            "fields": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "description": "Product fields to return.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "sku",
+                  "name",
+                  "price",
+                  "status",
+                  "visibility",
+                  "type_id",
+                  "description",
+                  "short_description",
+                  "brand",
+                  "cost",
+                  "url_key",
+                  "meta_title",
+                  "meta_keyword",
+                  "meta_description",
+                  "updated_at"
+                ]
+              }
+            }
+          },
+          "required": [
+            "brand",
+            "skus",
+            "fields"
+          ],
+          "additionalProperties": false
+        },
+        "fieldsArg": "fields"
+      },
+      {
+        "id": "catalog.update_content",
+        "toolName": "catalog.update_content",
+        "source": "preset:magento-catalog",
+        "connection": "magento",
+        "risk": "write",
+        "title": "Update product content",
+        "description": "Change content fields (name, descriptions, meta data, URL key) of products of one brand. Name the products by SKU (up to 1000) or select them with a name pattern. The change is prepared as a change-set for approval; nothing is written upstream until it is approved.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "brand": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "description": "The product brand (exact match)."
+            },
+            "skus": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1000,
+              "uniqueItems": true,
+              "description": "Product SKUs to change (no commas). Give either skus or name_like, not both.",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^,]+$"
+              }
+            },
+            "name_like": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "description": "Select products by name pattern (% wildcard) instead of skus; \"%\" selects the whole brand."
+            },
+            "changes": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": false,
+              "description": "Field to new value.",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "maxLength": 65535
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 65535
+                },
+                "short_description": {
+                  "type": "string",
+                  "maxLength": 65535
+                },
+                "meta_title": {
+                  "type": "string",
+                  "maxLength": 65535
+                },
+                "meta_keyword": {
+                  "type": "string",
+                  "maxLength": 65535
+                },
+                "meta_description": {
+                  "type": "string",
+                  "maxLength": 65535
+                },
+                "url_key": {
+                  "type": "string",
+                  "maxLength": 65535
+                }
+              }
+            }
+          },
+          "required": [
+            "brand",
+            "changes"
+          ],
+          "additionalProperties": false,
+          "minProperties": 3,
+          "maxProperties": 3
+        },
+        "fieldsArg": "changes",
+        "manifest": {
+          "idField": "sku",
+          "idsArg": "skus",
+          "valuesArg": "changes",
+          "fields": [
+            "name",
+            "description",
+            "short_description",
+            "meta_title",
+            "meta_keyword",
+            "meta_description",
+            "url_key"
+          ],
+          "requiredFields": [],
+          "scopeArgs": {
+            "brand": "brand"
+          },
+          "readBefore": {
+            "operation": "catalog.get_products_by_sku",
+            "idsArg": "skus",
+            "args": {
+              "brand": {
+                "arg": "brand"
+              }
+            }
+          },
+          "selector": {
+            "operation": "catalog.search_products",
+            "args": {
+              "brand": {
+                "arg": "brand"
+              },
+              "name_like": {
+                "arg": "name_like"
+              }
+            },
+            "pageArg": "current_page",
+            "pageSizeArg": "page_size",
+            "pageSize": 100
+          },
+          "write": {
+            "carryFields": [
+              "status"
+            ]
+          },
+          "batchSize": 100,
+          "maxTargets": 10000,
+          "rollback": {
+            "strategy": "replay_previous_state"
+          }
+        }
+      }
+    ],
+    "roles": [],
+    "roleMapping": [],
+    "serviceAccounts": []
+  },
+  "bindings": [
+    [
+      "catalog.get_product",
+      {
+        "kind": "http",
+        "connection": "magento",
+        "mapping": {
+          "method": "GET",
+          "path": "/V1/products",
+          "pathParams": {},
+          "query": {
+            "searchCriteria[filter_groups][0][filters][0][field]": "brand",
+            "searchCriteria[filter_groups][0][filters][0][value]": {
+              "arg": "brand"
+            },
+            "searchCriteria[filter_groups][0][filters][0][condition_type]": "eq",
+            "searchCriteria[filter_groups][1][filters][0][field]": "sku",
+            "searchCriteria[filter_groups][1][filters][0][value]": {
+              "arg": "sku"
+            },
+            "searchCriteria[filter_groups][1][filters][0][condition_type]": "eq",
+            "searchCriteria[pageSize]": 1
+          },
+          "headers": {},
+          "response": {
+            "items": "items",
+            "total": "total_count",
+            "flatten": {
+              "path": "custom_attributes",
+              "key": "attribute_code",
+              "value": "value"
+            },
+            "fieldsFromArg": "fields",
+            "maxItems": 100
+          }
+        }
+      }
+    ],
+    [
+      "catalog.get_products_by_sku",
+      {
+        "kind": "http",
+        "connection": "magento",
+        "mapping": {
+          "method": "GET",
+          "path": "/V1/products",
+          "pathParams": {},
+          "query": {
+            "searchCriteria[filter_groups][0][filters][0][field]": "brand",
+            "searchCriteria[filter_groups][0][filters][0][value]": {
+              "arg": "brand"
+            },
+            "searchCriteria[filter_groups][0][filters][0][condition_type]": "eq",
+            "searchCriteria[filter_groups][1][filters][0][field]": "sku",
+            "searchCriteria[filter_groups][1][filters][0][value]": {
+              "arg": "skus",
+              "join": ","
+            },
+            "searchCriteria[filter_groups][1][filters][0][condition_type]": "in",
+            "searchCriteria[pageSize]": 100
+          },
+          "headers": {},
+          "response": {
+            "items": "items",
+            "total": "total_count",
+            "flatten": {
+              "path": "custom_attributes",
+              "key": "attribute_code",
+              "value": "value"
+            },
+            "fieldsFromArg": "fields",
+            "maxItems": 100
+          }
+        }
+      }
+    ],
+    [
+      "catalog.search_products",
+      {
+        "kind": "http",
+        "connection": "magento",
+        "mapping": {
+          "method": "GET",
+          "path": "/V1/products",
+          "pathParams": {},
+          "query": {
+            "searchCriteria[filter_groups][0][filters][0][field]": "brand",
+            "searchCriteria[filter_groups][0][filters][0][value]": {
+              "arg": "brand"
+            },
+            "searchCriteria[filter_groups][0][filters][0][condition_type]": "eq",
+            "searchCriteria[filter_groups][1][filters][0][field]": "name",
+            "searchCriteria[filter_groups][1][filters][0][value]": {
+              "arg": "name_like",
+              "default": "%"
+            },
+            "searchCriteria[filter_groups][1][filters][0][condition_type]": "like",
+            "searchCriteria[sortOrders][0][field]": "sku",
+            "searchCriteria[sortOrders][0][direction]": "ASC",
+            "searchCriteria[pageSize]": {
+              "arg": "page_size",
+              "default": 20
+            },
+            "searchCriteria[currentPage]": {
+              "arg": "current_page",
+              "default": 1
+            }
+          },
+          "headers": {},
+          "response": {
+            "items": "items",
+            "total": "total_count",
+            "flatten": {
+              "path": "custom_attributes",
+              "key": "attribute_code",
+              "value": "value"
+            },
+            "fieldsFromArg": "fields",
+            "maxItems": 100
+          }
+        }
+      }
+    ],
+    [
+      "catalog.update_content",
+      {
+        "kind": "http",
+        "connection": "magento",
+        "mapping": {
+          "method": "POST",
+          "path": "/async/bulk/V1/products",
+          "pathParams": {},
+          "query": {},
+          "headers": {},
+          "response": {
+            "maxItems": 100
+          },
+          "bulk": {
+            "body": {
+              "wrap": "product",
+              "nest": {
+                "path": "custom_attributes",
+                "key": "attribute_code",
+                "value": "value",
+                "keep": [
+                  "sku",
+                  "name",
+                  "status"
+                ]
+              }
+            },
+            "batchId": "bulk_uuid",
+            "status": {
+              "method": "GET",
+              "path": "/V1/bulk/{batch_id}/detailed-status",
+              "items": "operations_list",
+              "index": "id",
+              "state": "status",
+              "states": {
+                "ok": [
+                  1
+                ],
+                "failed": [
+                  3,
+                  5
+                ],
+                "retriable": [
+                  2
+                ],
+                "open": [
+                  4
+                ]
+              }
+            }
+          }
+        }
+      }
+    ]
+  ]
+}

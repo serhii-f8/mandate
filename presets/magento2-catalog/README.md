@@ -1,13 +1,13 @@
 # @mandate/magento2-catalog
 
-Magento 2 catalog preset 1.0.0 (CONN-8, OPS-2, OPS-4). Three read operations on `GET /V1/products`, one write
+Magento 2 catalog preset 1.1.0 (CONN-8, OPS-2, OPS-4). Three read operations on `GET /V1/products`, one write
 operation with a change-set manifest, a vendored filtered spec, a default connection test and bearer auth.
 
 ## Use
 
 ```yaml
 presets:
-  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '1.0.0' }
+  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '1.1.0' }
 connections:
   - id: magento
     adapter: openapi
@@ -27,6 +27,32 @@ checks it from the repository.
 | `catalog.update_content` (write) | `brand`, `skus` (1-1000) or `name_like` (exactly one), `changes` | none: prepared from the two reads above |
 
 `catalog.search_products` sorts by `sku` ascending so pages are stable.
+
+## Parameters
+
+Since 1.1.0 (CONN-8) a connection can set two parameters with `preset_params`; without them the preset
+behaves exactly as 1.0.0. The preset declares `"sdk": "^1.1.0"`, so a 1.0.x platform refuses it.
+
+| Parameter | Type | Default | Effect |
+| --- | --- | --- | --- |
+| `scope_attribute` | string | `brand` | Magento attribute that filter group 0 of the three reads filters on, and that `catalog.update_content` re-checks (`manifest.scope_args`). |
+| `read_fields` | string_list | `sku, name, price, status, visibility, type_id, description, short_description, brand, cost, url_key, meta_title, meta_keyword, meta_description, updated_at` | The `fields` the read operations accept. |
+
+```yaml
+connections:
+  - id: magento
+    preset: magento-catalog
+    preset_params:
+      scope_attribute: manufacturer
+      read_fields: [sku, name, status, description, short_description, meta_title, meta_keyword, meta_description, url_key, manufacturer]
+```
+
+- The tool argument keeps the name `brand` in 1.x, whatever attribute it filters on; so do its
+  descriptions.
+- `read_fields` must list the scope attribute (the write's scope check reads it back) and every field
+  `catalog.update_content` reads and carries: `status`, `name`, `description`, `short_description`,
+  `meta_title`, `meta_keyword`, `meta_description`, `url_key`. Otherwise the connection is refused at
+  `connections[N].preset_params`, naming the operation and the field.
 
 ### `catalog.update_content`
 

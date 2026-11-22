@@ -1,4 +1,4 @@
-# Magento 2 catalog preset 1.0.0 (CONN-8, OPS-2, OPS-4, OPS-6; ADR 0007: scope `all`; Phase 4 design §8,
+# Magento 2 catalog preset 1.1.0 (CONN-8, OPS-2, OPS-4, OPS-6; ADR 0007: scope `all`; Phase 4 design §8,
 # Phase 5 design §6). catalog.update_content executes through POST /async/bulk/V1/products, which
 # needs a running `async.operations.all` consumer on the Magento side.
 # Bind it to an openapi connection whose base_url ends in /rest/all, for example
@@ -10,6 +10,17 @@
 version: 1
 spec: spec/magento2-catalog.swagger.json
 auth: { scheme: bearer }
+# Parameters (CONN-8): a connection sets them with `preset_params`; without them the preset behaves
+# as 1.0.0. The tool argument keeps the name `brand` whatever attribute it filters on.
+params:
+  scope_attribute:
+    type: string
+    default: brand
+    description: Magento product attribute the scope argument `brand` filters on (filter group 0).
+  read_fields:
+    type: string_list
+    default: [sku, name, price, status, visibility, type_id, description, short_description, brand, cost, url_key, meta_title, meta_keyword, meta_description, updated_at]
+    description: Product fields the read operations may return.
 test: { operation: catalog.search_products, args: { brand: acme, fields: [sku], page_size: 1 } }
 operations:
   - id: catalog.search_products
@@ -33,7 +44,7 @@ operations:
           description: Product fields to return.
           items:
             type: string
-            enum: [sku, name, price, status, visibility, type_id, description, short_description, brand, cost, url_key, meta_title, meta_keyword, meta_description, updated_at]
+            enum: { $param: read_fields }
         page_size:
           type: integer
           minimum: 1
@@ -56,7 +67,7 @@ operations:
       method: GET
       path: /V1/products
       query:
-        searchCriteria[filter_groups][0][filters][0][field]: brand
+        searchCriteria[filter_groups][0][filters][0][field]: { $param: scope_attribute }
         searchCriteria[filter_groups][0][filters][0][value]: { arg: brand }
         searchCriteria[filter_groups][0][filters][0][condition_type]: eq
         # Template values cannot concatenate, so the caller passes the whole LIKE pattern.
@@ -102,7 +113,7 @@ operations:
       method: GET
       path: /V1/products
       query:
-        searchCriteria[filter_groups][0][filters][0][field]: brand
+        searchCriteria[filter_groups][0][filters][0][field]: { $param: scope_attribute }
         searchCriteria[filter_groups][0][filters][0][value]: { arg: brand }
         searchCriteria[filter_groups][0][filters][0][condition_type]: eq
         searchCriteria[filter_groups][1][filters][0][field]: sku
@@ -143,7 +154,7 @@ operations:
       method: GET
       path: /V1/products
       query:
-        searchCriteria[filter_groups][0][filters][0][field]: brand
+        searchCriteria[filter_groups][0][filters][0][field]: { $param: scope_attribute }
         searchCriteria[filter_groups][0][filters][0][value]: { arg: brand }
         searchCriteria[filter_groups][0][filters][0][condition_type]: eq
         # Magento's `in` takes a comma-separated list (ADR 0024).
@@ -220,7 +231,7 @@ operations:
       ids_arg: skus
       values_arg: changes
       fields: [name, description, short_description, meta_title, meta_keyword, meta_description, url_key]
-      scope_args: { brand: brand }
+      scope_args: { brand: { $param: scope_attribute } }
       read_before:
         operation: catalog.get_products_by_sku
         ids_arg: skus

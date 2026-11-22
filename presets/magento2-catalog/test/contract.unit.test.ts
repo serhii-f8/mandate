@@ -55,7 +55,7 @@ async function loadPreset(baseUrl: string): Promise<LoadedConfiguration> {
   const config = presetConnectionYaml({
     presetId: 'magento-catalog',
     package: '@mandate/magento2-catalog',
-    version: '1.0.0',
+    version: '1.1.0',
     connectionId: 'magento',
     baseUrl,
     credentialRef: 'magento-token',

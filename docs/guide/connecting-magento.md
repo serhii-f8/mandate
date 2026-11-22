@@ -74,7 +74,7 @@ shop is called `magento-sandbox`.
 cat > my-config/connections.yaml <<'EOF'
 version: 1
 presets:
-  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '1.0.0' }
+  - { id: magento-catalog, package: '@mandate/magento2-catalog', version: '1.1.0' }
 connections:
   - id: magento
     adapter: openapi
@@ -157,7 +157,7 @@ or notifications.
 
 ## What the preset offers
 
-The connection applies the Magento catalog preset (`@mandate/magento2-catalog` 1.0.0), which brings
+The connection applies the Magento catalog preset (`@mandate/magento2-catalog` 1.1.0), which brings
 four operations:
 
 | Operation | Risk | What it does |
@@ -166,6 +166,11 @@ four operations:
 | `catalog.get_product` | read | Read one product of a brand by SKU |
 | `catalog.get_products_by_sku` | read | Read up to 100 products of a brand by SKU in one call |
 | `catalog.update_content` | write | Change content fields (`name`, `description`, `short_description`, `meta_title`, `meta_keyword`, `meta_description`, `url_key`) of the products of one brand, chosen by SKU list or name pattern |
+
+If your shop scopes products by another attribute than `brand`, set `preset_params` on the connection:
+`scope_attribute` names the attribute and `read_fields` the fields the reads may return (it must list the
+scope attribute and the content fields above). The tool argument keeps the name `brand` in 1.x. See the
+[preset README](../../presets/magento2-catalog/README.md#parameters).
 
 An operation exists for a user only when one of the user's roles grants it. The next page writes a
 role that decides who may call which operation, on which brands, and when a person must approve.

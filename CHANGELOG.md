@@ -26,6 +26,9 @@ only. Nothing needs to change on upgrade.
   with `preset_params`; `{ $param: <name> }` nodes in the preset's operations and test take the
   connection's value. Code operations receive the values as `ctx.params`, carried by
   `ConnectionSettings.presetParams` (CONN-8, ADR 0067).
+- `@mandate/magento2-catalog` 1.1.0 takes the parameters `scope_attribute` (default `brand`) and `read_fields`
+  (default the 1.0.0 field list); without them it behaves as 1.0.0. It requires connector SDK `^1.1.0`
+  (CONN-8).
 
 ## 1.0.1
 

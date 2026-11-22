@@ -12,7 +12,7 @@ Four things carry a version, and two of them are public interfaces with a writte
 | Product (`api`, `worker`, images) | 1.1.0 | `version` field of `GET /healthz`; image label `org.opencontainers.image.version` | The behaviour this guide describes |
 | Connector SDK (`@mandate/connector-sdk`) | 1.1.0 | package version; `CONNECTOR_SDK_VERSION` | `packages/connector-sdk/api-report.d.ts`; the preset format in `packages/config/schema/mandate-preset.v1.json` |
 | Configuration schema | 1.1.0 | `CONFIG_SCHEMA_VERSION`; the `version: 1` line of every YAML file is its major | `packages/config/schema/mandate-config.v1.json` |
-| Presets (`@mandate/magento2-catalog`, `@mandate/gitea-issues`) | 1.0.0 | package version | Each preset's `mandate.sdk` range |
+| Presets (`@mandate/magento2-catalog`, `@mandate/gitea-issues`) | 1.1.0 (`magento2-catalog`), 1.0.0 (`gitea-issues`) | package version | Each preset's `mandate.sdk` range |
 
 ```bash
 curl -fsS "http://localhost:${MANDATE_API_PORT:-8400}/healthz"
