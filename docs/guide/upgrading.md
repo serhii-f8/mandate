@@ -68,13 +68,12 @@ Two rules for you:
 ## Upgrading to 1.2.0
 
 Upgrade every `api` and `worker` instance before anyone prepares a new change-set. From 1.2.0 on, a
-change-set records the version of its hash format, and new change-sets use version 2 (see
-[ADR 0069](../decisions/0069-change-set-hash-version.md)). Change-sets prepared before the upgrade
-keep version 1 and verify, execute and roll back as before. A 1.1 process that is still running
-cannot compute a version 2 hash: it refuses such a change-set as `hash_mismatch` when it checks the
-hash before execution or rollback, so the change-set fails instead of running. With the single-host
-Compose setup, `docker compose up -d --wait` replaces both containers together and there is nothing
-more to do.
+change-set records the version of its hash format, and new change-sets use version 2. Change-sets
+prepared before the upgrade keep version 1 and verify, execute and roll back as before. A 1.1
+process that is still running cannot compute a version 2 hash: it refuses such a change-set as
+`hash_mismatch` when it checks the hash before execution or rollback, so the change-set fails
+instead of running. With the single-host Compose setup, `docker compose up -d --wait` replaces both
+containers together and there is nothing more to do.
 
 The migration `0015_change_set_hash_version` adds two columns to `change_set` with defaults and runs
 on start, as every migration does.
@@ -110,3 +109,8 @@ The 1.0.0 notes (changes in what the loader accepts, the SDK range, and credenti
 
 There is no downgrade of the database. To go back to an earlier release, restore the backup you took
 before the upgrade together with that release's images (see [Backup and restore](backup-and-restore.md)).
+
+## Background
+
+- [ADR 0069](../decisions/0069-change-set-hash-version.md): why a change-set records the version of
+  its hash format, and how version 1 change-sets keep verifying.
