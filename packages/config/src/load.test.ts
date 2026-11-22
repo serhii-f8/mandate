@@ -571,6 +571,29 @@ connections:
     }
   });
 
+  it('CONN-3 an mcp connection whose preset supplies oauth1 is refused at the connection', async () => {
+    const presets = await mkdtemp(join(tmpdir(), 'mandate-load-mcp-oauth1-'));
+    const dir = await withConfig(`version: 1
+presets:
+  - { id: tools, package: "@acme/mcp-oauth1" }
+connections:
+  - { id: shop, adapter: mcp, mcp_url: https://shop.example.test/mcp, credential_ref: shop-cred, preset: tools }
+roles:
+  - { id: integration_admin, grants: [], manage_credentials: [shop-cred] }
+`);
+    try {
+      await mkdir(join(presets, 'mcp-oauth1'));
+      await writeFile(join(presets, 'mcp-oauth1', 'package.json'), JSON.stringify({ name: '@acme/mcp-oauth1', version: '1.0.0', mandate: { sdk: '^1.1.0' } }));
+      await writeFile(join(presets, 'mcp-oauth1', 'preset.yaml'), 'version: 1\nadapter: mcp\nauth: { scheme: oauth1 }\n');
+      expect(issues(await loadConfigurationDirectory(dir, { presetDirs: [presets] }))).toEqual([
+        expect.objectContaining({ file: 'config.yaml', path: 'connections[0].auth.scheme', message: 'oauth1 is not supported on an mcp connection' }),
+      ]);
+    } finally {
+      await rm(presets, { recursive: true });
+      await rm(dir, { recursive: true });
+    }
+  });
+
   it('OPS-5 OPS-6 CONN-8 the fixture preset loads with all six operations and four code bindings plus one per-record binding', async () => {
     const dirs: string[] = [];
     try {

@@ -189,16 +189,45 @@ describe('CONN-3 SEC-3 prepared credential injection', () => {
     const auth = r.auth;
     const a = auth.header({ method: 'GET', url: new URL('https://x.test/a?b=1') });
     const same = auth.header({ method: 'GET', url: new URL('https://x.test/a?b=1') });
-    const other = auth.header({ method: 'GET', url: new URL('https://x.test/a?b=2') });
     expect(a?.[0]).toBe('authorization');
     expect(a?.[1]).toMatch(/^OAuth oauth_consumer_key="sentinel-ck", oauth_nonce="nonce-1", oauth_signature_method="HMAC-SHA256"/);
     expect(same?.[1]).not.toBe(a?.[1]);
-    expect(other?.[1]).not.toBe(same?.[1]);
     const key = `${percentEncode(material.consumer_secret)}&${percentEncode(material.token_secret)}`;
     for (const secret of [material.consumer_key, material.consumer_secret, material.token, material.token_secret, key, percentEncode(material.consumer_secret), percentEncode(material.token_secret)]) {
       expect(auth.scrubber.text(`echo ${secret}`)).toBe(`echo ${REDACTED}`);
     }
     expect(await auth.refreshAfter401()).toBeUndefined();
+  });
+
+  it('CONN-3 oauth1 with a fixed nonce and clock: the same URL gives the same header, another URL another', async () => {
+    const material = { consumer_key: 'ck', consumer_secret: 'cs', token: 'tk', token_secret: 'ts' };
+    const s = settings({ auth: { scheme: 'oauth1', signatureMethod: 'HMAC-SHA256' } });
+    const r = await prepareAuth(s, cred('oauth1', material), { ...deps(s), now: () => 1_700_000_000_000, nonce: () => 'fixed-nonce' });
+    if (!r.ok) throw new Error(r.message);
+    const a = r.auth.header({ method: 'GET', url: new URL('https://x.test/a?b=1') });
+    const same = r.auth.header({ method: 'GET', url: new URL('https://x.test/a?b=1') });
+    const other = r.auth.header({ method: 'GET', url: new URL('https://x.test/a?b=2') });
+    const post = r.auth.header({ method: 'POST', url: new URL('https://x.test/a?b=1') });
+    expect(same?.[1]).toBe(a?.[1]);
+    expect(other?.[1]).not.toBe(a?.[1]);
+    expect(post?.[1]).not.toBe(a?.[1]);
+  });
+
+  it('CONN-3 SEC-3 oauth1 scrubs the percent-encoded consumer key and token, as they appear in the header', async () => {
+    // RFC 3986 encodes ! * ' ( ), which encodeURIComponent leaves as they are.
+    const material = { consumer_key: "ck!key*(x)/+=&", consumer_secret: 'cs', token: "tk'tok:@?", token_secret: 'ts' };
+    const s = settings({ auth: { scheme: 'oauth1', signatureMethod: 'HMAC-SHA1' } });
+    const r = await prepareAuth(s, cred('oauth1', material), { ...deps(s), nonce: () => 'n' });
+    if (!r.ok) throw new Error(r.message);
+    const header = r.auth.header(REQ)?.[1] ?? '';
+    for (const value of [material.consumer_key, material.token]) {
+      const encoded = percentEncode(value);
+      expect(encoded).not.toBe(encodeURIComponent(value));
+      expect(header).toContain(`"${encoded}"`);
+      expect(r.auth.scrubber.text(`echo ${encoded} end`)).toBe(`echo ${REDACTED} end`);
+    }
+    expect(r.auth.scrubber.text(header)).not.toContain(percentEncode(material.consumer_key));
+    expect(r.auth.scrubber.text(header)).not.toContain(percentEncode(material.token));
   });
 
   it('CONN-3 oauth1 with a missing secret field is credential_unusable and echoes nothing', async () => {

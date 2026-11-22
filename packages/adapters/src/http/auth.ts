@@ -128,8 +128,15 @@ export async function prepareAuth(
     case 'oauth1': {
       const consumerSecret = s.consumer_secret ?? '';
       const tokenSecret = s.token_secret ?? '';
-      // The signing key and the encoded forms are what a debugging endpoint might echo (SEC-3).
-      secrets.push(oauth1SigningKey(consumerSecret, tokenSecret), percentEncode(consumerSecret), percentEncode(tokenSecret));
+      // The signing key and the encoded forms are what a debugging endpoint might echo (SEC-3); the
+      // header carries the consumer key and token RFC 3986-encoded.
+      secrets.push(
+        oauth1SigningKey(consumerSecret, tokenSecret),
+        percentEncode(consumerSecret),
+        percentEncode(tokenSecret),
+        percentEncode(s.consumer_key ?? ''),
+        percentEncode(s.token ?? ''),
+      );
       const nonce = deps.nonce ?? (() => randomBytes(16).toString('hex'));
       const signatureMethod = auth.signatureMethod;
       signer = (request) => [

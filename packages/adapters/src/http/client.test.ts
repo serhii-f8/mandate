@@ -2,6 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import type { ConnectionSettings, CredentialSource, RequestAttempt, RequestAttemptEnd, RequestInstrumentation } from '@mandate/connector-sdk';
 import { startFakeUpstream, type FakeUpstream } from '@mandate/testing';
+import { createHmac } from 'node:crypto';
 import { createServer, type Server } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HttpRequestSpec } from '../openapi/request.js';
@@ -33,6 +34,35 @@ function settings(over: Partial<ConnectionSettings> = {}): ConnectionSettings {
     extraHosts: [],
     ...over,
   };
+}
+
+/** RFC 3986 encoding as RFC 5849 section 3.6 asks, written independently of the signer. */
+function rfc3986(value: string): string {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+/**
+ * An OAuth 1.0a HMAC-SHA256 verifier as an upstream would run it (RFC 5849 sections 3.4.1, 3.4.2):
+ * the oauth parameters come from the Authorization header, the query from the received URL.
+ */
+function verifyOauth1(
+  method: string,
+  baseUri: string,
+  query: URLSearchParams,
+  header: string,
+  secrets: { consumer_secret: string; token_secret: string },
+): boolean {
+  if (!header.startsWith('OAuth ')) return false;
+  const oauth = new Map<string, string>();
+  for (const m of header.slice(6).matchAll(/([a-z_]+)="([^"]*)"/g)) oauth.set(m[1] ?? '', decodeURIComponent(m[2] ?? ''));
+  const signature = oauth.get('oauth_signature');
+  if (signature === undefined || oauth.get('oauth_signature_method') !== 'HMAC-SHA256') return false;
+  const pairs: [string, string][] = [...query.entries(), ...[...oauth].filter(([k]) => k !== 'oauth_signature')].map(([k, v]) => [rfc3986(k), rfc3986(v)]);
+  pairs.sort(([ak, av], [bk, bv]) => (ak === bk ? (av < bv ? -1 : av > bv ? 1 : 0) : ak < bk ? -1 : 1));
+  const normalized = pairs.map(([k, v]) => `${k}=${v}`).join('&');
+  const base = [method.toUpperCase(), rfc3986(baseUri), rfc3986(normalized)].join('&');
+  const key = `${rfc3986(secrets.consumer_secret)}&${rfc3986(secrets.token_secret)}`;
+  return createHmac('sha256', key).update(base).digest('base64') === signature;
 }
 
 function get(path = '/items', base = up.url): HttpRequestSpec {
@@ -89,6 +119,14 @@ describe('CONN-3 credential injection', () => {
     expect(nonce(headers[0] ?? '')).toBeDefined();
     expect(nonce(headers[0] ?? '')).not.toBe(nonce(headers[1] ?? ''));
     expect(headers.join('\n')).not.toContain('sentinel');
+    // The fake upstream's side: recompute the signature over what it received (both attempts).
+    for (const request of up.requests) {
+      const header = request.headers.authorization ?? '';
+      const host = request.headers.host ?? '';
+      expect(verifyOauth1(request.method, `http://${host}${request.path}`, request.query, header, material)).toBe(true);
+      // The same header over another query does not verify, so the check is not vacuous.
+      expect(verifyOauth1(request.method, `http://${host}${request.path}`, new URLSearchParams('q=a&z=1'), header, material)).toBe(false);
+    }
   });
 
   it('CONN-3 no auth configured sends no credential', async () => {
