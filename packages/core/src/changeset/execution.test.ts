@@ -78,6 +78,14 @@ const stats = (written: number, failed: number, skipped = 0): ChangeSetStats => 
 });
 
 describe('EXE-6 executionTerminal', () => {
+  it.each([
+    [{ pending: 0, confirmed: 3, unconfirmed: 0 }, 'completed'],
+    [{ pending: 0, confirmed: 2, unconfirmed: 1 }, 'completed_with_errors'],
+    [{ pending: 0, confirmed: 0, unconfirmed: 3 }, 'completed_with_errors'],
+    [{ pending: 1, confirmed: 2, unconfirmed: 0 }, 'completed_with_errors'],
+  ] as const)('EXE-6 EXE-12 final status after verification %j is %s', (verification, status) => {
+    expect(executionTerminal({ ...stats(3, 0), verification }, 'done')).toEqual({ status });
+  });
   it('EXE-6 maps done by failure counts', () => {
     expect(executionTerminal(stats(2, 0), 'done')).toEqual({ status: 'completed' });
     expect(executionTerminal(stats(1, 1), 'done')).toEqual({ status: 'completed_with_errors' });

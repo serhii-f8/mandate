@@ -52,7 +52,10 @@ export function preparingAnswer(id: string): InvocationResult {
 }
 
 export function executionSummaryText(status: ChangeSetStatus, stats: ChangeSetStats, drift: number): string {
-  return `${status}: ${String(stats.written)} written, ${String(stats.failed)} failed, ${String(stats.skipped)} skipped (${String(drift)} changed upstream since preparation).`;
+  const v = stats.verification;
+  // EXE-12: an item still pending counts as not confirmed.
+  const verified = v === undefined ? '' : `; ${String(v.confirmed)} confirmed, ${String(v.unconfirmed + v.pending)} not confirmed`;
+  return `${status}: ${String(stats.written)} written, ${String(stats.failed)} failed, ${String(stats.skipped)} skipped (${String(drift)} changed upstream since preparation)${verified}.`;
 }
 
 export function executionAnswer(record: ChangeSetRecord, errorCounts: Readonly<Record<string, number>>): InvocationResult {

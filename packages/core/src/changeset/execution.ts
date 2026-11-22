@@ -50,8 +50,10 @@ export function executionTerminal(
   outcome: Exclude<FinishOutcome, 'cancelled'>,
 ): { status: 'completed' | 'completed_with_errors' | 'failed'; errorCode?: string } {
   if (outcome !== 'done') return { status: 'failed', errorCode: outcome };
-  if (stats.failed === 0) return { status: 'completed' };
-  return stats.failed === stats.included ? { status: 'failed' } : { status: 'completed_with_errors' };
+  if (stats.failed === stats.included && stats.failed > 0) return { status: 'failed' };
+  // EXE-12: an item still pending when the stage ended counts as unconfirmed (fail closed).
+  const verified = stats.verification === undefined || (stats.verification.pending === 0 && stats.verification.unconfirmed === 0);
+  return stats.failed === 0 && verified ? { status: 'completed' } : { status: 'completed_with_errors' };
 }
 
 export interface StartEventContext {

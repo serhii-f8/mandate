@@ -57,6 +57,12 @@ describe('change-set answers', () => {
     );
   });
 
+  it('EXE-12 executionSummaryText adds the verification counts when present', () => {
+    expect(executionSummaryText('completed_with_errors', { ...stats, verification: { pending: 0, confirmed: 1, unconfirmed: 1 } }, 1)).toBe(
+      'completed_with_errors: 2 written, 0 failed, 1 skipped (1 changed upstream since preparation); 1 confirmed, 1 not confirmed.',
+    );
+  });
+
   it('MCP-7 preparingAnswer text', () => {
     expect(preparingAnswer('cs-1')).toEqual({
       text: 'Change-set cs-1 is being prepared. Call get_changeset with this ID to see the result.',
