@@ -12,3 +12,17 @@ tooling/acceptance/widget-host/dist/
 /.doc-test.log
 /my-config/
 /backups/
+
+# Local environment and secrets: only .env.example is committed
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Editor, OS and tool state
+.vscode/
+.DS_Store
+*.log
+.claude/settings.local.json

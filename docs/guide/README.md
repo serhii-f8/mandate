@@ -1,6 +1,12 @@
 # AI Operations Layer guide
 
-Read the pages in this order for a first install.
+Start here to understand the product:
+
+- [Architecture](architecture.md): the processes, the path of a read and a write, where safety is enforced.
+- [Using the server](usage.md): what requesters, approvers and administrators do, with screenshots.
+- [Use cases](use-cases.md): the situations it was built for.
+
+Read these pages in order for a first install.
 
 1. [Installation](installation.md)
 2. [Connecting Magento](connecting-magento.md)

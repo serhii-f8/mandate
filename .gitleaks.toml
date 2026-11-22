@@ -1,0 +1,16 @@
+# Secret scanning configuration (gitleaks). Run: bash scripts/secret-scan.sh
+# The allowlist names development-only fakes that look like keys. Never add a real secret here:
+# rotate it and remove it from history instead.
+title = "AI Operations Layer"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Development-only fakes: test tokens and the fake master keys of .env.example"
+regexTarget = "match"
+regexes = [
+  '''ZGV2LW9ubHkt[A-Za-z0-9+/=]+''', # base64 of "dev-only-..."
+  '''tok-secret[A-Za-z0-9-]*''',
+  '''wrong-audience''',
+]
