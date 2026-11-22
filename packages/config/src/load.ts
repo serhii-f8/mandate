@@ -14,7 +14,7 @@ import type { DisabledOperation, FieldApprovalRule, GrantDefinition, PolicyConfi
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN, DEFAULT_ROLLBACK_WINDOW_HOURS } from './manifest.js';
-import { bindPresetParams, readSpecFile, resolvePreset, type LoadedPreset } from './presets.js';
+import { bindPresetParams, readSpecFile, resolvePreset, withPath, type LoadedPreset } from './presets.js';
 import type { PresetParamValue } from './preset-params.js';
 import type { PresetOperationConfig } from './schema.js';
 import { isMcpUpstream, toMcpCatalog, type McpCatalogState } from './mcp.js';
@@ -200,6 +200,8 @@ type SpecSource =
 interface ConnectionState {
   readonly located: Located<ConnectionConfig>;
   readonly preset?: LoadedPreset;
+  /** CONN-8: where issues of the preset's test land when the connection sets `preset_params`. */
+  readonly testSource?: SourceDocument;
   readonly auth?: AuthConfig;
   readonly spec?: SpecSource;
   readonly settings: ConnectionSettings;
@@ -211,7 +213,19 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     return { ok: false, issues: [{ file: '.', path: '', message: 'no configuration files (*.yaml, *.yml) found' }] };
   }
   const issues: ConfigIssue[] = [];
+  /**
+   * CONN-8: the preset source of each binding that sets `preset_params`. Its operations and test
+   * carry it instead of the preset's own, so an issue any later check finds there is caused by the
+   * connection's values and is reported at its `preset_params`, naming the preset operation.
+   */
+  const parameterizedSources = new Map<SourceDocument, ParameterizedSource>();
   const at = (source: SourceDocument, path: readonly PropertyKey[], message: string): void => {
+    const bound = parameterizedSources.get(source);
+    if (bound !== undefined) {
+      const target = [...bound.path, 'preset_params'];
+      issues.push({ file: bound.source.file, path: pathToString(target), ...(bound.source.locate(target) ?? {}), message: parameterizedMessage(bound, path, message) });
+      return;
+    }
     issues.push({ file: source.file, path: pathToString(path), ...(source.locate(path) ?? {}), message });
   };
 
@@ -311,10 +325,19 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       // The load fails on these issues; the defaults keep later checks free of follow-on issues.
       bound = bindPresetParams(resolved, undefined);
     }
+    // A distinct source object per parameterized binding, with the preset file's text and positions.
+    const boundSource: SourceDocument | undefined =
+      resolved === undefined || c.preset_params === undefined || bound?.ok !== true
+        ? undefined
+        : { file: resolved.source.file, text: resolved.source.text, value: resolved.source.value, locate: (p) => resolved.source.locate(p) };
+    if (boundSource !== undefined && bound?.ok === true) {
+      parameterizedSources.set(boundSource, { source, path, operations: bound.operations, ...(bound.test === undefined ? {} : { testOperation: bound.test.operation }) });
+    }
     const binding: PresetBinding = {
       connection: c.id,
       ...(c.operation_prefix === undefined ? {} : { prefix: c.operation_prefix }),
       ...(bound?.ok === true ? { operations: bound.operations, params: bound.values, ...(bound.test === undefined ? {} : { test: bound.test }) } : {}),
+      ...(boundSource === undefined ? {} : { source: boundSource }),
     };
     const namespaces = bindingNamespaces(binding);
     const bindings = presetBoundTo.get(c.preset) ?? [];
@@ -335,7 +358,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       const bound = binding.operations ?? preset.operations;
       const alias = presetAlias(bound, binding.prefix);
       bound.forEach((value, index) => {
-        operations.push({ value: alias.operation(value), source: preset.source, path: ['operations', index], connection: binding.connection, origin: `preset:${presetId}` });
+        operations.push({ value: alias.operation(value), source: binding.source ?? preset.source, path: ['operations', index], connection: binding.connection, origin: `preset:${presetId}` });
       });
     }
   }
@@ -393,7 +416,15 @@ export async function loadConfigurationSources(sources: readonly { file: string;
       extraHosts: spec?.kind === 'url' && URL.canParse(spec.url) ? [new URL(spec.url).hostname] : [],
       ...(presetParams === undefined ? {} : { presetParams }),
     };
-    states.set(c.id, { located, ...(preset === undefined ? {} : { preset }), ...(auth === undefined ? {} : { auth }), ...(spec === undefined ? {} : { spec }), settings });
+    const testSource = loadedPreset === undefined ? undefined : binding?.source;
+    states.set(c.id, {
+      located,
+      ...(preset === undefined ? {} : { preset }),
+      ...(testSource === undefined ? {} : { testSource }),
+      ...(auth === undefined ? {} : { auth }),
+      ...(spec === undefined ? {} : { spec }),
+      settings,
+    });
   }
 
   // Specs: read connection spec files (hash, CFG-2), then resolve catalogs (CONN-2).
@@ -488,10 +519,10 @@ export async function loadConfigurationSources(sources: readonly { file: string;
 
   // Connection tests (CONN-7): a read operation of the same connection, with valid args.
   const connectionTests = new Map<string, { operation: string; args: Readonly<Record<string, unknown>> }>();
-  for (const { located, preset } of states.values()) {
+  for (const { located, preset, testSource: boundTestSource } of states.values()) {
     const { value: c, source, path } = located;
     const [test, testSource, testPath]: [ConnectionTestConfig | undefined, SourceDocument, readonly PropertyKey[]] =
-      c.test !== undefined ? [c.test, source, [...path, 'test']] : [preset?.test, preset?.source ?? source, ['test']];
+      c.test !== undefined ? [c.test, source, [...path, 'test']] : [preset?.test, boundTestSource ?? preset?.source ?? source, ['test']];
     if (test === undefined) continue;
     const op = registry.all.get(test.operation);
     const fail = (key: 'operation' | 'args', message: string): void => {
@@ -777,9 +808,35 @@ export async function loadConfigurationSources(sources: readonly { file: string;
 interface PresetBinding {
   readonly connection: string;
   readonly prefix?: string;
+  /** Set when the connection gives `preset_params`: the source its operations and test carry. */
+  readonly source?: SourceDocument;
   readonly operations?: readonly PresetOperationConfig[];
   readonly test?: ConnectionTestConfig;
   readonly params?: Readonly<Record<string, PresetParamValue>>;
+}
+
+/** CONN-8: the connection a parameterized binding belongs to, and what its issues name. */
+interface ParameterizedSource {
+  /** The connection's file and path. */
+  readonly source: SourceDocument;
+  readonly path: readonly PropertyKey[];
+  /** The binding's operations before aliasing, by index, for the preset operation IDs. */
+  readonly operations: readonly PresetOperationConfig[];
+  readonly testOperation?: string;
+}
+
+/** The message of an issue inside a parameterized binding's preset nodes, reported at the connection. */
+function parameterizedMessage(bound: ParameterizedSource, path: readonly PropertyKey[], message: string): string {
+  const [head, index, ...rest] = path;
+  if (head === 'operations' && typeof index === 'number') {
+    const id = bound.operations[index]?.id ?? `operations[${String(index)}]`;
+    return `makes preset operation ${id} invalid: ${withPath(rest, message)}`;
+  }
+  if (head === 'test') {
+    const named = bound.testOperation === undefined ? '' : ` (operation ${bound.testOperation})`;
+    return `makes the preset test${named} invalid: ${withPath(path.slice(1), message)}`;
+  }
+  return `makes the preset invalid: ${withPath(path, message)}`;
 }
 
 /** The first segment of an operation ID. */

@@ -288,7 +288,7 @@ export function bindPresetParams(preset: LoadedPreset, given: Readonly<Record<st
 }
 
 /** `<path> <message>`, or the message alone at the root. */
-function withPath(path: readonly PropertyKey[], message: string): string {
+export function withPath(path: readonly PropertyKey[], message: string): string {
   const where = pathToString(path);
   return where === '' ? message : `${where} ${message}`;
 }

@@ -45,9 +45,19 @@ Option 3.
   at `connections[N].preset_params`, naming the operation (or the test) and the path inside it. A
   binding whose values fail is still bound with the defaults, so the load reports no follow-on issues
   (ADR 0021).
+- The later checks (Ajv compile of `input_schema`, registry and manifest cross-checks, the connection
+  test's arguments) see a binding with `preset_params` through a source object of its own, with the
+  preset file's text and positions. The loader's issue sink recognises that source and reports the
+  issue at the connection's `preset_params`, naming the preset operation ID (or the test and its
+  operation) and the inner path. So with two bindings of one preset, only the binding whose values
+  broke something is named. A binding without `preset_params` keeps the preset's own source: an issue
+  there is the preset's defect and is reported in the preset file.
 - The preset format report (`mandate-preset.v1.json`) describes the file after substitution plus the
   new `params` key, and says so in its description. A `{ $param }` node may stand anywhere inside
   `operations` and `test`; describing that in the schema would mean accepting anything there.
+- A preset that declares `params` requires connector SDK 1.1.0 and says so with `mandate.sdk: ^1.1.0`
+  (the preset template does). A 1.0.x platform then refuses it with `preset_sdk_incompatible` rather
+  than with an unknown key `params`.
 - Code modules receive the binding's values, defaults filled in, as `ctx.params` (`{}` when the preset
   declares none). The loader puts them on `ConnectionSettings.presetParams`, since a connection binds at
   most one preset, and the code runner hands each invocation a frozen copy.
@@ -73,6 +83,8 @@ Unit tests of declaration parsing, value resolution and substitution (`preset-pa
 tests for defaults, two bindings of one preset with different values, a wrong type, an unknown name, an
 object and a nested list, a value that breaks the operation schema, `preset_params` without `preset`, an
 undeclared `$param`, a default of the wrong type, per-binding substitution of the test, the
-configuration hash and the secret scan (`load.test.ts`); code runner tests for `ctx.params` on read,
+configuration hash and the secret scan, and the location of issues the later checks find: test args and
+an uncompilable input schema caused by a value land at `preset_params`, only the offending binding of
+two is named, and a preset broken by its defaults reports in the preset file (`load.test.ts`); code runner tests for `ctx.params` on read,
 write and call (`runner.test.ts`); the preset template's contract test with its `search_fields`
 parameter; the semver gate reports all three surfaces additive.

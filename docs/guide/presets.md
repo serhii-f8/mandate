@@ -149,11 +149,17 @@ connections:
   format schema, `packages/config/schema/mandate-preset.v1.json`, describes the file after
   substitution.
 - Values are data. They are never coerced (`"5"` is not a number), never searched for another
-  `$param`, and the result must pass the same checks as the preset's own values. A value that breaks
-  an operation is reported at the connection's `preset_params`, naming the operation.
+  `$param`, and the result must pass the same checks as the preset's own values: the operation
+  schema, the input schema, the manifest checks and the connection test's arguments. When a
+  connection sets `preset_params`, every issue those checks find in its operations or its test is
+  reported at that connection's `preset_params`, naming the preset operation (or the test) and the
+  path inside it. A preset that is broken by its defaults alone is reported in the preset file.
 - Parameters are not secrets; the secret-key check applies to them like to every key. Credentials
   belong on the credential page.
 - Code operations read the connection's values, defaults filled in, from `ctx.params`.
+- A preset that declares `params` needs connector SDK 1.1.0: declare `"sdk": "^1.1.0"` in its
+  `mandate` field, so an older platform refuses it with `preset_sdk_incompatible` instead of an
+  unknown key `params`.
 
 Choose today's value as the default when you parameterize an existing preset, so connections that
 set nothing keep its behaviour and the recordings stay valid.

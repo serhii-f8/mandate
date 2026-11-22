@@ -7,7 +7,7 @@
   "license": "Apache-2.0",
   "mandate": {
     "preset": "preset.yaml",
-    "sdk": "^1.0.0"
+    "sdk": "^1.1.0"
   },
   "files": [
     "preset.yaml",

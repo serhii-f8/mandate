@@ -779,6 +779,47 @@ roles:
     expect(result.configuration.connectionTests.get('b')).toEqual({ operation: 'shop_b.search', args: { page: 1, per_page: 1, fields: ['id'], state: 'open' } });
   });
 
+  /** fixture.search and fixture.get_many share the `fields` enum through a YAML alias; it becomes a parameter. */
+  async function withSearchFields(test = ''): Promise<string> {
+    return (await parameterized())
+      .replace('params:\n', 'params:\n  search_fields: { type: string_list, default: [id, title, state, tags] }\n')
+      .replace('items: { type: string, enum: [id, title, state, tags] }', 'items: { type: string, enum: { $param: search_fields } }')
+      .replace('operations:\n', `${test}operations:\n`);
+  }
+  const TITLE_TEST = 'test: { operation: fixture.search, args: { page: 1, per_page: 1, fields: [title] } }\n';
+
+  it('CONN-8 test args that a parameter value makes invalid are reported at preset_params, naming the test operation', async () => {
+    const found = issues(await loadWith(oneShop('    preset_params: { search_fields: [id, tags] }\n'), await withSearchFields(TITLE_TEST)));
+    expect(found).toEqual([
+      expect.objectContaining({
+        file: 'config.yaml',
+        path: 'connections[0].preset_params',
+        message: expect.stringContaining('fixture.search') as unknown,
+      }),
+    ]);
+  });
+
+  it('CONN-8 an input schema that a parameter value makes uncompilable is reported at preset_params, naming the operation', async () => {
+    const found = issues(await loadWith(oneShop('    preset_params: { search_fields: [] }\n'), await withSearchFields()));
+    expect(found.length).toBeGreaterThan(0);
+    for (const issue of found) expect(issue).toMatchObject({ file: 'config.yaml', path: 'connections[0].preset_params' });
+    expect(found.map((i) => i.message).join('\n')).toContain('makes preset operation fixture.search invalid: input_schema');
+  });
+
+  it('CONN-8 with two bindings of one preset, only the binding with the bad value is named', async () => {
+    const found = issues(await loadWith(twoShops('', ', preset_params: { search_fields: [id, tags] }'), await withSearchFields(TITLE_TEST)));
+    expect(found).toEqual([expect.objectContaining({ file: 'config.yaml', path: 'connections[1].preset_params' })]);
+  });
+
+  it('CONN-8 a preset broken by itself still reports in the preset file', async () => {
+    const preset = (await withSearchFields(TITLE_TEST)).replace('default: [id, title, state, tags]', 'default: [id, tags]');
+    const found = issues(await loadWith(twoShops('', ''), preset));
+    expect(found).toEqual([
+      expect.objectContaining({ file: FIXTURE_PRESET_FILE, path: 'test.args' }),
+      expect.objectContaining({ file: FIXTURE_PRESET_FILE, path: 'test.args' }),
+    ]);
+  });
+
   it('CFG-4 two configurations differing only in a preset_params value have different hashes', async () => {
     const a = await loadWith(oneShop('    preset_params: { scope: vendor }\n'));
     const b = await loadWith(oneShop('    preset_params: { scope: maker }\n'));
