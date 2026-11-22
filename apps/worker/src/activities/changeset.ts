@@ -48,6 +48,7 @@ import {
 import { Context } from '@temporalio/activity';
 import { ApplicationFailure } from '@temporalio/common';
 import { markActivitySpan, rollbackCorrelation } from '../telemetry/span-attributes.js';
+import { storedActionMatches } from './guard.js';
 import { whileHeartbeating } from './heartbeat.js';
 import { executionSettings, type ExecutionSettings } from './settings.js';
 
@@ -398,6 +399,8 @@ export function createActivities(deps: ActivityDeps): ChangesetActivities {
       }
       if (hash === undefined || hash !== changeset.hash) return { ok: false, outcome: 'hash_mismatch' };
       const configuration = deps.configuration();
+      // EXE-8, POL-6: the stored action still matches the operation's and its inverse still undoes it (ADR 0071).
+      if (!storedActionMatches(configuration.policy.operations, changeset, 'rollback')) return { ok: false, outcome: 'executor_error' };
       // Ruling R13: no rollback writer (strategy none, operation or binding gone) ends the rollback failed.
       if (deps.rollbackWriterFor(configuration, changeset.operation) === undefined) return { ok: false, outcome: 'executor_error' };
       return {

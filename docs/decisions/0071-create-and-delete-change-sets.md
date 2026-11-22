@@ -69,7 +69,10 @@ option 3 makes the meaning of a configuration depend on its call.
 - **Guard.** The stored action must equal the action of the operation under the current configuration,
   else `policy_denied`, as for diff versus opaque. A change-set stored without an action counts as
   `update`, so a copy derived by an older process from a create or a delete never executes against
-  an operation that now creates or deletes.
+  an operation that now creates or deletes. A rollback makes the same comparison when it starts and,
+  for `inverse_operation`, also requires the inverse still to undo the stored action (a create's a
+  delete, a delete's a create, an update's an update); otherwise it ends failed (`executor_error`),
+  as when no rollback writer exists.
 - Versions: configuration schema 1.2.0, additive (`action` is optional with a default).
 
 ## Consequences

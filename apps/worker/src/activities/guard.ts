@@ -17,8 +17,37 @@ import {
   type ChangeSetRecord,
   type ChangeSetRepository,
   type ExecutionGuard,
+  type ManifestAction,
+  type OperationDefinition,
   type PolicyDecision,
 } from '@mandate/core';
+
+const INVERSE_ACTION: Readonly<Record<ManifestAction, ManifestAction>> = { create: 'delete', delete: 'create', update: 'update' };
+
+/** The action of an operation; none, or no manifest, is `update`. */
+function operationAction(operation: OperationDefinition | undefined): ManifestAction {
+  return operation?.manifest === undefined ? 'update' : manifestAction(operation.manifest);
+}
+
+/**
+ * Whether a stored change-set's action (none counts as `update`) still equals its operation's under
+ * the current configuration, so an update is never run as a create or a delete, nor a copy that lost
+ * its action (OPS-2, ADR 0071). With `rollback`, an `inverse_operation` strategy must also name an
+ * operation that undoes that action: a create's inverse a delete, a delete's a create, an update's an
+ * update (EXE-8). Shared by the execution guard and `beginRollback`.
+ */
+export function storedActionMatches(
+  operations: readonly OperationDefinition[],
+  changeset: Pick<ChangeSetRecord, 'operation' | 'action'>,
+  mode: 'execute' | 'rollback',
+): boolean {
+  const stored = changeset.action ?? 'update';
+  const operation = operations.find((o) => o.id === changeset.operation);
+  if (stored !== operationAction(operation)) return false;
+  const strategy = operation?.manifest?.rollback;
+  if (mode === 'execute' || strategy?.strategy !== 'inverse_operation') return true;
+  return operationAction(operations.find((o) => o.id === strategy.operation)) === INVERSE_ACTION[stored];
+}
 
 export interface ExecutionGuardDeps {
   readonly repository: Pick<ChangeSetRepository, 'itemsPage' | 'approvals'>;
@@ -121,8 +150,7 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
       const operation = configuration.policy.operations.find((o) => o.id === changeset.operation);
       if (changesetKind(operation) !== (await storedKind(changeset))) return { ok: false, outcome: 'policy_denied' };
       // A change-set stored without an action is an update, so it never runs as a create or a delete (OPS-2, ADR 0071).
-      const currentAction = operation?.manifest === undefined ? 'update' : manifestAction(operation.manifest);
-      if ((changeset.action ?? 'update') !== currentAction) return { ok: false, outcome: 'policy_denied' };
+      if (!storedActionMatches(configuration.policy.operations, changeset, 'execute')) return { ok: false, outcome: 'policy_denied' };
       const caller: Caller = {
         subject: request.actor,
         groups: request.groups,
