@@ -161,6 +161,7 @@ const FIXED_CODES: readonly WriteOutcomeCode[] = [
   'upstream_retriable',
   'no_outcome',
   'write_mode_unsupported',
+  'not_applied',
 ];
 
 function setup(op: OperationDefinition & { manifest: ManifestDefinition } = operation, direction?: WriteDirection) {
@@ -1394,6 +1395,66 @@ describe('CS-7 OPS-2 create and delete', () => {
       expect(outcomes).toEqual([
         { targetId: 'A', status: 'written' },
         { targetId: 'B', status: 'skipped', error: 'gone' },
+      ]);
+    });
+  });
+
+  describe('EXE-4 EXE-8 resume and reverse through the bulk path', () => {
+    it('EXE-4 a create batch with a recorded submission polls it without reading first or resubmitting; the verify decides each item', async () => {
+      const { events, reader, bulk, batch, writer } = setup(createOperation);
+      batch.submission = { upstreamBatchId: 'u-9', plan: [{ targetId: 'n1', action: 'write' }, { targetId: 'n2', action: 'write' }] };
+      bulk.statuses = [states('ok', 'ok')];
+      reader.pages = [page({ sku: 'n1', name: 'N1' })];
+      const outcomes = await writer.writeBatch({
+        changeset: createChangeset({ sku: 'n1', name: 'N1' }, { sku: 'n2', name: 'N2' }),
+        items: [created('n1', 'N1'), created('n2', 'N2')],
+        batch,
+      });
+      expect(bulk.submitted).toEqual([]);
+      expect(batch.recorded).toEqual([]);
+      expect(bulk.statusCalls).toEqual(['u-9']);
+      expect(events.indexOf('read')).toBeGreaterThan(events.indexOf('status'));
+      expect(reader.calls.map((c) => c.args.skus)).toEqual([['n1', 'n2']]);
+      expect(outcomes).toEqual([
+        { targetId: 'n1', status: 'written' },
+        { targetId: 'n2', status: 'failed', error: 'not_applied' },
+      ]);
+    });
+
+    it('EXE-4 a delete batch with a recorded submission polls it without reading first or resubmitting; the verify decides each item', async () => {
+      const { events, reader, bulk, batch, writer } = setup(deleteOperation);
+      batch.submission = { upstreamBatchId: 'u-9', plan: [{ targetId: 'A', action: 'write' }, { targetId: 'B', action: 'write' }] };
+      bulk.statuses = [states('ok', 'ok')];
+      reader.pages = [page({ sku: 'B', brand: 'acme', name: 'N', price: 1 })];
+      const outcomes = await writer.writeBatch({
+        changeset: { ...deleteChangeset, args: { brand: 'acme', skus: ['A', 'B'] } },
+        items: [deleted, { ...deleted, targetId: 'B' }],
+        batch,
+      });
+      expect(bulk.submitted).toEqual([]);
+      expect(batch.recorded).toEqual([]);
+      expect(bulk.statusCalls).toEqual(['u-9']);
+      expect(events.indexOf('read')).toBeGreaterThan(events.indexOf('status'));
+      expect(outcomes).toEqual([
+        { targetId: 'A', status: 'written' },
+        { targetId: 'B', status: 'failed', error: 'not_applied' },
+      ]);
+    });
+
+    it('EXE-8 reverse of a create batch submits delete-shaped records, records the plan, and verifies each removal', async () => {
+      const { reader, bulk, batch, writer } = setup(createOperation, 'reverse');
+      reader.pages = [page({ sku: 'n1', name: 'N1' }, { sku: 'n2', name: 'N2' }), page({ sku: 'n2', name: 'N2' })];
+      bulk.statuses = [states('ok', 'ok')];
+      const outcomes = await writer.writeBatch({
+        changeset: createChangeset({ sku: 'n1', name: 'N1' }, { sku: 'n2', name: 'N2' }),
+        items: [{ ...created('n1', 'N1'), status: 'written' }, { ...created('n2', 'N2'), status: 'written' }],
+        batch,
+      });
+      expect(bulk.submitted).toEqual([[{ sku: 'n1' }, { sku: 'n2' }]]);
+      expect(batch.recorded).toEqual([{ upstreamBatchId: 'u-1', plan: [{ targetId: 'n1', action: 'write' }, { targetId: 'n2', action: 'write' }] }]);
+      expect(outcomes).toEqual([
+        { targetId: 'n1', status: 'written' },
+        { targetId: 'n2', status: 'failed', error: 'not_applied' },
       ]);
     });
   });
