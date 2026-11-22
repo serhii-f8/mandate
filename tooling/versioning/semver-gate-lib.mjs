@@ -133,20 +133,24 @@ function narrowing(entry, oldFrames) {
 
 const STRING_LITERAL = String.raw`(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')`;
 const TUPLE_ELEMENT = new RegExp(`, ${STRING_LITERAL}$`);
+const READONLY_TUPLE_HEAD = new RegExp(`\\breadonly \\[(?:${STRING_LITERAL}(?:, ${STRING_LITERAL})*)?$`);
 const UNION_MEMBER = new RegExp(` \\| ${STRING_LITERAL}$`);
 
 /**
  * True when `newLine` is `oldLine` with string literals appended to one one-line literal list: elements
  * after the last element of a `[ ... ]` tuple (`, "c"` before the `]`) or members after the last member of
- * a `|` union (` | 'c'` before the `;`). Any other difference is false (NFR-18).
+ * a `|` union (` | 'c'` before the `;`). The tuple must be a `readonly` one (a plain tuple has a fixed
+ * length) and a JSON line (one that starts with a key) never qualifies. Any other difference is false (NFR-18).
  */
 export function isAppendedLiteralList(oldLine, newLine) {
+  if (JSON_KEY.test(newLine.trim())) return false;
   for (const [close, element] of [[']', TUPLE_ELEMENT], [';', UNION_MEMBER]]) {
     for (let at = newLine.indexOf(close); at !== -1; at = newLine.indexOf(close, at + 1)) {
       let head = newLine.slice(0, at);
       const tail = newLine.slice(at);
       for (let m = element.exec(head); m; m = element.exec(head)) {
         head = head.slice(0, m.index);
+        if (close === ']' && !READONLY_TUPLE_HEAD.test(head)) break;
         if (head + tail === oldLine) return true;
       }
     }

@@ -72,6 +72,12 @@ describe('NFR-18 semver gate', () => {
       expect(isAppendedLiteralList("x: 'a' | 'b';", "y: 'a' | 'b' | 'c';")).toBe(false);
       expect(isAppendedLiteralList('x: string;', 'x: string | number;')).toBe(false);
     });
+    it('NFR-18 appended literal list: required lists, plain tuples and string contents are not additive', () => {
+      expect(isAppendedLiteralList('"required": ["a"]', '"required": ["a", "b"]')).toBe(false);
+      expect(isAppendedLiteralList('f(p: ["a"]): void;', 'f(p: ["a", "b"]): void;')).toBe(false);
+      expect(isAppendedLiteralList('"description": "see [a]"', `"description": "see [a, 'b']"`)).toBe(false);
+      expect(judge('{\n  "required": ["a"]\n}\n', '{\n  "required": ["a", "b"]\n}\n', '1.0.0', '1.1.0')).toMatchObject({ ok: false, kind: 'breaking' });
+    });
     it('NFR-18 appended literal list is additive: a report with only that change classifies additive', () => {
       expect(judge(tuple('"a", "b"'), tuple('"a", "b", "c"'), '1.0.0', '1.1.0')).toMatchObject({ ok: true, kind: 'additive' });
       expect(judge(tuple('"a", "b"'), tuple('"a", "b", "c"'), '1.0.0', '1.0.1')).toMatchObject({ ok: false, kind: 'additive' });
