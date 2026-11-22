@@ -1,8 +1,9 @@
 # Preset template
 
 A working, contract-tested preset to copy when you write your own (CONN-8, NFR-17). It models a
-small notes API: one read, `notes.search`, and one write, `notes.update_title`, which is a
-manifest write sent as one `PATCH /notes/{id}` per record with `replay_previous_state` rollback.
+small notes API: one read, `notes.search`, and three manifest writes sent as one request per
+record: `notes.update_title` (`PATCH /notes/{id}`, `replay_previous_state` rollback),
+`notes.create` and `notes.delete`.
 
 | File | Purpose |
 | --- | --- |
@@ -11,6 +12,20 @@ manifest write sent as one `PATCH /notes/{id}` per record with `replay_previous_
 | `spec/notes.openapi.json` | the vendored OpenAPI 3 spec the preset's paths are checked against |
 | `test/contract.unit.test.ts` | loads the preset like the api does and replays the recordings |
 | `test/recordings/` | hand-written request/response pairs; `write/` holds the write exchange |
+
+## What each operation shows
+
+- **`notes.update_title`** changes the same field on many notes (`values_arg`). Its `empty_title`
+  check (since 1.2.0) leaves a note that has no title yet out of the change-set during preparation:
+  the item is excluded with that reason code and never written.
+- **`notes.create`** takes `notes: [{ id, title, body? }]` (`records_arg`): every record carries its
+  own values. A note whose id already exists is excluded with `already_exists`; one that appears
+  between approval and execution is skipped as drift, never overwritten. Its rollback is
+  `notes.delete`.
+- **`notes.delete`** takes `ids` and is `destructive`: it always needs approval with step-up
+  authentication. The change-set keeps each note's `title` and `body`, so its rollback,
+  `notes.create`, can put them back. The two operations name each other as the inverse; the loader
+  checks that they match.
 
 ## Copy and adapt
 

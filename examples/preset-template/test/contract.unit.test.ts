@@ -10,6 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createOpenApiAdapter } from '@mandate/adapters';
+import { failedCheck } from '@mandate/core';
 import { loadConfigurationSources, type HttpOperationBinding, type LoadedConfiguration } from '@mandate/config';
 import type { ConnectionSettings } from '@mandate/connector-sdk';
 import { contractRead, contractWrite, presetConnectionYaml, recordingsFreeOf, replayRecordings, startFakeUpstream, type FakeUpstream } from '@mandate/testing';
@@ -69,8 +70,8 @@ describe('NFR-17 preset template contract', () => {
     await upstream.close();
   });
 
-  it('NFR-17 CONN-8 the preset loads against its vendored spec: one read, one manifest write, bearer auth', () => {
-    expect(config.policy.operations.map((o) => o.id).sort()).toEqual(['notes.search', 'notes.update_title']);
+  it('NFR-17 CONN-8 the preset loads against its vendored spec: a read, an update, a create and a delete, bearer auth', () => {
+    expect(config.policy.operations.map((o) => o.id).sort()).toEqual(['notes.create', 'notes.delete', 'notes.search', 'notes.update_title']);
     const write = config.policy.operations.find((o) => o.id === 'notes.update_title');
     expect(write?.risk).toBe('write');
     expect(write?.manifest).toMatchObject({
@@ -82,6 +83,57 @@ describe('NFR-17 preset template contract', () => {
     });
     expect(settingsOf(config).auth).toEqual({ scheme: 'bearer' });
     expect(config.connectionTests.get('notes')?.operation).toBe('notes.search');
+  });
+
+  it('NFR-17 OPS-2 notes.create and notes.delete declare their action, records or ids, and each other as inverse', () => {
+    const create = config.policy.operations.find((o) => o.id === 'notes.create');
+    expect(create?.risk).toBe('write');
+    expect(create?.manifest).toMatchObject({
+      action: 'create',
+      idField: 'id',
+      recordsArg: 'notes',
+      fields: ['title', 'body'],
+      requiredFields: ['title'],
+      readBefore: { operation: 'notes.search', idsArg: 'ids' },
+      batchSize: 100,
+      maxTargets: 1000,
+      rollback: { strategy: 'inverse_operation', operation: 'notes.delete' },
+    });
+    const del = config.policy.operations.find((o) => o.id === 'notes.delete');
+    expect(del?.risk).toBe('destructive');
+    expect(del?.manifest).toMatchObject({
+      action: 'delete',
+      idField: 'id',
+      idsArg: 'ids',
+      fields: ['title', 'body'],
+      readBefore: { operation: 'notes.search', idsArg: 'ids' },
+      batchSize: 100,
+      maxTargets: 1000,
+      rollback: { strategy: 'inverse_operation', operation: 'notes.create' },
+    });
+  });
+
+  it('NFR-17 CS-3 notes.update_title excludes a note without a title with the code empty_title', () => {
+    const checks = config.policy.operations.find((o) => o.id === 'notes.update_title')?.manifest?.checks ?? [];
+    expect(checks.map((c) => c.code)).toEqual(['empty_title']);
+    const context = (before: Record<string, unknown>) => ({ before, after: { title: 'New' }, record: undefined, args: {}, lookups: {} });
+    expect(failedCheck(checks, context({ title: '' }))).toBe('empty_title');
+    expect(failedCheck(checks, context({ title: null }))).toBe('empty_title');
+    expect(failedCheck(checks, context({ title: 'Kickoff' }))).toBeUndefined();
+  });
+
+  it('NFR-17 OPS-2 the create input takes closed records with an id and a title; the delete input takes ids', () => {
+    const create = config.validators.get('notes.create');
+    expect(create?.({ notes: [{ id: 'n1', title: 'A' }, { id: 'n2', title: 'B', body: 'text' }] }).ok).toBe(true);
+    expect(create?.({ notes: [] }).ok).toBe(false);
+    expect(create?.({ notes: [{ id: 'n1' }] }).ok).toBe(false);
+    expect(create?.({ notes: [{ id: 'n1', title: 'A', extra: 1 }] }).ok).toBe(false);
+    expect(create?.({}).ok).toBe(false);
+    const del = config.validators.get('notes.delete');
+    expect(del?.({ ids: ['n1'] }).ok).toBe(true);
+    expect(del?.({ ids: [] }).ok).toBe(false);
+    expect(del?.({ ids: ['a,b'] }).ok).toBe(false);
+    expect(del?.({ ids: ['n1'], extra: 1 }).ok).toBe(false);
   });
 
   it('NFR-17 OPS-2 input schemas refuse unknown fields and fields outside the enum', () => {
@@ -135,6 +187,30 @@ describe('NFR-17 preset template contract', () => {
         connection: settingsOf(config),
         binding: bindingOf(config, 'notes.update_title'),
         records: [{ id: 'n1', title: 'Kickoff v2' }],
+        args: {},
+      });
+      expect(replayedWrite.unexpected).toEqual([]);
+      expect(outcomes).toEqual(['ok']);
+    });
+
+    it('NFR-17 OPS-6 notes.create sends one POST /notes per record with the record as body', async () => {
+      const outcomes = await contractWrite({
+        adapter: createOpenApiAdapter(),
+        connection: settingsOf(config),
+        binding: bindingOf(config, 'notes.create'),
+        records: [{ id: 'n3', title: 'Retro', body: 'Notes of the retro' }],
+        args: {},
+      });
+      expect(replayedWrite.unexpected).toEqual([]);
+      expect(outcomes).toEqual(['ok']);
+    });
+
+    it('NFR-17 OPS-6 notes.delete sends one DELETE /notes/{id} per record', async () => {
+      const outcomes = await contractWrite({
+        adapter: createOpenApiAdapter(),
+        connection: settingsOf(config),
+        binding: bindingOf(config, 'notes.delete'),
+        records: [{ id: 'n1' }],
         args: {},
       });
       expect(replayedWrite.unexpected).toEqual([]);

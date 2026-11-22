@@ -1,5 +1,5 @@
 # Preset template 1.2.0 (CONN-8, OPS-2, OPS-3, OPS-6). Copy this directory, rename the package,
-# replace the spec and the two operations, and keep the contract test green (NFR-17).
+# replace the spec and the operations, and keep the contract test green (NFR-17).
 # Bind it to an openapi connection:   base_url: https://notes.example.com/api
 version: 1
 spec: spec/notes.openapi.json
@@ -92,3 +92,76 @@ operations:
       batch_size: 100
       max_targets: 1000
       rollback: { strategy: replay_previous_state }
+      # A check (CS-3, since 1.2.0): a note that has no title yet is left out of the change-set with this code.
+      checks:
+        - code: empty_title
+          title: The note has no title yet
+          require: [{ present: { before: title } }]
+  # A create (OPS-2, since 1.2.0): each record carries its own values. A note that already exists is
+  # left out (already_exists); the rollback deletes what was created, through notes.delete.
+  - id: notes.create
+    risk: write
+    title: Create notes
+    description: Create notes with an id, a title and an optional body. Prepared as a change-set for approval; nothing is written until approved.
+    input_schema:
+      type: object
+      properties:
+        notes:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          description: The notes to create.
+          items:
+            type: object
+            properties:
+              id: { type: string, minLength: 1, maxLength: 64, pattern: '^[^,]+$' }
+              title: { type: string, minLength: 1, maxLength: 255 }
+              body: { type: string, maxLength: 10000 }
+            required: [id, title]
+            additionalProperties: false
+      required: [notes]
+      additionalProperties: false
+    upstream:
+      method: POST
+      path: /notes
+    manifest:
+      action: create
+      id_field: id
+      records_arg: notes
+      fields: [title, body]
+      required_fields: [title]
+      read_before: { operation: notes.search, ids_arg: ids }
+      batch_size: 100
+      max_targets: 1000
+      rollback: { strategy: inverse_operation, operation: notes.delete }
+  # A delete (OPS-2, since 1.2.0): destructive, so it always needs approval with step-up. The change-set
+  # keeps the title and body of every note; the rollback re-creates them through notes.create.
+  - id: notes.delete
+    risk: destructive
+    title: Delete notes
+    description: Delete notes by id. Prepared as a change-set that shows what is deleted; nothing is deleted until approved.
+    input_schema:
+      type: object
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          uniqueItems: true
+          description: Note ids to delete (no commas).
+          items: { type: string, minLength: 1, maxLength: 64, pattern: '^[^,]+$' }
+      required: [ids]
+      additionalProperties: false
+    upstream:
+      method: DELETE
+      path: /notes/{id}
+      path_params: { id: { record: id } }
+    manifest:
+      action: delete
+      id_field: id
+      ids_arg: ids
+      fields: [title, body]
+      read_before: { operation: notes.search, ids_arg: ids }
+      batch_size: 100
+      max_targets: 1000
+      rollback: { strategy: inverse_operation, operation: notes.create }

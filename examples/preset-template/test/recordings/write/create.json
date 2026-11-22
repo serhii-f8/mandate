@@ -1,0 +1,4 @@
+{
+  "request": { "method": "POST", "path": "/notes", "body": { "id": "n3", "title": "Retro", "body": "Notes of the retro" } },
+  "response": { "status": 201, "body": { "id": "n3", "title": "Retro", "body": "Notes of the retro" } }
+}

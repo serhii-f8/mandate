@@ -12,6 +12,18 @@
           { "name": "page_size", "in": "query", "schema": { "type": "integer" } }
         ],
         "responses": { "200": { "description": "Notes", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      },
+      "post": {
+        "operationId": "notesCreate",
+        "summary": "Create a note",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "id": { "type": "string" }, "title": { "type": "string" }, "body": { "type": "string" } }, "required": ["id", "title"] }
+            }
+          }
+        },
+        "responses": { "201": { "description": "The note" } }
       }
     },
     "/notes/{id}": {
@@ -21,6 +33,12 @@
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
         "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "title": { "type": "string" } } } } } },
         "responses": { "200": { "description": "The note" } }
+      },
+      "delete": {
+        "operationId": "notesDelete",
+        "summary": "Delete one note",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "204": { "description": "Deleted" } }
       }
     }
   }

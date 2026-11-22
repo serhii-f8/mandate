@@ -1,0 +1,4 @@
+{
+  "request": { "method": "DELETE", "path": "/notes/n1", "body": {} },
+  "response": { "status": 204 }
+}

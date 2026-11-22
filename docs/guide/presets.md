@@ -50,8 +50,9 @@ code changed, and `mandate config apply` stores the new revision.
 
 ## Write a preset
 
-Copy `examples/preset-template`. It models a small notes API: a read, `notes.search`, and a write,
-`notes.update_title`, sent as one `PATCH /notes/{id}` per record with rollback.
+Copy `examples/preset-template`. It models a small notes API: a read, `notes.search`, and three
+writes sent as one request per record with rollback: `notes.update_title` (`PATCH /notes/{id}`, with
+a check), `notes.create` (`POST /notes`) and `notes.delete` (`DELETE /notes/{id}`).
 
 ```text
 examples/preset-template/
