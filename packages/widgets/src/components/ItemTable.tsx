@@ -21,15 +21,25 @@ export interface ItemTableProps {
   action?: ChangeSetAction;
   /** CS-3: titles of check codes from the current configuration, shown beside the stored code. */
   reasonTitles?: Readonly<Record<string, string>>;
+  /** EXE-12: texts for verification codes, shown beside an unconfirmed item. */
+  verificationTitles?: Readonly<Record<string, string>>;
 }
 
-function note(row: ItemRowModel, reasonTitles: Readonly<Record<string, string>> | undefined): string {
+function titleOf(titles: Readonly<Record<string, string>> | undefined, code: string): string | undefined {
+  return titles !== undefined && Object.hasOwn(titles, code) ? titles[code] : undefined;
+}
+
+function note(row: ItemRowModel, reasonTitles: Readonly<Record<string, string>> | undefined, verificationTitles: Readonly<Record<string, string>> | undefined): string {
   if (row.status === 'excluded') {
     const reason = row.reason ?? '';
     const title = reasonTitles !== undefined && Object.hasOwn(reasonTitles, reason) ? reasonTitles[reason] : undefined;
     return title === undefined ? `excluded: ${reason}` : `excluded: ${title} (${reason})`;
   }
   if (row.status === 'failed') return row.error ?? '';
+  if (row.verificationStatus === 'unconfirmed') {
+    const code = row.verificationCode;
+    return code === undefined ? 'Not confirmed' : `Not confirmed: ${titleOf(verificationTitles, code) ?? code}`;
+  }
   return '';
 }
 
@@ -44,12 +54,13 @@ interface RowProps {
   row: ItemRowModel;
   action?: ChangeSetAction;
   reasonTitles?: Readonly<Record<string, string>>;
+  verificationTitles?: Readonly<Record<string, string>>;
   /** Absent without a selection column; otherwise whether the row has a checkbox and its state. */
   box?: { selectable: boolean; checked: boolean; disabled: boolean; toggle: (targetId: string) => void };
 }
 
 /** One item; memoised so a selection change re-renders only the rows whose checkbox changed. */
-const ItemRows = memo(function ItemRows({ row, action, reasonTitles, box }: RowProps): ReactElement {
+const ItemRows = memo(function ItemRows({ row, action, reasonTitles, verificationTitles, box }: RowProps): ReactElement {
   const excluded = row.status === 'excluded';
   const fields = excluded ? [] : fieldRows(row);
   const span = excluded ? 1 : fields.length;
@@ -87,7 +98,7 @@ const ItemRows = memo(function ItemRows({ row, action, reasonTitles, box }: RowP
         <td />
         <td />
         <td />
-        <td>{note(row, reasonTitles)}</td>
+        <td>{note(row, reasonTitles, verificationTitles)}</td>
       </tr>
     );
   }
@@ -103,7 +114,7 @@ const ItemRows = memo(function ItemRows({ row, action, reasonTitles, box }: RowP
           <td className="after">
             <Value value={f.after} />
           </td>
-          <td rowSpan={1}>{i === 0 ? note(row, reasonTitles) : ''}</td>
+          <td rowSpan={1}>{i === 0 ? note(row, reasonTitles, verificationTitles) : ''}</td>
         </tr>
       ))}
     </>
@@ -111,7 +122,7 @@ const ItemRows = memo(function ItemRows({ row, action, reasonTitles, box }: RowP
 }, sameRow);
 
 function sameRow(a: RowProps, b: RowProps): boolean {
-  if (a.row !== b.row || a.action !== b.action || a.reasonTitles !== b.reasonTitles) return false;
+  if (a.row !== b.row || a.action !== b.action || a.reasonTitles !== b.reasonTitles || a.verificationTitles !== b.verificationTitles) return false;
   if (!a.box || !b.box) return a.box === b.box;
   return (
     a.box.selectable === b.box.selectable &&
@@ -121,7 +132,7 @@ function sameRow(a: RowProps, b: RowProps): boolean {
   );
 }
 
-export function ItemTable({ rows, selection, empty, action, reasonTitles }: ItemTableProps): ReactElement {
+export function ItemTable({ rows, selection, empty, action, reasonTitles, verificationTitles }: ItemTableProps): ReactElement {
   return (
     <table className="items">
       <thead>
@@ -149,6 +160,7 @@ export function ItemTable({ rows, selection, empty, action, reasonTitles }: Item
             row={row}
             {...(action === undefined ? {} : { action })}
             {...(reasonTitles === undefined ? {} : { reasonTitles })}
+            {...(verificationTitles === undefined ? {} : { verificationTitles })}
             {...(selection
               ? {
                   box: {

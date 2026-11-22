@@ -103,6 +103,60 @@ describe('ChangeSetView', () => {
     expect(screen.getByRole('alert').textContent).toBe('Not cancelled: already finished');
   });
 
+  it('UI-4 EXE-12 the result shows the verification counts and the unconfirmed written items', async () => {
+    const loadItems = vi.fn<ChangeSetActions['loadItems']>().mockImplementation((q) =>
+      Promise.resolve({
+        ok: true,
+        value: {
+          items:
+            q.status === 'written'
+              ? [
+                  item('sku-1', { status: 'written', verificationStatus: 'unconfirmed', verificationCode: 'missing_in_shop' }),
+                  item('sku-2', { status: 'written', verificationStatus: 'unconfirmed', verificationCode: 'shop_price_differs' }),
+                  item('sku-3', { status: 'written', verificationStatus: 'confirmed' }),
+                ]
+              : [],
+        },
+      }),
+    );
+    setup(
+      changeSetModel({
+        status: 'completed_with_errors',
+        stats: { ...finished, written: 3, failed: 0, skipped: 0, verification: { pending: 0, confirmed: 1, unconfirmed: 2 } },
+        verificationTitles: { missing_in_shop: 'Missing in the shop' },
+      }),
+      actionsWith({ loadItems }),
+    );
+    await flush();
+    expect(document.body.textContent).toContain('Verification: 1 confirmed · 2 not confirmed');
+    fireEvent.click(screen.getByRole('tab', { name: 'Written' }));
+    await flush();
+    expect(loadItems).toHaveBeenLastCalledWith({ status: 'written' });
+    expect(screen.getByText('Not confirmed: Missing in the shop')).toBeTruthy();
+    expect(screen.getByText('Not confirmed: shop_price_differs')).toBeTruthy();
+  });
+
+  it('UI-4 EXE-12 a change-set without verification shows no verification line and no Written tab', async () => {
+    setup(changeSetModel({ status: 'completed', stats: finished }));
+    await flush();
+    expect(document.body.textContent).not.toContain('Verification');
+    expect(screen.queryByRole('tab', { name: 'Written' })).toBeNull();
+  });
+
+  it('UI-2 EXE-12 while items await their check the progress line reads Verifying: N of M confirmed', () => {
+    setup(
+      changeSetModel({
+        status: 'executing',
+        progress: { total: 10, done: 10, failed: 0, skipped: 0 },
+        stats: { ...finished, verification: { pending: 3, confirmed: 5, unconfirmed: 2 } },
+      }),
+    );
+    expect(document.body.textContent).toContain('Verifying: 5 of 10 confirmed');
+    cleanup();
+    setup(changeSetModel({ status: 'executing', progress, stats: { ...finished, verification: { pending: 0, confirmed: 5, unconfirmed: 2 } } }));
+    expect(document.body.textContent).not.toContain('Verifying');
+  });
+
   it('UI-4 the result shows written, failed, skipped and drift, and the failed items', async () => {
     const loadItems = vi.fn<ChangeSetActions['loadItems']>().mockResolvedValue({
       ok: true,

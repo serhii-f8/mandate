@@ -20,6 +20,8 @@ function toItemRow(row: ItemRow): ItemRowModel {
     before: row.before,
     after: row.after,
     ...(row.error === undefined ? {} : { error: row.error }),
+    ...(row.verificationStatus === undefined ? {} : { verificationStatus: row.verificationStatus }),
+    ...(row.verificationCode === undefined ? {} : { verificationCode: row.verificationCode }),
   };
 }
 
@@ -64,6 +66,12 @@ function reasonTitlesOf(detail: ChangeSetDetail): { reasonTitles?: Record<string
   return titles === undefined || Object.keys(titles).length === 0 ? {} : { reasonTitles: titles };
 }
 
+/** EXE-12: the verification texts only when there are any, so an unverified model is unchanged. */
+function verificationTitlesOf(detail: ChangeSetDetail): { verificationTitles?: Record<string, string> } {
+  const titles = detail.verificationTitles;
+  return titles === undefined || Object.keys(titles).length === 0 ? {} : { verificationTitles: titles };
+}
+
 /**
  * The requester's model. Permissions come from the server's viewer block; the page has no cancel
  * route in this phase, and it is the page itself, so there is no `pageUrl`.
@@ -76,6 +84,7 @@ export function toChangeSetModel(detail: ChangeSetDetail, items: ItemsPage, filt
     kind,
     ...actionOf(detail),
     ...reasonTitlesOf(detail),
+    ...verificationTitlesOf(detail),
     ...(kind === 'opaque' ? { args: detail.request.args } : {}),
     operation: { id: operation.id, ...(operation.title === undefined ? {} : { title: operation.title }) },
     status: detail.status,

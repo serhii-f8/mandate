@@ -63,7 +63,7 @@ export function executionAnswer(record: ChangeSetRecord, errorCounts: Readonly<R
   const { written, failed, skipped } = record.stats;
   return {
     text: executionSummaryText(record.status, record.stats, drift),
-    structured: { changesetId: record.id, status: record.status, stats: { written, failed, skipped, drift } },
+    structured: { changesetId: record.id, status: record.status, stats: { written, failed, skipped, drift, ...(record.stats.verification === undefined ? {} : { verification: record.stats.verification }) } },
     ...(record.status === 'failed' ? { isError: true } : {}),
   };
 }

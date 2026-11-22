@@ -13,12 +13,16 @@ import { type ItemPages, useItemPages } from '../paging.js';
 import type { ViewProps } from './PreviewView.js';
 import { useAction } from './useAction.js';
 
-type Tab = 'failed' | 'skipped';
+type Tab = 'failed' | 'skipped' | 'written';
 
 const TABS: { tab: Tab; label: string }[] = [
   { tab: 'failed', label: 'Failed' },
   { tab: 'skipped', label: 'Skipped' },
 ];
+
+/** EXE-12: a verified change-set also lists its written items, where the unconfirmed ones are marked. */
+const WRITTEN_TAB: { tab: Tab; label: string } = { tab: 'written', label: 'Written' };
+const EMPTY_TEXT: Record<Tab, string> = { failed: 'No failed items.', skipped: 'No skipped items.', written: 'No written items.' };
 
 // One stable empty page: each tab starts empty and loads its own status on first show.
 const EMPTY: ItemsPageModel = { items: [] };
@@ -27,6 +31,12 @@ function summary(data: ChangeSetViewModel): string {
   const { written, failed, skipped } = data.stats;
   const base = `${String(written)} written · ${String(failed)} failed · ${String(skipped)} skipped`;
   return data.drift === undefined ? base : `${base} · ${String(data.drift)} changed upstream`;
+}
+
+/** EXE-12: an item still pending verification counts as not confirmed, as in the tool answer. */
+function verificationLine(data: ChangeSetViewModel): string | undefined {
+  const v = data.stats.verification;
+  return v === undefined ? undefined : `Verification: ${String(v.confirmed)} confirmed · ${String(v.unconfirmed + v.pending)} not confirmed`;
 }
 
 /** The one call of an opaque change-set: its status and, when it failed, the error. */
@@ -41,12 +51,15 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
   const loadItems = useCallback((q: Parameters<ChangeSetActions['loadItems']>[0]) => actions.loadItems(q), [actions]);
   const failedPages = useItemPages(EMPTY, 'failed', loadItems, data.id);
   const skippedPages = useItemPages(EMPTY, 'skipped', loadItems, data.id);
+  const writtenPages = useItemPages(EMPTY, 'written', loadItems, data.id);
   const [tab, setTab] = useState<Tab>('failed');
   const loaded = useRef(new Set<string>());
   const action = useAction();
   const rollback = actions.rollback?.bind(actions);
 
-  const pages: ItemPages = tab === 'failed' ? failedPages : skippedPages;
+  const pages: ItemPages = tab === 'failed' ? failedPages : tab === 'skipped' ? skippedPages : writtenPages;
+  const verification = verificationLine(data);
+  const tabs = data.stats.verification === undefined ? TABS : [...TABS, WRITTEN_TAB];
   // Loads the shown tab once per change-set (the key holds the ID, so a new change-set loads again).
   const key = `${data.id}:${tab}`;
   useEffect(() => {
@@ -75,10 +88,11 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
         <StatusBadge status={data.status} />
       </header>
       <p className="counts">{summary(data)}</p>
+      {verification === undefined ? null : <p className="verification">{verification}</p>}
       <RollbackCounts stats={data.rollback.stats} />
       {data.errorCode === undefined ? null : <p className="error-code">{`Error: ${data.errorCode}`}</p>}
       <div role="tablist" aria-label="Items">
-        {TABS.map(({ tab: t, label }) => (
+        {tabs.map(({ tab: t, label }) => (
           <button
             key={t}
             type="button"
@@ -92,13 +106,14 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
           </button>
         ))}
       </div>
-      <div role="tabpanel" aria-label={tab === 'failed' ? 'Failed' : 'Skipped'}>
+      <div role="tabpanel" aria-label={tabs.find((t) => t.tab === tab)?.label ?? ''}>
         <ItemTable
           rows={pages.page.items}
           {...(data.action === undefined ? {} : { action: data.action })}
           {...(data.reasonTitles === undefined ? {} : { reasonTitles: data.reasonTitles })}
+          {...(data.verificationTitles === undefined ? {} : { verificationTitles: data.verificationTitles })}
           {...(loaded.current.has(key) && !pages.busy && pages.error === undefined
-            ? { empty: tab === 'failed' ? 'No failed items.' : 'No skipped items.' }
+            ? { empty: EMPTY_TEXT[tab] }
             : {})}
         />
         <Pager

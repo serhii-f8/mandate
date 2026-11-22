@@ -161,6 +161,25 @@ describe('MCP-8 built-in change-set tools', () => {
     expect(rows[0]?.details).toMatchObject({ changesetId: id });
   });
 
+  it('MCP-4 EXE-12 get_changeset carries the verification counts and each item code; the text says confirmed and not confirmed', async () => {
+    const id = await prepare();
+    const verification = { pending: 0, confirmed: 1, unconfirmed: 1 };
+    // Items change only while executing; the stage's own writes are exercised in the worker tests.
+    await sql(`update change_set set status = 'executing' where id = $1`, [id]);
+    await sql(`update change_item set status = 'written', verification_status = 'confirmed' where changeset_id = $1 and target_id = 'acme-1'`, [id]);
+    await sql(`update change_item set status = 'written', verification_status = 'unconfirmed', verification_code = 'verify_timeout' where changeset_id = $1 and target_id = 'acme-2'`, [id]);
+    await sql(`update change_set set status = 'completed_with_errors', stats = stats || $2::jsonb where id = $1`, [id, JSON.stringify({ written: 2, verification })]);
+    const { result } = await call(alice, 'get_changeset', { changeset_id: id, status: 'written' });
+    expect(text(result)).toContain('1 confirmed, 1 not confirmed');
+    const s = result.structuredContent as { changeset: { stats: Record<string, unknown> }; items: Record<string, unknown>[]; verificationTitles: Record<string, string> };
+    expect(s.changeset.stats.verification).toEqual(verification);
+    expect(s.items.map((i) => [i.targetId, i.verificationStatus, i.verificationCode])).toEqual([
+      ['acme-1', 'confirmed', undefined],
+      ['acme-2', 'unconfirmed', 'verify_timeout'],
+    ]);
+    expect(s.verificationTitles.verify_timeout).toBe('not confirmed in time');
+  });
+
   it('MCP-8 an invalid cursor is a validation-style error that does not echo it', async () => {
     const id = await prepare();
     const { result } = await call(alice, 'get_changeset', { changeset_id: id, cursor: 'not*a*cursor' });

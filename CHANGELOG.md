@@ -16,6 +16,9 @@ Additive release: the configuration schema and the connector SDK are 1.3.0. A pr
 - `changesetWorkflow` runs the verify-after stage after the last batch, on workflow timers, and
   continues as new on long verifications. A cancel during verification stops it; the change-set then
   ends with the status its items give, not `cancelled` (EXE-12, EXE-6, EXE-7, EXE-10).
+- `get_changeset`, the execution answer, the change-set page and the widget show the verification:
+  confirmed and not-confirmed counts, `Verifying: N of M confirmed` while checks are pending, and
+  `Not confirmed: <check title or code>` on an unconfirmed item (MCP-4, UI-4, EXE-12).
 
 ## 1.2.0
 

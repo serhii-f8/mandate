@@ -63,6 +63,26 @@ describe('widget adapters', () => {
     expect(old.kind === 'view' && 'reasonTitles' in old.model).toBe(false);
   });
 
+  it('EXE-12 verification counts, item codes and titles of a get_changeset answer reach the model; older answers still parse', () => {
+    const base = answer(prepared).structuredContent as { changeset: { stats: object }; items: object[] };
+    const verification = { pending: 1, confirmed: 2, unconfirmed: 1 };
+    const verified = {
+      ...answer(prepared),
+      structuredContent: {
+        ...base,
+        changeset: { ...base.changeset, stats: { ...base.changeset.stats, verification } },
+        items: [{ targetId: 'x', status: 'written', before: 1, after: 2, verificationStatus: 'unconfirmed', verificationCode: 'missing_in_shop' }],
+        verificationTitles: { missing_in_shop: 'Missing in the shop' },
+      },
+    };
+    const t = parseChangeSetTrigger(verified);
+    expect(t.kind === 'view' && t.model.stats.verification).toEqual(verification);
+    expect(t.kind === 'view' && t.model.verificationTitles).toEqual({ missing_in_shop: 'Missing in the shop' });
+    expect(t.kind === 'view' && t.model.items.items[0]).toMatchObject({ verificationStatus: 'unconfirmed', verificationCode: 'missing_in_shop' });
+    const old = parseChangeSetTrigger(answer(prepared));
+    expect(old.kind === 'view' && ('verificationTitles' in old.model || 'verification' in old.model.stats)).toBe(false);
+  });
+
   it('UI-1 a prepared result and a get_changeset answer become a view model', () => {
     const fromPrepared = parseChangeSetTrigger(answer(prepared));
     expect(fromPrepared.kind).toBe('view');

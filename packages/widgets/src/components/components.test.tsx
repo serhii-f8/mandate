@@ -107,6 +107,21 @@ describe('components', () => {
     expect(screen.getByText('excluded: stale')).toBeTruthy();
   });
 
+  it('EXE-12 an unconfirmed item shows Not confirmed with the check title, else the code, as text', () => {
+    render(
+      <>
+        <ItemTable rows={[row({ targetId: 'A', status: 'written', verificationStatus: 'unconfirmed', verificationCode: 'missing_in_shop' })]} verificationTitles={{ missing_in_shop: 'Missing in the shop' }} />
+        <ItemTable rows={[row({ targetId: 'B', status: 'written', verificationStatus: 'unconfirmed', verificationCode: 'shop_price_differs' })]} verificationTitles={{ missing_in_shop: 'Missing in the shop' }} />
+        <ItemTable rows={[row({ targetId: 'C', status: 'written', verificationStatus: 'unconfirmed', verificationCode: 'verify_timeout' })]} verificationTitles={{ verify_timeout: '<b>not confirmed in time</b>' }} />
+        <ItemTable rows={[row({ targetId: 'D', status: 'written', verificationStatus: 'confirmed' })]} />
+      </>,
+    );
+    expect(screen.getByText('Not confirmed: Missing in the shop')).toBeTruthy();
+    expect(screen.getByText('Not confirmed: shop_price_differs')).toBeTruthy();
+    expect(screen.getByText('Not confirmed: <b>not confirmed in time</b>')).toBeTruthy();
+    expect(screen.queryAllByText(/^Not confirmed/)).toHaveLength(3);
+  });
+
   it('CS-3 the stats summary lists check codes after the built-ins, by code', () => {
     const { container } = render(
       <StatsSummary

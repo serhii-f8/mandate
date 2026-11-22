@@ -6,7 +6,7 @@
  * link, never a crash (Review Focus 1).
  */
 import type { CallToolResult } from '@modelcontextprotocol/client';
-import type { ApprovalStateModel, ApprovalViewModel, ChangeSetViewModel, ItemFilter, ItemRowModel, ItemsPageModel } from '../model.js';
+import type { ApprovalStateModel, ApprovalViewModel, ChangeSetViewModel, ItemFilter, ItemRowModel, ItemsPageModel, StatsModel } from '../model.js';
 import { changeSetAnswerSchema, isPageUrl, reviewAnswerSchema, uuidSchema, type ChangeSetAnswer, type ItemAnswer, type ReviewAnswer } from './schemas.js';
 
 export type ChangeSetTrigger =
@@ -31,6 +31,16 @@ function reasonTitlesOf(titles: Record<string, string> | undefined): { reasonTit
   return titles === undefined || Object.keys(titles).length === 0 ? {} : { reasonTitles: titles };
 }
 
+/** EXE-12: the verification texts only when there are any, so an unverified model is unchanged. */
+function verificationTitlesOf(titles: Record<string, string> | undefined): { verificationTitles?: Record<string, string> } {
+  return titles === undefined || Object.keys(titles).length === 0 ? {} : { verificationTitles: titles };
+}
+
+function toStats(stats: ChangeSetAnswer['changeset']['stats']): StatsModel {
+  const { verification, ...rest } = stats;
+  return verification === undefined ? rest : { ...rest, verification };
+}
+
 function toItemRow(row: ItemAnswer): ItemRowModel {
   return {
     targetId: row.targetId,
@@ -39,6 +49,8 @@ function toItemRow(row: ItemAnswer): ItemRowModel {
     before: row.before,
     after: row.after,
     ...(row.error === undefined ? {} : { error: row.error }),
+    ...(row.verificationStatus === undefined ? {} : { verificationStatus: row.verificationStatus }),
+    ...(row.verificationCode === undefined ? {} : { verificationCode: row.verificationCode }),
   };
 }
 
@@ -87,13 +99,14 @@ export function fromGetChangeset(structured: unknown, filter?: ItemFilter): Chan
     id: cs.id,
     kind,
     ...actionOf(cs.action),
+    ...verificationTitlesOf(a.verificationTitles),
     ...(kind === 'opaque' && cs.args !== undefined ? { args: cs.args } : {}),
     operation: { id: cs.operation.id, ...(cs.operation.title === undefined ? {} : { title: cs.operation.title }) },
     status: cs.status,
     ...(cs.hash === undefined ? {} : { hash: cs.hash }),
     createdAt: cs.createdAt,
     expiresAt: cs.expiresAt,
-    stats: cs.stats,
+    stats: toStats(cs.stats),
     items: toItemsPage(a.items, a.nextCursor),
     ...(filter === undefined ? {} : { itemFilter: filter }),
     ...(a.progress === undefined ? {} : { progress: a.progress }),
@@ -182,7 +195,7 @@ export function fromReviewChangeset(structured: unknown, filter?: ItemFilter): A
                 }),
           },
         }),
-    stats: detail.stats,
+    stats: toStats(detail.stats),
     expiresAt: detail.expiresAt,
     ...(detail.approval === undefined ? {} : { approval: toDetailApproval(detail.approval) }),
     sample: { seed: sample.seed, items: sample.items.map(toItemRow) },

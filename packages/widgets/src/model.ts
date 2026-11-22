@@ -10,6 +10,10 @@ export interface ItemRowModel {
   before: unknown;
   after: unknown;
   error?: string;
+  /** EXE-12: the verification state of a written item; absent when it was not verified. */
+  verificationStatus?: 'pending' | 'confirmed' | 'unconfirmed';
+  /** EXE-12: the code of the failing check, or a fixed verification code. */
+  verificationCode?: string;
 }
 export interface ItemsPageModel {
   items: ItemRowModel[];
@@ -22,6 +26,8 @@ export interface StatsModel {
   written: number;
   failed: number;
   skipped: number;
+  /** EXE-12: present once the change-set was verified. */
+  verification?: { pending: number; confirmed: number; unconfirmed: number };
 }
 export interface ProgressModel {
   total: number;
@@ -67,6 +73,8 @@ export interface ChangeSetViewModel {
   rollback: { available: boolean; count?: number; until?: string; stats?: { restored: number; skipped: number; failed: number } };
   /** CS-3: titles of check codes from the current configuration, shown beside an item's stored reason. */
   reasonTitles?: Record<string, string>;
+  /** EXE-12: texts for verification codes (a check's title, a fixed code's text), shown on unconfirmed items. */
+  verificationTitles?: Record<string, string>;
   pageUrl?: string;
   permissions: { canExclude: boolean; canSubmit: boolean; canCancel: boolean };
 }

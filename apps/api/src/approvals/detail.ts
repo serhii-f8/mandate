@@ -26,8 +26,10 @@ import {
   type ItemStatus,
   type OperationDefinition,
   type RiskClass,
+  type VerificationStatus,
 } from '@mandate/core';
 import type { RollbackBlock } from '../changesets/rollback.js';
+import { verificationTitlesOf } from './texts.js';
 
 export interface PageViewer {
   subject: string;
@@ -59,6 +61,9 @@ export interface ItemRow {
   before: unknown;
   after: unknown;
   error?: string;
+  /** EXE-12: present once the written item was verified. */
+  verificationStatus?: VerificationStatus;
+  verificationCode?: string;
 }
 
 export function itemRow(i: ChangeItemRecord): ItemRow {
@@ -69,6 +74,8 @@ export function itemRow(i: ChangeItemRecord): ItemRow {
     before: i.before,
     after: i.after,
     ...(i.error === undefined ? {} : { error: i.error }),
+    ...(i.verificationStatus === undefined ? {} : { verificationStatus: i.verificationStatus }),
+    ...(i.verificationCode === undefined ? {} : { verificationCode: i.verificationCode }),
   };
 }
 
@@ -125,6 +132,8 @@ export interface ChangeSetDetail {
    * beside an item's stored reason code (display only; an untitled or unknown code shows the code).
    */
   reasonTitles: Record<string, string>;
+  /** EXE-12: the texts of the verification codes, present only for a verified change-set. */
+  verificationTitles?: Record<string, string>;
   viewer: ViewerBlock;
 }
 
@@ -132,6 +141,11 @@ function reasonTitlesOf(op: OperationDefinition | undefined): Record<string, str
   const out: Record<string, string> = {};
   for (const check of op?.manifest?.checks ?? []) if (check.title !== undefined) out[check.code] = check.title;
   return out;
+}
+
+function optionalVerificationTitles(stats: ChangeSetStats, op: OperationDefinition | undefined): { verificationTitles?: Record<string, string> } {
+  const titles = verificationTitlesOf(op, stats);
+  return titles === undefined ? {} : { verificationTitles: titles };
 }
 
 export function toApprover(v: PageViewer): Approver {
@@ -305,6 +319,7 @@ export function changesetDetailWith(input: {
     ...(input.drift === undefined ? {} : { drift: input.drift }),
     rollback: input.rollback,
     reasonTitles: reasonTitlesOf(input.operation),
+    ...optionalVerificationTitles(cs.stats, input.operation),
     // CS-5: an opaque change-set has no items to exclude.
     viewer: kind === 'opaque' ? { ...input.viewer, canExclude: false } : input.viewer,
   };

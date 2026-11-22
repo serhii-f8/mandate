@@ -277,6 +277,53 @@ describe('CS-3 detail reason titles', () => {
   });
 });
 
+describe('EXE-12 detail verification', () => {
+  const verifying: OperationDefinition = {
+    ...OPERATION,
+    manifest: {
+      idField: 'sku',
+      idsArg: 'skus',
+      valuesArg: 'fields',
+      fields: ['meta_title'],
+      requiredFields: [],
+      scopeArgs: {},
+      readBefore: { operation: 'catalog.get', args: {}, idsArg: 'skus' },
+      batchSize: 50,
+      maxTargets: 100,
+      rollback: { strategy: 'none' },
+      verifyAfter: {
+        afterSeconds: 0,
+        everySeconds: 30,
+        timeoutSeconds: 600,
+        checks: [
+          { code: 'shop_price_differs', require: [{ present: { record: 'price' } }] },
+          { code: 'missing_in_shop', title: 'Missing in the shop', require: [{ present: { record: 'sku' } }] },
+        ],
+      },
+    },
+  };
+  const verified = (): ChangeSetRecord => ({ ...prepared(), status: 'completed_with_errors', stats: { ...prepared().stats, written: 2, verification: { pending: 0, confirmed: 1, unconfirmed: 1 } } });
+
+  it('EXE-12 a verified change-set names the titles of its checks and the fixed codes; an unverified one nothing', () => {
+    const d = changesetDetail({ changeset: verified(), approvals: [], operation: verifying, viewer: alice, now: NOW, rollback: NO_ROLLBACK });
+    expect(d.verificationTitles).toEqual({
+      missing_in_shop: 'Missing in the shop',
+      verify_read_failed: 'could not be read',
+      verify_timeout: 'not confirmed in time',
+      verify_cancelled: 'verification was cancelled',
+    });
+    expect(d.stats.verification).toEqual({ pending: 0, confirmed: 1, unconfirmed: 1 });
+    const plain = changesetDetail({ changeset: prepared(), approvals: [], operation: verifying, viewer: alice, now: NOW, rollback: NO_ROLLBACK });
+    expect('verificationTitles' in plain).toBe(false);
+  });
+
+  it('EXE-12 an item row carries its verification status and code, and only when set', () => {
+    const base = { targetId: 'A', status: 'written' as const, before: 1, after: 2 };
+    expect(itemRow({ ...base, verificationStatus: 'unconfirmed', verificationCode: 'missing_in_shop' })).toMatchObject({ verificationStatus: 'unconfirmed', verificationCode: 'missing_in_shop' });
+    expect(Object.keys(itemRow(base))).not.toContain('verificationStatus');
+  });
+});
+
 describe('detail additions', () => {
   it('CS-5 the detail carries derivedFrom of a derived change-set', () => {
     const src = '22222222-2222-4222-8222-222222222222';

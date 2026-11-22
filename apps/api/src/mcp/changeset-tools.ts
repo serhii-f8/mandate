@@ -18,6 +18,7 @@ import {
   type ExecutionProgress,
   type ItemStatus,
 } from '@mandate/core';
+import { verificationTitlesOf } from '../approvals/texts.js';
 import { decodeCursor } from '../approvals/page-query.js';
 import { executionSummaryText } from '../changesets/results.js';
 import { rollbackBlock } from '../changesets/rollback.js';
@@ -152,7 +153,9 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
       const summary = drift === undefined ? '' : ` ${executionSummaryText(record.status, record.stats, drift)}`;
       const approval = await approvalView(deps, record);
       const rollback = await rollbackBlock({ repository: deps.repository, snapshot, now: deps.now }, record, caller);
-      const kind = changesetKind(snapshot.configuration.policy.operations.find((op) => op.id === record.operation));
+      const operation = snapshot.configuration.policy.operations.find((op) => op.id === record.operation);
+      const kind = changesetKind(operation);
+      const verificationTitles = verificationTitlesOf(operation, record.stats);
       const structured: Record<string, unknown> = {
         changeset: {
           id: record.id,
@@ -177,6 +180,8 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
         // UI-4: whether the requester can roll it back now; the rollback itself is confirmed on the page.
         rollback,
         ...(drift === undefined ? {} : { execution: { drift } }),
+        // EXE-12: how to read the verification codes of the items; only for a verified change-set.
+        ...(verificationTitles === undefined ? {} : { verificationTitles }),
       };
       const text =
         `Change-set ${record.id} (${record.operation}) is ${record.status}: ${String(record.stats.included)} change(s), ` +

@@ -112,11 +112,13 @@ export interface ChangeSetDetail {
   action?: 'update' | 'create' | 'delete';
   /** CS-3: titles of the operation's check codes, a label beside an item's stored reason. */
   reasonTitles?: Record<string, string>;
+  /** EXE-12: texts for verification codes, shown beside an unconfirmed item. */
+  verificationTitles?: Record<string, string>;
   operation: { id: string; title?: string; description?: string; risk?: string };
   connection: string;
   request: { args: Record<string, unknown>; requester: string; clientId?: string; createdAt: string; submittedAt?: string };
   policy?: { rule: string; role: string; approval?: { reason: string; threshold?: number; included: number } };
-  stats: { total: number; included: number; excluded: Record<string, number>; written: number; failed: number; skipped: number };
+  stats: { total: number; included: number; excluded: Record<string, number>; written: number; failed: number; skipped: number; verification?: { pending: number; confirmed: number; unconfirmed: number } };
   expiresAt: string;
   progress?: { total: number; done: number; failed: number; skipped: number };
   errorCode?: string;
@@ -138,6 +140,8 @@ export interface ItemRow {
   before: unknown;
   after: unknown;
   error?: string;
+  verificationStatus?: 'pending' | 'confirmed' | 'unconfirmed';
+  verificationCode?: string;
 }
 export interface ItemsPage {
   items: ItemRow[];

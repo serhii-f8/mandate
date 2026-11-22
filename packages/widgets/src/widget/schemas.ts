@@ -24,6 +24,8 @@ export const itemSchema = z.object({
   before: z.unknown(),
   after: z.unknown(),
   error: z.string().optional(),
+  verificationStatus: z.enum(['pending', 'confirmed', 'unconfirmed']).optional(),
+  verificationCode: z.string().optional(),
 });
 
 export const statsSchema = z.object({
@@ -33,6 +35,7 @@ export const statsSchema = z.object({
   written: z.number(),
   failed: z.number(),
   skipped: z.number(),
+  verification: z.object({ pending: z.number(), confirmed: z.number(), unconfirmed: z.number() }).optional(),
 });
 
 const progressSchema = z.object({ total: z.number(), done: z.number(), failed: z.number(), skipped: z.number() });
@@ -86,6 +89,8 @@ export const changeSetAnswerSchema = z.object({
     })
     .optional(),
   execution: z.object({ drift: z.number() }).optional(),
+  /** EXE-12: absent unless the change-set was verified. */
+  verificationTitles: z.record(z.string(), z.string()).optional(),
   pageUrl: pageUrlSchema,
 });
 

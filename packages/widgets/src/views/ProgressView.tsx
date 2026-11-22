@@ -21,7 +21,12 @@ export function ProgressView({ data, actions, onData }: ViewProps<ChangeSetViewM
   const action = useAction();
   const { total, done, failed, skipped } = progressOf(data);
   const cancel = actions.cancel?.bind(actions);
-  const counts = `${String(done)} done · ${String(failed)} failed · ${String(skipped)} skipped of ${String(total)}`;
+  const v = data.stats.verification;
+  // EXE-12: while items still await their check, the line says so.
+  const verifying = data.status === 'executing' && v !== undefined && v.pending > 0;
+  const counts = verifying
+    ? `Verifying: ${String(v.confirmed)} of ${String(v.confirmed + v.pending + v.unconfirmed)} confirmed`
+    : `${String(done)} done · ${String(failed)} failed · ${String(skipped)} skipped of ${String(total)}`;
   const canCancel = cancel !== undefined && data.permissions.canCancel && data.status === 'executing';
 
   return (

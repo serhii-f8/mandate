@@ -77,6 +77,14 @@ describe('change-set answers', () => {
     expect(executionAnswer(record('completed'), {}).isError).toBeUndefined();
   });
 
+  it('MCP-4 EXE-12 executionAnswer carries the verification counts when verified, and nothing otherwise', () => {
+    const verification = { pending: 0, confirmed: 2, unconfirmed: 1 };
+    const verified = executionAnswer(record('completed_with_errors', { stats: { ...stats, verification } }), {});
+    expect(verified.structured).toEqual({ changesetId: 'cs-1', status: 'completed_with_errors', stats: { written: 2, failed: 0, skipped: 1, drift: 0, verification } });
+    expect(verified.text).toContain('2 confirmed, 1 not confirmed');
+    expect((executionAnswer(record('completed'), {}).structured as { stats: object }).stats).not.toHaveProperty('verification');
+  });
+
   it('MCP-7 preparation errors and expiry', () => {
     expect(preparationErrorAnswer(record('failed', { errorCode: 'targets_missing' })).isError).toBe(true);
     expect(preparationErrorAnswer(record('cancelled')).structured).toMatchObject({ changeset: { status: 'cancelled', errorCode: 'cancelled' } });

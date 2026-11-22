@@ -125,6 +125,15 @@ describe('page adapters', () => {
     expect('reasonTitles' in toApprovalModel(requester, items, sample, FRESH)).toBe(false);
   });
 
+  it('EXE-12 the verification titles and item verification reach the model; none adds nothing', () => {
+    const titled: ChangeSetDetail = { ...requester, verificationTitles: { missing_in_shop: 'Missing in the shop' } };
+    expect(toChangeSetModel(titled, items).verificationTitles).toEqual({ missing_in_shop: 'Missing in the shop' });
+    expect('verificationTitles' in toChangeSetModel(requester, items)).toBe(false);
+    const page = toItemsPage({ items: [{ targetId: 'A', status: 'written', before: 1, after: 2, verificationStatus: 'unconfirmed', verificationCode: 'missing_in_shop' }] });
+    expect(page.items[0]).toMatchObject({ verificationStatus: 'unconfirmed', verificationCode: 'missing_in_shop' });
+    expect(Object.keys(toItemsPage({ items: [{ targetId: 'A', status: 'written', before: 1, after: 2 }] }).items[0] ?? {})).not.toContain('verificationStatus');
+  });
+
   it('APR-5 the stored action reaches both models; an update carries none', () => {
     const created: ChangeSetDetail = { ...requester, action: 'create' };
     expect(toChangeSetModel(created, items).action).toBe('create');
