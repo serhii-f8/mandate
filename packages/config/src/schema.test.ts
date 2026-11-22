@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { configDocumentSchema, schemaIssues } from './schema.js';
 import { changesetsSchema } from './manifest.js';
+import { toAuthSettings } from './upstream-schema.js';
 
 export const FULL_EXAMPLE = `
 version: 1
@@ -80,6 +81,28 @@ notifications:
 function issuesOf(yaml: string) {
   return schemaIssues(configDocumentSchema.safeParse(parse(yaml)));
 }
+
+describe('CONN-3 oauth_password auth', () => {
+  const conn = (auth: string) => `version: 1\nconnections:\n  - { id: m, adapter: openapi, base_url: https://x.test, credential_ref: c, auth: ${auth} }\n`;
+
+  it('CONN-3 loads with client_auth basic and no scopes by default', () => {
+    const parsed = configDocumentSchema.safeParse(parse(conn('{ scheme: oauth_password, token_url: https://id.example.test/token }')));
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const auth = parsed.data.connections?.[0]?.auth;
+      expect(auth && toAuthSettings(auth)).toEqual({ scheme: 'oauth_password', tokenUrl: 'https://id.example.test/token', scopes: [], clientAuth: 'basic' });
+    }
+  });
+
+  it('CONN-3 accepts client_auth body', () => {
+    expect(issuesOf(conn('{ scheme: oauth_password, token_url: https://id.example.test/token, client_auth: body, scopes: [a] }'))).toEqual([]);
+  });
+
+  it('CONN-3 refuses client_auth header at the key', () => {
+    const issues = issuesOf(conn('{ scheme: oauth_password, token_url: https://id.example.test/token, client_auth: header }'));
+    expect(issues[0]?.path).toEqual(['connections', 0, 'auth', 'client_auth']);
+  });
+});
 
 describe('CONN-6 connection rate', () => {
   const conn = (rate: string) => `version: 1\nconnections:\n  - { id: m, adapter: openapi, base_url: https://x.test, credential_ref: c${rate} }\n`;

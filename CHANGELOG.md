@@ -12,6 +12,9 @@ only. Nothing needs to change on upgrade.
 - `rate.requests_per_second` on a connection paces its upstream requests, retries included, and a
   `Retry-After` the client honours holds the whole connection (CONN-6, ADR 0064).
   `ConnectionSettings.minIntervalMs` carries it to adapters.
+- `auth.scheme: oauth_password` (with `client_auth: basic | body`) fetches upstream tokens with the OAuth
+  password grant, for upstreams that offer nothing else. The credential scheme `oauth_password`
+  is appended to `CREDENTIAL_SCHEMES` and `AuthSettings` gains the matching variant (CONN-3, ADR 0065).
 
 ## 1.0.1
 

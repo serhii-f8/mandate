@@ -61,10 +61,11 @@ Each entry has `adapter: openapi` or `adapter: mcp`.
 | `mcp_url` | http(s) URL | required for `mcp` | |
 | `pin_check_seconds` | integer | 300 | 10-86400; `mcp` only; seconds between checks of the pinned tools |
 | `credential_ref` | id | none | Required when `auth` is set; refused without `auth` |
-| `auth.scheme` | `bearer`, `api_key`, `basic`, `oauth_client_credentials` | none | |
+| `auth.scheme` | `bearer`, `api_key`, `basic`, `oauth_client_credentials`, `oauth_password` | none | `oauth_password` since 1.1.0: the OAuth password grant, for upstreams that offer nothing else (OAuth 2.1 removes the grant). Secret: `client_id`, `client_secret`, `username`, `password` |
 | `auth.header` | header name | required for `api_key` | |
-| `auth.token_url` | http(s) URL | required for `oauth_client_credentials` | |
-| `auth.scopes` | list of strings | `[]` | `oauth_client_credentials` only |
+| `auth.token_url` | http(s) URL | required for `oauth_client_credentials` and `oauth_password` | Its host joins the connection's allowed hosts |
+| `auth.scopes` | list of strings | `[]` | `oauth_client_credentials` and `oauth_password` |
+| `auth.client_auth` | `basic`, `body` | `basic` | `oauth_password` only; since 1.1.0. `basic`: client id and secret in a Basic header. `body`: as form fields, for token endpoints that do not accept the header |
 | `preset` | id | none | Names an entry of `presets` |
 | `operation_prefix` | string | none | `^[a-z][a-z0-9_]{0,30}$`; requires `preset` |
 | `timeout_ms` | integer | 10000 | 1-120000 |

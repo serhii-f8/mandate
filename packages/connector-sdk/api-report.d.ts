@@ -85,6 +85,11 @@ export type AuthSettings = {
     scheme: 'oauth_client_credentials';
     tokenUrl: string;
     scopes: readonly string[];
+} | {
+    scheme: 'oauth_password';
+    tokenUrl: string;
+    scopes: readonly string[];
+    clientAuth: 'basic' | 'body';
 };
 export interface ConnectionSettings {
     id: string;
@@ -104,7 +109,7 @@ export interface ConnectionSettings {
 }
 
 // file: credentials.d.ts
-export declare const CREDENTIAL_SCHEMES: readonly ["bearer", "api_key", "basic", "oauth_client_credentials", "webhook_url"];
+export declare const CREDENTIAL_SCHEMES: readonly ["bearer", "api_key", "basic", "oauth_client_credentials", "webhook_url", "oauth_password"];
 export type CredentialScheme = (typeof CREDENTIAL_SCHEMES)[number];
 export type SecretMaterial = {
     readonly token: string;
@@ -118,6 +123,11 @@ export type SecretMaterial = {
     readonly client_secret: string;
 } | {
     readonly url: string;
+} | {
+    readonly client_id: string;
+    readonly client_secret: string;
+    readonly username: string;
+    readonly password: string;
 };
 export declare function secretFieldNames(scheme: CredentialScheme): readonly string[];
 export declare function parseSecret(scheme: CredentialScheme, value: unknown): {

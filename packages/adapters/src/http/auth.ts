@@ -2,7 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import { parseSecret, type ConnectionSettings, type CredentialSource, type ReadErrorCode } from '@mandate/connector-sdk';
 import type { Transport } from './client.js';
-import { clientCredentialsToken, clientSecretBasicValue, HEADER_SAFE, type ClientCredentialsParams } from './oauth.js';
+import { clientSecretBasicValue, formEncode, HEADER_SAFE, oauthToken, type OAuthTokenParams } from './oauth.js';
 import { createScrubber, type Scrubber } from './scrub.js';
 
 /** A credential failure; the message is already scrubbed and names no secret (SEC-3). */
@@ -63,12 +63,13 @@ export async function prepareAuth(
   }
   const s = parsed.secret;
   const secrets: string[] = [];
-  // A Basic user name is an identifier, not a secret: scrubbing it would redact ordinary
-  // response data ("admin"). The password and the encoded pair are scrubbed.
-  secrets.push(...Object.entries(s).filter(([k]) => !(auth.scheme === 'basic' && k === 'username')).map(([, v]) => v));
+  // A user name (Basic, password grant) is an identifier, not a secret: scrubbing it would redact
+  // ordinary response data ("admin"). The password and the encoded pair are scrubbed.
+  const isUserName = (k: string): boolean => (auth.scheme === 'basic' || auth.scheme === 'oauth_password') && k === 'username';
+  secrets.push(...Object.entries(s).filter(([k]) => !isUserName(k)).map(([, v]) => v));
   const unsendable = (): AuthFailure => failure('credential_unusable', `credential ${credential.ref} contains characters not allowed in a header`, empty);
   let authHeader: readonly [string, string] | undefined;
-  let oauth: ClientCredentialsParams | undefined;
+  let oauth: OAuthTokenParams | undefined;
   switch (auth.scheme) {
     case 'bearer':
       if (!HEADER_SAFE.test(s.token ?? '')) return unsendable();
@@ -92,7 +93,27 @@ export async function prepareAuth(
       secrets.push(Buffer.from(`${clientId}:${clientSecret}`).toString('base64'));
       // The exact value sent to the token endpoint (form-encoded id and secret, RFC 6749 §2.3.1).
       secrets.push(clientSecretBasicValue(clientId, clientSecret));
-      oauth = { tokenUrl: auth.tokenUrl, clientId, clientSecret, scopes: auth.scopes, timeoutMs: settings.timeoutMs };
+      oauth = { tokenUrl: auth.tokenUrl, clientId, clientSecret, scopes: auth.scopes, timeoutMs: settings.timeoutMs, grant: { kind: 'client_credentials' }, clientAuth: 'basic' };
+      break;
+    }
+    case 'oauth_password': {
+      const clientId = s.client_id ?? '';
+      const clientSecret = s.client_secret ?? '';
+      const password = s.password ?? '';
+      secrets.push(Buffer.from(`${clientId}:${clientSecret}`).toString('base64'));
+      // The exact value sent to the token endpoint (form-encoded id and secret, RFC 6749 §2.3.1).
+      secrets.push(clientSecretBasicValue(clientId, clientSecret));
+      // The form-encoded forms are what an endpoint echoing the request body would return.
+      secrets.push(formEncode(password), formEncode(clientSecret));
+      oauth = {
+        tokenUrl: auth.tokenUrl,
+        clientId,
+        clientSecret,
+        scopes: auth.scopes,
+        timeoutMs: settings.timeoutMs,
+        grant: { kind: 'password', username: s.username ?? '', password },
+        clientAuth: auth.clientAuth,
+      };
       break;
     }
   }
@@ -104,7 +125,7 @@ export async function prepareAuth(
   const useToken = async (rejectedToken?: string): Promise<AuthFailure | undefined> => {
     if (!params) return undefined;
     const opts = rejectedToken === undefined ? { now: deps.now } : { now: deps.now, rejectedToken };
-    const t = await clientCredentialsToken(settings.id, params, opts, deps.transport);
+    const t = await oauthToken(settings.id, params, opts, deps.transport);
     if (!t.ok) return failure(t.code, t.message, scrubber, t.status);
     secrets.push(t.accessToken);
     scrubber = createScrubber(secrets);

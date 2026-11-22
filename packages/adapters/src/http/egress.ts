@@ -138,7 +138,7 @@ export function allowedHostsOf(settings: ConnectionSettings): Set<string> {
   const hosts = new Set<string>();
   const base = hostOfUrl(settings.baseUrl);
   if (base) hosts.add(base);
-  if (settings.auth?.scheme === 'oauth_client_credentials') {
+  if (settings.auth?.scheme === 'oauth_client_credentials' || settings.auth?.scheme === 'oauth_password') {
     const t = hostOfUrl(settings.auth.tokenUrl);
     if (t) hosts.add(t);
   }

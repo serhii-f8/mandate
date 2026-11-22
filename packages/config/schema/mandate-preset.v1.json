@@ -110,6 +110,41 @@
                 "token_url"
               ],
               "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "client_auth": {
+                  "default": "basic",
+                  "enum": [
+                    "basic",
+                    "body"
+                  ],
+                  "type": "string"
+                },
+                "scheme": {
+                  "const": "oauth_password",
+                  "type": "string"
+                },
+                "scopes": {
+                  "default": [],
+                  "items": {
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "token_url": {
+                  "format": "uri",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "scheme",
+                "token_url"
+              ],
+              "type": "object"
             }
           ]
         },

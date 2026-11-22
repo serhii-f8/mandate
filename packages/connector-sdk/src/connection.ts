@@ -4,7 +4,8 @@ export type AuthSettings =
   | { scheme: 'bearer' }
   | { scheme: 'api_key'; header: string }
   | { scheme: 'basic' }
-  | { scheme: 'oauth_client_credentials'; tokenUrl: string; scopes: readonly string[] };
+  | { scheme: 'oauth_client_credentials'; tokenUrl: string; scopes: readonly string[] }
+  | { scheme: 'oauth_password'; tokenUrl: string; scopes: readonly string[]; clientAuth: 'basic' | 'body' };
 
 export interface ConnectionSettings {
   id: string;

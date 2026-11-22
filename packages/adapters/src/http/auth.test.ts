@@ -83,6 +83,44 @@ describe('CONN-3 SEC-3 prepared credential injection', () => {
     expect(up.requests.filter((r) => r.path === '/token')).toHaveLength(1);
   });
 
+  it('CONN-3 SEC-3 oauth_password gives a Bearer header and scrubs password, secret, token and encoded forms but not the user name', async () => {
+    up.route('POST', '/token', () => ({ status: 200, body: { access_token: 'issued-pw', expires_in: 3600 } }));
+    const s = settings({ auth: { scheme: 'oauth_password', tokenUrl: `${up.url}/token`, scopes: [], clientAuth: 'basic' } });
+    const auth = await prepared(s, cred('oauth_password', { client_id: 'cid', client_secret: 'c secret&', username: 'alice', password: 'p +w&' }));
+    expect(auth.header()).toEqual(['authorization', 'Bearer issued-pw']);
+    for (const secret of ['issued-pw', 'c secret&', 'p +w&', 'p+%2Bw%26', 'c+secret%26']) expect(auth.scrubber.text(`x ${secret} y`), secret).toBe(`x ${REDACTED} y`);
+    expect(auth.scrubber.text('alice')).toBe('alice');
+    expect(auth.scrubber.text(Buffer.from('cid:c+secret%26').toString('base64'))).toBe(REDACTED);
+  });
+
+  it('CONN-3 SEC-3 oauth_password failure message built from a response echoing the password comes back scrubbed', async () => {
+    const s = settings({ auth: { scheme: 'oauth_password', tokenUrl: `${up.url}/token`, scopes: [], clientAuth: 'body' } });
+    const secrets = { client_id: 'cid', client_secret: 'csecret', username: 'alice', password: 'hunter2-pw' };
+    const transport: Parameters<typeof prepareAuth>[2]['transport'] = () =>
+      Promise.resolve({ kind: 'error', code: 'network', message: 'upstream said: bad password hunter2-pw' });
+    const r = await prepareAuth(s, cred('oauth_password', secrets), { now: Date.now, transport });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.message).not.toContain('hunter2-pw');
+      expect(r.message).toContain(REDACTED);
+    }
+  });
+
+  it('CONN-3 oauth_password refreshAfter401 fetches a new token once', async () => {
+    let issued = 0;
+    up.route('POST', '/token', () => {
+      issued += 1;
+      return { status: 200, body: { access_token: `pw-issued-${issued}`, expires_in: 3600 } };
+    });
+    const s = settings({ auth: { scheme: 'oauth_password', tokenUrl: `${up.url}/token`, scopes: [], clientAuth: 'basic' } });
+    const auth = await prepared(s, cred('oauth_password', { client_id: 'cid', client_secret: 'cs', username: 'u', password: 'pw' }));
+    expect(auth.header()).toEqual(['authorization', 'Bearer pw-issued-1']);
+    expect(await auth.refreshAfter401()).toEqual({ ok: true });
+    expect(auth.header()).toEqual(['authorization', 'Bearer pw-issued-2']);
+    expect(await auth.refreshAfter401()).toBeUndefined();
+    expect(up.requests.filter((r) => r.path === '/token')).toHaveLength(2);
+  });
+
   it('CONN-3 no auth configured gives no header and an empty scrubber', async () => {
     const auth = await prepared(settings(), undefined);
     expect(auth.header()).toBeUndefined();

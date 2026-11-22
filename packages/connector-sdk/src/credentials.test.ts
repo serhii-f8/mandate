@@ -30,6 +30,21 @@ describe('SEC-2 secret material per scheme', () => {
   });
 });
 
+describe('CONN-3 oauth_password secret', () => {
+  it('CONN-3 lists the four field names', () => {
+    expect(secretFieldNames('oauth_password')).toEqual(['client_id', 'client_secret', 'username', 'password']);
+  });
+  it('CONN-3 SEC-3 a missing password fails naming the field and quoting no value', () => {
+    const r = parseSecret('oauth_password', { client_id: 'c', client_secret: 'sentinel-secret', username: 'sentinel-user' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.message).toContain('password');
+      expect(r.message).not.toContain('sentinel-secret');
+      expect(r.message).not.toContain('sentinel-user');
+    }
+  });
+});
+
 describe('SEC-2 webhook_url secret', () => {
   it('SEC-2 accepts an https webhook URL', () => {
     const r = parseSecret('webhook_url', { url: 'https://hooks.slack.com/services/T/B/x' });

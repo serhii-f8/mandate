@@ -34,34 +34,46 @@ export function formEncode(value: string): string {
   return new URLSearchParams([['v', value]]).toString().slice(2);
 }
 
-/**
- * Client credentials grant (RFC 6749 §4.4) with client_secret_basic (§2.3.1). The returned token is
- * secret material: callers add it to their scrubber and never log it.
- */
 /** The client_secret_basic header value (RFC 6749 §2.3.1): Base64 of the form-encoded id and secret. */
 export function clientSecretBasicValue(clientId: string, clientSecret: string): string {
   return Buffer.from(`${formEncode(clientId)}:${formEncode(clientSecret)}`).toString('base64');
 }
 
-export async function fetchClientCredentialsToken(p: ClientCredentialsParams, transport: Transport): Promise<TokenFetchResult> {
+/** The grant a token request makes: client credentials (RFC 6749 §4.4) or resource owner password (§4.3). */
+export type TokenGrant = { kind: 'client_credentials' } | { kind: 'password'; username: string; password: string };
+
+export interface OAuthTokenParams extends ClientCredentialsParams {
+  grant: TokenGrant;
+  /** `basic`: client_secret_basic (§2.3.1). `body`: client_id and client_secret as form fields (§2.3.1, not recommended). */
+  clientAuth: 'basic' | 'body';
+}
+
+/** Client credentials grant with client_secret_basic; kept for callers that need nothing else. */
+export function fetchClientCredentialsToken(p: ClientCredentialsParams, transport: Transport): Promise<TokenFetchResult> {
+  return fetchOAuthToken({ ...p, grant: { kind: 'client_credentials' }, clientAuth: 'basic' }, transport);
+}
+
+export async function fetchOAuthToken(p: OAuthTokenParams, transport: Transport): Promise<TokenFetchResult> {
   let url: URL;
   try {
     url = new URL(p.tokenUrl);
   } catch {
     return { ok: false, code: 'credential_unusable', message: 'token URL is not a valid URL' };
   }
-  const form = new URLSearchParams({ grant_type: 'client_credentials' });
+  const form = new URLSearchParams({ grant_type: p.grant.kind });
+  if (p.grant.kind === 'password') {
+    form.set('username', p.grant.username);
+    form.set('password', p.grant.password);
+  }
   if (p.scopes.length > 0) form.set('scope', p.scopes.join(' '));
-  const basic = clientSecretBasicValue(p.clientId, p.clientSecret);
-  const r = await transport(
-    {
-      method: 'POST',
-      url,
-      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded', authorization: `Basic ${basic}` },
-      body: form.toString(),
-    },
-    p.timeoutMs,
-  );
+  const headers: Record<string, string> = { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' };
+  if (p.clientAuth === 'basic') {
+    headers.authorization = `Basic ${clientSecretBasicValue(p.clientId, p.clientSecret)}`;
+  } else {
+    form.set('client_id', p.clientId);
+    form.set('client_secret', p.clientSecret);
+  }
+  const r = await transport({ method: 'POST', url, headers, body: form.toString() }, p.timeoutMs);
   if (r.kind === 'error') return { ok: false, code: r.code, message: `token request failed: ${r.message}` };
   if (r.kind === 'status') {
     // 4xx: the client or its scopes are refused. 5xx (and odd statuses): the endpoint itself failed.
@@ -80,7 +92,7 @@ export async function fetchClientCredentialsToken(p: ClientCredentialsParams, tr
 }
 
 interface CachedToken {
-  /** Hash of token URL, client and scopes: a rotated credential never reuses an old token. */
+  /** Hash of token URL, client, scopes, grant and client authentication: a rotated credential never reuses an old token. */
   fingerprint: string;
   token: string;
   /** undefined: no `expires_in` was given; the token is kept until an upstream 401 replaces it. */
@@ -105,8 +117,19 @@ export function lastTokenScopes(connectionId: string): readonly string[] | undef
   return scopesSeen.get(connectionId);
 }
 
-function fingerprintOf(p: ClientCredentialsParams): string {
-  return createHash('sha256').update(JSON.stringify([p.tokenUrl, p.clientId, p.clientSecret, p.scopes])).digest('hex');
+function fingerprintOf(p: OAuthTokenParams): string {
+  const grant = p.grant.kind === 'password' ? ['password', p.grant.username, p.grant.password] : ['client_credentials'];
+  return createHash('sha256').update(JSON.stringify([p.tokenUrl, p.clientId, p.clientSecret, p.scopes, grant, p.clientAuth])).digest('hex');
+}
+
+/** Client credentials token with client_secret_basic, cached per connection; see `oauthToken`. */
+export function clientCredentialsToken(
+  connectionId: string,
+  p: ClientCredentialsParams,
+  opts: { now: () => number; rejectedToken?: string },
+  transport: Transport,
+): Promise<TokenFetchResult> {
+  return oauthToken(connectionId, { ...p, grant: { kind: 'client_credentials' }, clientAuth: 'basic' }, opts, transport);
 }
 
 /**
@@ -114,9 +137,9 @@ function fingerprintOf(p: ClientCredentialsParams): string {
  * token an upstream just answered 401 to: it is dropped and replaced, unless the cache already holds
  * a different token (another call refreshed it meanwhile), which is then returned as is.
  */
-export async function clientCredentialsToken(
+export async function oauthToken(
   connectionId: string,
-  p: ClientCredentialsParams,
+  p: OAuthTokenParams,
   opts: { now: () => number; rejectedToken?: string },
   transport: Transport,
 ): Promise<TokenFetchResult> {
@@ -128,7 +151,7 @@ export async function clientCredentialsToken(
   const key = `${connectionId}\u0000${fingerprint}`;
   let pending = inflight.get(key);
   if (!pending) {
-    const fetched = fetchClientCredentialsToken(p, transport).then((r) => {
+    const fetched = fetchOAuthToken(p, transport).then((r) => {
       if (r.ok) {
         const renewAt = r.expiresInS === undefined ? undefined : opts.now() + r.expiresInS * 1000 - TOKEN_REFRESH_MARGIN_MS;
         tokens.set(connectionId, { fingerprint, token: r.accessToken, renewAt });

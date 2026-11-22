@@ -33,7 +33,7 @@ import { createCodeRunner, type CodeRunnerDeps } from '../code/runner.js';
 import { createConnectionClient, createTransport, type ConnectionClient, type SendResult, type Transport } from '../http/client.js';
 import { createGuardedLookup } from '../http/egress.js';
 import { FORBIDDEN_HEADERS } from '../http/headers.js';
-import { clientCredentialsToken, lastTokenScopes } from '../http/oauth.js';
+import { lastTokenScopes, oauthToken, type OAuthTokenParams } from '../http/oauth.js';
 import { buildBulkBody, extractBatchId, isSafeBatchId, mapBulkStatus } from './bulk.js';
 import { deriveCatalog } from './derive.js';
 import { normaliseSpec, validateSpecDocument } from './normalise.js';
@@ -260,16 +260,19 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
       const values = secret?.token === undefined ? undefined : jwtScopes(secret.token);
       return values ? { detectable: true, source: 'jwt_claims', values } : NOT_DETECTABLE;
     }
-    if (auth?.scheme === 'oauth_client_credentials') {
-      const secret = await openSecret('oauth_client_credentials', credential);
+    if (auth?.scheme === 'oauth_client_credentials' || auth?.scheme === 'oauth_password') {
+      const secret = await openSecret(auth.scheme, credential);
       if (secret?.client_id === undefined || secret.client_secret === undefined) return NOT_DETECTABLE;
+      const common = { tokenUrl: auth.tokenUrl, clientId: secret.client_id, clientSecret: secret.client_secret, scopes: auth.scopes, timeoutMs: connection.timeoutMs };
+      let params: OAuthTokenParams;
+      if (auth.scheme === 'oauth_password') {
+        if (secret.username === undefined || secret.password === undefined) return NOT_DETECTABLE;
+        params = { ...common, grant: { kind: 'password', username: secret.username, password: secret.password }, clientAuth: auth.clientAuth };
+      } else {
+        params = { ...common, grant: { kind: 'client_credentials' }, clientAuth: 'basic' };
+      }
       // Returns the cached token when there is one, so the recorded scope belongs to it.
-      const t = await clientCredentialsToken(
-        connection.id,
-        { tokenUrl: auth.tokenUrl, clientId: secret.client_id, clientSecret: secret.client_secret, scopes: auth.scopes, timeoutMs: connection.timeoutMs },
-        { now: Date.now },
-        transportFor(connection),
-      );
+      const t = await oauthToken(connection.id, params, { now: Date.now }, transportFor(connection));
       if (!t.ok) return NOT_DETECTABLE;
       // No `scope` in the token response means the requested scopes were granted (RFC 6749 §5.1).
       const values = lastTokenScopes(connection.id) ?? auth.scopes;

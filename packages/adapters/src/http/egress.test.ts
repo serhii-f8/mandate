@@ -60,6 +60,11 @@ describe('CONN-5 outbound restriction', () => {
   });
 
   it('CONN-5 derives allowed hosts from baseUrl, tokenUrl and extraHosts', () => {
+    expect([...allowedHostsOf(settings({ auth: { scheme: 'oauth_password', tokenUrl: 'https://id.example.com/token', scopes: [], clientAuth: 'basic' } }))].sort()).toEqual([
+      'id.example.com',
+      'shop.example.com',
+      'spec.example.com',
+    ]);
     expect([...allowedHostsOf(settings())].sort()).toEqual(['auth.example.com', 'shop.example.com', 'spec.example.com']);
   });
 
