@@ -48,6 +48,7 @@ export {
   type EvaluationRequest,
   type PolicyDecision,
   type PolicyEngine,
+  touchedFields as touchedCallFields,
 } from './policy-engine.js';
 export { MAX_AUDITED_TOOL_NAME, policyDecisionAuditEvent, type PolicyDecisionRecord } from './policy-audit.js';
 export { isTaskId, TASK_TTL_MS, type TaskKind, type TaskRecord, type TaskRepository } from './task.js';

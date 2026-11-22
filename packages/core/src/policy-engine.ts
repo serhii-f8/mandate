@@ -70,7 +70,7 @@ function checkScope(grant: GrantDefinition, args: Readonly<Record<string, unknow
 }
 
 /** Fields the call touches, or `unreadable` when the argument is neither an object nor an array of strings. */
-function touchedFields(fieldsArg: string | undefined, args: Readonly<Record<string, unknown>>): readonly string[] | 'unreadable' {
+export function touchedFields(fieldsArg: string | undefined, args: Readonly<Record<string, unknown>>): readonly string[] | 'unreadable' {
   if (fieldsArg === undefined) return [];
   const value = args[fieldsArg];
   if (value === undefined || value === null) return [];

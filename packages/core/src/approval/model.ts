@@ -29,6 +29,13 @@ export interface RoleApprovalRule {
   readonly steps: readonly string[];
   readonly stepUpMaxAgeSeconds?: number;
   readonly allowWidget: boolean;
+  /** Rules that replace this one when the call touches one of their fields (POL-5). */
+  readonly fieldRules?: readonly FieldApprovalRule[];
+}
+
+/** An approval rule that applies when a call touches any of `fields`; it never nests further field rules. */
+export interface FieldApprovalRule extends RoleApprovalRule {
+  readonly fields: readonly string[];
 }
 
 export const DEFAULT_STEP_UP_SECONDS = 120;
