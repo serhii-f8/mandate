@@ -273,7 +273,7 @@ describe('EXE-8 changesetWorkflow rollback window and compensation', () => {
       // Rollback batch 2's submission is recorded and its writer call is held open.
       await paused.reached;
       // As in durability.int.test.ts: the held activity keeps the Core worker, so stop() rejects.
-      await expect(a.stop()).rejects.toThrow(/Worker still in use/);
+      await expect(a.stop()).rejects.toThrow(/Timed out while waiting for worker to shutdown gracefully/);
 
       const writerB = new ScriptedWriter();
       b = await startTestWorker(infra, { rollbackWriter: writerB, settings: WINDOW, taskQueue: a.taskQueue });

@@ -94,11 +94,12 @@ describe('changesetWorkflow durability', () => {
       // Batch 1's submission is recorded and its writer call is held open.
       await paused.reached;
       // Grace time 0: the held activity is cancelled at once and ignores it. After shutdownForceTime
-      // run() fails with GracefulShutdownPeriodExpiredError (logged as "Worker failed"), and the
-      // finalizeShutdown in its finally masks it with IllegalStateError, because the pending
-      // activity still holds the Core worker. The activity is left running and never reported.
+      // run() fails with GracefulShutdownPeriodExpiredError (logged as "Worker failed"). The
+      // finalizeShutdown in its finally also fails with IllegalStateError, because the pending
+      // activity still holds the Core worker; since @temporalio/worker 1.26 that second error is
+      // only logged and no longer masks the first. The activity is left running and never reported.
       const stopping = Date.now();
-      await expect(a.stop()).rejects.toThrow(/Worker still in use/);
+      await expect(a.stop()).rejects.toThrow(/Timed out while waiting for worker to shutdown gracefully/);
       expect(Date.now() - stopping).toBeGreaterThanOrEqual(900);
 
       const writerB = new ScriptedWriter();

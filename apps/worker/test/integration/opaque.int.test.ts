@@ -362,7 +362,7 @@ describe('EXE-4 NFR-2 opaque execution across a worker kill', () => {
       // The submission is recorded and the request has left; the worker dies before the answer.
       await paused.reached;
       expect(counter.sends).toBe(1);
-      await expect(a.stop()).rejects.toThrow(/Worker still in use/);
+      await expect(a.stop()).rejects.toThrow(/Timed out while waiting for worker to shutdown gracefully/);
 
       b = await startTestWorker(infra, { writer: new OpaqueCallWriter({ callerFor: () => callerB }), taskQueue: a.taskQueue });
       await expect(handle.result()).resolves.toEqual({ status: 'failed' });
