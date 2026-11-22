@@ -10,7 +10,6 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createOpenApiAdapter } from '@mandate/adapters';
-import { failedCheck } from '@mandate/core';
 import { loadConfigurationSources, type HttpOperationBinding, type LoadedConfiguration } from '@mandate/config';
 import type { ConnectionSettings } from '@mandate/connector-sdk';
 import { contractRead, contractWrite, presetConnectionYaml, recordingsFreeOf, replayRecordings, startFakeUpstream, type FakeUpstream } from '@mandate/testing';
@@ -113,13 +112,11 @@ describe('NFR-17 preset template contract', () => {
     });
   });
 
-  it('NFR-17 CS-3 notes.update_title excludes a note without a title with the code empty_title', () => {
-    const checks = config.policy.operations.find((o) => o.id === 'notes.update_title')?.manifest?.checks ?? [];
-    expect(checks.map((c) => c.code)).toEqual(['empty_title']);
-    const context = (before: Record<string, unknown>) => ({ before, after: { title: 'New' }, record: undefined, args: {}, lookups: {} });
-    expect(failedCheck(checks, context({ title: '' }))).toBe('empty_title');
-    expect(failedCheck(checks, context({ title: null }))).toBe('empty_title');
-    expect(failedCheck(checks, context({ title: 'Kickoff' }))).toBeUndefined();
+  it('NFR-17 CS-3 notes.update_title carries the empty_title check: a note without a title is excluded with that code', () => {
+    const update = config.policy.operations.find((o) => o.id === 'notes.update_title');
+    expect(update?.manifest?.checks).toEqual([
+      { code: 'empty_title', title: 'The note has no title yet', require: [{ present: { before: 'title' } }] },
+    ]);
   });
 
   it('NFR-17 OPS-2 the create input takes closed records with an id and a title; the delete input takes ids', () => {

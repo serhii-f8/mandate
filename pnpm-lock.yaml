@@ -296,9 +296,6 @@ importers:
       '@mandate/connector-sdk':
         specifier: workspace:*
         version: link:../../packages/connector-sdk
-      '@mandate/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@mandate/testing':
         specifier: workspace:*
         version: link:../../packages/testing

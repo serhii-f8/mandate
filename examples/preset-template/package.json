@@ -23,7 +23,6 @@
     "@mandate/adapters": "workspace:*",
     "@mandate/config": "workspace:*",
     "@mandate/connector-sdk": "workspace:*",
-    "@mandate/core": "workspace:*",
     "@mandate/testing": "workspace:*"
   }
 }

@@ -177,7 +177,7 @@ export const boundaryRules = [
   },
   {
     // Contract tests (NFR-17) run the preset through the real adapter and the shared fakes.
-    files: ['presets/*/src/**/*.test.ts', 'presets/*/test/**/*.ts'],
+    files: ['presets/*/src/**/*.test.ts', 'presets/*/test/**/*.ts', 'examples/preset-template/test/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',

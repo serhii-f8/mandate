@@ -34,7 +34,8 @@ record: `notes.update_title` (`PATCH /notes/{id}`, `replay_previous_state` rollb
 3. Keep the read that serves as `read_before` taking an optional array of ids (`ids_arg`): the
    manifest needs it to capture the before state.
 4. Record real exchanges from a sandbox, strip tokens and customer data, and update the cases.
-5. Run `pnpm --filter <your-package> test`.
+5. Run `pnpm --filter <your-package> test`. A per-record `DELETE` carries the record minus its path
+   fields, so the recorded `DELETE /notes/n1` request has body `{}`.
 
 ## Try it
 
