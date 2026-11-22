@@ -177,9 +177,12 @@ new plan.
 (`changesets.expire_after_hours`, 72 hours by default) before its turn. Set `expire_after_hours` for
 the whole plan, not for one step.
 
-**Rollback goes backwards.** A step can be rolled back only when no later step has started
-executing, or when every later step that did is `rolled_back`. Otherwise the request is refused
-with `plan_order`. To undo a plan, roll back the last step that ran first.
+**Rollback goes backwards.** A step cannot be rolled back while a later step is `executing` or
+`rolling_back`, or while a later step wrote records that were not rolled back (it is not
+`rolled_back`). Such a request is refused with `plan_order`. To undo a plan, roll back the last step
+that wrote something first. A later step that started but wrote nothing (refused by the execution
+guard, every record failed or was skipped, cancelled before its first batch, or ended
+`executor_unavailable`) has nothing to undo and does not hold up the earlier step.
 
 **Excluding items from a step.** Deriving a change-set from a plan step that is still `prepared`
 (to exclude items) puts the derived change-set in the step's place once it is prepared; the source

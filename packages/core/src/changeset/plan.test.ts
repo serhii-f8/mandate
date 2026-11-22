@@ -12,14 +12,16 @@ import {
   planStepMayStart,
   type PlanRecord,
   type PlanStep,
+  type PlanStepState,
 } from './plan.js';
 
 function step(n: number, status: ChangeSetStatus): PlanStep {
   return { step: n, changesetId: `cs-${n}`, operation: 'catalog.update', status };
 }
 
-function started(n: number, status: ChangeSetStatus, executionStarted: boolean): PlanStep & { executionStarted: boolean } {
-  return { ...step(n, status), executionStarted };
+/** A step with its execution state; `written` defaults to 1 for a started step, 0 otherwise. */
+function started(n: number, status: ChangeSetStatus, executionStarted: boolean, written = executionStarted ? 1 : 0): PlanStepState {
+  return { ...step(n, status), executionStarted, written };
 }
 
 const PLAN: PlanRecord = {
@@ -71,6 +73,19 @@ describe('CS-9 plan rules', () => {
   it('EXE-13 a missing predecessor fails closed', () => {
     expect(planStepMayStart(2, [step(2, 'approved')])).toBe(false);
     expect(planStepMayStart(0, [step(1, 'completed')])).toBe(false);
+  });
+
+  it('EXE-8 planAllowsRollback: a later step that wrote nothing does not block, one running or with writes does', () => {
+    // Wrote nothing (guard refusal, every item failed or skipped, cancelled before its first batch,
+    // executor_unavailable): it never gets a rollback window, so it must not strand step 1.
+    for (const status of ['failed', 'cancelled', 'completed_with_errors', 'completed'] as const) {
+      expect(planAllowsRollback(1, [started(1, 'completed', true), started(2, status, true, 0)])).toBe(true);
+    }
+    expect(planAllowsRollback(1, [started(1, 'completed', true), started(2, 'failed', true, 3)])).toBe(false);
+    // Running: its writes are still coming (or being undone), whatever it wrote so far.
+    expect(planAllowsRollback(1, [started(1, 'completed', true), started(2, 'executing', true, 0)])).toBe(false);
+    expect(planAllowsRollback(1, [started(1, 'completed', true), started(2, 'rolling_back', true, 0)])).toBe(false);
+    expect(planAllowsRollback(1, [started(1, 'completed', true), started(2, 'rolled_back', true, 3)])).toBe(true);
   });
 
   it('EXE-8 planAllowsRollback refuses while a later step that started is not rolled back', () => {

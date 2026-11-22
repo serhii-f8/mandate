@@ -76,8 +76,13 @@ skipped as `drift` by CS-7, as today.
 - **A step that does not complete stops the plan.** `completed_with_errors`, `failed`, `cancelled`,
   `rejected`, `expired` or `rolled_back` on a step leaves every later step blocked **(call: no
   override in 1.x)**. They expire, or the requester cancels them.
-- **Rollback order (amends EXE-8).** A step can be rolled back only when no later step of its plan
-  has started executing, or every later step that did is `rolled_back` (`plan_order` otherwise).
+- **Rollback order (amends EXE-8).** A step cannot be rolled back while a later step of its plan is
+  `executing` or `rolling_back`, or has written items (`stats.written > 0`) and is not
+  `rolled_back` (`plan_order`). A later step that started but wrote nothing (a guard refusal, every
+  item failed or skipped, cancelled before its first batch, `executor_unavailable` on the automatic
+  start) never gets a rollback window and could never become `rolled_back`; under the first version
+  of this rule ("every later step that started is `rolled_back`") it stranded the earlier step until
+  that step's own window ran out, so it no longer counts.
 - **Deriving (amends CS-5).** A change-set derived from a plan step that is still `prepared` takes
   the source's place in the plan in the transaction that seals it (its move to `prepared`); the
   source leaves the plan **(call)**. Derived from a source in any other status, or when its
@@ -106,7 +111,8 @@ skipped as `drift` by CS-7, as today.
 - A step cannot be prepared from an earlier step's results; such work stays outside a plan.
 - A long plan can outlive an approved step's expiry; `expire_after_hours` has to cover the whole
   plan.
-- Rolling back a step waits for every later step that started to be rolled back first.
+- Rolling back a step waits while a later step runs, and until every later step that wrote
+  something is rolled back.
 - A change-set outside a plan starts, executes and rolls back exactly as before, and old workflow
   histories replay unchanged.
 - Every transaction that needs plan-wide exclusion locks the `plan` row `FOR NO KEY UPDATE` first,
@@ -128,7 +134,8 @@ append failed and when the source was cancelled first. The integration test of m
 change on `pending_approval`, `approved`, `executing`, `completed`, `cancelled` and `expired` rows
 and admitting it on `preparing` and `prepared` ones, the check and unique index, and the `0016`
 verification rule still in force. The contract also covers the rollback order in the request transaction (`plan_order` while
-a later step that started is not `rolled_back`, admitted once it is) and a start of step 2 racing a
+a later step is executing or holds writes and is not `rolled_back`, admitted once it is, and admitted
+when a later step failed without writing anything) and a start of step 2 racing a
 rollback request of step 1 (`Promise.all`, eight rounds): before both took the plan lock first, the
 PostgreSQL run let both succeed; with it, exactly one does. The execution guard refuses a step whose
 predecessor is not `completed` as `policy_denied`.

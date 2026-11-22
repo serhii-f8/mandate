@@ -5,7 +5,7 @@ import type { Caller } from '../caller.js';
 import type { EvaluationRequest, PolicyDecision } from '../policy-engine.js';
 import type { ManifestDefinition, OperationDefinition, RollbackStrategy } from '../policy-model.js';
 import type { ChangeSetRecord, ChangeSetStatus, RollbackRequest } from './model.js';
-import type { PlanStep } from './plan.js';
+import type { PlanStepState } from './plan.js';
 import {
   changesetRollbackBatchEvent,
   ROLLBACK_REQUEST_MARGIN_MS,
@@ -76,7 +76,7 @@ function record(patch: { [K in keyof ChangeSetRecord]?: ChangeSetRecord[K] | und
   return Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined)) as unknown as ChangeSetRecord;
 }
 
-type StartedStep = PlanStep & { executionStarted: boolean };
+type StartedStep = PlanStepState;
 
 class FakeReads implements RollbackReads {
   readonly gets: string[] = [];
@@ -225,9 +225,9 @@ describe('EXE-8 rollback eligibility', () => {
   describe('EXE-8 plan order', () => {
     const PLAN = 'plan-1';
     const stepOne = record({ plan: { id: PLAN, step: 1 } });
-    const later = (status: ChangeSetStatus, executionStarted = true): StartedStep[] => [
-      { step: 1, changesetId: ID, operation: OP, status: 'completed', executionStarted: true },
-      { step: 2, changesetId: 'cs-2', operation: OP, status, executionStarted },
+    const later = (status: ChangeSetStatus, executionStarted = true, written = executionStarted ? 2 : 0): StartedStep[] => [
+      { step: 1, changesetId: ID, operation: OP, status: 'completed', executionStarted: true, written: 4 },
+      { step: 2, changesetId: 'cs-2', operation: OP, status, executionStarted, written },
     ];
 
     it('EXE-8 EXE-13 a step whose later step completed is not_rollbackable plan_order', async () => {
@@ -243,6 +243,12 @@ describe('EXE-8 rollback eligibility', () => {
       // The last step of a plan has no later step.
       const last = record({ plan: { id: PLAN, step: 2 } });
       expect(await ask(deps(last, { steps: later('completed') }))).toEqual({ ok: true, count: 4, until: UNTIL });
+    });
+
+    it('EXE-8 EXE-13 a later step that started but wrote nothing does not block; a running one does', async () => {
+      expect(await ask(deps(stepOne, { steps: later('failed', true, 0) }))).toEqual({ ok: true, count: 4, until: UNTIL });
+      expect(await ask(deps(stepOne, { steps: later('cancelled', true, 0) }))).toEqual({ ok: true, count: 4, until: UNTIL });
+      expect(await ask(deps(stepOne, { steps: later('executing', true, 0) }))).toEqual(notRollbackable('plan_order'));
     });
 
     it('EXE-8 EXE-13 a plan that cannot be read fails closed', async () => {

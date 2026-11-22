@@ -3,7 +3,7 @@
 import type { ManifestDefinition, OperationDefinition } from '../policy-model.js';
 import { CanonicalJsonError, canonicalJson } from './canonical.js';
 import { itemFields, manifestAction } from './fields.js';
-import { existenceReadIncomplete, inScope, recordsById, touchedFields } from './items.js';
+import { existenceReadIncomplete, inScope, readableId, recordsById, touchedFields } from './items.js';
 import type { ChangeItemRecord, ChangeSetRecord } from './model.js';
 import type { BatchContext, ChangeWriter, ItemOutcome, PlanEntry, ReadPage, UpstreamReader } from './ports.js';
 import { resolveTemplates } from './templates.js';
@@ -446,6 +446,11 @@ export type CurrentRecordsRead =
       readonly records: ReadonlyMap<string, Readonly<Record<string, unknown>>>;
       /** The page holds fewer records than the `total` the upstream reports (only possible for an update). */
       readonly shorterThanTotal: boolean;
+      /**
+       * The page holds a record without a readable identifier (only possible for an update; skipped in
+       * `records`). The writer reads such a page as before; verification treats it as a failed read (EXE-12).
+       */
+      readonly unidentified: boolean;
     }
   | { readonly ok: false; readonly code: 'read_failed' | 'incomplete_read' };
 
@@ -477,6 +482,7 @@ export async function readCurrentRecords(input: {
     ok: true,
     records: recordsById(manifest, page.items),
     shorterThanTotal: page.total !== undefined && page.total > page.items.length,
+    unidentified: page.items.some((record) => !readableId(manifest, record)),
   };
 }
 

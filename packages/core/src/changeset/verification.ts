@@ -64,8 +64,9 @@ class VerifyReadFailed extends Error {
  * One look at a chunk of written items, one outcome per item in input order: read the current
  * records when a check or a lookup key uses `{ record }` (through `read_before`, with the scope
  * filter for an update only), read the verify lookups, evaluate the verify checks in order. A read
- * that is not `ok`, is truncated or holds fewer records than its total makes every item of the
- * chunk `verify_read_failed`; any other error propagates.
+ * that is not `ok`, is truncated, holds fewer records than its total or (current records) holds a
+ * record without a readable identifier makes every item of the chunk `verify_read_failed`; any other
+ * error propagates.
  */
 export async function verifyChunk(input: {
   manifest: ManifestDefinition & { verifyAfter: ManifestVerifyAfter };
@@ -159,7 +160,9 @@ async function currentRecords(input: Parameters<typeof verifyChunk>[0]): Promise
     // The identifier indexes the records and the scope fields filter an update's.
     fields: [...new Set([manifest.idField, ...Object.values(manifest.scopeArgs), ...recordFields])],
   });
-  if (!read.ok || read.shorterThanTotal) throw new VerifyReadFailed();
+  // A record without a readable identifier is a failed read for an update too: dropping it would read
+  // as "no record" and confirm `absent: { record }` for an item that was never seen.
+  if (!read.ok || read.shorterThanTotal || read.unidentified) throw new VerifyReadFailed();
   if (manifestAction(manifest) !== 'update') return read.records;
   const scoped = new Map<string, Fields>();
   for (const [id, record] of read.records) if (inScope(manifest, args, record)) scoped.set(id, record);

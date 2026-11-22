@@ -24,7 +24,7 @@ import type {
   NewChangeSet,
   NewNotification,
   PlanRecord,
-  PlanStep,
+  PlanStepState,
   PreparationCompletion,
   RollbackCounts,
   RollbackItemOutcome,
@@ -1453,17 +1453,19 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           .for('update');
         if (parent === undefined) return { left: 0, pending: 0 };
         if (rows.length > 0) {
-          // Only pending items change: a confirmed or unconfirmed item is final.
+          // Only pending items change: a confirmed or unconfirmed item is final. A miss of a round below the
+          // stored one (a delayed retry, NFR-2) changes nothing: the round only moves up, and so does the code.
           await tx.execute(sql`
             UPDATE change_item AS ci
             SET verification_status = CASE WHEN o.confirmed THEN 'confirmed' ELSE 'pending' END,
                 verification_code = o.code,
-                verification_round = CASE WHEN o.confirmed THEN ci.verification_round ELSE ${round}::int END,
+                verification_round = CASE WHEN o.confirmed THEN ci.verification_round ELSE GREATEST(ci.verification_round, ${round}::int) END,
                 updated_at = now()
             FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS o(target_id text, confirmed boolean, code text)
             WHERE ci.changeset_id = ${changesetId}::uuid
               AND ci.target_id = o.target_id
-              AND ci.verification_status = 'pending'`);
+              AND ci.verification_status = 'pending'
+              AND (o.confirmed OR ci.verification_round <= ${round}::int)`);
         }
         const stats = await computeStats(tx, changesetId);
         await tx.update(changeSet).set({ stats, updatedAt: sql`now()` }).where(eq(changeSet.id, changesetId));
@@ -1567,8 +1569,8 @@ async function lockPlanOf(tx: DbExecutor, changesetId: string): Promise<string |
   return planId;
 }
 
-/** CS-9: the steps of a plan in step order, with whether each one's execution was requested. */
-async function stepsOfPlan(db: Db | DbExecutor, planId: string): Promise<(PlanStep & { executionStarted: boolean })[]> {
+/** CS-9: the steps of a plan in step order, with whether each one's execution was requested and what it wrote. */
+async function stepsOfPlan(db: Db | DbExecutor, planId: string): Promise<PlanStepState[]> {
   const rows = await db
     .select({
       step: changeSet.planStep,
@@ -1576,6 +1578,7 @@ async function stepsOfPlan(db: Db | DbExecutor, planId: string): Promise<(PlanSt
       operation: changeSet.operation,
       status: changeSet.status,
       executionStartedAt: changeSet.executionStartedAt,
+      stats: changeSet.stats,
     })
     .from(changeSet)
     .where(eq(changeSet.planId, planId))
@@ -1586,6 +1589,7 @@ async function stepsOfPlan(db: Db | DbExecutor, planId: string): Promise<(PlanSt
     operation: s.operation,
     status: s.status,
     executionStarted: s.executionStartedAt !== null,
+    written: s.stats.written,
   }));
 }
 

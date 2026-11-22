@@ -63,7 +63,10 @@ verification ends. Both are documented.
   read *now* through the manifest's `read_before`, with the change-set's arguments, the ids and the
   field list, as the writer's verify read does. For an update a record outside the call's scope is
   no record; a create or delete reads existence without the scope filter, and a page shorter than
-  its total or holding a record without a readable identifier is an incomplete read (ADR 0071).
+  its total or holding a record without a readable identifier is an incomplete read (ADR 0071). On
+  the verification read a record without a readable identifier is a failed read for an update too:
+  dropped, it would read as no record and confirm `{ absent: { record: f } }` for an item that was
+  never seen. The writer reads such a page as before.
   Lookup keys: `{ target: true }`, `{ after: f }`, `{ before: f }`, `{ record: f }`. The current
   records are read only when a check or a lookup key uses `{ record }`.
 - **Which items.** Every item that ended `written`, including `already_applied`. Items that were

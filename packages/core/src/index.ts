@@ -105,6 +105,7 @@ export {
   type CreatePlanRefusal,
   type PlanRecord,
   type PlanStep,
+  type PlanStepState,
 } from './changeset/plan.js';
 export { lookupKey, readLookups } from './changeset/lookups.js';
 export {

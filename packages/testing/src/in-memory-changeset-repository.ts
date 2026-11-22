@@ -21,6 +21,7 @@ import type {
   NewNotification,
   PlanRecord,
   PlanStep,
+  PlanStepState,
   PreparationCompletion,
   RollbackCounts,
   RollbackItemOutcome,
@@ -593,12 +594,12 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     return Promise.resolve({ plan: structuredClone(plan), steps: this.startedStepsOf(planId) });
   }
 
-  /** The steps of a plan in step order, with whether each one's execution was requested. */
-  private startedStepsOf(planId: string): (PlanStep & { executionStarted: boolean })[] {
+  /** The steps of a plan in step order, with whether each one's execution was requested and what it wrote. */
+  private startedStepsOf(planId: string): PlanStepState[] {
     return [...this.entries.values()]
       .map((e) => e.record)
       .filter((r) => r.plan?.id === planId)
-      .map((r) => ({ ...stepOf(r), executionStarted: r.executionRequest !== undefined }))
+      .map((r) => ({ ...stepOf(r), executionStarted: r.executionRequest !== undefined, written: r.stats.written }))
       .sort((a, b) => a.step - b.step);
   }
 
@@ -914,7 +915,8 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       const { verificationCode: _code, ...rest } = current; // eslint-disable-line @typescript-eslint/no-unused-vars -- replaced below
       if (o.confirmed) {
         entry.items.set(o.targetId, { ...rest, verificationStatus: 'confirmed' });
-      } else {
+      } else if (round >= (entry.verificationRounds.get(o.targetId) ?? 0)) {
+        // NFR-2: a delayed outcome of an older round neither lowers the round nor replaces a newer code.
         entry.items.set(o.targetId, { ...rest, ...(o.code === undefined ? {} : { verificationCode: o.code }) });
         entry.verificationRounds.set(o.targetId, round);
       }

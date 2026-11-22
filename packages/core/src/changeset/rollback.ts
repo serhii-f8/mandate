@@ -8,7 +8,7 @@ import { isTaskId } from '../task.js';
 import { changesetTransitionEvent } from './audit.js';
 import { executionStarted, ROLLBACK_FROM } from './lifecycle.js';
 import type { ChangeSetRecord, RollbackCounts, RollbackRequest } from './model.js';
-import { planAllowsRollback, type PlanStep } from './plan.js';
+import { planAllowsRollback, type PlanStepState } from './plan.js';
 import type { ItemOutcome, RollbackItemOutcome } from './ports.js';
 
 /** EXE-8: a request inside this margin before `rollbackUntil` is refused, so it cannot race the workflow's last look. */
@@ -38,7 +38,7 @@ export interface RollbackReads {
   get(changesetId: string): Promise<ChangeSetRecord | undefined>;
   rollbackableCount(changesetId: string): Promise<number>;
   /** CS-9: the steps of a plan, as `ChangeSetRepository.planSteps`; undefined for an unknown plan. */
-  planSteps(planId: string): Promise<{ readonly steps: readonly (PlanStep & { executionStarted: boolean })[] } | undefined>;
+  planSteps(planId: string): Promise<{ readonly steps: readonly PlanStepState[] } | undefined>;
 }
 
 export interface RollbackEligibilityDeps {
@@ -97,7 +97,7 @@ export async function rollbackEligibility(
   }
   const count = await deps.repository.rollbackableCount(cs.id);
   if (!(count > 0)) return refuse('nothing_written');
-  // EXE-8, EXE-13: a plan step waits until every later step that started was rolled back. This is the early
+  // EXE-8, EXE-13: a plan step waits while a later step runs or holds writes that were not rolled back. This is the early
   // answer; the request transaction applies the same rule under the plan lock. An unreadable plan fails closed.
   if (cs.plan !== undefined) {
     const plan = await deps.repository.planSteps(cs.plan.id);

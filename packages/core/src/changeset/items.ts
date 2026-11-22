@@ -124,7 +124,7 @@ function createItem(
   return { targetId, status: 'pending', before: null, after: { ...values } };
 }
 
-function readableId(manifest: ManifestDefinition, record: Readonly<Record<string, unknown>>): boolean {
+export function readableId(manifest: ManifestDefinition, record: Readonly<Record<string, unknown>>): boolean {
   const id = record[manifest.idField];
   return typeof id === 'string' || typeof id === 'number';
 }

@@ -136,6 +136,8 @@ describe('EXE-12 verify-after', () => {
     ['a failed read', failed(503)],
     ['a truncated read', ok([{ sku: 'a', store_id: 's1', status: 'live' }], { truncated: true })],
     ['a page shorter than its total', ok([{ sku: 'a', store_id: 's1', status: 'live' }], { total: 2 })],
+    // An update too: dropping the record would read as "no record" and confirm `absent: { record }`.
+    ['a record without a readable identifier', ok([{ sku: 'a', store_id: 's1', status: 'live' }, { sku: { id: 'b' }, store_id: 's1', status: 'live' }])],
   ])('EXE-12 %s of the current records makes every item of the chunk verify_read_failed', async (_name, page) => {
     const reader = new FakeReader({ 'catalog.get': () => page });
     expect(await verifyChunk(input(reader, statusManifest))).toEqual(allFailed);
@@ -150,6 +152,12 @@ describe('EXE-12 verify-after', () => {
     { targetId: 'a', before: { price: 1 }, after: null },
     { targetId: 'b', before: { price: 1 }, after: null },
   ];
+
+  it('EXE-12 for an update, a record without a readable identifier never confirms an absent { record } check', async () => {
+    const absentManifest = { ...statusManifest, verifyAfter: { ...statusManifest.verifyAfter, checks: [{ code: 'still_there', require: [{ absent: { record: 'status' } }] }] } };
+    const reader = new FakeReader({ 'catalog.get': () => ok([{ sku: null, store_id: 's1', status: 'live' }]) });
+    expect(await verifyChunk(input(reader, absentManifest))).toEqual(allFailed);
+  });
 
   it('EXE-12 a deleted record that is gone confirms an absent { record } check; one still there, in any scope, does not', async () => {
     const reader = new FakeReader({ 'catalog.get': () => ok([{ sku: 'b', store_id: 'other' }]) });

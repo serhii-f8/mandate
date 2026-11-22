@@ -23,6 +23,13 @@ export interface PlanStep {
   readonly status: ChangeSetStatus;
 }
 
+/** A step with what its execution did so far: whether it ever started, and how many items it wrote. */
+export interface PlanStepState extends PlanStep {
+  readonly executionStarted: boolean;
+  /** `stats.written` of the step's change-set. */
+  readonly written: number;
+}
+
 /** CS-9: the fixed refusal codes of plan creation. */
 export type CreatePlanRefusal =
   | 'not_found'
@@ -55,11 +62,17 @@ export function planStepMayStart(step: number, steps: readonly PlanStep[]): bool
 }
 
 /**
- * EXE-8, EXE-13: true when a step may be rolled back: no later step has an execution request, or each that
- * has is `rolled_back`.
+ * EXE-8, EXE-13: true when a step may be rolled back. A later step blocks it only while it is `executing` or
+ * `rolling_back`, or when it wrote items and is not `rolled_back`. A later step that started but wrote
+ * nothing (a guard refusal, every item failed or skipped, cancelled before its first batch,
+ * `executor_unavailable`) never gets a rollback window and could never become `rolled_back`, so it does not.
  */
-export function planAllowsRollback(step: number, steps: readonly (PlanStep & { executionStarted: boolean })[]): boolean {
-  return steps.every((s) => s.step <= step || !s.executionStarted || s.status === 'rolled_back');
+export function planAllowsRollback(step: number, steps: readonly PlanStepState[]): boolean {
+  return steps.every(
+    (s) =>
+      s.step <= step ||
+      (s.status !== 'executing' && s.status !== 'rolling_back' && (s.written === 0 || s.status === 'rolled_back')),
+  );
 }
 
 /**

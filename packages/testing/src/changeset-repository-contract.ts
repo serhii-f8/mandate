@@ -1411,8 +1411,8 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
           expect(await c.repository.planSteps(planId)).toEqual({
             plan: { id: planId, title: 'Launch', requester: owner, createdAt: NOW },
             steps: [
-              { step: 1, changesetId: a, operation: 'catalog.update', status: 'prepared', executionStarted: false },
-              { step: 2, changesetId: b, operation: 'catalog.update', status: 'prepared', executionStarted: false },
+              { step: 1, changesetId: a, operation: 'catalog.update', status: 'prepared', executionStarted: false, written: 0 },
+              { step: 2, changesetId: b, operation: 'catalog.update', status: 'prepared', executionStarted: false, written: 0 },
             ],
           });
           const events = await planEvents(c, planId);
@@ -1549,18 +1549,21 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         return plan;
       }
 
-      it('EXE-8 EXE-13 requestRollback of a step refuses plan_order while a later step started, writing nothing; admits it once that step is rolled back', async () =>
+      it('EXE-8 EXE-13 requestRollback of a step refuses plan_order while a later step runs or holds writes, writing nothing; admits it once that step is rolled back', async () =>
         withRepo(async (c) => {
           const owner = requester('alice');
-          const { first, second } = await firstCompleted(c, owner);
+          const { planId, first, second } = await firstCompleted(c, owner);
           expect((await start(c, second)).ok).toBe(true);
           const before = (await eventsOf(c, first)).length;
+          // Executing, nothing written yet: its writes are still coming.
           expect(await requestRollbackOf(c, first)).toEqual({ ok: false, reason: 'plan_order' });
           const unchanged = await c.repository.get(first);
           expect(unchanged?.status).toBe('completed');
           expect(unchanged?.rollbackRequest).toBeUndefined();
           expect(await eventsOf(c, first)).toHaveLength(before);
 
+          await c.repository.recordItemOutcomes(second, written(targets(1)));
+          expect((await c.repository.planSteps(planId))?.steps).toMatchObject([{ step: 1, written: 0 }, { step: 2, written: 1 }]);
           await c.repository.transition(second, ['executing'], 'completed', auditEvent(second));
           await c.repository.openRollbackWindow(second, new Date(Date.now() + HOUR));
           expect(await requestRollbackOf(c, first)).toEqual({ ok: false, reason: 'plan_order' });
@@ -1570,6 +1573,24 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
           await c.repository.transition(second, ['rolling_back'], 'rolled_back', auditEvent(second));
           expect((await requestRollbackOf(c, first)).ok).toBe(true);
           expect((await c.repository.get(first))?.status).toBe('rolling_back');
+        }));
+
+      it('EXE-8 EXE-13 a later step that started but wrote nothing does not block; one that ended with writes does', async () =>
+        withRepo(async (c) => {
+          const owner = requester('alice');
+          // Step 2 failed with every item failed: it never gets a rollback window.
+          const empty = await firstCompleted(c, owner);
+          expect((await start(c, empty.second)).ok).toBe(true);
+          await c.repository.recordItemOutcomes(empty.second, targets(1).map((targetId) => ({ targetId, status: 'failed', error: 'x' })));
+          await c.repository.transition(empty.second, ['executing'], 'failed', auditEvent(empty.second));
+          expect((await requestRollbackOf(c, empty.first)).ok).toBe(true);
+
+          // Step 2 failed after writing an item: that write stands until step 2 is rolled back.
+          const wrote = await firstCompleted(c, owner);
+          expect((await start(c, wrote.second)).ok).toBe(true);
+          await c.repository.recordItemOutcomes(wrote.second, written(targets(1)));
+          await c.repository.transition(wrote.second, ['executing'], 'failed', auditEvent(wrote.second));
+          expect(await requestRollbackOf(c, wrote.first)).toEqual({ ok: false, reason: 'plan_order' });
         }));
 
       it('EXE-8 EXE-13 a start of step 2 and a rollback request of step 1 at the same moment do not both succeed', async () =>
@@ -2338,6 +2359,27 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
           // Item status, before, after and the hash inputs are untouched.
           expect(await sealed(c)).toEqual(before);
           expect((await c.repository.get(c.id))?.status).toBe('executing');
+        }));
+
+      it('EXE-12 NFR-2 a delayed outcome of an older round neither lowers the round nor replaces a newer code', async () =>
+        withRepo(async (c) => {
+          await executed(c);
+          await c.repository.beginVerification(c.id, SCHEDULE);
+          await c.repository.recordVerification(c.id, 3, [{ targetId: 'a', confirmed: false, code: 'newer' }]);
+          // A retried look of round 2 arrives late.
+          expect(await c.repository.recordVerification(c.id, 2, [{ targetId: 'a', confirmed: false, code: 'older' }])).toMatchObject({
+            pending: 3,
+          });
+          expect((await byTarget(c)).a?.verificationCode).toBe('newer');
+          // `a` stays at round 3: not looked at again in round 3, but in round 4.
+          expect(await ids(c, 3, 10)).toEqual(['b', 'c']);
+          expect(await ids(c, 4, 10)).toEqual(['a', 'b', 'c']);
+          expect((await c.repository.beginVerification(c.id, SCHEDULE))?.round).toBe(3);
+          // The same round again replaces the code; a confirmation of any round confirms.
+          await c.repository.recordVerification(c.id, 3, [{ targetId: 'a', confirmed: false, code: 'again' }]);
+          expect((await byTarget(c)).a?.verificationCode).toBe('again');
+          await c.repository.recordVerification(c.id, 1, [{ targetId: 'a', confirmed: true }]);
+          expect((await byTarget(c)).a?.verificationStatus).toBe('confirmed');
         }));
 
       it('EXE-12 finishVerification with nothing pending appends the audit row once', async () =>

@@ -18,7 +18,7 @@ import type {
   RollbackRequest,
   VerificationCounts,
 } from './model.js';
-import type { CreatePlanRefusal, PlanRecord, PlanStep } from './plan.js';
+import type { CreatePlanRefusal, PlanRecord, PlanStepState } from './plan.js';
 import type { VerificationOutcome } from './verification.js';
 
 /**
@@ -225,7 +225,7 @@ export interface ChangeSetRepository {
   /** CS-9: the plan and its steps in step order; undefined for an unknown or non-UUID ID. */
   planSteps(
     planId: string,
-  ): Promise<{ plan: PlanRecord; steps: readonly (PlanStep & { executionStarted: boolean })[] } | undefined>;
+  ): Promise<{ plan: PlanRecord; steps: readonly PlanStepState[] } | undefined>;
   /**
    * Stores the cancel request only while executing and only the first one (EXE-7). `ok: true`
    * with the record (an earlier request kept) while executing; otherwise the current status
@@ -277,8 +277,8 @@ export interface ChangeSetRepository {
    * EXE-8, SEC-8: one transaction. Locks the change-set FOR UPDATE and reads the database clock; refuses
    * `not_found`; `already_rolled_back` (status rolling_back/rolled_back, or a request stored); `not_finished`
    * (status not in ROLLBACK_FROM, or cancelled/failed without execution); `window_closed` (rollback_until NULL or
-   * `now() >= rollback_until − marginMs`); `plan_order` for a plan step when a later step of its plan started and
-   * is not `rolled_back`, read under the plan row's lock taken before the change-set's own (EXE-8, EXE-13,
+   * `now() >= rollback_until − marginMs`); `plan_order` for a plan step when a later step of its plan is
+   * `executing` or `rolling_back`, or wrote items and is not `rolled_back` (`planAllowsRollback`), read under the plan row's lock taken before the change-set's own (EXE-8, EXE-13,
    * ADR 0074). Then sets status `rolling_back` with the four request columns and `updated_at`, appends `audit` in
    * order, and answers the record. A refusal writes nothing.
    */
@@ -341,7 +341,8 @@ export interface ChangeSetRepository {
   verificationItems(changesetId: string, round: number, limit: number): Promise<readonly ChangeItemRecord[]>;
   /**
    * EXE-12: per outcome (the first per target), only for an item still `pending`: confirmed → status `confirmed`,
-   * code NULL; otherwise the code and verification round = `round`. Stats recomputed. `left`: pending items with
+   * code NULL; otherwise, only when `round` is not below the item's verification round (a delayed retry of an
+   * older round changes nothing, NFR-2), the code and verification round = `round`. Stats recomputed. `left`: pending items with
    * verification round < `round`; `pending`: all pending items.
    */
   recordVerification(
