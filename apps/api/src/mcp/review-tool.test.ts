@@ -4,7 +4,7 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
 import { describe, expect, it } from 'vitest';
 import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
 import { encodeCursor, type Caller, type ChangeItemRecord } from '@mandate/core';
-import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryExecutor, InMemoryTaskRepository, ScriptedWriter, submitChangeSet } from '@mandate/testing';
+import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryExecutor, InMemoryFileStore, InMemoryTaskRepository, ScriptedWriter, submitChangeSet } from '@mandate/testing';
 import { ApprovalService } from '../approvals/approval-service.js';
 import { changesetDetailWith, itemRow, widgetViewerBlock } from '../approvals/detail.js';
 import type { AuditDetails } from './audited-tool.js';
@@ -131,6 +131,7 @@ async function setup(options: { items?: number; widget?: boolean; after?: (i: nu
     tasks: new InMemoryTaskRepository(),
     audit,
     approvals: new ApprovalService({ repository, executor, audit, newId, now: () => NOW }),
+    files: new InMemoryFileStore(),
     publicUrl: new URL('https://mandate.example.test'),
   });
   const reports: AuditDetails[] = [];

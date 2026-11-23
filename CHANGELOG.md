@@ -16,6 +16,7 @@ Additive release: the configuration schema and the connector SDK are 1.4.0. A pr
   a grant scope that names a one-segment file argument (OPS-8, ADR 0075).
 - A change-set with files stores each file's descriptor in its arguments and is sealed with hash
   version 3; change-sets without files keep version 2 (CS-4, CS-10).
+- `list_staged_files` answers the upload page URL and the caller's own staged files, and a tool call passes a staged file by ID; `list_staged_files` is now a reserved tool name (MCP-11, CS-10). **Action needed before upgrading:** a configuration with an operation named exactly `list_staged_files` no longer loads; rename it.
 
 ## 1.3.0
 

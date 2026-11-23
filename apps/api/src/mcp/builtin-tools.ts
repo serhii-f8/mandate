@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import { createSchemaCompiler } from '@mandate/config';
-import type { AuditLog, ChangeSetExecutor, ChangeSetRepository, TaskRepository, WorkflowStarter } from '@mandate/core';
+import type { AuditLog, ChangeSetExecutor, ChangeSetRepository, FileStore, TaskRepository, WorkflowStarter } from '@mandate/core';
 import type { UpstreamToolView } from '@mandate/upstream';
 import type { ApprovalService } from '../approvals/approval-service.js';
 import { createChangesetTools } from './changeset-tools.js';
 import { decideChangesetTool } from './decide-tool.js';
 import { excludeChangesetItemsTool } from './exclude-tool.js';
+import { createListStagedFilesTool } from './files-tool.js';
 import { createListMyOperationsTool } from './operations-tool.js';
 import { createPlanTool } from './plan-tool.js';
 import { reviewChangesetTool } from './review-tool.js';
@@ -53,6 +54,8 @@ export interface BuiltinToolDeps {
   readonly publicUrl: URL;
   /** Pin states for `list_my_operations` (CONN-4). */
   readonly upstreamTools?: UpstreamToolView;
+  /** The caller's staged files for `list_staged_files` (MCP-11, CS-10). */
+  readonly files: Pick<FileStore, 'ownedBy'>;
 }
 
 /** What `exclude_changeset_items` needs besides the shared deps: the derived change-set's workflow start (EXE-1). */
@@ -61,7 +64,7 @@ export interface ExclusionWiring {
   readonly onStartFailure: (changesetId: string, error: unknown) => void;
 }
 
-/** Every built-in tool (MCP-8); their names are reserved. */
+/** Every built-in tool (MCP-8, MCP-10, MCP-11); their names are reserved. */
 export function createBuiltinTools(deps: BuiltinToolDeps, exclusion: ExclusionWiring): readonly BuiltinTool[] {
   return [
     pingTool,
@@ -73,5 +76,6 @@ export function createBuiltinTools(deps: BuiltinToolDeps, exclusion: ExclusionWi
     createPlanTool({ repository: deps.repository, newId: deps.newId, now: deps.now }),
     decideChangesetTool(deps),
     reviewChangesetTool(deps),
+    createListStagedFilesTool({ files: deps.files, publicUrl: deps.publicUrl }),
   ];
 }

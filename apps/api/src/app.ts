@@ -144,7 +144,7 @@ interface TemporalHandle {
 function invokerFactory(
   override: OperationInvoker | undefined,
   io: UpstreamIo,
-  write: { tasks: TaskRepository; starter: WorkflowStarter; prepareWaitMs: number },
+  write: { tasks: TaskRepository; starter: WorkflowStarter; prepareWaitMs: number; files: { store: Pick<FileStore, 'get'>; publicUrl: URL } },
 ): PipelineDeps['invokerFor'] {
   if (override !== undefined) return () => override;
   return operationInvokers({
@@ -154,6 +154,7 @@ function invokerFactory(
     tasks: write.tasks,
     starter: write.starter,
     prepareWaitMs: write.prepareWaitMs,
+    files: write.files,
     newId: randomUUID,
     now: () => new Date(),
     log: io.log,
@@ -355,7 +356,7 @@ class AppModule {
         },
         {
           provide: MCP_HANDLER,
-          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE, WORKFLOW_STARTER, WIDGET_BUNDLES, PIN_MONITOR, RATE_COUNTER],
+          inject: [AUDIT_LOG, CREDENTIAL_VAULT, DATABASE, CHANGESET_REPOSITORY, CHANGESET_EXECUTOR, APPROVAL_SERVICE, WORKFLOW_STARTER, WIDGET_BUNDLES, PIN_MONITOR, RATE_COUNTER, FILE_STORE],
           useFactory: (
             audit: AuditLog,
             vault: CredentialVault,
@@ -367,6 +368,7 @@ class AppModule {
             widgets: WidgetBundles,
             pinMonitor: PinMonitorRun | null,
             rateCounter: RateCounter,
+            fileStore: FileStore,
           ) => {
             // One task store for the write path that creates tasks and the handlers that read them.
             const tasks = overrides.tasks ?? new PostgresTaskRepository(database.db);
@@ -395,6 +397,7 @@ class AppModule {
                       audit,
                       approvals,
                       publicUrl: env.publicUrl,
+                      files: fileStore,
                       ...(upstreamTools === undefined ? {} : { upstreamTools }),
                     },
                     {
@@ -405,7 +408,7 @@ class AppModule {
                       },
                     },
                   ),
-                  invokerFor: invokerFactory(overrides.invoker, io, { tasks, starter, prepareWaitMs: env.prepareWaitMs }),
+                  invokerFor: invokerFactory(overrides.invoker, io, { tasks, starter, prepareWaitMs: env.prepareWaitMs, files: { store: fileStore, publicUrl: env.publicUrl } }),
                   audit,
                   newId: randomUUID,
                   now: () => performance.now(),

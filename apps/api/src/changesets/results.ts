@@ -76,3 +76,17 @@ export function toCallToolResult(r: InvocationResult): CallToolResult {
     ...(r.isError === true ? { isError: true } : {}),
   };
 }
+
+/** What a refused file argument says (CS-10): the path and the upload page, never a file name or content (SEC-1, SEC-3). */
+export function fileRefusalResult(code: 'file_not_found' | 'file_too_large' | 'file_type_not_allowed', pointer: string, publicUrl: URL | undefined): InvocationResult {
+  const text = {
+    file_not_found: `The file at ${pointer} was not found.${publicUrl === undefined ? '' : ` Upload it at ${new URL('/app/files', publicUrl).href} and pass its ID.`}`,
+    file_too_large: `The file at ${pointer} is larger than this operation allows.`,
+    file_type_not_allowed: `The file at ${pointer} has a type this operation does not allow.`,
+  }[code];
+  return { text, isError: true };
+}
+
+export function isFileRefusal(code: string): code is 'file_not_found' | 'file_too_large' | 'file_type_not_allowed' {
+  return code === 'file_not_found' || code === 'file_too_large' || code === 'file_type_not_allowed';
+}

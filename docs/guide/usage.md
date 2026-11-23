@@ -35,6 +35,7 @@ tools below. An operation that is not granted is not listed and cannot be called
 | `cancel_changeset` | Cancels a change-set that has not finished |
 | `rollback_changeset` | Says whether a rollback is possible and links to the page that confirms it |
 | `create_plan` | Puts change-sets the caller prepared in an order, so each starts only after the one before it completed |
+| `list_staged_files` | Where to upload a file and the files the caller has staged, with their IDs; shown only to roles that may stage files |
 | `review_changeset` | For approvers: the data of a change-set awaiting their decision |
 | `ping` | Checks the connection and the login |
 
@@ -253,7 +254,15 @@ name in `X-File-Name`. It is open to a user with a role that grants such an oper
 403 `forbidden`) and answers 201 with `{ id, name, mediaType, size, sha256, preview, createdAt,
 expiresAt }`. Refusals: 400 `invalid_name`, `invalid_media_type`, `empty_file`; 413
 `payload_too_large` (above `files.max_bytes`); 409 `quota_exceeded`. `GET /api/v1/files` lists the
-user's own files that still have content. The upload is audited as `file.staged` with its size,
+user's own files that still have content.
+
+To use a staged file, the person uploads it on `/app/files` and the model passes its ID, a UUID, as
+the value of the file argument (for example `{ "image": "<id>" }`). `list_staged_files` answers the
+upload page URL and the caller's own staged files, so the model can find the ID after the upload. A
+file that is unknown, someone else's or purged is refused with the path of the argument and
+`file_not_found`; a file above the operation's size limit or of a type it does not allow is refused
+with `file_too_large` or `file_type_not_allowed`. Nothing is created in any of these cases, and the
+change-set that is created shows the file's name, type, size and hash, not its bytes. The upload is audited as `file.staged` with its size,
 type and hash, never the name or the content. The body is stored as sent: a `Content-Encoding`
 other than identity is refused with 415.
 

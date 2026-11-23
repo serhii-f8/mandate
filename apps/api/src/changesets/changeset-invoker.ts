@@ -19,6 +19,7 @@ import {
   type ChangeSetKind,
   type ChangeSetRecord,
   type ChangeSetRepository,
+  type FileStore,
   type InvocationRequest,
   type InvocationResult,
   type OperationDefinition,
@@ -28,7 +29,7 @@ import {
 } from '@mandate/core';
 import { deriveTaskState } from '../mcp/tasks/task-state.js';
 import { riskNotSupportedResult } from '../upstream/risk-not-supported.js';
-import { expiredDuringPreparationAnswer, preparationErrorAnswer, preparedAnswer, preparingAnswer } from './results.js';
+import { expiredDuringPreparationAnswer, fileRefusalResult, isFileRefusal, preparationErrorAnswer, preparedAnswer, preparingAnswer } from './results.js';
 
 /** How long a call without Tasks waits for preparation, and how often it looks. */
 export interface PrepareWait {
@@ -47,6 +48,8 @@ export interface ChangeSetInvokerDeps {
   readonly now: () => Date;
   readonly correlationId: string;
   readonly wait: PrepareWait;
+  /** Where staged files are read for operations with file arguments (CS-10), and the base of the upload page link. Without it such a call is refused. */
+  readonly files?: { readonly store: Pick<FileStore, 'get'>; readonly publicUrl: URL };
 }
 
 type Details = Record<string, string | number | boolean>;
@@ -77,7 +80,7 @@ export class ChangeSetInvoker implements OperationInvoker {
     const base: Details = { operation: operation.id, connection: operation.connection };
 
     const created = await createChangeSet(
-      { repository, newId: this.deps.newId, now: this.deps.now },
+      { repository, newId: this.deps.newId, now: this.deps.now, ...(this.deps.files === undefined ? {} : { files: this.deps.files.store }) },
       {
         operation,
         args,
@@ -88,6 +91,11 @@ export class ChangeSetInvoker implements OperationInvoker {
       },
     );
     if (!created.ok) {
+      if (isFileRefusal(created.code)) {
+        // CS-10: the path and the code only; the file's name never leaves (SEC-1, SEC-3).
+        const pointer = created.pointer ?? '';
+        return { ...fileRefusalResult(created.code, pointer, this.deps.files?.publicUrl), auditDetails: { ...base, errorCode: created.code, pointer } };
+      }
       return { ...preparationErrorResult(operation.id, created.code), auditDetails: { ...base, errorCode: created.code } };
     }
     const { changeset } = created;

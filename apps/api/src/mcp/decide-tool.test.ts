@@ -8,6 +8,7 @@ import {
   InMemoryAuditLog,
   InMemoryChangeSetRepository,
   InMemoryExecutor,
+  InMemoryFileStore,
   InMemoryTaskRepository,
   recordApproval,
   ScriptedWriter,
@@ -168,6 +169,7 @@ async function setup(options: { steps?: readonly string[]; widget?: boolean } = 
     tasks: new InMemoryTaskRepository(),
     audit,
     approvals,
+    files: new InMemoryFileStore(),
     publicUrl: new URL('https://mandate.example.test'),
   });
   const reports: AuditDetails[] = [];

@@ -9,7 +9,7 @@
 import type { LoadedConfiguration } from '@mandate/config';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { UpstreamToolView } from '@mandate/upstream';
-import type { ChangeSetRepository, InvocationRequest, InvocationResult, OperationInvoker, TaskRepository, WorkflowStarter } from '@mandate/core';
+import type { ChangeSetRepository, FileStore, InvocationRequest, InvocationResult, OperationInvoker, TaskRepository, WorkflowStarter } from '@mandate/core';
 import { ChangeSetInvoker, checkPrepareWait, preparesChangeSet } from '../changesets/changeset-invoker.js';
 import type { PipelineDeps } from '../mcp/tool-pipeline.js';
 import { pinRefusal, usablePin } from './pin-refusal.js';
@@ -64,6 +64,8 @@ export interface OperationInvokersBase extends Omit<DirectReadInvokerDeps, 'conf
   readonly sleep?: (ms: number) => Promise<void>;
   /** Pin states of MCP-backed operations (CONN-4); without it they are refused. */
   readonly upstreamTools?: UpstreamToolView;
+  /** Staged files and the upload page base (CS-10); without it a call naming a file is refused. */
+  readonly files?: { readonly store: Pick<FileStore, 'get'>; readonly publicUrl: URL };
 }
 
 const POLL_MS = 250;
@@ -86,6 +88,7 @@ export function operationInvokers(base: OperationInvokersBase): PipelineDeps['in
         now: base.now,
         correlationId,
         wait,
+        ...(base.files === undefined ? {} : { files: base.files }),
       }),
     }, { configuration, ...(base.upstreamTools === undefined ? {} : { upstreamTools: base.upstreamTools }) });
   };

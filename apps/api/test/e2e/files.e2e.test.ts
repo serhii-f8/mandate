@@ -6,8 +6,9 @@
  * Identities (`files-config`): ed (group `editors`) holds `editor`, which grants an operation with a
  * file argument; vi (group `viewers`) holds `viewer`, which does not.
  */
+import { randomUUID } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +16,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pageLogin, startTestIssuer, type StartedPostgres, type TestIssuer, type TestLoginUser } from '@mandate/testing';
 import { HARD_MAX_FILE_BYTES, sha256Of, type FileStore } from '@mandate/core';
 import { FILE_STORE } from '../../src/tokens.js';
-import { auditRows, startApi, startDatabase, uploadFile, type RunningApi } from './helpers.js';
+import pg from 'pg';
+import { auditRows, connectClient, startApi, startDatabase, text, tokenFor, uploadFile, type RunningApi } from './helpers.js';
 
 const FILES_CONFIG = fileURLToPath(new URL('./fixtures/files-config', import.meta.url));
 const ED: TestLoginUser = { sub: 'ed-id', username: 'ed', groups: ['editors'] };
@@ -198,5 +200,166 @@ describe('CS-10 staging files', () => {
     expect((await upload(small, ed, { body: PNG })).status).toBe(201);
     expect(await upload(small, ed, { body: PNG })).toMatchObject({ status: 409, body: { error: 'quota_exceeded' } });
     expect(await listed(small, ed)).toHaveLength(1);
+  });
+});
+
+interface ToolResult {
+  isError?: boolean;
+  content: { type: string; text: string }[];
+  structuredContent?: Record<string, unknown>;
+}
+
+const MED: TestLoginUser = { sub: 'med-id', username: 'med', groups: ['editors'] };
+const MED2: TestLoginUser = { sub: 'med2-id', username: 'med2', groups: ['editors'] };
+const MVI: TestLoginUser = { sub: 'mvi-id', username: 'mvi', groups: ['viewers'] };
+
+async function callTool(token: string, name: string, args: Record<string, unknown>): Promise<{ result: ToolResult; correlationId: string }> {
+  let correlationId = '';
+  const client = await connectClient({
+    era: 'modern',
+    baseUrls: [api.url],
+    token,
+    onResponse: (r) => {
+      correlationId = r.headers.get('x-correlation-id') ?? correlationId;
+    },
+  });
+  try {
+    return { result: (await client.callTool({ name, arguments: args })) as unknown as ToolResult, correlationId };
+  } finally {
+    await client.close();
+  }
+}
+
+async function toolNames(token: string): Promise<string[]> {
+  const client = await connectClient({ era: 'modern', baseUrls: [api.url], token });
+  try {
+    return (await client.listTools()).tools.map((t) => t.name);
+  } finally {
+    await client.close();
+  }
+}
+
+async function query<T extends Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    return (await client.query<T>(sql, params)).rows;
+  } finally {
+    await client.end();
+  }
+}
+
+const changesetCount = async (): Promise<number> => Number((await query<{ n: string }>('select count(*) as n from change_set'))[0]?.n);
+const NOT_FOUND = (pointer: string, base: string): string => `The file at ${pointer} was not found. Upload it at ${base}/app/files and pass its ID.`;
+
+describe('MCP-11 CS-10 a tool call with a file', () => {
+  it('MCP-11 tools/list of an editor contains list_staged_files, of a viewer does not, and a viewer call is an unknown tool', async () => {
+    const editor = await tokenFor(issuer, api, MED.sub, ['editors']);
+    const viewer = await tokenFor(issuer, api, MVI.sub, ['viewers']);
+    const tools = (await (async () => {
+      const client = await connectClient({ era: 'modern', baseUrls: [api.url], token: editor });
+      try {
+        return (await client.listTools()).tools;
+      } finally {
+        await client.close();
+      }
+    })()).find((t) => t.name === 'list_staged_files');
+    expect(tools?.annotations?.readOnlyHint).toBe(true);
+    expect(await toolNames(viewer)).not.toContain('list_staged_files');
+    // A hidden tool is answered exactly as one that does not exist (MCP-2).
+    const message = async (name: string): Promise<string> => {
+      const failure = await callTool(viewer, name, {}).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      return (failure instanceof Error ? failure.message : 'no error').replace(name, 'X');
+    };
+    expect(await message('list_staged_files')).toBe(await message('no_such_tool_at_all'));
+    expect(await message('list_staged_files')).toBe('Tool X not found');
+  });
+
+  it('MCP-11 list_staged_files answers the upload URL and only the caller own files', async () => {
+    const med = await login(api, MED);
+    const other = await login(api, MED2);
+    const mine = (await upload(api, med, { body: PNG, name: 'mine.png' })).body as { id: string };
+    await upload(api, other, { body: PNG, name: 'theirs-secret.png' });
+    const { result } = await callTool(await tokenFor(issuer, api, MED.sub, ['editors']), 'list_staged_files', {});
+    expect(result.isError).toBeUndefined();
+    const answer = result.structuredContent as { uploadUrl: string; files: { id: string }[] };
+    expect(answer.uploadUrl).toBe(`${api.url}/app/files`);
+    expect(answer.files.map((f) => f.id)).toEqual([mine.id]);
+    expect(text(result)).toContain(`mine.png (${mine.id})`);
+    expect(text(result)).not.toContain('theirs-secret');
+  });
+
+  it('MCP-11 CS-10 CS-4 a staged file passed by ID prepares a change-set sealing its descriptor under hash version 3', async () => {
+    const med = await login(api, MED);
+    const staged = (await upload(api, med, { body: PNG, name: 'logo.png' })).body as { id: string; mediaType: string; size: number; sha256: string };
+    const token = await tokenFor(issuer, api, MED.sub, ['editors']);
+    const { result, correlationId } = await callTool(token, 'shop.upload_image', { image: staged.id });
+    expect(result.isError).toBeUndefined();
+    const prepared = result.structuredContent?.changeset as { id: string; status: string };
+    expect(prepared.status).toBe('prepared');
+    const { result: shown } = await callTool(token, 'get_changeset', { changeset_id: prepared.id });
+    const shownChangeset = shown.structuredContent?.changeset as { args: Record<string, unknown> };
+    expect(shownChangeset.args.image).toEqual({ $file: { id: staged.id, name: 'logo.png', media_type: 'image/png', size: PNG.length, sha256: staged.sha256 } });
+    expect((await query<{ hash_version: number }>('select hash_version from change_set where id = $1', [prepared.id]))[0]?.hash_version).toBe(3);
+    const row = (await auditRows(databaseUrl, `action = 'tool.call' and correlation_id = $1`, [correlationId]))[0];
+    expect(row?.details).toMatchObject({ changesetId: prepared.id });
+    expect(JSON.stringify(row)).not.toContain('logo.png');
+  });
+
+  it('SEC-1 CS-10 another user file, an unknown ID and a purged file answer file_not_found and create nothing', async () => {
+    const med = await login(api, MED);
+    const other = await login(api, MED2);
+    const theirs = (await upload(api, other, { body: PNG, name: 'theirs-secret.png' })).body as { id: string };
+    const purged = (await upload(api, med, { body: PNG, name: 'purged-secret.png' })).body as { id: string };
+    const token = await tokenFor(issuer, api, MED.sub, ['editors']);
+    // An operator-side purge: the file has no change-set and is older than the TTL.
+    await storeOf(api).purge({ now: new Date(Date.now() + 48 * 3_600_000), stagedTtlHours: 24, keepDays: 7, limit: 1000 }, (n) => ({
+      id: randomUUID(),
+      actor: 'system',
+      action: 'files.purged',
+      outcome: 'ok',
+      correlationId: 'e2e-purge',
+      details: { count: n },
+    }));
+    for (const id of [theirs.id, '99999999-9999-4999-8999-999999999999', purged.id]) {
+      const before = await changesetCount();
+      const { result, correlationId } = await callTool(token, 'shop.upload_image', { image: id });
+      expect(result.isError, id).toBe(true);
+      expect(text(result), id).toBe(NOT_FOUND('/image', api.url));
+      expect(JSON.stringify(result)).not.toMatch(/secret/);
+      expect(await changesetCount()).toBe(before);
+      const row = (await auditRows(databaseUrl, `action = 'tool.call' and correlation_id = $1`, [correlationId]))[0];
+      expect(row?.details).toMatchObject({ errorCode: 'file_not_found', pointer: '/image' });
+      expect(JSON.stringify(row)).not.toMatch(/secret/);
+    }
+  });
+
+  it('MCP-3 a value that is not a UUID is refused by argument validation, before policy', async () => {
+    const token = await tokenFor(issuer, api, MED.sub, ['editors']);
+    const before = await changesetCount();
+    const { result, correlationId } = await callTool(token, 'shop.upload_image', { image: 'not-a-uuid' });
+    expect(result.isError).toBe(true);
+    expect(text(result)).toMatch(/^Input validation error: Invalid arguments for tool shop\.upload_image/);
+    const rows = await auditRows(databaseUrl, 'correlation_id = $1', [correlationId]);
+    expect(rows.map((r) => r.action)).toEqual(['tool.call']);
+    expect(rows[0]?.details).toMatchObject({ errorCode: 'invalid_arguments' });
+    expect(await changesetCount()).toBe(before);
+  });
+
+  it('MCP-11 a configuration with an operation named list_staged_files is refused at load', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mandate-files-reserved-e2e-'));
+    try {
+      await cp(FILES_CONFIG, dir, { recursive: true });
+      for (const file of ['operations.yaml', 'roles.yaml']) {
+        const path = join(dir, file);
+        await writeFile(path, (await readFile(path, 'utf8')).replaceAll('shop.post_note', 'list_staged_files'));
+      }
+      await expect(startApi(databaseUrl, { issuer, configDir: dir })).rejects.toThrow(/is reserved for a built-in tool/);
+    } finally {
+      await rm(dir, { recursive: true });
+    }
   });
 });

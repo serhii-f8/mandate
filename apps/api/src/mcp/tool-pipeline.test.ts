@@ -11,6 +11,7 @@ import {
   InMemoryAuditLog,
   InMemoryChangeSetRepository,
   InMemoryExecutor,
+  InMemoryFileStore,
   InMemoryRateCounter,
   InMemoryTaskRepository,
   ScriptedWriter,
@@ -588,6 +589,7 @@ function widgetSetup() {
     tasks: new InMemoryTaskRepository(),
     audit,
     approvals,
+    files: new InMemoryFileStore(),
     publicUrl: new URL('https://mandate.example.test'),
   };
   return { audit, repository, toolDeps, deps: { ...deps, builtins: [pingTool, decideChangesetTool(toolDeps)] }, req };

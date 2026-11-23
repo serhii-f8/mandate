@@ -14,7 +14,7 @@ import {
   type UpstreamReader,
   type WorkflowStarter,
 } from '@mandate/core';
-import { InMemoryChangeSetRepository, InMemoryTaskRepository } from '@mandate/testing';
+import { InMemoryChangeSetRepository, InMemoryFileStore, InMemoryTaskRepository } from '@mandate/testing';
 import { ChangeSetInvoker, type PrepareWait } from './changeset-invoker.js';
 
 const CHANGESET_SOURCES = {
@@ -455,5 +455,94 @@ describe('MCP-7 MCP-1 EXE-1 asynchronous write call', () => {
     expect(result.auditDetails).toMatchObject({ errorCode: 'risk_not_supported' });
     expect(starter.started).toEqual([]);
     expect(await repository.get(ID)).toBeUndefined();
+  });
+});
+
+describe('CS-10 a call naming a staged file', () => {
+  const FILE_SOURCES = {
+    'connections.yaml': CHANGESET_SOURCES['connections.yaml'],
+    'files.yaml': JSON.stringify({
+      version: 1,
+      operations: [
+        {
+          id: 'catalog.upload_image',
+          connection: 'magento',
+          risk: 'write_opaque',
+          description: 'Upload an image.',
+          upstream: { method: 'POST', path: '/V1/media', body: { arg: 'image' } },
+          input_schema: { type: 'object', properties: { image: { type: 'string', format: 'uuid' } }, required: ['image'], additionalProperties: false },
+          files: [{ at: '/image', send: 'base64', media_types: ['image/png'], max_bytes: 100 }],
+        },
+      ],
+    }),
+  };
+  const FILE_ID = '11111111-1111-4111-8111-111111111111';
+  const PUBLIC = new URL('https://mandate.example.test/');
+
+  async function fileSetup(owner = 'alice-id', size = 10, type = 'image/png') {
+    const result = await loadConfigurationSources(Object.entries(FILE_SOURCES).map(([file, text]) => ({ file, text })));
+    if (!result.ok) throw new Error(JSON.stringify(result.issues));
+    const configuration = result.configuration;
+    const operation = configuration.policy.operations.find((o) => o.id === 'catalog.upload_image');
+    if (operation === undefined) throw new Error('fixture');
+    const store = new InMemoryFileStore();
+    await store.stage(
+      { id: FILE_ID, owner, name: 'secret-name.png', mediaType: type, content: new Uint8Array(size).fill(1), sha256: `sha256:${'a'.repeat(64)}`, preview: 'image', createdAt: NOW, quota: { count: 5, bytes: 10_000 } },
+      { id: 'e1', actor: owner, action: 'file.staged', outcome: 'ok', correlationId: 'c', details: {} },
+    );
+    const repository = new InMemoryChangeSetRepository(undefined, undefined, { files: store });
+    const starter = new FakeStarter();
+    let n = 0;
+    const invoker = new ChangeSetInvoker({
+      configuration,
+      repository,
+      tasks: new RecordingTasks(),
+      starter,
+      newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
+      now: () => NOW,
+      correlationId: 'corr-f',
+      wait: NO_WAIT,
+      files: { store, publicUrl: PUBLIC },
+    });
+    const call = (args: Record<string, unknown>) => invoker.invoke({ operation, args, caller, asTask: false, report: undefined } as never);
+    return { call, repository, starter };
+  }
+
+  it('CS-10 an unknown, foreign or purged file is refused with the pointer and the upload URL; nothing is created', async () => {
+    for (const setupArgs of [['bob-id'] as const, [] as const]) {
+      const { call, repository, starter } = await fileSetup(...setupArgs);
+      const id = setupArgs.length === 0 ? '99999999-9999-4999-8999-999999999999' : FILE_ID;
+      const result = await call({ image: id });
+      expect(result).toMatchObject({
+        isError: true,
+        text: 'The file at /image was not found. Upload it at https://mandate.example.test/app/files and pass its ID.',
+        auditDetails: { operation: 'catalog.upload_image', errorCode: 'file_not_found', pointer: '/image' },
+      });
+      expect(JSON.stringify(result)).not.toContain('secret-name');
+      expect(starter.started).toEqual([]);
+      expect(await repository.get('00000000-0000-4000-8000-000000000001')).toBeUndefined();
+    }
+  });
+
+  it('CS-10 a file above the limit and a file of another type have their own texts', async () => {
+    const large = await fileSetup('alice-id', 101);
+    expect(await large.call({ image: FILE_ID })).toMatchObject({
+      isError: true,
+      text: 'The file at /image is larger than this operation allows.',
+      auditDetails: { errorCode: 'file_too_large', pointer: '/image' },
+    });
+    const wrong = await fileSetup('alice-id', 10, 'application/pdf');
+    expect(await wrong.call({ image: FILE_ID })).toMatchObject({
+      isError: true,
+      text: 'The file at /image has a type this operation does not allow.',
+      auditDetails: { errorCode: 'file_type_not_allowed', pointer: '/image' },
+    });
+  });
+
+  it('CS-10 the caller own file prepares a change-set', async () => {
+    const { call } = await fileSetup();
+    const result = await call({ image: FILE_ID });
+    expect(result.isError).toBeUndefined();
+    expect(result.auditDetails).toHaveProperty('changesetId');
   });
 });

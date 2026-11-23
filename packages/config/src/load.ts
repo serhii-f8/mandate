@@ -54,6 +54,7 @@ export const BUILTIN_TOOL_NAMES: readonly string[] = [
   'decide_changeset',
   'review_changeset',
   'create_plan',
+  'list_staged_files',
 ];
 
 export type { OperationBinding };

@@ -12,7 +12,7 @@ import {
   type StartRequest,
   type TaskRecord,
 } from '@mandate/core';
-import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryTaskRepository } from '@mandate/testing';
+import { InMemoryAuditLog, InMemoryChangeSetRepository, InMemoryFileStore, InMemoryTaskRepository } from '@mandate/testing';
 import { ApprovalService } from '../approvals/approval-service.js';
 import { AUDIT_UNAVAILABLE, type AuditDetails } from './audited-tool.js';
 import { submitForApprovalTool } from './submit-tool.js';
@@ -279,6 +279,7 @@ async function setup(
     newId,
     now,
     approvals: new ApprovalService({ repository, executor, audit, newId, now }),
+    files: new InMemoryFileStore(),
     publicUrl: new URL('http://localhost:8400'),
   });
   const reported: AuditDetails[] = [];
