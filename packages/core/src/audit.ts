@@ -28,6 +28,10 @@ export const AUDIT_ACTIONS = [
   'changeset.verification',
   /** CS-9: once, when a plan orders prepared change-sets; the plan ID and step count, never the title. */
   'plan.created',
+  /** CS-10: once per staged file; the file ID, size and media type, never the name or content. */
+  'file.staged',
+  /** CS-10: once per purge run that removed content; the count only. */
+  'files.purged',
   'notification.sent',
   'notification.failed',
   'audit.search',

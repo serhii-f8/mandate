@@ -13,6 +13,8 @@ export { InMemoryNotificationOutbox } from './in-memory-notification-outbox.js';
 export { describeNotificationOutboxContract, type NotificationOutboxHarness } from './notification-outbox-contract.js';
 export { InMemoryTaskRepository } from './in-memory-task-repository.js';
 export { describeTaskRepositoryContract, type TaskRepositoryHarness } from './task-repository-contract.js';
+export { InMemoryFileStore } from './in-memory-file-store.js';
+export { fileStoreContract, type FileStoreHarness } from './file-store-contract.js';
 export { InMemoryRateCounter } from './in-memory-rate-counter.js';
 export { describeRateCounterContract, type RateCounterHarness } from './rate-counter-contract.js';
 export { InMemoryExecutor, ScriptedWriter, type InMemoryExecutorDeps, type ScriptedWriterOptions } from './in-memory-executor.js';

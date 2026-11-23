@@ -42,3 +42,10 @@ export const AUDIT_RETENTION_LOCK_KEY = 0x6169_6f70_732d_6172n;
  * cannot both win (NFR-3). Nothing else may use it. ASCII "mandate-cf".
  */
 export const CONFIG_LOCK_KEY = 0x6169_6f70_732d_6366n;
+
+/**
+ * First key of the two-key transaction lock `pg_advisory_xact_lock(FILE_STAGE_LOCK_NAMESPACE,
+ * hashtext(owner))` that `PostgresFileStore.stage` takes before it counts the owner's files (CS-10).
+ * Serialises uploads per owner so the quota counts exactly. ASCII "afs1" as a 32-bit integer.
+ */
+export const FILE_STAGE_LOCK_NAMESPACE = 0x6166_7331;

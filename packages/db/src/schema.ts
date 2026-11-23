@@ -159,6 +159,34 @@ export const plan = pgTable('plan', {
 });
 
 /**
+ * Staged files (CS-10, ADR 0075): content uploaded ahead of a tool call, sealed by `sha256`. Migration `0018_staged_files`
+ * adds the trigger: the only UPDATE is the purge (`content` to NULL, `purged_at` from NULL to a time); DELETE is refused.
+ * `owner` is the user ID; the file name is user text and never reaches a log or an audit row (SEC-3).
+ */
+export const stagedFile = pgTable(
+  'staged_file',
+  {
+    id: uuid('id').primaryKey(),
+    owner: text('owner').notNull(),
+    clientId: text('client_id'),
+    name: text('name').notNull(),
+    mediaType: text('media_type').notNull(),
+    size: integer('size').notNull(),
+    sha256: text('sha256').notNull(),
+    preview: text('preview').$type<'image' | 'text' | 'none'>().notNull(),
+    content: bytea('content'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    purgedAt: timestamp('purged_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('staged_file_owner_created_at_idx').on(t.owner, t.createdAt.desc()),
+    check('staged_file_size_check', sql`${t.size} > 0`),
+    check('staged_file_preview_check', sql`${t.preview} IN ('image', 'text', 'none')`),
+    check('staged_file_purged_check', sql`(${t.content} IS NULL) = (${t.purgedAt} IS NOT NULL)`),
+  ],
+);
+
+/**
  * Change-sets (CS-2, CS-4, CS-6). Immutability after `prepared` is enforced by triggers of
  * migration `0004_change_set_immutability`; status transitions are compare-and-set in the
  * repository and checked in core.
@@ -469,4 +497,19 @@ export const configRevision = pgTable(
     check('config_revision_hash_check', sql`${t.hash} ~ '^[0-9a-f]{64}$'`),
     check('config_revision_source_check', sql`${t.source} IN ('apply', 'bootstrap')`),
   ],
+);
+
+/** The files a change-set carries, by JSON pointer into its arguments (CS-10). Insert-only (migration `0018_staged_files`). */
+export const changeSetFile = pgTable(
+  'change_set_file',
+  {
+    changeSetId: uuid('change_set_id')
+      .notNull()
+      .references(() => changeSet.id),
+    pointer: text('pointer').notNull(),
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => stagedFile.id),
+  },
+  (t) => [primaryKey({ columns: [t.changeSetId, t.pointer] }), index('change_set_file_file_id_idx').on(t.fileId)],
 );
