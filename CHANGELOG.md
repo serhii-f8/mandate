@@ -18,7 +18,11 @@ Additive release: the configuration schema and the connector SDK are 1.3.0. A pr
   a rollback waits for it and the read load (NFR-9, EXE-12).
 - `changesetWorkflow` runs the verify-after stage after the last batch, on workflow timers, and
   continues as new on long verifications. A cancel during verification stops it; the change-set then
-  ends with the status its items give, not `cancelled` (EXE-12, EXE-6, EXE-7, EXE-10).
+  ends with the status its items give, not `cancelled` (EXE-12, EXE-6, EXE-7, EXE-10). The deadline
+  is checked after every look, so a long round cannot outlast `timeout_seconds`; the start of
+  verification is retried until PostgreSQL answers; a cancel stops verification also on a run
+  started without resume state; a record without a readable identifier on the verification read is
+  `verify_read_failed`; a delayed look of an older round changes nothing.
 - `get_changeset`, the execution answer, the change-set page and the widget show the verification:
   confirmed and not-confirmed counts, `Verifying: N of M confirmed` while checks are pending, and
   `Not confirmed: <check title or code>` on an unconfirmed item (MCP-4, UI-4, EXE-12).
@@ -26,14 +30,24 @@ Additive release: the configuration schema and the connector SDK are 1.3.0. A pr
   the one before it completed, and a change-set derived from a prepared step takes its place
   (CS-9, EXE-13, CS-5, ADR 0074).
 - `create_plan` creates a plan from MCP, `get_changeset` shows a step's plan, the execution guard
-  refuses a step whose predecessor is not `completed`, and a step rolls back only after every later
-  step that ran was rolled back; `create_plan` is now a reserved tool name (MCP-10, EXE-13, EXE-8).
+  refuses a step whose predecessor is not `completed`, and a step cannot roll back while a later step
+  runs or holds writes that were not rolled back (a later step that wrote nothing does not block it); `create_plan` is now a reserved tool name (MCP-10, EXE-13, EXE-8).
+  **Action needed before upgrading:** a configuration with an operation named exactly `create_plan`
+  must rename it, or it no longer loads.
 - A plan step that ends `completed` starts the next step by itself when that one is `approved`, as
   `system` with the requester's identity and role limits, behind a new `changesetWorkflow` patch
   (EXE-13, EXE-10).
 - The change-set and approval views, on the pages and in the widgets, show the plan: "Step N of M in
   plan ...", one row per step and, for a step whose predecessor is not `completed`, what it waits
   for. The page answer marks the steps the viewer may open; only those link (UI-4, APR-5, CS-9).
+- The result view has a **Not confirmed** tab (items pending or unconfirmed), opened first when nothing
+  failed; `get_changeset` and the page items route take `verification: not_confirmed` (or a single
+  verification status), and `get_changeset` reads "verifying: N of M confirmed" while verifying
+  (EXE-12, UI-4, MCP-8).
+- A plan step behind one that ended `failed`, `rejected`, `cancelled`, `expired`, `rolled_back` or
+  `completed_with_errors` shows "Blocked: step N ended ...; this step cannot start", an approved step
+  whose predecessor completed shows "Ready to start", and the `plan_blocked` refusal says the same;
+  an early approval of a plan step says it starts when the step before it completes (EXE-13, UI-4).
 - The usage guide explains plans (ordering, per-change-set approval, expiry sizing, rollback order, what a
   plan cannot do), the architecture guide the start path of an advanced step, and the upgrade guide
   migration `0017` (CS-9, EXE-13, NFR-9).

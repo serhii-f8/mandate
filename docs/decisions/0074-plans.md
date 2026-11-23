@@ -58,7 +58,9 @@ skipped as `drift` by CS-7, as today.
 - **Approval is per change-set, unchanged (POL-5).** Steps may be submitted and approved in any
   order. The approval view names the plan, the step and the predecessor's status.
 - **The gate (EXE-13).** `startExecution` refuses a step above 1 with `plan_blocked` unless the step
-  before it is `completed` (so: all written, none failed, verification confirmed, ADR 0073). The
+  before it is `completed` (so: no item failed and, with `verify_after`, none is unconfirmed, ADR
+  0073; an item skipped as drift or already gone does not make a change-set fail, so skipped items do
+  not stop a plan). The
   predecessor is read in the start transaction, after the status and approval checks and before the
   limits, so a blocked start changes nothing and writes no audit row. A refused step stays
   `prepared` or `approved`. The same check runs in the execution guard.

@@ -150,7 +150,7 @@ title and the change-set IDs. The order of the list is the order of the steps.
 - A plan has 2 to 20 steps. Every change-set must be one the caller prepared, still `prepared` (not
   yet submitted), not expired, in no other plan, and listed once. A call that breaks one of these
   rules is refused and writes nothing.
-- The title is free text of 1 to 200 characters. It is shown to the approvers of every step of the
+- The title is text of 1 to 200 characters, without control characters. It is shown to the approvers of every step of the
   plan, so keep it free of anything they should not see.
 
 **Approval stays per change-set.** An approver approves exactly the hash of the step in front of
@@ -158,8 +158,8 @@ them, and steps can be approved in any order. Approving step 3 early is safe: it
 step 2 is done.
 
 **Order is enforced at the start.** A step above the first cannot start until the step before it is
-`completed`. With a [verify-after stage](#verify-after) that means every written item was confirmed.
-A start that comes too early is refused with `plan_blocked` and changes nothing: the step stays
+`completed`: no record failed and, with a [verify-after stage](#verify-after), none is
+unconfirmed. A start that comes too early is refused with `plan_blocked` and changes nothing: the step stays
 `prepared` or `approved`.
 
 **The next step starts by itself.** When a step ends `completed`, the platform starts the next step
@@ -172,6 +172,11 @@ Things to know:
   `approved` and the requester or the approver can start it later.
 - If the platform cannot reach Temporal to start it, the next step ends `failed` with
   `executor_unavailable`, as when an approver's start meets the same failure, and the plan stops.
+
+**Skipped records do not stop a plan.** A step whose records were skipped, because they changed
+upstream since preparation (`drift`) or are gone, still ends `completed` when nothing failed, and
+the next step starts. Check a step's skipped count before you rely on what it should have changed;
+if a skipped record matters to a later step, cancel that step.
 
 **A step that does not complete stops the plan.** A step that ends `completed_with_errors`, `failed`,
 `cancelled`, `rejected`, `expired` or `rolled_back` leaves every later step blocked. There is no

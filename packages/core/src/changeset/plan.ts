@@ -51,9 +51,9 @@ export function planShapeRefusal(
 }
 
 /**
- * EXE-13: true when a step may start: step 1, or the step before it is `completed` (all written, none
- * failed, verification confirmed). Any other status of the predecessor, or no predecessor in `steps`,
- * blocks the step (fail closed).
+ * EXE-13: true when a step may start: step 1, or the step before it is `completed` (no item failed and, with
+ * `verify_after`, none is unconfirmed; skipped items, drift or gone, do not stop a plan). Any other status of
+ * the predecessor, or no predecessor in `steps`, blocks the step (fail closed).
  */
 export function planStepMayStart(step: number, steps: readonly PlanStep[]): boolean {
   if (step === 1) return true;
