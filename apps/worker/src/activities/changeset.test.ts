@@ -101,7 +101,7 @@ describe('CS-4 EXE-8 beginRollback recomputes the hash with the stored version',
   });
 
   it('CS-4 an unknown hash version is answered hash_mismatch', async () => {
-    // A row from a newer release: the type does not admit 3, the database column does.
+    // A row from a newer release: the type does not admit 4 (a later version), the database column does.
     const newer = await rollingBack({ hashVersion: 4 as never });
     expect(await beginRollback(newer)).toEqual({ ok: false, outcome: 'hash_mismatch' });
   });

@@ -386,7 +386,7 @@ describe('CS-5 derived change-sets', () => {
 
     it('CS-4 CS-5 a source with an unknown hash version is refused hash_mismatch and creates no row', async () => {
       const s = await setup();
-      // A row from a newer release: the type does not admit 3, the database column does.
+      // A row from a newer release: the type does not admit 4 (a later version), the database column does.
       const newer = { ...s.source, hashVersion: 4 as never };
       s.repo.sets.set(SOURCE_ID, newer);
       expect(await deriveChangeSet(s.deps, s.req({ exclude: ['t-0002'] }))).toEqual({ ok: false, reason: 'hash_mismatch' });

@@ -141,7 +141,7 @@ describe('CS-4 POL-6 execution guard recomputes the hash with the stored version
 
   it('CS-4 an unknown hash version is answered hash_mismatch', async () => {
     const base = await record({ skus: ['a'], changes: { name: 'N' } });
-    // A row from a newer release: the type does not admit 3, the database column does.
+    // A row from a newer release: the type does not admit 4 (a later version), the database column does.
     const newer = { ...base, hashVersion: 4 as never };
     const guardFor = createExecutionGuard({ repository: approvedRepository(base.hash ?? ''), audit: new InMemoryAuditLog(), newId: () => 'id' });
     expect(await guardFor(A).check(newer)).toEqual({ ok: false, outcome: 'hash_mismatch' });
