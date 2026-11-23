@@ -4,6 +4,7 @@
  * The policy model (SPEC section 4: Operation, Role, Grant), as `@mandate/config`
  * produces it from validated YAML. Plain immutable data, no behaviour.
  */
+import type { FileArgument } from './files/model.js';
 
 /** SPEC section 4, "Operation risk classes". */
 export type RiskClass = 'read' | 'write' | 'write_opaque' | 'destructive';
@@ -27,6 +28,8 @@ export interface OperationDefinition {
   readonly fieldsArg?: string;
   /** Present on write operations that prepare change-sets (CS-1). */
   readonly manifest?: ManifestDefinition;
+  /** OPS-8: declared file arguments of an opaque operation; absent means none. */
+  readonly files?: readonly FileArgument[];
 }
 
 export type RollbackStrategy =

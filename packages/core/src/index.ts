@@ -265,3 +265,4 @@ export {
 export { OpaqueCallWriter, type OpaqueCallWriterDeps } from './changeset/opaque-writer.js';
 export * from './approval/index.js';
 export * from './notification/index.js';
+export * from './files/index.js';

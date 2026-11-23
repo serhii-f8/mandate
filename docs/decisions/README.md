@@ -70,3 +70,4 @@ Requirements cited in the records (`MCP-1`, `POL-3`, `NFR-18`) are defined in th
 | [0072](0072-preparation-checks-and-lookups.md) | Preparation checks and lookups | 2026-11-22 |
 | [0073](0073-verify-after-stage.md) | Verify-after stage | 2026-11-22 |
 | [0074](0074-plans.md) | Plans | 2026-11-22 |
+| [0075](0075-file-arguments.md) | File arguments | 2026-11-23 |

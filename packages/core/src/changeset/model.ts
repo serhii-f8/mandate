@@ -2,6 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import type { ApprovalPlan, Submission } from '../approval/model.js';
 import type { ManifestAction } from '../policy-model.js';
+import type { FileLink } from '../files/model.js';
 import type { HashVersion } from './hash.js';
 
 export type ChangeSetStatus =
@@ -124,6 +125,8 @@ export interface ChangeSetRecord {
   readonly hashVersion?: HashVersion;
   /** CS-4: the manifest action sealed into a version 2 hash; absent for version 1 and for an opaque change-set. */
   readonly action?: ManifestAction;
+  /** CS-10: the staged files the arguments name, ordered by pointer; absent means none. */
+  readonly files?: readonly FileLink[];
   readonly status: ChangeSetStatus;
   readonly stats: ChangeSetStats;
   readonly errorCode?: string;
