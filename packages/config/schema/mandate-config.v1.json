@@ -769,7 +769,8 @@
                 },
                 "send": {
                   "enum": [
-                    "base64"
+                    "base64",
+                    "multipart"
                   ],
                   "type": "string"
                 }

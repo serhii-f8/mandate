@@ -15,8 +15,7 @@ const PART = /^[A-Za-z0-9_.-]{1,64}$/;
 
 const fileArgumentSchema = z.strictObject({
   at: z.string().regex(FILE_AT),
-  /** Task 14 widens this to `multipart`. */
-  send: z.enum(['base64']),
+  send: z.enum(['base64', 'multipart']),
   media_types: z.array(z.string().regex(MEDIA_TYPE)).min(1).max(20),
   max_bytes: z.number().int().min(1).max(HARD_MAX_FILE_BYTES).optional(),
   part: z.string().regex(PART).optional(),
@@ -50,14 +49,19 @@ export function toFileSettings(config: FileSettingsConfig | undefined): FileSett
 
 /** The core model of an operation's file arguments; an entry without `max_bytes` takes `maxBytes`. */
 export function toFileArguments(config: FileArgumentsConfig, maxBytes: number): FileArgument[] {
-  return config.map((entry) => ({
-    pointer: entry.at,
-    path: entry.at.slice(1).split('/'),
-    send: entry.send,
-    mediaTypes: [...entry.media_types],
-    maxBytes: entry.max_bytes ?? maxBytes,
-    ...(entry.part === undefined ? {} : { part: entry.part }),
-  }));
+  return config.map((entry) => {
+    const path = entry.at.slice(1).split('/');
+    // A multipart file's part defaults to its argument name; the loader refuses a nested path for multipart.
+    const part = entry.part ?? (entry.send === 'multipart' && path.length === 1 ? path[0] : undefined);
+    return {
+      pointer: entry.at,
+      path,
+      send: entry.send,
+      mediaTypes: [...entry.media_types],
+      maxBytes: entry.max_bytes ?? maxBytes,
+      ...(part === undefined ? {} : { part }),
+    };
+  });
 }
 
 export interface FileArgumentInput {
@@ -118,7 +122,17 @@ export function fileArgumentIssues(input: FileArgumentInput): FileIssue[] {
     if (entry.max_bytes !== undefined && entry.max_bytes > input.maxBytes) {
       issues.push({ path: ['files', index, 'max_bytes'], message: 'must not exceed files.max_bytes' });
     }
-    // `send` is widened: only base64 parses now, and multipart arrives with its own rules.
+    const first = input.files[0];
+    if (first !== undefined && index > 0 && entry.send !== first.send) {
+      issues.push({ path: ['files', index, 'send'], message: 'must be the same for every file of the operation' });
+    }
+    if (isMultipart(entry.send)) {
+      const segments = entry.at.slice(1).split('/');
+      if (segments.length > 1) issues.push({ path: at, message: 'must be a top-level argument with send: multipart' });
+      const part = entry.part ?? segments[0];
+      const taken = input.files.slice(0, index).some((earlier) => isMultipart(earlier.send) && (earlier.part ?? earlier.at.slice(1).split('/')[0]) === part);
+      if (taken && segments.length === 1) issues.push({ path: ['files', index, 'part'], message: 'is already used by another file' });
+    }
     if (entry.part !== undefined && !isMultipart(entry.send)) {
       issues.push({ path: ['files', index, 'part'], message: 'is allowed only with send: multipart' });
     }

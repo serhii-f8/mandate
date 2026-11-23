@@ -246,3 +246,103 @@ describe('EXE-4 CS-10 a file reaches the upstream as approved', () => {
     expect(payloads).not.toContain(BASE64);
   }, 60_000);
 });
+
+const MP_OPERATION = 'catalog.upload_attachment';
+
+function multipartSources(upstreamUrl: string): { file: string; text: string }[] {
+  const [connections, , roles] = sources(upstreamUrl);
+  return [
+    connections as { file: string; text: string },
+    {
+      file: 'operations.yaml',
+      text: `version: 1
+changesets: { expire_after_hours: 10, failure_threshold: 0.5, items_per_workflow_run: 100, rollback_window_hours: 1 }
+operations:
+  - id: ${MP_OPERATION}
+    connection: shop
+    risk: write_opaque
+    description: Upload an attachment with fields.
+    upstream: { method: POST, path: /V1/attachments, body: { arg: fields } }
+    input_schema:
+      type: object
+      properties:
+        fields: { type: object, properties: { title: { type: string }, pages: { type: integer } } }
+        attachment: { type: string, format: uuid }
+      required: [fields, attachment]
+    files: [{ at: /attachment, send: multipart, media_types: [application/pdf] }]
+`,
+    },
+    { file: 'roles.yaml', text: (roles as { text: string }).text.replace(OPERATION, MP_OPERATION) },
+  ];
+}
+
+describe('CONN-9 a multipart file reaches the upstream as approved', () => {
+  let up: FakeUpstream;
+  let configuration: LoadedConfiguration;
+  let worker: TestWorker;
+  let store: PostgresFileStore;
+
+  beforeEach(async () => {
+    up = await startFakeUpstream();
+    up.route('POST', '/rest/V1/attachments', () => ({ status: 201, body: { id: 9 } }));
+    store = new PostgresFileStore(infra.database.db);
+    const adapter = createAdapters();
+    const loaded = await loadConfigurationSources(multipartSources(up.url), { resolver: adapter.resolver });
+    if (!loaded.ok) throw new Error(`configuration invalid: ${JSON.stringify(loaded.issues)}`);
+    configuration = loaded.configuration;
+    const vault = new MemoryVault();
+    await vault.put({ ref: CREDENTIAL_REF, scheme: 'bearer', secret: { token: FAKE_TOKEN }, actor: 'test' });
+    const guard = createExecutionGuard({ repository: infra.repository, audit: infra.audit, newId: randomUUID, files: store })(configuration);
+    worker = await startTestWorker(infra, { configuration, writerFor: createWriterFor({ vault, adapter, files: store }), guard, settingsFor: executionSettings });
+  });
+  afterEach(async () => {
+    await worker.stop();
+    await up.close();
+  });
+
+  it('CONN-9 the upstream receives one multipart request with the text fields and the file part, byte for byte', async () => {
+    const fileId = randomUUID();
+    const staged = await store.stage(
+      { id: fileId, owner: 'alice', name: NAME, mediaType: 'application/pdf', content: BYTES, sha256: sha256Of(BYTES), preview: 'none', createdAt: new Date(), quota: { count: 100, bytes: 100_000_000 } },
+      { id: randomUUID(), actor: 'alice', action: 'file.staged', outcome: 'ok', correlationId: randomUUID(), details: {} },
+    );
+    if (!staged.ok) throw new Error('file not staged');
+    const operation = configuration.policy.operations.find((o) => o.id === MP_OPERATION);
+    if (operation === undefined) throw new Error('operation missing');
+    const created = await createChangeSet(
+      { repository: infra.repository, newId: randomUUID, now: () => new Date(), files: store },
+      {
+        operation,
+        args: { fields: { title: 'Q3 report', pages: 12 }, attachment: fileId },
+        caller: { subject: 'alice', groups: [EDITOR_GROUP] },
+        correlationId: `corr-create-${randomUUID()}`,
+        configHash: configuration.hash,
+        expireAfterHours: 1,
+      },
+    );
+    if (!created.ok) throw new Error(`change-set not created: ${created.code}`);
+    const { id } = created.changeset;
+    await worker.starter.start(id);
+    await expect.poll(async () => (await infra.repository.get(id))?.status, { timeout: 30_000 }).toBe('prepared');
+    const hash = (await infra.repository.get(id))?.hash;
+    if (hash === undefined) throw new Error('no hash');
+    expect(await worker.executor.start({ changesetId: id, expectedHash: hash, actor: 'alice', groups: [EDITOR_GROUP], correlationId: `corr-exec-${randomUUID()}` })).toEqual({ ok: true });
+    await worker.executor.settled(id);
+
+    expect((await infra.repository.get(id))?.status).toBe('completed');
+    expect(up.requests).toHaveLength(1);
+    const request = up.requests[0];
+    if (request === undefined) throw new Error('no request');
+    expect(request.headers['content-type']).toMatch(/^multipart\/form-data; boundary=/);
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- test-side parsing: Node's parser is the independent reader
+    const form = await new Response(request.rawBody, { headers: { 'content-type': request.headers['content-type'] ?? '' } }).formData();
+    expect([...form.keys()].sort()).toEqual(['attachment', 'pages', 'title']);
+    expect(form.get('title')).toBe('Q3 report');
+    expect(form.get('pages')).toBe('12');
+    const file = form.get('attachment');
+    if (!(file instanceof File)) throw new Error('attachment is not a file part');
+    expect(file.name).toBe(NAME);
+    expect(file.type).toBe('application/pdf');
+    expect(Buffer.from(await file.arrayBuffer()).equals(Buffer.from(BYTES))).toBe(true);
+  }, 60_000);
+});

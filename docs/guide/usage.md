@@ -287,6 +287,12 @@ hash with the sealed one; a change is refused as `hash_mismatch`. A configuratio
 moved the file argument since approval is refused as `policy_denied`. If the content changes or
 disappears between the guard and the send, the call ends `file_unavailable` and nothing is sent.
 
+*Multipart.* An operation whose files use `send: multipart` sends one `multipart/form-data` request:
+the text fields come from the operation's body template and each file is a part named by its `part`
+(default: the argument name), with the staged name and declared type. The checks are the same as for
+base64: if the stored bytes do not hash to the sealed value, nothing is sent. See
+[`files`](configuration.md#operations).
+
 *Limits and lifetime.* One file is at most `files.max_bytes` (default 10 MiB, at most 25 MiB; an
 operation may lower it), and one user holds at most `per_user_count` files (50) and `per_user_bytes`
 (250 MiB) with content. An hourly job on the worker removes content that is no longer needed:

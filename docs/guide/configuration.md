@@ -298,10 +298,10 @@ and content hash instead. The operation needs an explicit `input_schema`: every 
 | Key | Type | Default | Bounds / notes |
 | --- | --- | --- | --- |
 | `at` | string | required | Where the file sits in the arguments: `/a/b/c`, 1-8 property names each matching `^[A-Za-z_][A-Za-z0-9_]{0,63}$`; no array index, no `~` escape. Paths are distinct and none is a prefix of another |
-| `send` | `base64` | required | How the file is sent upstream |
+| `send` | `base64` or `multipart` | required | How the file is sent upstream: `base64` puts the encoded bytes in the argument; `multipart` sends the request as `multipart/form-data` (since 1.4.0). The value is the same for every file of the operation |
 | `media_types` | list of strings | required | 1-20 declared types the caller may send, lower case, `type/subtype` |
 | `max_bytes` | integer | `files.max_bytes` | 1 to `files.max_bytes` |
-| `part` | string | none | `^[A-Za-z0-9_.-]{1,64}$`; allowed only with `send: multipart`, so it is refused for now |
+| `part` | string | the argument name | `^[A-Za-z0-9_.-]{1,64}$`; allowed only with `send: multipart`; unique within the operation, defaults included |
 
 ```yaml
 files:
@@ -345,6 +345,18 @@ operations:
 The caller passes the staged file's ID at `entry.content.base64_encoded_data`; the worker puts the
 file's bytes, base64 encoded, in that place of the request body. See
 [Staged files](usage.md#administer) for the upload and the approver's view.
+
+With `send: multipart` the request body is `multipart/form-data`: the text fields are the entries of
+the operation's `upstream.body` template (it must render an object of strings, numbers and booleans;
+otherwise nothing is sent), and each file is one part named `part`, carrying the staged file's name and
+declared type and its exact bytes. A multipart `at` is a top-level argument (one segment); the file
+properties are not part of the text fields. The operation cannot also declare `upstream.bulk`.
+
+```yaml
+files:
+  - { at: /front, send: multipart, media_types: [image/png], part: front_image }
+  - { at: /back, send: multipart, media_types: [image/png] }   # part: back
+```
 
 A grant `scope` must not name an argument that is a one-segment file path: it holds a file ID, which
 no scope value could match.

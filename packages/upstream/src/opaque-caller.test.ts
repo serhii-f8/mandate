@@ -90,6 +90,21 @@ operations:
         entry: { type: object, properties: { doc: { type: string, format: uuid } }, required: [doc] }
       required: [entry]
     files: [{ at: /entry/doc, send: base64, media_types: [text/plain] }]
+  - id: shop.photos
+    connection: shop
+    risk: write_opaque
+    description: Opaque write with two multipart files.
+    upstream: { method: POST, path: /V1/photos, body: { arg: fields } }
+    input_schema:
+      type: object
+      properties:
+        fields: { type: object }
+        front: { type: string, format: uuid }
+        back: { type: string, format: uuid }
+      required: [front, back]
+    files:
+      - { at: /front, send: multipart, media_types: [text/plain], part: front_image }
+      - { at: /back, send: multipart, media_types: [text/plain] }
   - id: tools.send
     connection: tools
     risk: write_opaque
@@ -501,6 +516,78 @@ describe('EXE-4 CS-10 an opaque call with a file', () => {
     const { seen, beforeSend } = hooked();
     await expect(mcp.caller.call({ args: {}, idempotencyKey: KEY, files: LINKS, beforeSend })).resolves.toEqual({ kind: 'not_sent', code: 'file_unavailable' });
     expect(mcp.adapter.calls).toEqual([]);
+    expect(seen.calls).toBe(0);
+  });
+});
+
+describe('CONN-9 an opaque call with multipart files', () => {
+  const FRONT = '11111111-1111-4111-8111-111111111111';
+  const BACK = '22222222-2222-4222-8222-222222222222';
+  const FRONT_BYTES = Uint8Array.from({ length: 300 }, (_, i) => (i * 7 + 130) % 256);
+  const BACK_BYTES = Uint8Array.from({ length: 50 }, (_, i) => 255 - i);
+  const desc = (id: string, name: string, bytes: Uint8Array) => ({ $file: { id, name, media_type: 'text/plain', size: bytes.byteLength, sha256: sha256Of(bytes) } });
+  const ARGS_MP = { fields: { sku: 'X1' }, front: desc(FRONT, 'front.txt', FRONT_BYTES), back: desc(BACK, 'back-distinctive.txt', BACK_BYTES) };
+  const LINKS = [
+    { pointer: '/front', fileId: FRONT },
+    { pointer: '/back', fileId: BACK },
+  ] as const;
+
+  async function stored(): Promise<InMemoryFileStore> {
+    const store = new InMemoryFileStore();
+    const now = new Date('2026-11-23T10:00:00.000Z');
+    for (const [id, name, bytes] of [[FRONT, 'front.txt', FRONT_BYTES], [BACK, 'back-distinctive.txt', BACK_BYTES]] as const) {
+      await store.stage(
+        { id, owner: 'alice', name, mediaType: 'text/plain', content: bytes, sha256: sha256Of(bytes), preview: 'none', createdAt: now, quota: { count: 5, bytes: 1_000_000 } },
+        { id: 'a', ts: now } as never,
+      );
+    }
+    return store;
+  }
+
+  it('CONN-9 the adapter gets an http_multipart target with the parts in order and arguments without the file properties', async () => {
+    const { adapter, caller, lines } = await setup('shop.photos', { files: await stored() });
+    const { seen, beforeSend } = hooked();
+    await expect(caller.call({ args: ARGS_MP, idempotencyKey: KEY, files: LINKS, beforeSend })).resolves.toEqual({ kind: 'accepted' });
+    const call = adapter.calls[0];
+    expect(call?.args).toEqual({ fields: { sku: 'X1' } });
+    expect(call?.target.kind).toBe('http_multipart');
+    if (call?.target.kind !== 'http_multipart') throw new Error('unexpected target');
+    expect(call.target.mapping.path).toBe('/V1/photos');
+    expect(call.target.parts.map((p) => [p.name, p.filename, p.mediaType])).toEqual([
+      ['front_image', 'front.txt', 'text/plain'],
+      ['back', 'back-distinctive.txt', 'text/plain'],
+    ]);
+    expect(Buffer.from(call.target.parts[0]?.content ?? []).equals(Buffer.from(FRONT_BYTES))).toBe(true);
+    expect(Buffer.from(call.target.parts[1]?.content ?? []).equals(Buffer.from(BACK_BYTES))).toBe(true);
+    expect(seen.calls).toBe(1);
+    expect(JSON.stringify(lines)).not.toContain('back-distinctive');
+    // The change-set's own arguments keep their descriptors.
+    expect(ARGS_MP.front).toEqual(desc(FRONT, 'front.txt', FRONT_BYTES));
+  });
+
+  it('CONN-9 the checks of a file call refuse a multipart call the same way and call nothing', async () => {
+    const corrupt = await stored();
+    corrupt.corrupt(BACK, new TextEncoder().encode('changed after approval'));
+    const cases: [string, Partial<OpaqueCallerDeps>, readonly { pointer: string; fileId: string }[]][] = [
+      ['corrupt second file', { files: corrupt }, LINKS],
+      ['no store', {}, LINKS],
+      ['one link only', { files: await stored() }, [LINKS[0]]],
+    ];
+    for (const [name, overrides, files] of cases) {
+      const { adapter, caller } = await setup('shop.photos', overrides);
+      const { seen, beforeSend } = hooked();
+      await expect(caller.call({ args: ARGS_MP, idempotencyKey: KEY, files, beforeSend }), name).resolves.toEqual({ kind: 'not_sent', code: 'file_unavailable' });
+      expect(adapter.calls, name).toEqual([]);
+      expect(seen.calls, name).toBe(0);
+    }
+  });
+
+  it('CONN-9 an adapter that answers not_sent for the target yields not_sent', async () => {
+    const adapter = new FakeWriteAdapter({ result: 'not_sent', code: 'mapping', durationMs: 0 });
+    const { caller } = await setup('shop.photos', { files: await stored(), adapter });
+    const { seen, beforeSend } = hooked();
+    await expect(caller.call({ args: ARGS_MP, idempotencyKey: KEY, files: LINKS, beforeSend })).resolves.toEqual({ kind: 'not_sent', code: 'upstream_rejected' });
+    expect(adapter.sent).toBe(0);
     expect(seen.calls).toBe(0);
   });
 });

@@ -72,6 +72,41 @@ describe('OPS-8 file arguments in configuration', () => {
     expect(config.policy.operations.find((o) => o.id === 'media.upload')?.files?.[0]?.maxBytes).toBe(2000);
   });
 
+  describe('CONN-9 send: multipart', () => {
+    const TOP = obj({ front: { type: 'string', format: 'uuid' }, back: { type: 'string', format: 'uuid' }, fields: { type: 'object' } }, ['front', 'back']);
+    const multipart = (extra: Record<string, unknown> = {}) => ({ at: '/front', send: 'multipart', media_types: ['image/png'], ...extra });
+    const op = (files: Record<string, unknown>[], more: Record<string, unknown> = {}) =>
+      operation({ input_schema: TOP, upstream: { method: 'POST', path: '/V1/media', body: { arg: 'fields' } }, files, ...more });
+
+    it('CONN-9 two multipart files with their parts load, the part defaulting to the argument name', async () => {
+      const config = ok(await loadOp(op([multipart({ part: 'front' }), multipart({ at: '/back' })])));
+      const files = config.policy.operations.find((o) => o.id === 'media.upload')?.files;
+      expect(files?.map((f) => [f.send, f.part])).toEqual([['multipart', 'front'], ['multipart', 'back']]);
+    });
+
+    it('CONN-9 entries of one operation must agree on send', async () => {
+      await refused(op([multipart(), { ...multipart({ at: '/back' }), send: 'base64' }]), 'operations[0].files[1].send', 'must be the same for every file of the operation');
+    });
+
+    it('CONN-9 a multipart path must be a top-level argument', async () => {
+      await refused(operation({ files: [{ ...FILE, send: 'multipart' }] }), 'operations[0].files[0].at', 'must be a top-level argument with send: multipart');
+    });
+
+    it('CONN-9 two entries may not use one part, defaults included', async () => {
+      await refused(op([multipart({ part: 'back' }), multipart({ at: '/back' })]), 'operations[0].files[1].part', 'is already used by another file');
+    });
+
+    it('CONN-9 a part outside the allowed characters is refused by the schema', async () => {
+      expect(found(await loadOp(op([multipart({ part: 'a b' })]))).length).toBeGreaterThan(0);
+    });
+
+    it('OPS-8 an opaque operation with upstream.bulk and files is refused as any opaque operation with bulk', async () => {
+      const bulk = { method: 'POST', path: '/bulk', bulk: { batch_id: 'id', status: { path: '/b/{batch_id}', items: 'ops', key: 'sku', state: 's', states: { ok: [1], open: [2] } } } };
+      const result = await loadOp(op([multipart()], { upstream: bulk }));
+      expect(result.ok).toBe(false);
+    });
+  });
+
   describe('where files are allowed', () => {
     const NOT_ALLOWED = 'is allowed only on an opaque operation with an HTTP binding';
     it('OPS-8 refuses files on a read operation', async () => {

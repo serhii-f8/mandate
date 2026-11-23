@@ -9,8 +9,8 @@
  * (SEC-2); each call logs identifiers, method, status and timing only, never arguments (SEC-3).
  */
 import type { LoadedConfiguration, PinEvaluation } from '@mandate/config';
-import type { CallOutcome, CallTarget, CodeAdapter, ConnectionSettings, CodeCallOperation, CodeCallResult, WriteAdapter, WriteErrorCode } from '@mandate/connector-sdk';
-import { fileDescriptorAt, isOpaque, sha256Of, storedFilesMatch, withValueAt, type CredentialVault, type FileArgument, type FileLink, type FileStore, type OpaqueCaller, type OpaqueCallOutcome, type OpaqueNotSentCode } from '@mandate/core';
+import type { CallOutcome, CallTarget, CodeAdapter, FilePart, ConnectionSettings, CodeCallOperation, CodeCallResult, WriteAdapter, WriteErrorCode } from '@mandate/connector-sdk';
+import { OMIT, fileDescriptorAt, isOpaque, sha256Of, storedFilesMatch, withValueAt, type CredentialVault, type FileArgument, type FileLink, type FileStore, type OpaqueCaller, type OpaqueCallOutcome, type OpaqueNotSentCode } from '@mandate/core';
 import { connectionCredential, type UpstreamCallLog } from './read.js';
 
 export interface OpaqueCallerDeps {
@@ -90,31 +90,40 @@ function pinRefusal(evaluation: PinEvaluation | undefined): OpaqueNotSentCode | 
 }
 
 /**
- * The arguments with each `send: base64` file replaced by its stored content, standard base64 with padding
- * (EXE-4, CS-10); undefined when a file is missing, purged, differs from its sealed descriptor, or the links
- * are not exactly what the operation declares. Nothing is returned for content that does not hash to the
- * descriptor's `sha256`, and neither content nor name is logged or thrown (SEC-3).
+ * The arguments with each `send: base64` file replaced by its stored content, standard base64 with padding,
+ * or, for `send: multipart`, with each file property removed and the files returned as parts in declaration
+ * order (EXE-4, CS-10, CONN-9). Undefined when a file is missing, purged, differs from its sealed descriptor, or
+ * the links are not exactly what the operation declares. Nothing is returned for content that does not hash to
+ * the descriptor's `sha256`, and neither content nor name is logged or thrown (SEC-3).
  */
 async function argsWithFiles(
   operation: { readonly files?: readonly FileArgument[] },
   args: Readonly<Record<string, unknown>>,
   links: readonly FileLink[],
   store: Pick<FileStore, 'content'> | undefined,
-): Promise<Readonly<Record<string, unknown>> | undefined> {
+): Promise<{ readonly args: Readonly<Record<string, unknown>>; readonly parts: readonly FilePart[] | undefined } | undefined> {
   if (!storedFilesMatch(operation.files, { args, files: links })) return undefined;
   if (store === undefined) return undefined;
   let sent = args;
+  const parts: FilePart[] = [];
+  let multipart = false;
   for (const entry of operation.files ?? []) {
     const descriptor = fileDescriptorAt(args, entry.path);
     if (descriptor === undefined) return undefined;
     const content = await store.content(descriptor.id);
     if (content === undefined) return undefined;
     if (content.byteLength !== descriptor.size || sha256Of(content) !== descriptor.sha256) return undefined;
-    // Only base64 exists until multipart sending lands; any other kind never goes out as base64.
-    if (entry.send !== 'base64') return undefined;
-    sent = withValueAt(sent, entry.path, Buffer.from(content).toString('base64'));
+    if (entry.send === 'multipart') {
+      // The loader gives a multipart entry its part; a model without one never goes out.
+      if (entry.part === undefined) return undefined;
+      multipart = true;
+      parts.push({ name: entry.part, filename: descriptor.name, mediaType: descriptor.media_type, content });
+      sent = withValueAt(sent, entry.path, OMIT);
+    } else {
+      sent = withValueAt(sent, entry.path, Buffer.from(content).toString('base64'));
+    }
   }
-  return sent;
+  return { args: sent, parts: multipart ? parts : undefined };
 }
 
 /**
@@ -163,6 +172,7 @@ export function createOpaqueCaller(deps: OpaqueCallerDeps): OpaqueCaller | undef
     ...(idempotencyHeader === undefined ? {} : { idempotencyHeader }),
     async call({ args: callArgs, idempotencyKey, files, beforeSend }) {
       let args = callArgs;
+      let callTarget: CallTarget = target;
       // An adapter written against connector-sdk 0.5.x has no callOnce (NFR-18): fail closed, nothing sent.
       if (adapter.callOnce === undefined) return refuse('upstream_unavailable');
       const credential = await connectionCredential(deps.vault, connection.credentialRef);
@@ -178,12 +188,13 @@ export function createOpaqueCaller(deps: OpaqueCallerDeps): OpaqueCaller | undef
         // CS-10: load each file, hash it against the sealed descriptor, and only then put it into the request.
         const withFiles = binding.kind === 'http' ? await argsWithFiles(operation, args, files ?? [], deps.files) : undefined;
         if (withFiles === undefined) return refuse('file_unavailable');
-        args = withFiles;
+        args = withFiles.args;
+        if (withFiles.parts !== undefined && binding.kind === 'http') callTarget = { kind: 'http_multipart', mapping: binding.mapping, parts: withFiles.parts };
       }
       // beforeSend goes to the adapter unchanged: if it throws, nothing is sent and the error propagates.
       const outcome = await adapter.callOnce({
         connection,
-        target,
+        target: callTarget,
         args,
         ...(credential === undefined ? {} : { credential }),
         ...(idempotencyHeader === undefined ? {} : { idempotencyKey }),

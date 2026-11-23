@@ -22,6 +22,7 @@ Additive release: the configuration schema and the connector SDK are 1.4.0. A pr
 - A worker job removes the content of staged files after `files.staged_ttl_hours`, or `files.keep_days` after the last change-set that used them ended, hourly, and audits each run that removed something as `files.purged` (CS-10). The migration `0018_staged_files` is forward-only. Upgrade every `api` and `worker` before adding `files` to the configuration.
 - `examples/preset-template` is 1.4.0 (`mandate.sdk: ^1.4.0`) and gains `notes.attach`, an opaque write with a base64 file argument (OPS-8, NFR-9).
 - The connector SDK's `CallTarget` gains `http_multipart` with `FilePart` parts (since 1.4.0, additive): the OpenAPI adapter sends an opaque call's files as a `multipart/form-data` request, once; an adapter that does not know the kind sends nothing (CONN-9, ADR 0076).
+- `files[].send: multipart` (with `part`) is accepted: an opaque call sends its staged files as `multipart/form-data` parts after the same hash checks as base64, once; the loader requires one `send` for the operation, a top-level `at` and unique parts (CONN-9, OPS-8).
 
 ## 1.3.0
 

@@ -10,6 +10,8 @@ export interface RecordedRequest {
   query: URLSearchParams;
   headers: Record<string, string>;
   body: string;
+  /** The request body's exact bytes; `body` is their UTF-8 decoding and lossy for binary content. */
+  rawBody: Uint8Array;
 }
 
 export interface FakeResponse {
@@ -85,12 +87,14 @@ export async function startFakeUpstream(opts: { readonly host?: string; readonly
     req.on('data', (c: Buffer) => chunks.push(c));
     req.on('end', () => {
       const u = new URL(req.url ?? '/', 'http://fake.invalid');
+      const raw = Buffer.concat(chunks);
       const recorded: RecordedRequest = {
         method: req.method ?? 'GET',
         path: u.pathname,
         query: u.searchParams,
         headers: flattenHeaders(req),
-        body: Buffer.concat(chunks).toString('utf8'),
+        body: raw.toString('utf8'),
+        rawBody: new Uint8Array(raw),
       };
       requests.push(recorded);
       const handler =
