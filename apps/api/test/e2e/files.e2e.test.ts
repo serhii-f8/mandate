@@ -6,6 +6,7 @@
  * Identities (`files-config`): ed (group `editors`) holds `editor`, which grants an operation with a
  * file argument; vi (group `viewers`) holds `viewer`, which does not.
  */
+import { gzipSync } from 'node:zlib';
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,6 +24,7 @@ const ED3: TestLoginUser = { sub: 'ed3-id', username: 'ed3', groups: ['editors']
 const ED4: TestLoginUser = { sub: 'ed4-id', username: 'ed4', groups: ['editors'] };
 const FRANK: TestLoginUser = { sub: 'frank-id', username: 'frank', groups: ['editors'] };
 const GINA: TestLoginUser = { sub: 'gina-id', username: 'gina', groups: ['editors'] };
+const HANK: TestLoginUser = { sub: 'hank-id', username: 'hank', groups: ['editors'] };
 const VI: TestLoginUser = { sub: 'vi-id', username: 'vi', groups: ['viewers'] };
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
 
@@ -144,6 +146,41 @@ describe('CS-10 staging files', () => {
     expect(await upload(api, ed, { body: new Uint8Array(), type: 'image/png' })).toMatchObject({ status: 400, body: { error: 'empty_file' } });
     expect(await upload(api, ed, { body: new Uint8Array(), type: 'application/json' })).toMatchObject({ status: 400, body: { error: 'empty_file' } });
     expect(await listed(api, ed)).toEqual([]);
+  });
+
+  it('CS-10 every spelling of the route reads the exact bytes', async () => {
+    const ed = await login(api, ED4);
+    const body = new TextEncoder().encode('{"b": 2}');
+    for (const path of ['/API/v1/Files', '/api/v1/files/', '/api/v1/files?x=1']) {
+      const answer = await upload(api, ed, { body, type: 'application/json', path });
+      expect(answer.status, path).toBe(201);
+      const stored = await storeOf(api).content((answer.body as { id: string }).id);
+      expect(Buffer.from(stored ?? []).toString('utf8'), path).toBe('{"b": 2}');
+    }
+  });
+
+  it('CS-10 a compressed upload is refused, not decompressed; nothing is stored', async () => {
+    const ed = await login(api, ED3);
+    const answer = await upload(api, ed, { body: gzipSync(PNG), headers: { 'content-encoding': 'gzip' } });
+    expect(answer).toMatchObject({ status: 415, body: { error: 'invalid_body' } });
+    expect(await listed(api, ed)).toEqual([]);
+  });
+
+  it('AUD-3 CS-10 refused uploads leave no file.staged row', async () => {
+    const before = (await auditRows(databaseUrl, `action = 'file.staged'`)).length;
+    const ed = await login(api, ED3);
+    const vi = await login(api, VI);
+    await upload(api, vi, { body: PNG });
+    await upload(api, ed, { body: PNG, name: '..' });
+    await upload(api, ed, { body: PNG, type: 'png' });
+    await upload(api, ed, { body: new Uint8Array() });
+    await upload(api, ed, { body: gzipSync(PNG), headers: { 'content-encoding': 'gzip' } });
+    const hank = await login(small, HANK);
+    expect((await upload(small, hank, { body: new Uint8Array(101) })).status).toBe(413);
+    expect((await upload(small, hank, { body: PNG })).status).toBe(201);
+    expect((await upload(small, hank, { body: PNG })).status).toBe(409);
+    // Only the one stored file has a row.
+    expect((await auditRows(databaseUrl, `action = 'file.staged'`)).length - before).toBe(1);
   });
 
   it('CS-10 a body above files.max_bytes is 413 and one above the hard limit is 413 too', async () => {

@@ -478,9 +478,9 @@ export interface CreateAppOptions {
   readonly telemetry?: ApiTelemetry;
 }
 
-/** The one request whose body is raw bytes: `POST /api/v1/files` (CS-10). */
+/** The one request whose body is raw bytes: `POST /api/v1/files` (CS-10). Matched as Express routes it: case-insensitive, optional trailing slash, query ignored. */
 function isFileUpload(req: IncomingMessage): boolean {
-  return req.method === 'POST' && /^\/api\/v1\/files\/?(\?|$)/.test(req.url ?? '');
+  return req.method === 'POST' && /^\/api\/v1\/files\/?(\?|$)/i.test(req.url ?? '');
 }
 
 /** Builds the api application without listening (used by `main.ts` and the e2e tests). */
@@ -501,7 +501,8 @@ export async function createApp(options: CreateAppOptions): Promise<INestApplica
   // only `POST /api/v1/files` (its `type` test); it must come first: once it has read the stream, the
   // JSON parser below finds the request finished and skips it, so an `application/json` upload is not
   // re-serialised and the 4 MiB JSON limit does not apply to it.
-  app.useBodyParser('raw', { type: isFileUpload, limit: HARD_MAX_FILE_BYTES });
+  // `inflate: false`: the stored bytes are the bytes sent, so a compressed upload is refused (415), not decompressed.
+  app.useBodyParser('raw', { type: isFileUpload, limit: HARD_MAX_FILE_BYTES, inflate: false });
   // MCP request bodies up to 4 MiB, the SDK's default bound (ADR 0013).
   app.useBodyParser('json', { limit: '4mb' });
   // Directly after the parser: its errors quote the body, so they get fixed bodies (SEC-3).

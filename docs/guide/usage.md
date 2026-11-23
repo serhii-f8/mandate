@@ -254,7 +254,8 @@ name in `X-File-Name`. It is open to a user with a role that grants such an oper
 expiresAt }`. Refusals: 400 `invalid_name`, `invalid_media_type`, `empty_file`; 413
 `payload_too_large` (above `files.max_bytes`); 409 `quota_exceeded`. `GET /api/v1/files` lists the
 user's own files that still have content. The upload is audited as `file.staged` with its size,
-type and hash, never the name or the content.
+type and hash, never the name or the content. The body is stored as sent: a `Content-Encoding`
+other than identity is refused with 415.
 
 **Audit.** Every login, policy decision, tool call, approval, batch and configuration change is in
 the audit log at `/app/audit`, for roles with `view_audit`. The log can be filtered by actor,

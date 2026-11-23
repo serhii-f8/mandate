@@ -369,13 +369,17 @@ export interface UploadOptions {
   readonly cookie?: string | null;
   /** `X-CSRF-Token`; omitted when `null`. */
   readonly csrfToken?: string | null;
+  /** Request path and query; `/api/v1/files` by default. */
+  readonly path?: string;
+  /** Further headers, e.g. `content-encoding`. */
+  readonly headers?: Record<string, string>;
 }
 
 /** `POST /api/v1/files` as the trusted page sends it (CS-10): raw bytes, the name in a header. */
 export async function uploadFile(apiUrl: string, options: UploadOptions): Promise<{ status: number; body: unknown; correlationId: string }> {
   const name = options.name === undefined ? 'file.png' : options.name;
   const type = options.type === undefined ? 'image/png' : options.type;
-  const response = await fetch(`${apiUrl}/api/v1/files`, {
+  const response = await fetch(`${apiUrl}${options.path ?? '/api/v1/files'}`, {
     method: 'POST',
     redirect: 'manual',
     headers: {
@@ -384,6 +388,7 @@ export async function uploadFile(apiUrl: string, options: UploadOptions): Promis
       ...(options.csrfToken === null || options.csrfToken === undefined ? {} : { 'x-csrf-token': options.csrfToken }),
       ...(name === null ? {} : { 'x-file-name': name }),
       ...(type === null ? {} : { 'content-type': type }),
+      ...options.headers,
     },
     body: options.body,
   });
