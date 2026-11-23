@@ -9,6 +9,9 @@ import {
   planAllowsRollback,
   planCreatedEvent,
   planShapeRefusal,
+  planBlockedText,
+  planStepGate,
+  planStepGateText,
   planStepMayStart,
   type PlanRecord,
   type PlanStep,
@@ -99,6 +102,47 @@ describe('CS-9 plan rules', () => {
     expect(
       planAllowsRollback(1, [started(1, 'completed', true), started(2, 'rolled_back', true), started(3, 'failed', true)]),
     ).toBe(false);
+  });
+
+  describe('EXE-13 UI-4 what a step waits for', () => {
+    const line = (steps: PlanStep[], at = 2): string | undefined => planStepGateText(planStepGate(at, steps));
+
+    it('EXE-13 a predecessor that can still complete: Runs after step N completes', () => {
+      for (const status of ['prepared', 'pending_approval', 'approved', 'executing', 'preparing'] as const) {
+        expect(line([step(1, status), step(2, 'approved')])).toBe(`Runs after step 1 completes (now: ${status})`);
+      }
+    });
+
+    it('EXE-13 a predecessor that ended any other way: Blocked, this step cannot start', () => {
+      for (const status of ['failed', 'rejected', 'cancelled', 'expired', 'rolled_back', 'completed_with_errors'] as const) {
+        expect(line([step(1, status), step(2, 'approved')])).toBe(`Blocked: step 1 ended ${status}; this step cannot start`);
+        expect(planBlockedText('cs-2', planStepGate(2, [step(1, status), step(2, 'approved')]))).toBe(
+          `Change-set cs-2 is blocked: step 1 of its plan ended ${status}, so this step cannot start.`,
+        );
+      }
+      // A rollback never ends completed: blocked too.
+      expect(line([step(1, 'rolling_back'), step(2, 'prepared')])).toBe('Blocked: step 1 is rolling_back; this step cannot start');
+    });
+
+    it('EXE-13 a completed predecessor and an approved step that is not running: Ready to start', () => {
+      expect(line([step(1, 'completed'), step(2, 'approved')])).toBe('Ready to start');
+      // Prepared, running or done: nothing to say.
+      for (const status of ['prepared', 'pending_approval', 'executing', 'completed'] as const) {
+        expect(line([step(1, 'completed'), step(2, status)])).toBeUndefined();
+      }
+    });
+
+    it('EXE-13 step 1, or a predecessor not in the list, has no line', () => {
+      expect(line([step(1, 'approved'), step(2, 'prepared')], 1)).toBeUndefined();
+      expect(line([step(2, 'approved')])).toBeUndefined();
+    });
+
+    it('EXE-13 the refusal of a start that came too early says what the step waits for', () => {
+      expect(planBlockedText('cs-2', planStepGate(2, [step(1, 'executing'), step(2, 'approved')]))).toBe(
+        'Change-set cs-2 cannot start yet: the step before it in its plan has not completed (now: executing).',
+      );
+      expect(planBlockedText('cs-2', { kind: 'none' })).toBe('Change-set cs-2 cannot start yet: the step before it in its plan has not completed.');
+    });
   });
 
   it('AUD-1 planCreatedEvent is a plan.created event without the title (SEC-3)', () => {

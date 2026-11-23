@@ -63,7 +63,9 @@ export const REFUSAL_STATUS: Readonly<Record<PageRefusal, 400 | 403 | 404 | 409>
   not_excludable: 409,
   policy_denied: 403,
   not_rollbackable: 409,
-  // EXE-13: the step before it in its plan has not completed; it can start once that step has.
+  // EXE-13: the step before it in its plan has not completed. While that step can still complete, this one can
+  // start once it has; when it ended otherwise (failed, rejected, cancelled, expired, rolled back, completed with
+  // errors), this step can never start, which the plan block's line on the page says ("Blocked: ...").
   plan_blocked: 409,
 };
 

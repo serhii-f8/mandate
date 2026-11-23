@@ -235,11 +235,12 @@ export class ChangeSetPagesController {
       await refuse(res, 'invalid_query');
       return;
     }
-    const { limit, after, status } = parsed.value;
+    const { limit, after, status, verification } = parsed.value;
     const rows = await this.repository.itemsPage(found.changeset.id, {
       limit: limit + 1,
       ...(after === undefined ? {} : { after }),
       ...(status === undefined ? {} : { status }),
+      ...(verification === undefined ? {} : { verification }),
     });
     const page = rows.slice(0, limit);
     const last = page.at(-1);

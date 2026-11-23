@@ -107,9 +107,12 @@ const carol: Caller = { subject: 'carol', groups: ['brands'] };
 class SpyExecutor implements ChangeSetExecutor {
   readonly starts: StartRequest[] = [];
   unavailable = false;
+  /** Answers every start with this refusal instead of starting. */
+  refusal: Awaited<ReturnType<ChangeSetExecutor['start']>> | undefined;
   constructor(private readonly inner: InMemoryExecutor) {}
   start(req: StartRequest): ReturnType<ChangeSetExecutor['start']> {
     this.starts.push(req);
+    if (this.refusal !== undefined) return Promise.resolve(this.refusal);
     return this.unavailable ? Promise.reject(new ExecutorUnavailable()) : this.inner.start(req);
   }
   cancel(req: Parameters<ChangeSetExecutor['cancel']>[0]): ReturnType<ChangeSetExecutor['cancel']> {
@@ -280,6 +283,16 @@ describe('APR-8 decide_changeset widget tool', () => {
     expect(text(answer)).toBe(`Decision recorded for change-set ${ID}: approved. Execution started.`);
     expect(answer.structuredContent).toEqual({ changesetId: ID, status: 'approved', start: { ok: true } });
     expect(s.executor.starts).toHaveLength(1);
+  });
+
+  it('EXE-13 an early approval of a plan step says in plain words that the step starts after the one before it', async () => {
+    const s = await setup();
+    s.executor.refusal = { ok: false, reason: 'plan_blocked' };
+    const answer = await s.call(bob);
+    expect(text(answer)).toBe(
+      `Decision recorded for change-set ${ID}: approved. The step is approved and will start when the step before it in its plan completes.`,
+    );
+    expect(answer.structuredContent).toEqual({ changesetId: ID, status: 'approved', start: { ok: false, reason: 'plan_blocked' } });
   });
 
   it('the last widget approval reports an unavailable executor', async () => {

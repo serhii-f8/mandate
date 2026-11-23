@@ -29,6 +29,17 @@ describe('NFR-8 page queries and cursors', () => {
     }
   });
 
+  it('EXE-12 NFR-8 the items verification filter takes one known value', () => {
+    expect(parseItemsQuery({ verification: 'not_confirmed' })).toEqual({ ok: true, value: { limit: 50, verification: 'not_confirmed' } });
+    expect(parseItemsQuery({ verification: 'unconfirmed', status: 'written' })).toEqual({
+      ok: true,
+      value: { limit: 50, status: 'written', verification: 'unconfirmed' },
+    });
+    for (const bad of ['done', '', 'NOT_CONFIRMED', ['pending', 'confirmed'], 'pending\n']) {
+      expect(parseItemsQuery({ verification: bad })).toEqual({ ok: false });
+    }
+  });
+
   it('NFR-8 an item cursor round-trips any targetId and refuses tampering', () => {
     const parsed = parseItemsQuery({ after: encodeItemCursor('ACME-1/ü') });
     expect(parsed).toEqual({ ok: true, value: { limit: 50, after: 'ACME-1/ü' } });

@@ -485,6 +485,7 @@ describe('UI-4 APR-5 CS-9 the approval view shows the plan', () => {
       { step: 2, id: ID, operation: 'catalog.update', status: 'pending_approval' },
       { step: 3, id: '33333333-3333-4333-8333-333333333333', operation: 'shop.publish', status: 'prepared', href: '/app/changesets/33333333-3333-4333-8333-333333333333' },
     ],
+    startLine: 'Runs after step 1 completes (now: executing)',
   };
 
   it('UI-4 step 2 of 3 names its plan and what it waits for; only a step with a link is a link', () => {

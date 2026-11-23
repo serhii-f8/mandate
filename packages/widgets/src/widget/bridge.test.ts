@@ -62,6 +62,7 @@ describe('widget bridge', () => {
     const cases: [string, (app: WidgetApp) => Promise<unknown>, string, Record<string, unknown>][] = [
       ['loadItems', (app) => changeSetActions(app, changeSetModel).loadItems({ after: 'c1', status: 'failed' }), 'get_changeset', { changeset_id: A, page_size: 50, cursor: 'c1', status: 'failed' }],
       ['loadItems first page', (app) => changeSetActions(app, changeSetModel).loadItems({}), 'get_changeset', { changeset_id: A, page_size: 50 }],
+      ['loadItems not confirmed', (app) => changeSetActions(app, changeSetModel).loadItems({ verification: 'not_confirmed' }), 'get_changeset', { changeset_id: A, page_size: 50, verification: 'not_confirmed' }],
       ['refresh', (app) => changeSetActions(app, changeSetModel).refresh(), 'get_changeset', { changeset_id: A, page_size: 50 }],
       ['exclude', (app) => changeSetActions(app, changeSetModel).exclude?.({ exclude: ['UMBRELLA-0001'], include: [] }) ?? Promise.reject(new Error('none')), 'exclude_changeset_items', { changeset_id: A, hash: HASH_A, exclude: ['UMBRELLA-0001'] }],
       ['include', (app) => changeSetActions(app, changeSetModel).exclude?.({ exclude: [], include: ['UMBRELLA-0003'] }) ?? Promise.reject(new Error('none')), 'exclude_changeset_items', { changeset_id: A, hash: HASH_A, include: ['UMBRELLA-0003'] }],

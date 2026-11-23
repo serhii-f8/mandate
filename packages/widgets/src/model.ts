@@ -3,6 +3,16 @@
 /** Normalized view models and action interfaces shared by the page and widget entries. */
 export type ActionResult<T = undefined> = { ok: true; value: T } | { ok: false; message: string };
 export type ItemFilter = 'pending' | 'excluded' | 'written' | 'failed' | 'skipped';
+/** EXE-12: the written items verification has not confirmed (pending or unconfirmed). */
+export type VerificationItemFilter = 'not_confirmed';
+/** One list of items: by status, or by verification state. */
+export type ListFilter = ItemFilter | VerificationItemFilter;
+/** A page request: by status or (EXE-12) by verification state. */
+export interface ItemsQuery {
+  after?: string;
+  status?: ItemFilter;
+  verification?: VerificationItemFilter;
+}
 export interface ItemRowModel {
   targetId: string;
   status: string;
@@ -57,6 +67,8 @@ export interface PlanModel {
   step: number;
   of: number;
   steps: { step: number; id: string; operation: string; status: string; href?: string }[];
+  /** EXE-13: what this step waits for (`Runs after ...`, `Blocked: ...`, `Ready to start`), worded by the server. */
+  startLine?: string;
 }
 export interface ChangeSetViewModel {
   id: string;
@@ -133,7 +145,7 @@ export interface DecisionInput {
   comment?: string;
 }
 export interface ChangeSetActions {
-  loadItems(q: { after?: string; status?: ItemFilter }): Promise<ActionResult<ItemsPageModel>>;
+  loadItems(q: ItemsQuery): Promise<ActionResult<ItemsPageModel>>;
   refresh(): Promise<ActionResult<ChangeSetViewModel>>;
   exclude?(edit: { exclude: string[]; include: string[] }): Promise<ActionResult<ChangeSetViewModel>>;
   submit?(hash: string): Promise<ActionResult<ChangeSetViewModel>>;

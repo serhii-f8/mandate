@@ -93,6 +93,7 @@ describe('widget adapters', () => {
         { step: 1, id: A, operation: 'shop.retire', status: 'executing', visible: true },
         { step: 2, id: B, operation: 'shop.update', status: 'approved', visible: true },
       ],
+      startLine: 'Runs after step 1 completes (now: executing)',
     };
     const expected = {
       title: 'Spring launch',
@@ -102,6 +103,7 @@ describe('widget adapters', () => {
         { step: 1, id: A, operation: 'shop.retire', status: 'executing' },
         { step: 2, id: B, operation: 'shop.update', status: 'approved' },
       ],
+      startLine: 'Runs after step 1 completes (now: executing)',
     };
     const base = answer(getPrepared).structuredContent as object;
     const t = parseChangeSetTrigger({ ...answer(getPrepared), structuredContent: { ...base, plan: { ...plan, steps: plan.steps.map((s) => ({ step: s.step, id: s.id, operation: s.operation, status: s.status })) } } });

@@ -54,6 +54,19 @@ describe('UI-4 CS-9 the plan block of a change-set', () => {
     expect(block?.steps.map((s) => s.visible)).toEqual([true, true]);
   });
 
+  it('UI-4 EXE-13 the block carries the line the views show for what the step waits for, built on the server', async () => {
+    const repository = await setup();
+    const blockOf = async (id: string) => {
+      const record = await repository.get(id);
+      return record === undefined ? undefined : planBlock(repository, record);
+    };
+    expect((await blockOf(B))?.startLine).toBe('Runs after step 1 completes (now: prepared)');
+    // Step 1 has nothing to wait for.
+    expect(await blockOf(A)).not.toHaveProperty('startLine');
+    await repository.transition(A, ['prepared'], 'cancelled', event('a-cancel'));
+    expect((await blockOf(B))?.startLine).toBe('Blocked: step 1 ended cancelled; this step cannot start');
+  });
+
   it('UI-4 SEC-1 a sibling the viewer may not open is listed with `visible: false`; the shown step is always visible', async () => {
     const repository = await setup();
     const record = await repository.get(B);

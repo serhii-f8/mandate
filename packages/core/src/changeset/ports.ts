@@ -17,6 +17,7 @@ import type {
   RollbackItemStatus,
   RollbackRequest,
   VerificationCounts,
+  VerificationFilter,
 } from './model.js';
 import type { CreatePlanRefusal, PlanRecord, PlanStepState } from './plan.js';
 import type { VerificationOutcome } from './verification.js';
@@ -70,6 +71,8 @@ export interface ItemsPageQuery {
   readonly after?: string;
   readonly limit: number;
   readonly status?: ItemStatus;
+  /** EXE-12: only items in these verification states; an item that was never verified matches none. */
+  readonly verification?: VerificationFilter;
 }
 
 export interface ItemOutcome {

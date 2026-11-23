@@ -45,6 +45,8 @@ import {
   planStepMayStart,
   rollbackFromFinished,
   rollbackWindowOpen,
+  VERIFICATION_FILTERS,
+  verificationStatusesOf,
 } from '@mandate/core';
 import { DrizzleAuditLog } from './audit-log.js';
 import { guarded, isUniqueViolation } from './errors.js';
@@ -372,11 +374,18 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > MAX_PAGE) {
       throw new Error(`limit must be between 1 and ${MAX_PAGE}`);
     }
+    // The callers validate it at their boundary; a value outside the filters is a programming error.
+    if (query.verification !== undefined && !VERIFICATION_FILTERS.includes(query.verification)) {
+      throw new Error('invalid verification filter');
+    }
     if (!UUID.test(changesetId)) return [];
     const conditions: SQL[] = [eq(changeItem.changesetId, changesetId)];
     // Keyset on the primary key; the column's "C" collation orders by code point.
     if (query.after !== undefined) conditions.push(gt(changeItem.targetId, query.after));
     if (query.status !== undefined) conditions.push(eq(changeItem.status, query.status));
+    if (query.verification !== undefined) {
+      conditions.push(inArray(changeItem.verificationStatus, [...verificationStatusesOf(query.verification)]));
+    }
     const rows = await guarded('change items page', () =>
       this.db
         .select()

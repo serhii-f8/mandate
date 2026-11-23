@@ -14,16 +14,33 @@ import { type ItemPages, useItemPages } from '../paging.js';
 import type { ViewProps } from './PreviewView.js';
 import { useAction } from './useAction.js';
 
-type Tab = 'failed' | 'skipped' | 'written';
+type Tab = 'failed' | 'skipped' | 'written' | 'not_confirmed';
 
 const TABS: { tab: Tab; label: string }[] = [
   { tab: 'failed', label: 'Failed' },
   { tab: 'skipped', label: 'Skipped' },
 ];
 
-/** EXE-12: a verified change-set also lists its written items, where the unconfirmed ones are marked. */
-const WRITTEN_TAB: { tab: Tab; label: string } = { tab: 'written', label: 'Written' };
-const EMPTY_TEXT: Record<Tab, string> = { failed: 'No failed items.', skipped: 'No skipped items.', written: 'No written items.' };
+/**
+ * EXE-12: a verified change-set also lists the written items verification has not confirmed (pending or
+ * unconfirmed), and all its written items, where the unconfirmed ones are marked.
+ */
+const VERIFIED_TABS: { tab: Tab; label: string }[] = [
+  { tab: 'not_confirmed', label: 'Not confirmed' },
+  { tab: 'written', label: 'Written' },
+];
+const EMPTY_TEXT: Record<Tab, string> = {
+  failed: 'No failed items.',
+  skipped: 'No skipped items.',
+  written: 'No written items.',
+  not_confirmed: 'No items that are not confirmed.',
+};
+
+/** EXE-12: with nothing failed, the items to look at are the ones not confirmed; otherwise the failed ones. */
+function firstTab(data: ChangeSetViewModel): Tab {
+  const v = data.stats.verification;
+  return data.stats.failed === 0 && v !== undefined && v.pending + v.unconfirmed > 0 ? 'not_confirmed' : 'failed';
+}
 
 // One stable empty page: each tab starts empty and loads its own status on first show.
 const EMPTY: ItemsPageModel = { items: [] };
@@ -53,14 +70,16 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
   const failedPages = useItemPages(EMPTY, 'failed', loadItems, data.id);
   const skippedPages = useItemPages(EMPTY, 'skipped', loadItems, data.id);
   const writtenPages = useItemPages(EMPTY, 'written', loadItems, data.id);
-  const [tab, setTab] = useState<Tab>('failed');
+  const notConfirmedPages = useItemPages(EMPTY, 'not_confirmed', loadItems, data.id);
+  const [tab, setTab] = useState<Tab>(() => firstTab(data));
   const loaded = useRef(new Set<string>());
   const action = useAction();
   const rollback = actions.rollback?.bind(actions);
 
-  const pages: ItemPages = tab === 'failed' ? failedPages : tab === 'skipped' ? skippedPages : writtenPages;
+  const byTab: Record<Tab, ItemPages> = { failed: failedPages, skipped: skippedPages, written: writtenPages, not_confirmed: notConfirmedPages };
+  const pages = byTab[tab];
   const verification = verificationLine(data);
-  const tabs = data.stats.verification === undefined ? TABS : [...TABS, WRITTEN_TAB];
+  const tabs = data.stats.verification === undefined ? TABS : [...TABS, ...VERIFIED_TABS];
   // Loads the shown tab once per change-set (the key holds the ID, so a new change-set loads again).
   const key = `${data.id}:${tab}`;
   useEffect(() => {

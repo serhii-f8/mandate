@@ -102,6 +102,7 @@ export function changeSetActions(app: WidgetApp, current: () => ChangeSetViewMod
         page_size: PAGE_SIZE,
         ...(q.after === undefined ? {} : { cursor: q.after }),
         ...(q.status === undefined ? {} : { status: q.status }),
+        ...(q.verification === undefined ? {} : { verification: q.verification }),
       });
       if (!r.ok) return r;
       const model = fromGetChangeset(r.value.structuredContent, q.status);

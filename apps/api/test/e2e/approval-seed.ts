@@ -161,7 +161,8 @@ export interface ExecutedOptions {
   items: number;
   /** Opens the rollback window until then, as the workflow does after the finish. */
   rollbackUntil?: Date;
-  status?: Extract<ChangeSetStatus, 'completed' | 'completed_with_errors' | 'cancelled' | 'failed'>;
+  /** `executing` leaves it running, every item written (as during verification, EXE-12). */
+  status?: Extract<ChangeSetStatus, 'executing' | 'completed' | 'completed_with_errors' | 'cancelled' | 'failed'>;
 }
 
 /**
@@ -190,6 +191,7 @@ export async function seedExecuted(repo: ChangeSetRepository, o: ExecutedOptions
   const completed = await repo.completeBatch(id, 1, 1, outcomes, audit);
   if (!completed.ok) throw new Error('seedExecuted: completeBatch fenced');
   const status = o.status ?? 'completed';
+  if (status === 'executing') return seeded;
   if (status === 'cancelled') {
     const cancel = await repo.requestCancel(id, { actor: o.requester, correlationId, requestedAt: new Date() });
     if (!cancel.ok) throw new Error('seedExecuted: requestCancel refused');

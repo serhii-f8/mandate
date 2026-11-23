@@ -91,18 +91,29 @@ export type {
   RollbackItemStatus,
   RollbackRequest,
   VerificationCounts,
+  VerificationFilter,
   VerificationStatus,
 } from './changeset/model.js';
-export { BUILTIN_EXCLUSION_REASONS, countExclusions, EMPTY_STATS } from './changeset/model.js';
+export {
+  BUILTIN_EXCLUSION_REASONS,
+  countExclusions,
+  EMPTY_STATS,
+  VERIFICATION_FILTERS,
+  verificationStatusesOf,
+} from './changeset/model.js';
 export { checkRecordFields, failedCheck, type CheckContext } from './changeset/checks.js';
 export {
   PLAN_MAX_STEPS,
   PLAN_MIN_STEPS,
   planAllowsRollback,
   planCreatedEvent,
+  planBlockedText,
   planShapeRefusal,
+  planStepGate,
+  planStepGateText,
   planStepMayStart,
   type CreatePlanRefusal,
+  type PlanStepGate,
   type PlanRecord,
   type PlanStep,
   type PlanStepState,

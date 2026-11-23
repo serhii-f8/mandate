@@ -48,6 +48,7 @@ function toPlan(plan: ChangeSetAnswer['plan']): { plan?: PlanModel } {
       step: plan.step,
       of: plan.of,
       steps: plan.steps.map((s) => ({ step: s.step, id: s.id, operation: s.operation, status: s.status })),
+      ...(plan.startLine === undefined ? {} : { startLine: plan.startLine }),
     },
   };
 }

@@ -9,9 +9,10 @@
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { allApprovalRules, createSchemaCompiler, type LoadedConfiguration } from '@mandate/config';
-import { callerKind, rolesOf, type Approver, type Caller, type DecisionRequest } from '@mandate/core';
+import { callerKind, planBlockedText, rolesOf, type Approver, type Caller, type ChangeSetRepository, type DecisionRequest } from '@mandate/core';
 import type { DecideResult } from '../approvals/approval-service.js';
 import { DECISION_REFUSAL_TEXT } from '../approvals/texts.js';
+import { planGateOf } from '../changesets/plan-view.js';
 import type { BuiltinToolDeps } from './builtin-tools.js';
 import type { BuiltinTool } from './tool-catalog.js';
 
@@ -47,9 +48,21 @@ function holdsWidgetRole(caller: Caller, configuration: LoadedConfiguration): bo
   return rolesOf(caller, configuration.policy).some((role) => widget.has(role));
 }
 
-function startText(start: NonNullable<Extract<DecideResult, { ok: true }>['start']>): string {
+async function startText(
+  repository: ChangeSetRepository,
+  id: string,
+  start: NonNullable<Extract<DecideResult, { ok: true }>['start']>,
+): Promise<string> {
   if (start === 'executor_unavailable') return ` Execution did not start: ${start}.`;
-  return start.ok ? ' Execution started.' : ` Execution did not start: ${start.reason}.`;
+  if (start.ok) return ' Execution started.';
+  // EXE-13: the normal case for an early approval of a plan step, not an error; blocked for good says so.
+  if (start.reason === 'plan_blocked') {
+    const gate = await planGateOf(repository, id);
+    return gate.kind === 'blocked'
+      ? ` ${planBlockedText(id, gate)}`
+      : ' The step is approved and will start when the step before it in its plan completes.';
+  }
+  return ` Execution did not start: ${start.reason}.`;
 }
 
 export function decideChangesetTool(deps: BuiltinToolDeps): BuiltinTool {
@@ -89,7 +102,7 @@ export function decideChangesetTool(deps: BuiltinToolDeps): BuiltinTool {
       }
       const { status, start } = result;
       return {
-        content: [{ type: 'text', text: `Decision recorded for change-set ${id}: ${status}.${start === undefined ? '' : startText(start)}` }],
+        content: [{ type: 'text', text: `Decision recorded for change-set ${id}: ${status}.${start === undefined ? '' : await startText(deps.repository, id, start)}` }],
         structuredContent: { changesetId: id, status, ...(start === undefined ? {} : { start }) },
       };
     },

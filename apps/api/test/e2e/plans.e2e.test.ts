@@ -165,13 +165,15 @@ describe('CS-9 EXE-13 a plan over the real MCP transport', () => {
     // Step 2 approved first: the approval's start is refused, and the step waits as approved.
     const early = await approve(second);
     expect(early.result.isError).toBeUndefined();
-    expect(text(early.result)).toBe(`Decision recorded for change-set ${second.id}: approved. Execution did not start: plan_blocked.`);
+    expect(text(early.result)).toBe(
+      `Decision recorded for change-set ${second.id}: approved. The step is approved and will start when the step before it in its plan completes.`,
+    );
     expect(await statusOf(alice, second.id)).toBe('approved');
 
     const blocked = await call(alice, 'submit_for_approval', { changeset_id: second.id, hash: second.hash });
     expect(blocked.result.isError).toBe(true);
     expect(text(blocked.result)).toBe(
-      `Change-set ${second.id} cannot start yet: the step before it in its plan has not completed. Open: ${api.url}/app/changesets/${second.id}`,
+      `Change-set ${second.id} cannot start yet: the step before it in its plan has not completed (now: pending_approval). Open: ${api.url}/app/changesets/${second.id}`,
     );
     const blockedRow = (await auditRows(databaseUrl, "action = 'tool.call' and correlation_id = $1", [blocked.correlationId]))[0];
     expect(blockedRow?.details).toMatchObject({ errorCode: 'plan_blocked' });
@@ -188,6 +190,7 @@ describe('CS-9 EXE-13 a plan over the real MCP transport', () => {
         { step: 1, id: first.id, operation: 'shop.update_content', status: 'pending_approval' },
         { step: 2, id: second.id, operation: 'shop.update_content', status: 'approved' },
       ],
+      startLine: 'Runs after step 1 completes (now: pending_approval)',
     });
 
     // Step 1 approved and completed: the platform starts the approved step 2 by itself, with no further call.

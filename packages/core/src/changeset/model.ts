@@ -60,6 +60,19 @@ export interface ChangeSetStats {
 /** EXE-12 (ADR 0073): an item's verification state; absent on an item that was never verified. */
 export type VerificationStatus = 'pending' | 'confirmed' | 'unconfirmed';
 
+/**
+ * EXE-12: a filter on items by verification state: one status, or `not_confirmed` (pending or unconfirmed),
+ * the items a person has to look at.
+ */
+export type VerificationFilter = VerificationStatus | 'not_confirmed';
+
+export const VERIFICATION_FILTERS: readonly VerificationFilter[] = ['pending', 'confirmed', 'unconfirmed', 'not_confirmed'];
+
+/** The verification statuses a filter admits. */
+export function verificationStatusesOf(filter: VerificationFilter): readonly VerificationStatus[] {
+  return filter === 'not_confirmed' ? ['pending', 'unconfirmed'] : [filter];
+}
+
 export interface VerificationCounts {
   readonly pending: number;
   readonly confirmed: number;

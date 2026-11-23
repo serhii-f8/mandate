@@ -214,6 +214,7 @@ describe('MCP-8 CS-6 built-in change-set tools', () => {
         { step: 1, id: SECOND, operation: 'shop.retire_content', status: 'prepared' },
         { step: 2, id: ID, operation: 'shop.update_content', status: 'prepared' },
       ],
+      startLine: 'Runs after step 1 completes (now: prepared)',
     });
     // A sibling's row carries nothing else: no arguments, items or hash.
     expect(JSON.stringify(plan)).not.toMatch(/SECRET|sha256/);
@@ -376,6 +377,53 @@ describe('MCP-8 CS-6 built-in change-set tools', () => {
     expect(result.content[0]).toEqual({
       type: 'text',
       text: `Change-set ${ID} (shop.update_content) is prepared: 3 change(s), 0 excluded. Showing 3 item(s). ${READ_RESULT_TEXT.dataNote}`,
+    });
+  });
+
+  describe('EXE-12 verification', () => {
+    const SCHEDULE = { firstAt: NOW, until: new Date('2026-01-01T13:00:00Z') };
+    const text = (r: CallToolResult): string => (r.content[0]?.type === 'text' ? r.content[0].text : '');
+    const ids = (r: CallToolResult): string[] => (r.structuredContent as { items: { targetId: string }[] }).items.map((i) => i.targetId);
+
+    /** Executing, all three written, verification begun with `a` confirmed. */
+    async function verifying() {
+      const s = await setup();
+      await s.advance('executing', ['a', 'b', 'c'].map((targetId) => ({ targetId, status: 'written' as const })));
+      await s.repository.beginVerification(ID, SCHEDULE);
+      await s.repository.recordVerification(ID, 1, [{ targetId: 'a', confirmed: true }, { targetId: 'b', confirmed: false, code: 'not_live' }]);
+      return s;
+    }
+
+    it('EXE-12 MCP-8 get_changeset lists only the items not confirmed with verification not_confirmed', async () => {
+      const { get, ctx } = await verifying();
+      expect(get.validate({ changeset_id: ID, verification: 'not_confirmed' }).ok).toBe(true);
+      expect(get.validate({ changeset_id: ID, verification: 'nope' }).ok).toBe(false);
+      expect(ids(plain(await get.handler({ changeset_id: ID, verification: 'not_confirmed' }, ctx(alice))))).toEqual(['b', 'c']);
+      expect(ids(plain(await get.handler({ changeset_id: ID, verification: 'confirmed' }, ctx(alice))))).toEqual(['a']);
+      // Pages with the filter.
+      const first = plain(await get.handler({ changeset_id: ID, verification: 'not_confirmed', page_size: 1 }, ctx(alice)));
+      expect(ids(first)).toEqual(['b']);
+      const cursor = (first.structuredContent as { nextCursor?: string }).nextCursor;
+      expect(ids(plain(await get.handler({ changeset_id: ID, verification: 'not_confirmed', cursor }, ctx(alice))))).toEqual(['c']);
+    });
+
+    it('EXE-12 MCP-8 a change-set without verification answers no items for the filter and is otherwise unchanged', async () => {
+      const { get, ctx } = await setup();
+      expect(ids(plain(await get.handler({ changeset_id: ID, verification: 'not_confirmed' }, ctx(alice))))).toEqual([]);
+      expect(ids(plain(await get.handler({ changeset_id: ID }, ctx(alice))))).toEqual(['a', 'b', 'c']);
+    });
+
+    it('EXE-12 EXE-6 while verifying the text says how many are confirmed', async () => {
+      const { get, ctx } = await verifying();
+      expect(text(plain(await get.handler({ changeset_id: ID }, ctx(alice))))).toContain(
+        `Change-set ${ID} (shop.update_content) is executing, verifying: 1 of 3 confirmed: 3 change(s), 0 excluded.`,
+      );
+    });
+
+    it('EXE-12 the text of an executing change-set without pending verification is unchanged', async () => {
+      const { get, ctx, advance } = await setup();
+      await advance('executing');
+      expect(text(plain(await get.handler({ changeset_id: ID }, ctx(alice))))).toContain(`Change-set ${ID} (shop.update_content) is executing: 3 change(s)`);
     });
   });
 

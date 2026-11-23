@@ -25,6 +25,7 @@ import type {
   CreatePlanRefusal,
   ExecutionLimits,
   ItemOutcome,
+  ItemsPageQuery,
   NewChangeSet,
   NewNotification,
   NotificationRow,
@@ -2359,6 +2360,28 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
           // Item status, before, after and the hash inputs are untouched.
           expect(await sealed(c)).toEqual(before);
           expect((await c.repository.get(c.id))?.status).toBe('executing');
+        }));
+
+      it('EXE-12 itemsPage filters by verification state; not_confirmed is pending or unconfirmed', async () =>
+        withRepo(async (c) => {
+          await executed(c);
+          const page = async (q: Partial<ItemsPageQuery>): Promise<readonly string[]> =>
+            (await c.repository.itemsPage(c.id, { limit: 10, ...q })).map((i) => i.targetId);
+          // Before verification began no item has a verification state: every filter is empty.
+          expect(await page({ verification: 'not_confirmed' })).toEqual([]);
+          await c.repository.beginVerification(c.id, SCHEDULE);
+          await c.repository.recordVerification(c.id, 1, [{ targetId: 'a', confirmed: true }]);
+          expect(await page({ verification: 'not_confirmed' })).toEqual(['b', 'c']);
+          expect(await page({ verification: 'confirmed' })).toEqual(['a']);
+          await c.repository.finishVerification(c.id, 'verify_timeout', finishAudit(c));
+          expect(await page({ verification: 'pending' })).toEqual([]);
+          expect(await page({ verification: 'unconfirmed' })).toEqual(['b', 'c']);
+          expect(await page({ verification: 'not_confirmed' })).toEqual(['b', 'c']);
+          // Keyset, limit and status combine with it.
+          expect(await page({ verification: 'not_confirmed', after: 'b' })).toEqual(['c']);
+          expect(await page({ verification: 'not_confirmed', limit: 1 })).toEqual(['b']);
+          expect(await page({ verification: 'not_confirmed', status: 'failed' })).toEqual([]);
+          expect(await page({})).toEqual(['a', 'b', 'c', 'd', 'e']);
         }));
 
       it('EXE-12 NFR-2 a delayed outcome of an older round neither lowers the round nor replaces a newer code', async () =>

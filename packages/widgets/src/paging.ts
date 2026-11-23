@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ActionResult, ItemFilter, ItemsPageModel } from './model.js';
+import type { ActionResult, ItemsPageModel, ItemsQuery, ListFilter } from './model.js';
 
 export interface ItemPages {
   page: ItemsPageModel;
-  filter: ItemFilter | undefined;
+  filter: ListFilter | undefined;
   hasPrevious: boolean;
   busy: boolean;
   error?: string;
   next(): void;
   previous(): void;
-  setFilter(f: ItemFilter | undefined): void;
+  setFilter(f: ListFilter | undefined): void;
 }
 
-type Load = (q: { after?: string; status?: ItemFilter }) => Promise<ActionResult<ItemsPageModel>>;
+type Load = (q: ItemsQuery) => Promise<ActionResult<ItemsPageModel>>;
 
 interface State {
   page: ItemsPageModel;
-  filter: ItemFilter | undefined;
+  filter: ListFilter | undefined;
   stack: (string | undefined)[];
   busy: boolean;
   error: string | undefined;
@@ -27,7 +27,7 @@ interface State {
 /** Cursor-stack paging over the items of one change-set; a new resetKey starts over. */
 export function useItemPages(
   initial: ItemsPageModel,
-  initialFilter: ItemFilter | undefined,
+  initialFilter: ListFilter | undefined,
   load: Load,
   resetKey: string,
 ): ItemPages {
@@ -55,13 +55,14 @@ export function useItemPages(
   }, [resetKey]);
 
   const go = useCallback(
-    (stack: (string | undefined)[], filter: ItemFilter | undefined) => {
+    (stack: (string | undefined)[], filter: ListFilter | undefined) => {
       const cursor = stack[stack.length - 1];
       const ticket = ++seq.current;
       setState((s) => ({ ...s, busy: true, error: undefined }));
-      const q: { after?: string; status?: ItemFilter } = {};
+      const q: ItemsQuery = {};
       if (cursor !== undefined) q.after = cursor;
-      if (filter !== undefined) q.status = filter;
+      if (filter === 'not_confirmed') q.verification = filter;
+      else if (filter !== undefined) q.status = filter;
       void load(q).then(
         (r) => {
           if (ticket !== seq.current) return;

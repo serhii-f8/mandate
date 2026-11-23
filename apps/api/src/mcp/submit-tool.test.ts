@@ -452,6 +452,28 @@ describe('MCP-8 POL-6 POL-5 POL-4 submit_for_approval', () => {
     });
   }
 
+  it('EXE-13 MCP-8 plan_blocked behind a step that ended otherwise says the step is blocked and cannot start', async () => {
+    const { tool, ctx, executor, repository } = await setup();
+    const BEFORE = '99999999-9999-4999-8999-999999999999';
+    const event = { id: 'b0', actor: 'alice', action: 'changeset.transition' as const, outcome: 'ok' as const, correlationId: 'c0', details: {} };
+    await repository.create(
+      { id: BEFORE, operation: 'catalog.update_content', connection: 'magento', requester: 'alice', args: {}, configHash: 'h', correlationId: 'c0', createdAt: NOW, expiresAt: new Date('2026-11-18T10:00:00.000Z') },
+      event,
+    );
+    await repository.completePreparation(
+      BEFORE,
+      { status: 'prepared', hashVersion: 1, hash: HASH, stats: { total: 0, included: 0, excluded: {}, written: 0, failed: 0, skipped: 0 }, preparedAt: NOW },
+      { ...event, id: 'b1' },
+    );
+    const planned = await repository.createPlan({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', title: 'Launch', requester: 'alice', changesetIds: [BEFORE, ID], now: NOW, audit: { ...event, id: 'b2', action: 'plan.created' } });
+    expect(planned.ok).toBe(true);
+    await repository.transition(BEFORE, ['prepared'], 'cancelled', { ...event, id: 'b3' });
+    executor.answer = { ok: false, reason: 'plan_blocked' };
+    const result = plain(await tool.handler(args(), ctx(alice)));
+    expect(result.isError).toBe(true);
+    expect(text(result)).toBe(`Change-set ${ID} is blocked: step 1 of its plan ended cancelled, so this step cannot start.`);
+  });
+
   it('POL-4 POL-8 a limit refusal is not recorded a second time by the tool', async () => {
     const { tool, ctx, executor, audit } = await setup();
     executor.answer = { ok: false, reason: 'limit_exceeded', limit: 'records_per_day' };

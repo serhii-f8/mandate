@@ -121,6 +121,8 @@ export interface ChangeSetDetail {
     step: number;
     of: number;
     steps: { step: number; id: string; operation: string; status: string; visible?: boolean }[];
+    /** EXE-13: what this step waits for, worded by the server. */
+    startLine?: string;
   };
   operation: { id: string; title?: string; description?: string; risk?: string };
   connection: string;
@@ -208,10 +210,11 @@ export function createApi(fetcher: typeof fetch = (input, init) => fetch(input, 
     approvals: (after?: string): Promise<ApprovalQueue> =>
       get('approvals', `/api/v1/approvals${after === undefined ? '' : `?after=${encodeURIComponent(after)}`}`),
     changeset: (id: string): Promise<ChangeSetDetail> => get('changeset', `/api/v1/changesets/${encodeURIComponent(id)}`),
-    items(id: string, q: { after?: string; status?: string }): Promise<ItemsPage> {
+    items(id: string, q: { after?: string; status?: string; verification?: string }): Promise<ItemsPage> {
       const params = new URLSearchParams();
       if (q.after !== undefined) params.set('after', q.after);
       if (q.status !== undefined) params.set('status', q.status);
+      if (q.verification !== undefined) params.set('verification', q.verification);
       const query = params.toString();
       return get('items', `/api/v1/changesets/${encodeURIComponent(id)}/items${query === '' ? '' : `?${query}`}`);
     },

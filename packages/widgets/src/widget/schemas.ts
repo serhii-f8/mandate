@@ -47,6 +47,8 @@ const planSchema = z.object({
   step: z.number(),
   of: z.number(),
   steps: z.array(z.object({ step: z.number(), id: z.string(), operation: z.string(), status: z.string(), visible: z.boolean().optional() })),
+  /** EXE-13: absent in answers from before this field and when there is nothing to say. */
+  startLine: z.string().optional(),
 });
 
 /** Today `get_changeset` sends the operation ID as a string; an object with a title is read too (ruling F13). */

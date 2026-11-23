@@ -10,7 +10,8 @@
  */
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { createSchemaCompiler } from '@mandate/config';
-import { TASK_TTL_MS, type ApprovalPlan, type ChangeSetRecord, type StartOutcome } from '@mandate/core';
+import { planBlockedText, TASK_TTL_MS, type ApprovalPlan, type ChangeSetRecord, type StartOutcome } from '@mandate/core';
+import { planGateOf } from '../changesets/plan-view.js';
 import { pageLink } from '../changesets/links.js';
 import { SUBMIT_TOOL, SubmitService, type SubmitOutcome } from '../changesets/submit-service.js';
 import { AUDIT_UNAVAILABLE } from './audited-tool.js';
@@ -58,9 +59,10 @@ function refusalText(id: string, role: string, refusal: Exclude<StartOutcome, { 
     case 'limit_exceeded':
       return `Execution refused: limit ${refusal.limit} of role ${role} reached.`;
     case 'plan_blocked':
-      return `Change-set ${id} cannot start yet: the step before it in its plan has not completed.`;
+      return planBlockedText(id, { kind: 'none' });
   }
 }
+
 
 type Call = Omit<BuiltinContext, 'snapshot'>;
 
@@ -113,6 +115,10 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
     };
   }
 
+  async function planBlocked(id: string): Promise<ToolAnswer> {
+    return refusedFor(id, planBlockedText(id, await planGateOf(deps.repository, id)));
+  }
+
   /** Today's text and `errorCode` for every outcome; no code for an unknown ID, a wrong status or a failed audit write. */
   function answer(call: Call, id: string, outcome: SubmitOutcome): Promise<ToolAnswer> | ToolAnswer {
     switch (outcome.kind) {
@@ -154,6 +160,7 @@ export function submitForApprovalTool(deps: BuiltinToolDeps): BuiltinTool {
         call.report({ errorCode: outcome.refusal.reason });
         // The executor's not_found names nothing, like any not_found answer.
         if (outcome.refusal.reason === 'not_found') return { isError: true, content: [{ type: 'text', text: refusalText(id, outcome.role, outcome.refusal) }] };
+        if (outcome.refusal.reason === 'plan_blocked') return planBlocked(id);
         return refusedFor(id, refusalText(id, outcome.role, outcome.refusal));
     }
   }

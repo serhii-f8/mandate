@@ -117,6 +117,11 @@ What you see:
   `verify_timeout` (the time ran out without a look that named a failing check) and
   `verify_cancelled`.
 - Only a status and a code are stored and shown for each record, never a value that was read.
+- The result lists the records that are not confirmed (still pending or `unconfirmed`) on a tab of
+  their own, **Not confirmed**, which it opens on when no record failed. `get_changeset` takes
+  `verification: not_confirmed` (or `pending`, `confirmed`, `unconfirmed`) to page through the same
+  list, and so does the page's items list (`?verification=not_confirmed`). While verification runs,
+  `get_changeset` says "is executing, verifying: N of M confirmed".
 
 Things to know when you run it:
 
@@ -197,8 +202,11 @@ and run it outside a plan. A step whose stored `before` values went stale becaus
 changed the same fields is skipped as `drift`, like any change-set.
 
 **See it.** `get_changeset`, the change-set page, the approval page and the widgets show "Step N of
-M in plan ...", the status of every step and, for a step whose predecessor is not `completed`, what
-it waits for. A step's row shows only its number, ID, operation and status; opening another step
+M in plan ...", the status of every step and one line about the start: "Runs after step N completes
+(now: ...)" while the step before it can still complete, "Blocked: step N ended ...; this step cannot
+start" once it ended any other way (there is nothing left to approve it for), and "Ready to start"
+for an approved step whose predecessor completed. An approval given before the step's turn answers
+that the step will start when the step before it completes. A step's row shows only its number, ID, operation and status; opening another step
 needs your own right to it. Plans need migration `0017`; see [Upgrading](upgrading.md#upgrading-to-130).
 
 ## Roll back

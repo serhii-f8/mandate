@@ -17,6 +17,8 @@ import {
   type ChangeSetRepository,
   type ExecutionProgress,
   type ItemStatus,
+  type VerificationFilter,
+  VERIFICATION_FILTERS,
 } from '@mandate/core';
 import { verificationTitlesOf } from '../approvals/texts.js';
 import { decodeCursor } from '../approvals/page-query.js';
@@ -41,6 +43,8 @@ const GET_SCHEMA = {
     cursor: { type: 'string', maxLength: 512 },
     page_size: { type: 'integer', minimum: 1, maximum: 100 },
     status: { enum: ['pending', 'excluded', 'written', 'failed', 'skipped'] },
+    // EXE-12: `not_confirmed` lists the written items verification has not confirmed (pending or unconfirmed).
+    verification: { enum: [...VERIFICATION_FILTERS] },
   },
   required: ['changeset_id'],
   additionalProperties: false,
@@ -119,6 +123,13 @@ async function approvalView(deps: ChangesetToolDeps, record: ChangeSetRecord): P
   return { round: record.approvalRound, plan: record.approvalPlan, decisions };
 }
 
+/** EXE-12, EXE-6: while verification is under way, how far it got; empty otherwise. */
+function verifyingText(record: ChangeSetRecord): string {
+  const v = record.stats.verification;
+  if (record.status !== 'executing' || v === undefined || v.pending === 0) return '';
+  return `, verifying: ${String(v.confirmed)} of ${String(v.pending + v.confirmed + v.unconfirmed)} confirmed`;
+}
+
 function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
   return {
     name: 'get_changeset',
@@ -142,6 +153,7 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
         limit: limit + 1,
         ...(after === undefined ? {} : { after }),
         ...(typeof args.status === 'string' ? { status: args.status as ItemStatus } : {}),
+        ...(typeof args.verification === 'string' ? { verification: args.verification as VerificationFilter } : {}),
       });
       const items = rows.slice(0, limit);
       const last = items.at(-1);
@@ -187,7 +199,7 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
         ...(verificationTitles === undefined ? {} : { verificationTitles }),
       };
       const text =
-        `Change-set ${record.id} (${record.operation}) is ${record.status}: ${String(record.stats.included)} change(s), ` +
+        `Change-set ${record.id} (${record.operation}) is ${record.status}${verifyingText(record)}: ${String(record.stats.included)} change(s), ` +
         `${String(excluded)} excluded. Showing ${String(items.length)} item(s)${nextCursor === undefined ? '' : '; more with cursor'}.${summary} ${READ_RESULT_TEXT.dataNote}`;
       return { content: [{ type: 'text', text }, { type: 'text', text: JSON.stringify(structured) }], structuredContent: structured };
     },

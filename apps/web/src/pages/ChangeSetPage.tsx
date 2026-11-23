@@ -125,7 +125,7 @@ export function ChangeSetPage(props: { id: string }): ReactElement {
       show(s.id, shown);
       return shown;
     };
-    const loadItems = (q: { after?: string; status?: string }) => orFail(async () => toItemsPage(await api.items(ready().id, q)));
+    const loadItems = (q: { after?: string; status?: string; verification?: string }) => orFail(async () => toItemsPage(await api.items(ready().id, q)));
 
     const requester: ChangeSetActions = {
       loadItems,

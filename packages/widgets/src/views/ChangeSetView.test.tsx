@@ -136,11 +136,59 @@ describe('ChangeSetView', () => {
     expect(screen.getByText('Not confirmed: shop_price_differs')).toBeTruthy();
   });
 
-  it('UI-4 EXE-12 a change-set without verification shows no verification line and no Written tab', async () => {
+  it('UI-4 EXE-12 with no failed item and some not confirmed, the result opens on the Not confirmed tab', async () => {
+    const loadItems = vi.fn<ChangeSetActions['loadItems']>().mockImplementation((q) =>
+      Promise.resolve({
+        ok: true,
+        value: {
+          items:
+            q.verification === 'not_confirmed'
+              ? [item('sku-7', { status: 'written', verificationStatus: 'unconfirmed', verificationCode: 'missing_in_shop' })]
+              : [],
+        },
+      }),
+    );
+    setup(
+      changeSetModel({
+        status: 'completed_with_errors',
+        stats: { ...finished, written: 10_000, failed: 0, skipped: 0, verification: { pending: 0, confirmed: 9_996, unconfirmed: 4 } },
+        verificationTitles: { missing_in_shop: 'Missing in the shop' },
+      }),
+      actionsWith({ loadItems }),
+    );
+    await flush();
+    expect(screen.getByRole('tab', { name: 'Not confirmed' }).getAttribute('aria-selected')).toBe('true');
+    expect(loadItems).toHaveBeenCalledTimes(1);
+    expect(loadItems).toHaveBeenCalledWith({ verification: 'not_confirmed' });
+    expect(screen.getByText('Not confirmed: Missing in the shop')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('No failed items.');
+    // The Written tab stays.
+    expect(screen.getByRole('tab', { name: 'Written' })).toBeTruthy();
+  });
+
+  it('UI-4 EXE-12 with a failed item the result still opens on Failed; Not confirmed is a tab of its own', async () => {
+    const loadItems = vi.fn<ChangeSetActions['loadItems']>().mockResolvedValue({ ok: true, value: { items: [] } });
+    setup(
+      changeSetModel({
+        status: 'completed_with_errors',
+        stats: { ...finished, verification: { pending: 0, confirmed: 5, unconfirmed: 2 } },
+      }),
+      actionsWith({ loadItems }),
+    );
+    await flush();
+    expect(loadItems).toHaveBeenCalledWith({ status: 'failed' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Not confirmed' }));
+    await flush();
+    expect(loadItems).toHaveBeenLastCalledWith({ verification: 'not_confirmed' });
+    expect(document.body.textContent).toContain('No items that are not confirmed.');
+  });
+
+  it('UI-4 EXE-12 a change-set without verification shows no verification line, no Written and no Not confirmed tab', async () => {
     setup(changeSetModel({ status: 'completed', stats: finished }));
     await flush();
     expect(document.body.textContent).not.toContain('Verification');
     expect(screen.queryByRole('tab', { name: 'Written' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Not confirmed' })).toBeNull();
   });
 
   it('UI-2 EXE-12 while items await their check the progress line reads Verifying: N of M confirmed', () => {
@@ -411,6 +459,7 @@ describe('ChangeSetView', () => {
         { step: 2, id: changeSetModel().id, operation: 'shop.update', status: 'approved' },
         { step: 3, id: '33333333-3333-4333-8333-333333333333', operation: 'shop.publish', status: 'prepared' },
       ],
+      startLine: 'Runs after step 1 completes (now: executing)',
     };
 
     it('UI-4 the plan line, one row per step and what the step waits for show on every status view', () => {
@@ -430,13 +479,20 @@ describe('ChangeSetView', () => {
       expect(container.querySelector('.plan img')).toBeNull();
     });
 
-    it('CS-9 step 1, or a predecessor that completed, shows no waiting line', () => {
-      setup(changeSetModel({ plan: { ...plan, step: 1 } }));
+    it('EXE-13 the view shows the line the server built: Blocked or Ready to start', () => {
+      const blocked = { ...plan, steps: plan.steps.map((s) => (s.step === 1 ? { ...s, status: 'failed' } : s)), startLine: 'Blocked: step 1 ended failed; this step cannot start' };
+      setup(changeSetModel({ plan: blocked }));
+      expect(screen.getByText('Blocked: step 1 ended failed; this step cannot start')).toBeTruthy();
       expect(screen.queryByText(/^Runs after/)).toBeNull();
       cleanup();
-      const done = { ...plan, steps: plan.steps.map((s) => (s.step === 1 ? { ...s, status: 'completed' } : s)) };
-      setup(changeSetModel({ plan: done }));
-      expect(screen.queryByText(/^Runs after/)).toBeNull();
+      setup(changeSetModel({ status: 'approved', plan: { ...plan, startLine: 'Ready to start' } }));
+      expect(screen.getByText('Ready to start')).toBeTruthy();
+    });
+
+    it('CS-9 without a line from the server the browser decides nothing: no waiting line', () => {
+      const { startLine: _line, ...noLine } = plan; // eslint-disable-line @typescript-eslint/no-unused-vars -- dropped on purpose
+      setup(changeSetModel({ plan: noLine }));
+      expect(screen.queryByText(/^Runs after|^Blocked|^Ready/)).toBeNull();
     });
 
     it('UI-4 a change-set without a plan renders no plan section', () => {

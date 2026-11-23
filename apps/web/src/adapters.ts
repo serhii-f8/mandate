@@ -90,6 +90,7 @@ function planOf(detail: ChangeSetDetail): { plan?: PlanModel } {
         status: s.status,
         ...(s.visible === true ? { href: changesetPath(s.id) } : {}),
       })),
+      ...(plan.startLine === undefined ? {} : { startLine: plan.startLine }),
     },
   };
 }

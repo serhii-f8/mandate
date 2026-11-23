@@ -53,8 +53,11 @@ describe('web api client', () => {
     const { calls, api } = fake(200, { items: [] });
     await api.items(ID, { after: 'abc', status: 'failed' });
     await api.items(ID, {});
+    await api.items(ID, { verification: 'not_confirmed' });
     expect(calls[0]?.url).toBe(`/api/v1/changesets/${ID}/items?after=abc&status=failed`);
     expect(calls[1]?.url).toBe(`/api/v1/changesets/${ID}/items`);
+    // EXE-12: the items verification has not confirmed.
+    expect(calls[2]?.url).toBe(`/api/v1/changesets/${ID}/items?verification=not_confirmed`);
   });
 
   it('UI-3 submit posts the hash with the CSRF token and maps 200 and 409', async () => {

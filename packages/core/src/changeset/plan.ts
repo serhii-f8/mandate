@@ -62,6 +62,68 @@ export function planStepMayStart(step: number, steps: readonly PlanStep[]): bool
 }
 
 /**
+ * EXE-13: the statuses of a predecessor that can never become `completed` again: the plan stopped there.
+ * `rolling_back` ends `rolled_back` or `failed`.
+ */
+const PLAN_STOPPED: readonly ChangeSetStatus[] = [
+  'failed',
+  'rejected',
+  'cancelled',
+  'expired',
+  'rolled_back',
+  'completed_with_errors',
+  'rolling_back',
+];
+
+/**
+ * EXE-13, UI-4: what a step's place in its plan means for its start, from the statuses alone. `waiting`: the
+ * step before it can still complete; `blocked`: it ended otherwise, so this step can never start; `ready`: it
+ * completed and this step is `approved` (not yet running); `none`: nothing to say (step 1, a predecessor not in
+ * `steps`, or a step that is prepared, running or done).
+ */
+export type PlanStepGate =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'ready' }
+  | { readonly kind: 'waiting' | 'blocked'; readonly step: number; readonly status: ChangeSetStatus };
+
+export function planStepGate(step: number, steps: readonly PlanStep[]): PlanStepGate {
+  if (!Number.isInteger(step) || step <= 1) return { kind: 'none' };
+  const before = steps.find((s) => s.step === step - 1);
+  if (before === undefined) return { kind: 'none' };
+  if (before.status === 'completed') {
+    return steps.find((s) => s.step === step)?.status === 'approved' ? { kind: 'ready' } : { kind: 'none' };
+  }
+  return { kind: PLAN_STOPPED.includes(before.status) ? 'blocked' : 'waiting', step: before.step, status: before.status };
+}
+
+/** The one line the views show for a gate (UI-4); the server builds it, the browser only renders it. */
+export function planStepGateText(gate: PlanStepGate): string | undefined {
+  switch (gate.kind) {
+    case 'none':
+      return undefined;
+    case 'ready':
+      return 'Ready to start';
+    case 'waiting':
+      return `Runs after step ${String(gate.step)} completes (now: ${gate.status})`;
+    case 'blocked':
+      return `Blocked: step ${String(gate.step)} ${endedText(gate.status)}; this step cannot start`;
+  }
+}
+
+/** The text of a `plan_blocked` refusal (EXE-13): blocked for good, or not yet. */
+export function planBlockedText(changesetId: string, gate: PlanStepGate): string {
+  if (gate.kind === 'blocked') {
+    return `Change-set ${changesetId} is blocked: step ${String(gate.step)} of its plan ${endedText(gate.status)}, so this step cannot start.`;
+  }
+  const now = gate.kind === 'waiting' ? ` (now: ${gate.status})` : '';
+  return `Change-set ${changesetId} cannot start yet: the step before it in its plan has not completed${now}.`;
+}
+
+function endedText(status: ChangeSetStatus): string {
+  return status === 'rolling_back' ? 'is rolling_back' : `ended ${status}`;
+}
+
+/**
  * EXE-8, EXE-13: true when a step may be rolled back. A later step blocks it only while it is `executing` or
  * `rolling_back`, or when it wrote items and is not `rolled_back`. A later step that started but wrote
  * nothing (a guard refusal, every item failed or skipped, cancelled before its first batch,

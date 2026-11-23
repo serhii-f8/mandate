@@ -7,7 +7,13 @@
  */
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { decodeCursor as decodeCanonicalCursor, type DecisionRequest, type ItemStatus } from '@mandate/core';
+import {
+  decodeCursor as decodeCanonicalCursor,
+  type DecisionRequest,
+  type ItemStatus,
+  type VerificationFilter,
+  VERIFICATION_FILTERS,
+} from '@mandate/core';
 
 export const CHANGESET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -97,10 +103,10 @@ export function parseQueueQuery(
 
 export function parseItemsQuery(
   q: Record<string, unknown>,
-): Parsed<{ limit: number; after?: string; status?: ItemStatus }> {
+): Parsed<{ limit: number; after?: string; status?: ItemStatus; verification?: VerificationFilter }> {
   const limit = intParam(single(q, 'limit'), 50, 1, 100);
   if (limit === undefined) return fail;
-  const value: { limit: number; after?: string; status?: ItemStatus } = { limit };
+  const value: { limit: number; after?: string; status?: ItemStatus; verification?: VerificationFilter } = { limit };
   const rawAfter = single(q, 'after');
   if (rawAfter !== undefined) {
     const after = rawAfter === INVALID ? undefined : decodeCursor(rawAfter);
@@ -112,6 +118,13 @@ export function parseItemsQuery(
     const status = ITEM_STATUSES.find((s) => s === rawStatus);
     if (status === undefined) return fail;
     value.status = status;
+  }
+  // EXE-12: one known verification filter; anything else is a bad query, never a database error.
+  const rawVerification = single(q, 'verification');
+  if (rawVerification !== undefined) {
+    const verification = VERIFICATION_FILTERS.find((v) => v === rawVerification);
+    if (verification === undefined) return fail;
+    value.verification = verification;
   }
   return ok(value);
 }

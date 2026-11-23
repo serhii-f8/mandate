@@ -145,6 +145,7 @@ describe('page adapters', () => {
         { step: 1, id: A, operation: 'shop.retire', status: 'executing', visible: false },
         { step: 2, id: requester.id, operation: 'shop.update', status: 'approved', visible: true },
       ],
+      startLine: 'Runs after step 1 completes (now: executing)',
     };
     const expected = {
       title: 'Spring launch',
@@ -154,6 +155,7 @@ describe('page adapters', () => {
         { step: 1, id: A, operation: 'shop.retire', status: 'executing' },
         { step: 2, id: requester.id, operation: 'shop.update', status: 'approved', href: `/app/changesets/${requester.id}` },
       ],
+      startLine: 'Runs after step 1 completes (now: executing)',
     };
     expect(toChangeSetModel({ ...requester, plan }, items).plan).toEqual(expected);
     expect(toApprovalModel({ ...approver, plan }, items, sample, FRESH).plan).toEqual(expected);

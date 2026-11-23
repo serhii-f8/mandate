@@ -340,6 +340,30 @@ describe('NFR-8 items are paged on the server', () => {
   });
 });
 
+describe('EXE-12 the items route filters by verification state', () => {
+  it('EXE-12 NFR-8 verification=not_confirmed lists the written items not confirmed; a bad value is invalid_query', async () => {
+    const seeded = await seedExecuted(repo, { requester: ALICE.sub, items: 3, status: 'executing' });
+    await repo.beginVerification(seeded.id, { firstAt: new Date(), until: new Date(Date.now() + 3_600_000) });
+    const [first] = await repo.itemsPage(seeded.id, { limit: 1 });
+    if (first === undefined) throw new Error('no item');
+    await repo.recordVerification(seeded.id, 1, [{ targetId: first.targetId, confirmed: true }]);
+    const alice = await login(ALICE);
+    const listed = await get(alice, `/api/v1/changesets/${seeded.id}/items?verification=not_confirmed`);
+    expect(listed.status).toBe(200);
+    expect((listed.body as ItemsPage).items.map((i) => i.targetId)).toEqual(['SKU-0002', 'SKU-0003']);
+    const confirmed = await get(alice, `/api/v1/changesets/${seeded.id}/items?verification=confirmed`);
+    expect((confirmed.body as ItemsPage).items.map((i) => i.targetId)).toEqual(['SKU-0001']);
+    for (const q of ['verification=done', 'verification=pending&verification=confirmed', `verification=${'x'.repeat(300)}`]) {
+      const answer = await get(alice, `/api/v1/changesets/${seeded.id}/items?${q}`);
+      expect({ q, status: answer.status, body: answer.body }).toEqual({ q, status: 400, body: { error: 'invalid_query' } });
+    }
+    // Without verification the filter matches nothing, and the unfiltered answer is as before.
+    const plain = await seedAlice(2);
+    expect(((await get(alice, `/api/v1/changesets/${plain.id}/items?verification=not_confirmed`)).body as ItemsPage).items).toEqual([]);
+    expect(((await get(alice, `/api/v1/changesets/${plain.id}/items`)).body as ItemsPage).items).toHaveLength(2);
+  });
+});
+
 describe('NFR-3 page reads work on any instance', () => {
   it('NFR-3 a session from api A reads the detail on api B', async () => {
     const seeded = await seedAlice();

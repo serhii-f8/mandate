@@ -42,6 +42,8 @@ import {
   planStepMayStart,
   rollbackFromFinished,
   rollbackWindowOpen,
+  VERIFICATION_FILTERS,
+  verificationStatusesOf,
 } from '@mandate/core';
 import { createHash, randomUUID } from 'node:crypto';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
@@ -217,12 +219,17 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > MAX_PAGE) {
       return Promise.reject(new Error(`limit must be between 1 and ${MAX_PAGE}`));
     }
+    if (query.verification !== undefined && !VERIFICATION_FILTERS.includes(query.verification)) {
+      return Promise.reject(new Error('invalid verification filter'));
+    }
     this.largestPage = Math.max(this.largestPage, query.limit);
     const entry = this.entries.get(changesetId);
     if (entry === undefined) return Promise.resolve([]);
     const after = query.after;
+    const verification = query.verification === undefined ? undefined : verificationStatusesOf(query.verification);
     const page = [...entry.items.values()]
       .filter((i) => query.status === undefined || i.status === query.status)
+      .filter((i) => verification === undefined || (i.verificationStatus !== undefined && verification.includes(i.verificationStatus)))
       .filter((i) => after === undefined || compareTargetIds(i.targetId, after) > 0)
       .sort((a, b) => compareTargetIds(a.targetId, b.targetId))
       .slice(0, query.limit)
