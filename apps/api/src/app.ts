@@ -47,6 +47,7 @@ import { ChangeSetActionsController } from './changesets/changeset-actions.contr
 import { SubmitService } from './changesets/submit-service.js';
 import { FilesController } from './files/files.controller.js';
 import { ChangeSetFilesController } from './files/changeset-files.controller.js';
+import { uploadGate } from './files/upload-gate.js';
 import { ChangeSetExportController } from './export/export.controller.js';
 import { createBuiltinTools } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
@@ -501,6 +502,9 @@ export async function createApp(options: CreateAppOptions): Promise<INestApplica
   );
   // SEC-10: `req.ip` honours X-Forwarded-For only across the configured number of proxy hops (0: none).
   app.set('trust proxy', options.env.trustProxy);
+  // CS-10: refuse an upload without a session cookie (401) or with a Content-Length above the current
+  // `files.max_bytes` (413) before the raw parser below buffers its body; the guard still authenticates.
+  app.use(uploadGate({ isUpload: isFileUpload, configuration: options.configuration, secureCookie: options.env.publicUrl.origin.startsWith('https:') }));
   // CS-10: an upload is the raw bytes of any content type, up to the hard file limit. This parser reads
   // only `POST /api/v1/files` (its `type` test); it must come first: once it has read the stream, the
   // JSON parser below finds the request finished and skips it, so an `application/json` upload is not

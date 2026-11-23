@@ -64,6 +64,10 @@ address for rate limits. A value higher than your real hop count lets a client c
 limiter sees. Publish the ports of PostgreSQL, Temporal and the metrics endpoints to nobody; Compose binds
 the published ports to `127.0.0.1` for this reason.
 
+Give the proxy a request body limit for `POST /api/v1/files` a little above `files.max_bytes` (for
+nginx, `client_max_body_size` in a `location /api/v1/files` block), so an oversized or chunked upload
+is refused at the edge before the api reads it.
+
 ## 5. Rate limits
 
 Defaults are 300 requests per minute per user, 600 per service account and 60 per client address for

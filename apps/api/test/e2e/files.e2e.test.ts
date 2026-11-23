@@ -7,6 +7,7 @@
  * file argument; vi (group `viewers`) holds `viewer`, which does not.
  */
 import { randomUUID } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -28,6 +29,7 @@ const FRANK: TestLoginUser = { sub: 'frank-id', username: 'frank', groups: ['edi
 const GINA: TestLoginUser = { sub: 'gina-id', username: 'gina', groups: ['editors'] };
 const HANK: TestLoginUser = { sub: 'hank-id', username: 'hank', groups: ['editors'] };
 const VI: TestLoginUser = { sub: 'vi-id', username: 'vi', groups: ['viewers'] };
+const IVY: TestLoginUser = { sub: 'ivy-id', username: 'ivy', groups: ['editors'] };
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
 
 let postgres: StartedPostgres;
@@ -78,6 +80,50 @@ const listed = async (target: RunningApi, page: Page): Promise<Record<string, un
   expect(response.status).toBe(200);
   expect(response.headers.get('cache-control')).toBe('no-store');
   return (await response.json()) as Record<string, unknown>[];
+};
+
+/**
+ * An upload that announces `contentLength` bytes but sends only `sent`: the answer can only arrive if the
+ * server answers without reading the body. Resolves with the answer; the socket is then destroyed.
+ */
+async function partialUpload(target: RunningApi, options: { cookie?: string; csrfToken?: string; contentLength: number; sent: Uint8Array }): Promise<{ status: number; body: unknown }> {
+  const url = new URL('/api/v1/files', target.url);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(url, {
+      method: 'POST',
+      headers: {
+        origin: url.origin,
+        'content-type': 'image/png',
+        'x-file-name': 'big.png',
+        'content-length': String(options.contentLength),
+        ...(options.cookie === undefined ? {} : { cookie: options.cookie }),
+        ...(options.csrfToken === undefined ? {} : { 'x-csrf-token': options.csrfToken }),
+      },
+    });
+    req.on('response', (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        resolve({ status: res.statusCode ?? 0, body: text === '' ? undefined : (JSON.parse(text) as unknown) });
+        req.destroy();
+      });
+    });
+    // The server may close the connection once it has answered; only an error before an answer counts.
+    req.on('error', reject);
+    req.write(options.sent);
+  });
+}
+
+const stagedCount = async (): Promise<number> => {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const result = await client.query<{ n: number }>('SELECT count(*)::int AS n FROM staged_file');
+    return result.rows[0]?.n ?? 0;
+  } finally {
+    await client.end();
+  }
 };
 
 describe('CS-10 staging files', () => {
@@ -193,6 +239,24 @@ describe('CS-10 staging files', () => {
     const ed = await login(api, ED3);
     expect(await upload(api, ed, { body: new Uint8Array(HARD_MAX_FILE_BYTES + 1), type: 'application/json' })).toMatchObject({ status: 413, body: { error: 'payload_too_large' } });
     expect(await listed(api, ed)).toEqual([]);
+  });
+
+  it('SEC-1 CS-10 an upload without a session cookie is 401 before its body is read; nothing is stored', async () => {
+    const before = await stagedCount();
+    const answer = await partialUpload(api, { contentLength: 20 * 1024 * 1024, sent: new Uint8Array(1024) });
+    expect(answer).toEqual({ status: 401, body: { error: 'unauthenticated' } });
+    expect(await stagedCount()).toBe(before);
+  });
+
+  it('CS-10 an upload whose Content-Length is above files.max_bytes is 413 before its body is read; nothing is stored', async () => {
+    const ivy = await login(small, IVY);
+    const before = await stagedCount();
+    const answer = await partialUpload(small, { cookie: ivy.cookie, csrfToken: ivy.csrfToken, contentLength: 101, sent: new Uint8Array(10) });
+    expect(answer).toEqual({ status: 413, body: { error: 'payload_too_large' } });
+    expect(await stagedCount()).toBe(before);
+    expect(await listed(small, ivy)).toEqual([]);
+    // At the limit the body is read and stored.
+    expect(await upload(small, ivy, { body: new Uint8Array(100) })).toMatchObject({ status: 201 });
   });
 
   it('CS-10 a second upload over per_user_count is 409 quota_exceeded; nothing more is stored', async () => {
