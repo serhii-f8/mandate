@@ -43,7 +43,7 @@ describe('CS-4 stored item hash', () => {
     });
     it('CS-4 an unknown hash version rejects with UnknownHashVersionError', async () => {
       // A row from a newer release, or a corrupted one: the type does not admit 3, the database does.
-      const unknown = { ...base, hashVersion: 3 as HashVersion };
+      const unknown = { ...base, hashVersion: 4 as never };
       await expect(hashStoredItems(repo, unknown)).rejects.toBeInstanceOf(UnknownHashVersionError);
     });
   });

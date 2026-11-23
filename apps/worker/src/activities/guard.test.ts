@@ -2,7 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
-import { hashStoredItems, type ApprovalRecord, type ChangeSetRecord, type HashVersion } from '@mandate/core';
+import { hashStoredItems, type ApprovalRecord, type ChangeSetRecord } from '@mandate/core';
 import { InMemoryAuditLog } from '@mandate/testing';
 import { createExecutionGuard } from './guard.js';
 
@@ -142,7 +142,7 @@ describe('CS-4 POL-6 execution guard recomputes the hash with the stored version
   it('CS-4 an unknown hash version is answered hash_mismatch', async () => {
     const base = await record({ skus: ['a'], changes: { name: 'N' } });
     // A row from a newer release: the type does not admit 3, the database column does.
-    const newer = { ...base, hashVersion: 3 as HashVersion };
+    const newer = { ...base, hashVersion: 4 as never };
     const guardFor = createExecutionGuard({ repository: approvedRepository(base.hash ?? ''), audit: new InMemoryAuditLog(), newId: () => 'id' });
     expect(await guardFor(A).check(newer)).toEqual({ ok: false, outcome: 'hash_mismatch' });
   });

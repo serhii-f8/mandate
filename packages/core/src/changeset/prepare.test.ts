@@ -5,6 +5,7 @@ import type { AuditEventInput } from '../audit.js';
 import type { Caller } from '../caller.js';
 import type { ManifestDefinition, ManifestLookup, OperationDefinition } from '../policy-model.js';
 import { compareTargetIds, normalizeArgs } from './canonical.js';
+import { FileUnavailableError, type FileArgument, type StagedFile } from '../files/index.js';
 import { ChangeSetHasher } from './hash.js';
 import { hashStoredItems } from './verify.js';
 import { countExclusions, type ChangeItemRecord, type ChangeSetRecord, type ChangeSetStats } from './model.js';
@@ -31,8 +32,11 @@ class FakeRepository implements PreparationRepository {
   readonly audit: AuditEventInput[] = [];
   largestAppend = 0;
   largestPageLimit = 0;
+  /** CS-10: what `create` throws, when set (a file lost between the lookup and the insert). */
+  createError: Error | undefined;
 
   create(cs: NewChangeSet, audit: AuditEventInput): Promise<ChangeSetRecord> {
+    if (this.createError !== undefined) return Promise.reject(this.createError);
     const record: ChangeSetRecord = {
       ...cs,
       status: 'preparing',
@@ -1158,5 +1162,92 @@ describe('EXE-1 preparation split', () => {
     expect(await runPreparation(deps, runRequest(id))).toMatchObject({ ok: false, code: 'preparation_interrupted' });
     expect(repository.sets.get(id)?.status).toBe('failed');
     expect(reader.calls).toHaveLength(0);
+  });
+});
+
+describe('CS-10 createChangeSet with files', () => {
+  const FILE_ID = '11111111-1111-4111-8111-111111111111';
+  const sha = `sha256:${'a'.repeat(64)}`;
+  const staged = (over: Partial<StagedFile> = {}): StagedFile => ({
+    id: FILE_ID,
+    owner: 'alice',
+    name: 'logo.png',
+    mediaType: 'image/png',
+    size: 100,
+    sha256: sha,
+    preview: 'image',
+    createdAt: new Date('2026-11-17T09:00:00.000Z'),
+    ...over,
+  });
+  const entry: FileArgument = {
+    pointer: '/attachment',
+    path: ['attachment'],
+    send: 'base64',
+    mediaTypes: ['image/png'],
+    maxBytes: 1000,
+  };
+  const fileOp = (): OperationDefinition => ({
+    ...bareOperation(),
+    id: 'orders.attach',
+    risk: 'write_opaque',
+    files: [entry],
+  });
+  const store = (file: StagedFile | undefined) => ({ get: (id: string) => Promise.resolve(id === FILE_ID ? file : undefined) });
+  const call = (deps: ReturnType<typeof setup>['deps'], files: { get: (id: string) => Promise<StagedFile | undefined> } | undefined, args: Record<string, unknown>, operation = fileOp()) =>
+    createChangeSet(files === undefined ? deps : { ...deps, files }, { ...request(args), operation });
+  const descriptor = { id: FILE_ID, name: 'logo.png', media_type: 'image/png', size: 100, sha256: sha };
+
+  it('CS-10 the caller\'s staged file becomes a descriptor in the arguments and a link', async () => {
+    const { deps, repository } = setup(new ScriptedReader({}));
+    const out = await call(deps, store(staged()), { order: '1', attachment: FILE_ID.toUpperCase() });
+    if (!out.ok) throw new Error(`expected created, got ${out.code}`);
+    expect(out.changeset.args).toEqual({ order: '1', attachment: { $file: descriptor } });
+    expect(out.changeset.files).toEqual([{ pointer: '/attachment', fileId: FILE_ID }]);
+    expect(repository.sets.get(out.changeset.id)?.files).toEqual([{ pointer: '/attachment', fileId: FILE_ID }]);
+  });
+
+  it.each([
+    ['another user\'s file', staged({ owner: 'bob' }), FILE_ID, 'file_not_found'],
+    ['an unknown id', undefined, FILE_ID, 'file_not_found'],
+    ['a purged file', staged({ purgedAt: new Date('2026-11-17T09:30:00.000Z') }), FILE_ID, 'file_not_found'],
+    ['an id that is not a uuid', staged(), 'x\u0000y', 'file_not_found'],
+    ['a too large file', staged({ size: 1001 }), FILE_ID, 'file_too_large'],
+    ['a type outside the list', staged({ mediaType: 'text/html' }), FILE_ID, 'file_type_not_allowed'],
+  ])('CS-10 %s is refused and creates nothing', async (_n, file, id, code) => {
+    const { deps, repository } = setup(new ScriptedReader({}));
+    expect(await call(deps, store(file), { order: '1', attachment: id })).toEqual({ ok: false, code, pointer: '/attachment' });
+    expect(repository.sets.size).toBe(0);
+    expect(repository.audit).toHaveLength(0);
+  });
+
+  it('CS-10 an operation with files and no file store fails closed with file_not_found', async () => {
+    const { deps, repository } = setup(new ScriptedReader({}));
+    expect(await call(deps, undefined, { attachment: FILE_ID })).toEqual({ ok: false, code: 'file_not_found', pointer: '/attachment' });
+    expect(repository.sets.size).toBe(0);
+  });
+
+  it('CS-10 a file lost between the lookup and the insert refuses the creation with its pointer', async () => {
+    const { deps, repository } = setup(new ScriptedReader({}));
+    repository.createError = new FileUnavailableError('/attachment');
+    expect(await call(deps, store(staged()), { attachment: FILE_ID })).toEqual({ ok: false, code: 'file_not_found', pointer: '/attachment' });
+  });
+
+  it('CS-10 any other error from the repository propagates', async () => {
+    const { deps, repository } = setup(new ScriptedReader({}));
+    repository.createError = new Error('db down');
+    await expect(call(deps, store(staged()), { attachment: FILE_ID })).rejects.toThrow('db down');
+  });
+
+  it('CS-10 an operation without files passes an argument that looks like a descriptor through untouched', async () => {
+    const { deps } = setup(new ScriptedReader({}));
+    const args = { attachment: { $file: descriptor } };
+    const out = await call(deps, undefined, args, { ...fileOp(), files: [] });
+    if (!out.ok) throw new Error(`expected created, got ${out.code}`);
+    expect(out.changeset.args).toEqual(args);
+    expect(out.changeset.files).toBeUndefined();
+    const plain = await call(deps, store(staged()), args, { ...bareOperation(), id: 'orders.plain', risk: 'write_opaque' });
+    if (!plain.ok) throw new Error(`expected created, got ${plain.code}`);
+    expect(plain.changeset.args).toEqual(args);
+    expect(plain.changeset.files).toBeUndefined();
   });
 });

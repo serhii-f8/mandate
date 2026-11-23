@@ -4,12 +4,14 @@ import { describe, expect, it } from 'vitest';
 import type { AuditEventInput } from '../audit.js';
 import type { Caller } from '../caller.js';
 import type { ManifestDefinition, OperationDefinition, RiskClass } from '../policy-model.js';
+import type { FileArgument, StagedFile } from '../files/index.js';
 import { compareTargetIds } from './canonical.js';
 import { ChangeSetHasher } from './hash.js';
 import type { ChangeItemRecord, ChangeSetRecord, ChangeSetStats } from './model.js';
 import { OPAQUE_TARGET_ID, changesetKind, isOpaque, runOpaquePreparation } from './opaque.js';
 import type { ItemsPageQuery, NewChangeSet, PreparationCompletion, PreparationRepository } from './ports.js';
 import { createChangeSet } from './prepare.js';
+import { hashStoredItems } from './verify.js';
 
 const MANIFEST: ManifestDefinition = {
   idField: 'sku',
@@ -305,5 +307,52 @@ describe('CS-1 CS-4 opaque preparation', () => {
     repository.appendItems = () => Promise.reject(new Error('db down'));
     repository.completePreparation = () => Promise.reject(new Error('db still down'));
     await expect(runOpaquePreparation(deps, runRequest(cs.id))).rejects.toThrow('db down');
+  });
+});
+
+describe('CS-4 CS-10 opaque preparation with files', () => {
+  const FILE_ID = '11111111-1111-4111-8111-111111111111';
+  const sha = `sha256:${'b'.repeat(64)}`;
+  const file: StagedFile = {
+    id: FILE_ID,
+    owner: 'alice',
+    name: 'a.txt',
+    mediaType: 'text/plain',
+    size: 5,
+    sha256: sha,
+    preview: 'text',
+    createdAt: new Date('2026-11-19T09:00:00.000Z'),
+  };
+  const entry: FileArgument = { pointer: '/doc', path: ['doc'], send: 'base64', mediaTypes: ['text/plain'], maxBytes: 100 };
+  const FILE_OP: OperationDefinition = { ...OPAQUE_OP, files: [entry] };
+  const descriptor = { $file: { id: FILE_ID, name: 'a.txt', media_type: 'text/plain', size: 5, sha256: sha } };
+
+  it('CS-4 CS-10 a change-set with files is sealed with hash version 3 over the descriptor', async () => {
+    const { deps, repository } = setup();
+    const out = await createChangeSet(
+      { ...deps, files: { get: () => Promise.resolve(file) } },
+      { operation: FILE_OP, args: { order: '1', doc: FILE_ID }, caller, correlationId: 'corr-1', configHash: 'cfg-1', expireAfterHours: 72 },
+    );
+    if (!out.ok) throw new Error(`expected created, got ${out.code}`);
+    const prepared = await runOpaquePreparation(deps, runRequest(out.changeset.id, FILE_OP));
+    if (!prepared.ok) throw new Error(`expected prepared, got ${prepared.code}`);
+    expect(prepared.changeset.hashVersion).toBe(3);
+    expect(prepared.changeset.action).toBeUndefined();
+    expect(prepared.firstItems).toEqual([
+      { targetId: 'call', status: 'pending', before: null, after: { order: '1', doc: descriptor } },
+    ]);
+    expect(prepared.changeset.hash).toBe(await hashStoredItems(repository, prepared.changeset));
+    const hasher = new ChangeSetHasher(FILE_OP.id, { order: '1', doc: descriptor }, { version: 3 });
+    hasher.add({ targetId: 'call', status: 'pending', before: null, after: { order: '1', doc: descriptor } });
+    expect(prepared.changeset.hash).toBe(hasher.digest());
+  });
+
+  it('CS-4 an opaque change-set without files still seals version 2 with the same hash', async () => {
+    const { deps } = setup();
+    const cs = await created(deps);
+    const out = await runOpaquePreparation(deps, runRequest(cs.id));
+    if (!out.ok) throw new Error(`expected prepared, got ${out.code}`);
+    expect(out.changeset.hashVersion).toBe(2);
+    expect(out.changeset.hash).toBe(expectedHash(ARGS));
   });
 });

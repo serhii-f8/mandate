@@ -14,7 +14,7 @@ const HASH_PAGE = 500;
  * execution moves items to written or failed. Memory holds one page (NFR-7).
  *
  * The hash is taken with the change-set's stored version (absent: 1) and action, so a change-set
- * prepared before an upgrade keeps verifying (ADR 0069). A version outside 1 and 2 throws
+ * prepared before an upgrade keeps verifying (ADR 0069). A version outside 1 to 3 throws
  * `UnknownHashVersionError` before any item is read; callers comparing with a stored hash treat it
  * as a mismatch.
  */

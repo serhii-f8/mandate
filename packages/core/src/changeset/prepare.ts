@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
 import type { Caller } from '../caller.js';
+import { resolveFileArgs, type FileRefusal } from '../files/file-args.js';
+import { FileUnavailableError, type FileStore } from '../files/ports.js';
+import type { FileLink } from '../files/model.js';
 import type { ManifestDefinition, OperationDefinition } from '../policy-model.js';
 import { changesetTransitionEvent } from './audit.js';
 import { normalizeArgs, normalizeRecords } from './canonical.js';
@@ -24,6 +27,8 @@ export interface PrepareDeps {
   readonly reader: UpstreamReader;
   readonly newId: () => string;
   readonly now: () => Date;
+  /** CS-10: where file arguments are looked up. Without it an operation with `files` is refused. */
+  readonly files?: Pick<FileStore, 'get'>;
 }
 
 export interface PrepareRequest {
@@ -106,16 +111,34 @@ function manifestArgs(
  * so it can run in the API call while `runPreparation` runs later, in a workflow activity.
  */
 export async function createChangeSet(
-  deps: Pick<PrepareDeps, 'repository' | 'newId' | 'now'>,
+  deps: Pick<PrepareDeps, 'repository' | 'newId' | 'now' | 'files'>,
   req: CreateRequest,
-): Promise<{ ok: true; changeset: ChangeSetRecord } | { ok: false; code: PrepareFailure }> {
+): Promise<
+  | { ok: true; changeset: ChangeSetRecord }
+  | { ok: false; code: PrepareFailure | FileRefusal; pointer?: string }
+> {
   const { operation, caller, correlationId } = req;
-  const args = isOpaque(operation) ? normalizeArgs(req.args, undefined) : manifestArgs(operation.manifest, req.args);
-  if (typeof args === 'string') return { ok: false, code: args };
+  const normalized = isOpaque(operation) ? normalizeArgs(req.args, undefined) : manifestArgs(operation.manifest, req.args);
+  if (typeof normalized === 'string') return { ok: false, code: normalized };
+
+  // CS-10: each declared file ID becomes its descriptor, before anything is created (SEC-1: one code for
+  // unknown, foreign and purged). Without a file store the operation fails closed.
+  let args: Record<string, unknown> = normalized;
+  let links: readonly FileLink[] = [];
+  const declared = operation.files ?? [];
+  if (declared.length > 0) {
+    if (deps.files === undefined) return { ok: false, code: 'file_not_found', pointer: declared[0]?.pointer ?? '' };
+    const resolved = await resolveFileArgs({ files: declared, args, owner: caller.subject, store: deps.files });
+    if (!resolved.ok) return { ok: false, code: resolved.code, pointer: resolved.pointer };
+    args = resolved.args;
+    links = resolved.links;
+  }
 
   const id = deps.newId();
   const createdAt = deps.now();
-  const changeset = await deps.repository.create(
+  let changeset: ChangeSetRecord;
+  try {
+    changeset = await deps.repository.create(
     {
       id,
       operation: operation.id,
@@ -127,6 +150,7 @@ export async function createChangeSet(
       correlationId,
       createdAt,
       expiresAt: new Date(createdAt.getTime() + Math.round(req.expireAfterHours * HOUR_MS)),
+      ...(links.length === 0 ? {} : { files: links }),
     },
     changesetTransitionEvent({
       id: deps.newId(),
@@ -138,6 +162,11 @@ export async function createChangeSet(
       correlationId,
     }),
   );
+  } catch (err) {
+    // Only the named error: a file that vanished between the lookup and the insert (CS-10).
+    if (err instanceof FileUnavailableError) return { ok: false, code: 'file_not_found', pointer: err.pointer };
+    throw err;
+  }
   return { ok: true, changeset };
 }
 

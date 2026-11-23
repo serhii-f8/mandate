@@ -14,6 +14,8 @@ Additive release: the configuration schema and the connector SDK are 1.4.0. A pr
   and `part`; the global `files` settings (`max_bytes`, `staged_ttl_hours`, `keep_days`,
   `per_user_count`, `per_user_bytes`) may be set in one document. The loader checks both and refuses
   a grant scope that names a one-segment file argument (OPS-8, ADR 0075).
+- A change-set with files stores each file's descriptor in its arguments and is sealed with hash
+  version 3; change-sets without files keep version 2 (CS-4, CS-10).
 
 ## 1.3.0
 

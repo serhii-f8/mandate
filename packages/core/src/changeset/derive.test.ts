@@ -6,7 +6,7 @@ import type { Caller } from '../caller.js';
 import { compareTargetIds } from './canonical.js';
 import { deriveChangeSet, isValidTargetId, MAX_DERIVE_TARGETS, type DeriveRepository, type DeriveRequest } from './derive.js';
 import { countExclusions, type ChangeItemRecord, type ChangeSetRecord, type ChangeSetStats, type ChangeSetStatus } from './model.js';
-import { ChangeSetHasher, type HashVersion } from './hash.js';
+import { ChangeSetHasher } from './hash.js';
 import type { ItemsPageQuery, NewChangeSet, PreparationCompletion } from './ports.js';
 import { hashStoredItems } from './verify.js';
 
@@ -387,7 +387,7 @@ describe('CS-5 derived change-sets', () => {
     it('CS-4 CS-5 a source with an unknown hash version is refused hash_mismatch and creates no row', async () => {
       const s = await setup();
       // A row from a newer release: the type does not admit 3, the database column does.
-      const newer = { ...s.source, hashVersion: 3 as HashVersion };
+      const newer = { ...s.source, hashVersion: 4 as never };
       s.repo.sets.set(SOURCE_ID, newer);
       expect(await deriveChangeSet(s.deps, s.req({ exclude: ['t-0002'] }))).toEqual({ ok: false, reason: 'hash_mismatch' });
       expect([...s.repo.sets.keys()]).toEqual([SOURCE_ID]);

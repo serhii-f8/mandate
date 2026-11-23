@@ -3,7 +3,16 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { ManifestAction } from '../policy-model.js';
-import { ChangeSetHasher, type HashableItem, type HashVersion } from './hash.js';
+import { canonicalJson } from './canonical.js';
+import {
+  ChangeSetHasher,
+  FILES_HASH_VERSION,
+  CURRENT_HASH_VERSION,
+  isKnownHashVersion,
+  UnknownHashVersionError,
+  type HashableItem,
+  type HashVersion,
+} from './hash.js';
 
 const item = (over: Partial<HashableItem> = {}): HashableItem => ({
   targetId: 'A',
@@ -78,5 +87,34 @@ describe('CS-4 hash version', () => {
     const text =
       '{"action":null,"args":{},"format":"mandate.changeset.v2","operation":"op.x"}\n{"after":{"f":2},"before":{"f":1},"status":"pending","target":"A"}\n';
     expect(sealed({ version: 2 })).toBe(`sha256:${createHash('sha256').update(text).digest('hex')}`);
+  });
+});
+
+describe('CS-4 hash version 3', () => {
+  const args = { a: 1 };
+  const h = (version: 1 | 2 | 3) => {
+    const x = new ChangeSetHasher('op', args, { version });
+    x.add({ targetId: 'call', status: 'pending', before: null, after: args });
+    return x.digest();
+  };
+  it('CS-4 version 3 differs from versions 1 and 2', () => {
+    expect(h(3)).not.toBe(h(2));
+    expect(h(3)).not.toBe(h(1));
+  });
+  it('CS-4 version 3 is known, 4 is not, and the current version stays 2', () => {
+    expect(isKnownHashVersion(3)).toBe(true);
+    expect(isKnownHashVersion(4)).toBe(false);
+    expect(FILES_HASH_VERSION).toBe(3);
+    expect(CURRENT_HASH_VERSION).toBe(2);
+    expect(() => new ChangeSetHasher('op', args, { version: 4 as never })).toThrow(UnknownHashVersionError);
+  });
+  it('CS-4 the version 3 header is exactly the canonical v3 object, action null for opaque', () => {
+    const x = new ChangeSetHasher('op', args, { version: 3 });
+    const text = `${canonicalJson({ format: 'mandate.changeset.v3', operation: 'op', action: null, args })}\n`;
+    expect(x.digest()).toBe(`sha256:${createHash('sha256').update(text).digest('hex')}`);
+  });
+  it('CS-4 version 3 binds the action when there is one', () => {
+    const withAction = new ChangeSetHasher('op', args, { version: 3, action: 'update' }).digest();
+    expect(withAction).not.toBe(new ChangeSetHasher('op', args, { version: 3 }).digest());
   });
 });

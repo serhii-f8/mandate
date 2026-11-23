@@ -71,6 +71,7 @@ export { callRecords, itemFields, manifestAction } from './changeset/fields.js';
 export {
   ChangeSetHasher,
   CURRENT_HASH_VERSION,
+  FILES_HASH_VERSION,
   isKnownHashVersion,
   UnknownHashVersionError,
   type HashableItem,
