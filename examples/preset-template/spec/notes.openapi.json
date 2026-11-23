@@ -26,6 +26,20 @@
         "responses": { "201": { "description": "The note" } }
       }
     },
+    "/attachments": {
+      "post": {
+        "operationId": "attachmentsCreate",
+        "summary": "Attach a file (base64) to a note",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "properties": { "note_id": { "type": "string" }, "content": { "type": "string", "format": "byte" } }, "required": ["note_id", "content"] }
+            }
+          }
+        },
+        "responses": { "201": { "description": "The attachment" } }
+      }
+    },
     "/notes/{id}": {
       "patch": {
         "operationId": "notesUpdate",

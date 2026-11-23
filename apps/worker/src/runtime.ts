@@ -49,6 +49,7 @@ import { NativeConnection, type Worker } from '@temporalio/worker';
 import type { Logger } from 'pino';
 import { createActivities, createExecutionGuard, echo, type WorkerActivities } from './activities/index.js';
 import { createAuditJobs } from './audit-jobs.js';
+import { createFileJobs, FILE_PURGE_BATCH } from './file-jobs.js';
 import { startWorkerHttpServer } from './http-server.js';
 import { createNotificationDispatcher } from './notifications/dispatcher.js';
 import { createSmtpSender } from './notifications/email.js';
@@ -273,6 +274,7 @@ export async function startWorkerRuntime(
       logger.warn('MANDATE_SMTP_URL is not set: email notifications fail with channel_unconfigured');
     }
     const repository = new PostgresChangeSetRepository(database.db);
+    const files = new PostgresFileStore(database.db);
     // Preset sensitive fields are covered: the configuration was loaded with the preset directories (AUD-4).
     const audit = new DrizzleAuditLog(database.db, { sensitiveKeys: () => configuration.current.sensitiveFields });
     connection = await NativeConnection.connect({ address: env.temporalAddress });
@@ -293,7 +295,7 @@ export async function startWorkerRuntime(
       tuning: env.activityTuning,
       logger,
       executor,
-      files: new PostgresFileStore(database.db),
+      files,
     }), meter);
     const dispatcher = createNotificationDispatcher({
       outbox: new PostgresNotificationOutbox(database.db),
@@ -323,6 +325,21 @@ export async function startWorkerRuntime(
         }),
       logger,
     });
+    const fileJobs = createFileJobs({
+      // The settings are read on every pass, so a reload changes the lifetime (CFG-2, CS-10).
+      purge: () => {
+        const { stagedTtlHours, keepDays } = configuration.current.files;
+        return files.purge({ now: new Date(), stagedTtlHours, keepDays, limit: FILE_PURGE_BATCH }, (purged) => ({
+          id: randomUUID(),
+          actor: 'system',
+          action: 'files.purged',
+          outcome: 'ok',
+          correlationId: randomUUID(),
+          details: { purged },
+        }));
+      },
+      logger,
+    });
     const running = await createWorker({
       connection,
       namespace: env.temporalNamespace,
@@ -342,10 +359,11 @@ export async function startWorkerRuntime(
         // Delivery and the audit jobs run beside the worker; a failure in either never stops polling (NTF-3, AUD-3).
         const delivery = dispatcher.start();
         const jobs = auditJobs.start();
+        const purging = fileJobs.start();
         try {
           await running.run();
         } finally {
-          await Promise.all([delivery.stop(), jobs.stop()]);
+          await Promise.all([delivery.stop(), jobs.stop(), purging.stop()]);
         }
       },
       close: async () => {

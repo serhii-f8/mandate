@@ -3,7 +3,7 @@
 A working, contract-tested preset to copy when you write your own (CONN-8, NFR-17). It models a
 small notes API: one read, `notes.search`, and three manifest writes sent as one request per
 record: `notes.update_title` (`PATCH /notes/{id}`, `replay_previous_state` rollback),
-`notes.create` and `notes.delete`.
+`notes.create` and `notes.delete`, and one opaque write that takes a file, `notes.attach`.
 
 | File | Purpose |
 | --- | --- |
@@ -32,6 +32,14 @@ record: `notes.update_title` (`PATCH /notes/{id}`, `replay_previous_state` rollb
   authentication. The change-set keeps each note's `title` and `body`, so its rollback,
   `notes.create`, can put them back. The two operations name each other as the inverse; the loader
   checks that they match.
+- **`notes.attach`** (since 1.4.0) is an opaque write (`write_opaque`) with a file argument. Its
+  `content` is the ID of a file the user staged beforehand (the upload page `/app/files` or
+  `POST /api/v1/files`; `list_staged_files` lists them). `files: [{ at: /content, send: base64,
+  media_types: [text/csv, image/png], max_bytes? }]` names where the ID sits; the change-set seals the
+  file's hash, the approver sees and downloads the file, and the worker sends its bytes as base64 at
+  `/content` only if they still hash to the sealed value. The `input_schema` must be explicit, with
+  `content` a required `{ type: string, format: uuid }` (the loader refuses a file operation
+  without it). It needs `"sdk": "^1.4.0"` in `package.json`.
 
 ## Copy and adapt
 
@@ -51,7 +59,7 @@ pnpm mandate validate <config-dir> --preset-dir examples
 ```
 
 The configuration binds the preset to a connection, for example
-`presets: [{ id: notes, package: '@mandate-examples/preset-template', version: '1.3.0' }]` and a
+`presets: [{ id: notes, package: '@mandate-examples/preset-template', version: '1.4.0' }]` and a
 connection with `preset: notes`, `adapter: openapi` and a `base_url`. The parameter `search_fields` (the fields
 `notes.search` may return) can be narrowed with `preset_params: { search_fields: [id, title] }`; see
 [Parameters](../../docs/guide/presets.md#parameters).

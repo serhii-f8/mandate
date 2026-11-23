@@ -32,7 +32,7 @@ async function loadPreset(baseUrl: string): Promise<LoadedConfiguration> {
   const config = presetConnectionYaml({
     presetId: 'notes',
     package: '@mandate-examples/preset-template',
-    version: '1.3.0',
+    version: '1.4.0',
     connectionId: 'notes',
     baseUrl,
     credentialRef: 'notes-token',
@@ -69,8 +69,8 @@ describe('NFR-17 preset template contract', () => {
     await upstream.close();
   });
 
-  it('NFR-17 CONN-8 the preset loads against its vendored spec: a read, an update, a create and a delete, bearer auth', () => {
-    expect(config.policy.operations.map((o) => o.id).sort()).toEqual(['notes.create', 'notes.delete', 'notes.search', 'notes.update_title']);
+  it('NFR-17 CONN-8 the preset loads against its vendored spec: a read, an update, a create, a delete and an attachment upload, bearer auth', () => {
+    expect(config.policy.operations.map((o) => o.id).sort()).toEqual(['notes.attach', 'notes.create', 'notes.delete', 'notes.search', 'notes.update_title']);
     const write = config.policy.operations.find((o) => o.id === 'notes.update_title');
     expect(write?.risk).toBe('write');
     expect(write?.manifest).toMatchObject({
@@ -110,6 +110,18 @@ describe('NFR-17 preset template contract', () => {
       maxTargets: 1000,
       rollback: { strategy: 'inverse_operation', operation: 'notes.create' },
     });
+  });
+
+  it('NFR-17 OPS-8 CS-10 notes.attach is an opaque write whose content is a staged file, sent as base64', () => {
+    const attach = config.policy.operations.find((o) => o.id === 'notes.attach');
+    expect(attach?.risk).toBe('write_opaque');
+    expect(attach?.files).toEqual([
+      { pointer: '/content', path: ['content'], send: 'base64', mediaTypes: ['text/csv', 'image/png'], maxBytes: 10_485_760 },
+    ]);
+    const validate = config.validators.get('notes.attach');
+    expect(validate?.({ note_id: 'n1', content: '3f2b1c9e-8a4d-4e6f-9b1a-2c3d4e5f6a7b' }).ok).toBe(true);
+    expect(validate?.({ note_id: 'n1', content: 'not-an-id' }).ok).toBe(false);
+    expect(validate?.({ note_id: 'n1' }).ok).toBe(false);
   });
 
   it('NFR-17 CS-3 notes.update_title carries the empty_title check: a note without a title is excluded with that code', () => {

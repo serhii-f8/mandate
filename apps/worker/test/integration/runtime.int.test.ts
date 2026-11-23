@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { createAdapters } from '@mandate/adapters';
 import { parseWorkerEnv } from '@mandate/config';
 import { mcpToolHash } from '@mandate/connector-sdk';
-import { createDb, insertNotifications, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, runMigrations } from '@mandate/db';
+import { sha256Of } from '@mandate/core';
+import { createDb, insertNotifications, parseMasterKeys, PostgresChangeSetRepository, PostgresCredentialVault, PostgresFileStore, runMigrations } from '@mandate/db';
 import { startFakeMcpServer, startPostgres, startSmtpSink, type StartedPostgres } from '@mandate/testing';
 import { connectionCredential } from '@mandate/upstream';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
@@ -19,6 +20,7 @@ import { startRuntimeConfiguration, startWorkerRuntime } from '../../src/runtime
 import { createPrepared } from '../support/changesets.js';
 
 let postgres: StartedPostgres;
+const STALE_FILE = randomUUID();
 
 beforeAll(async () => {
   postgres = await startPostgres();
@@ -227,6 +229,13 @@ describe('NTF-1 NFR-10 NFR-12 a running worker runtime', () => {
     await runMigrations(url);
     database = createDb(url, { onError: () => undefined });
     await writeFile(join(dir, 'mandate.yaml'), NOTIFYING_CONFIG);
+    // CS-10: a file staged long before the default 24 h lifetime, unreferenced; the purge pass at start removes it.
+    const stale = new TextEncoder().encode('stale');
+    const staged = await new PostgresFileStore(database.db).stage(
+      { id: STALE_FILE, owner: 'alice', name: 'old.txt', mediaType: 'text/plain', content: stale, sha256: sha256Of(stale), preview: 'text', createdAt: new Date(Date.now() - 48 * 3_600_000), quota: { count: 50, bytes: 262_144_000 } },
+      { id: randomUUID(), actor: 'alice', action: 'file.staged', outcome: 'ok', correlationId: randomUUID(), details: {} },
+    );
+    expect(staged.ok).toBe(true);
     const env = parseWorkerEnv({
       DATABASE_URL: url,
       TEMPORAL_ADDRESS: env0.address,
@@ -267,6 +276,20 @@ describe('NTF-1 NFR-10 NFR-12 a running worker runtime', () => {
       { timeout: 15_000, interval: 100 },
     );
     expect(sink.messages[0]?.to).toEqual(['ops@example.test']);
+  }, 60_000);
+
+  it('CS-10 a staged file older than its lifetime is purged after the runtime starts, with one files.purged event', async () => {
+    const { database } = started();
+    const { pool } = database;
+    await vi.waitFor(
+      async () => {
+        const row = await pool.query('SELECT content IS NULL AS gone, purged_at IS NOT NULL AS stamped FROM staged_file WHERE id = $1', [STALE_FILE]);
+        expect(row.rows[0]).toEqual({ gone: true, stamped: true });
+      },
+      { timeout: 15_000, interval: 100 },
+    );
+    const events = await pool.query("SELECT actor, details FROM audit_event WHERE action = 'files.purged'");
+    expect(events.rows).toEqual([{ actor: 'system', details: { purged: 1 } }]);
   }, 60_000);
 
   it('NFR-10 NFR-12 the running worker is ready and serves its metrics', async () => {
