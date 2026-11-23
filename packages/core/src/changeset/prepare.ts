@@ -139,29 +139,29 @@ export async function createChangeSet(
   let changeset: ChangeSetRecord;
   try {
     changeset = await deps.repository.create(
-    {
-      id,
-      operation: operation.id,
-      connection: operation.connection,
-      requester: caller.subject,
-      ...(caller.clientId === undefined ? {} : { clientId: caller.clientId }),
-      args,
-      configHash: req.configHash,
-      correlationId,
-      createdAt,
-      expiresAt: new Date(createdAt.getTime() + Math.round(req.expireAfterHours * HOUR_MS)),
-      ...(links.length === 0 ? {} : { files: links }),
-    },
-    changesetTransitionEvent({
-      id: deps.newId(),
-      actor: caller.subject,
-      ...(caller.clientId === undefined ? {} : { clientId: caller.clientId }),
-      changeset: { id, operation: operation.id },
-      from: null,
-      to: 'preparing',
-      correlationId,
-    }),
-  );
+      {
+        id,
+        operation: operation.id,
+        connection: operation.connection,
+        requester: caller.subject,
+        ...(caller.clientId === undefined ? {} : { clientId: caller.clientId }),
+        args,
+        configHash: req.configHash,
+        correlationId,
+        createdAt,
+        expiresAt: new Date(createdAt.getTime() + Math.round(req.expireAfterHours * HOUR_MS)),
+        ...(links.length === 0 ? {} : { files: links }),
+      },
+      changesetTransitionEvent({
+        id: deps.newId(),
+        actor: caller.subject,
+        ...(caller.clientId === undefined ? {} : { clientId: caller.clientId }),
+        changeset: { id, operation: operation.id },
+        from: null,
+        to: 'preparing',
+        correlationId,
+      }),
+    );
   } catch (err) {
     // Only the named error: a file that vanished between the lookup and the insert (CS-10).
     if (err instanceof FileUnavailableError) return { ok: false, code: 'file_not_found', pointer: err.pointer };
