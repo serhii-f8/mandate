@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
-export type Route = { kind: 'index' } | { kind: 'credentials' } | { kind: 'approvals' } | { kind: 'audit' } | { kind: 'changeset'; id: string } | { kind: 'not_found' };
+export type Route = { kind: 'index' } | { kind: 'credentials' } | { kind: 'approvals' } | { kind: 'audit' } | { kind: 'files' } | { kind: 'changeset'; id: string } | { kind: 'not_found' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -11,6 +11,7 @@ export function route(pathname: string): Route {
   if (path === '/app/credentials') return { kind: 'credentials' };
   if (path === '/app/approvals') return { kind: 'approvals' };
   if (path === '/app/audit') return { kind: 'audit' };
+  if (path === '/app/files') return { kind: 'files' };
   const m = /^\/app\/changesets\/([^/]+)$/.exec(path);
   if (m?.[1] !== undefined && UUID.test(m[1])) return { kind: 'changeset', id: m[1] };
   return { kind: 'not_found' };

@@ -180,4 +180,12 @@ describe('page adapters', () => {
     expect(diff.kind).toBe('diff');
     expect('args' in diff).toBe(false);
   });
+
+  it('UI-2 APR-5 the files of a detail reach both models; a detail without files adds no key', () => {
+    const file = { pointer: '/image', id: '33333333-3333-4333-8333-333333333333', name: 'logo.png', mediaType: 'image/png', size: 2048, sha256: `sha256:${'a'.repeat(64)}`, preview: 'image' as const, available: true };
+    expect(toChangeSetModel(requester, items)).not.toHaveProperty('files');
+    expect(toApprovalModel(approver, items, sample, FRESH)).not.toHaveProperty('files');
+    expect(toChangeSetModel({ ...requester, files: [file] }, items).files).toEqual([file]);
+    expect(toApprovalModel({ ...approver, files: [file] }, items, sample, FRESH).files).toEqual([file]);
+  });
 });

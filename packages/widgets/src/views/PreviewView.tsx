@@ -4,6 +4,7 @@ import { type ReactElement, useCallback, useRef, useState } from 'react';
 import { ActionBar } from '../components/ActionBar.js';
 import { ItemTable } from '../components/ItemTable.js';
 import { Notice } from '../components/Notice.js';
+import { FilesSection } from '../components/FilesSection.js';
 import { RawArguments } from '../components/RawArguments.js';
 import { Pager } from '../components/Pager.js';
 import { StatsSummary } from '../components/StatsSummary.js';
@@ -120,6 +121,7 @@ export function PreviewView({ data, actions, onData }: ViewProps<ChangeSetViewMo
       </header>
       <PlanSection plan={data.plan} />
       <StatsSummary stats={data.stats} {...(hash === undefined ? {} : { hash })} />
+      {opaque ? <FilesSection files={data.files ?? []} {...(actions.filesSource === undefined ? {} : { source: actions.filesSource })} /> : null}
       {opaque ? <RawArguments args={data.args ?? {}} /> : null}
       {opaque ? null : (
       <div className="filters" role="group" aria-label="Show">

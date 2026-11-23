@@ -13,6 +13,13 @@ export function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
 
+/** A byte count as `512 B`, `2.0 KB`, `1.5 MB`. */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${String(n)} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function shortHash(hash: string): string {
   const m = /^([a-z0-9]+:)([0-9a-f]{9,})$/i.exec(hash);
   return m ? `${m[1]}${m[2]?.slice(0, 8)}…` : hash;

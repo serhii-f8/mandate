@@ -474,6 +474,24 @@ describe('ApprovalView', () => {
   });
 });
 
+describe('UI-2 APR-5 the approval view shows files', () => {
+  const FILE = { pointer: '/image', id: '33333333-3333-4333-8333-333333333333', name: 'logo.png', mediaType: 'image/png', size: 2048, sha256: HASH, preview: 'image' as const, available: true };
+  const viewer = { channel: 'page' as const, canDecide: true, reason: null, needsFreshLogin: false, canStart: false };
+
+  it('APR-5 the files section comes before the raw arguments', () => {
+    const data = detail({ kind: 'opaque', viewer, files: [FILE] });
+    render(<ApprovalView data={data} actions={actionsWith()} onData={vi.fn()} />);
+    const files = screen.getByRole('heading', { name: 'Files sent with this call (1)' });
+    const raw = screen.getByRole('heading', { name: 'Raw arguments' });
+    expect(files.compareDocumentPosition(raw) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('APR-5 a call without files shows no files section', () => {
+    render(<ApprovalView data={detail({ kind: 'opaque', viewer })} actions={actionsWith()} onData={vi.fn()} />);
+    expect(screen.queryByText(/Files sent with this call/)).toBeNull();
+  });
+});
+
 describe('UI-4 APR-5 CS-9 the approval view shows the plan', () => {
   const SIBLING = '22222222-2222-4222-8222-222222222222';
   const plan: NonNullable<ApprovalViewModel['plan']> = {

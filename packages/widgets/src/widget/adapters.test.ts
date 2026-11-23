@@ -328,4 +328,16 @@ describe('widget adapters', () => {
     rev.detail.kind = 'opaque';
     expect(fromReviewChangeset(rev)?.kind).toBe('opaque');
   });
+
+  it('UI-2 APR-5 files reach the models: top level of get_changeset, inside detail of review_changeset', () => {
+    const file = { pointer: '/image', id: '33333333-3333-4333-8333-333333333333', name: 'logo.png', mediaType: 'image/png', size: 2048, sha256: `sha256:${'a'.repeat(64)}`, preview: 'image', available: true };
+    const get = structuredClone(getPrepared.structuredContent) as Record<string, unknown>;
+    expect(fromGetChangeset(get)).not.toHaveProperty('files');
+    get.files = [file];
+    expect(fromGetChangeset(get)?.files).toEqual([file]);
+    const rev = structuredClone(review.structuredContent) as { detail: Record<string, unknown> };
+    expect(fromReviewChangeset(rev)).not.toHaveProperty('files');
+    rev.detail.files = [file];
+    expect(fromReviewChangeset(rev)?.files).toEqual([file]);
+  });
 });

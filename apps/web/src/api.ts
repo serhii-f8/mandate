@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The Mandate Authors
-import type { AuditEventModel, AuditFilters } from '@mandate/widgets';
+import type { AuditEventModel, AuditFilters, FileItem } from '@mandate/widgets';
 import type { ConnectionTestReport, CredentialRow, SaveResult } from './views/CredentialsView.js';
 
 export interface Session {
@@ -141,8 +141,24 @@ export interface ChangeSetDetail {
   /** Present once execution is summarised (UI-4). */
   drift?: number;
   rollback: { available: boolean; count?: number; until?: string; reason?: string; stats?: { restored: number; skipped: number; failed: number } };
+  /** CS-10, APR-5: the files the call sends. */
+  files?: FileItem[];
   viewer: ViewerBlock;
 }
+/** A staged file as `GET /api/v1/files` and the upload answer describe it (CS-10). */
+export interface StagedFile {
+  id: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  sha256: string;
+  preview: 'image' | 'text' | 'none';
+  createdAt: string;
+  expiresAt: string;
+}
+export type FilesOutcome = { ok: true; files: StagedFile[] } | { ok: false; error: string };
+export type UploadOutcome = { ok: true; file: StagedFile } | { ok: false; error: string };
+
 export interface ItemRow {
   targetId: string;
   status: string;
@@ -244,6 +260,42 @@ export function createApi(fetcher: typeof fetch = (input, init) => fetch(input, 
       if (response.ok && typeof answer.id === 'string' && typeof answer.hash === 'string') return { ok: true, id: answer.id, hash: answer.hash };
       if (response.ok) return { ok: false, error: 'invalid_answer' };
       return { ok: false, error: errorOf(answer, response), ...(typeof answer.count === 'number' ? { count: answer.count } : {}) };
+    },
+    /** The user's own staged files; a refusal (403 `forbidden`: no role has a file operation) is an outcome, not a throw. */
+    async files(): Promise<FilesOutcome> {
+      const response = await fetcher('/api/v1/files', { credentials: 'same-origin' });
+      if (response.status === 401) throw new Unauthenticated();
+      const answer: unknown = await response.json().catch(() => ({}));
+      if (response.ok && Array.isArray(answer)) return { ok: true, files: answer as StagedFile[] };
+      const code = typeof answer === 'object' && answer !== null ? (answer as { error?: unknown }).error : undefined;
+      return { ok: false, error: typeof code === 'string' ? code : `HTTP ${String(response.status)}` };
+    },
+    /** Stages a file: the raw bytes as the body, the name percent-encoded in a header (CS-10, SEC-8). */
+    async upload(csrfToken: string, file: File): Promise<UploadOutcome> {
+      const response = await fetcher('/api/v1/files', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'x-csrf-token': csrfToken, 'x-file-name': encodeURIComponent(file.name), 'content-type': file.type === '' ? 'application/octet-stream' : file.type },
+        body: file,
+      });
+      if (response.status === 401) throw new Unauthenticated();
+      const answer: unknown = await response.json().catch(() => ({}));
+      const body = typeof answer === 'object' && answer !== null ? (answer as Record<string, unknown>) : {};
+      if (response.status === 201 && typeof body.id === 'string') return { ok: true, file: body as unknown as StagedFile };
+      return { ok: false, error: errorOf(body, response) };
+    },
+    /** Where a trusted page reads a change-set file's content (APR-5, UI-7). */
+    fileUrls: (changesetId: string, fileId: string): { content: string; preview: string } => ({
+      content: `${changesetUrl(changesetId)}/files/${encodeURIComponent(fileId)}/content`,
+      preview: `${changesetUrl(changesetId)}/files/${encodeURIComponent(fileId)}/preview`,
+    }),
+    async filePreviewText(changesetId: string, fileId: string): Promise<{ text: string; truncated: boolean }> {
+      const response = await fetcher(`${changesetUrl(changesetId)}/files/${encodeURIComponent(fileId)}/preview`, { credentials: 'same-origin' });
+      if (response.status === 401) throw new Unauthenticated();
+      if (!response.ok) throw new Error(`preview: HTTP ${String(response.status)}`);
+      const body = (await response.json()) as { text?: unknown; truncated?: unknown };
+      if (typeof body.text !== 'string') throw new Error('preview: malformed');
+      return { text: body.text, truncated: body.truncated === true };
     },
     /** The download address of the items (CS-8); the browser navigates to it with the session cookie. */
     exportUrl: (id: string, format: 'csv' | 'xlsx'): string => `${changesetUrl(id)}/export?format=${format}`,

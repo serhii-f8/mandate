@@ -16,7 +16,7 @@ function escapeOf(codePoint: number): string {
 }
 
 /** The text with each invisible code point replaced by a marked `\uXXXX` escape, as React text only. */
-function visible(text: string): ReactNode[] {
+export function visible(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
   let last = 0;
   for (const match of text.matchAll(INVISIBLE)) {

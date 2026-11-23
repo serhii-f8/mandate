@@ -22,3 +22,21 @@ describe('IndexPage', () => {
     }
   });
 });
+
+describe('IndexPage files link', () => {
+  it('UI-2 the home page links the files page unless GET /api/v1/files answered 403', async () => {
+    for (const status of [200, 403]) {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((input: RequestInfo | URL) => {
+          const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          return Promise.resolve(new Response(JSON.stringify(url === '/api/v1/files' ? (status === 200 ? [] : { error: 'forbidden' }) : session(false)), { status: url === '/api/v1/files' ? status : 200 }));
+        }),
+      );
+      render(<IndexPage />);
+      await waitFor(() => { expect(screen.getByRole('link', { name: 'Approvals' })).toBeTruthy(); });
+      await waitFor(() => { expect(screen.queryByRole('link', { name: 'Files' }) !== null).toBe(status === 200); });
+      cleanup();
+    }
+  });
+});

@@ -51,6 +51,18 @@ const planSchema = z.object({
   startLine: z.string().optional(),
 });
 
+/** APR-5, CS-10: a file the call sends; the server's page detail and the MCP answers describe it the same way. */
+export const fileRowSchema = z.object({
+  pointer: z.string(),
+  id: z.string(),
+  name: z.string(),
+  mediaType: z.string(),
+  size: z.number(),
+  sha256: z.string(),
+  preview: z.enum(['image', 'text', 'none']),
+  available: z.boolean(),
+});
+
 /** Today `get_changeset` sends the operation ID as a string; an object with a title is read too (ruling F13). */
 const operationSchema = z
   .union([z.string(), z.object({ id: z.string(), title: z.string().optional() })])
@@ -104,6 +116,8 @@ export const changeSetAnswerSchema = z.object({
   verificationTitles: z.record(z.string(), z.string()).optional(),
   /** CS-9: absent for a change-set outside a plan, and in answers from before 1.3.0. */
   plan: planSchema.optional(),
+  /** CS-10: absent unless the call sends files. */
+  files: z.array(fileRowSchema).optional(),
   pageUrl: pageUrlSchema,
 });
 
@@ -117,6 +131,8 @@ const detailSchema = z.object({
   /** CS-3: absent in answers from before 1.2.0. */
   reasonTitles: z.record(z.string(), z.string()).optional(),
   plan: planSchema.optional(),
+  /** CS-10: absent unless the call sends files. */
+  files: z.array(fileRowSchema).optional(),
   operation: z.object({ id: z.string(), title: z.string().optional(), description: z.string().optional(), risk: z.string().optional() }),
   request: z.object({
     args: z.record(z.string(), z.unknown()),

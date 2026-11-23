@@ -70,6 +70,23 @@ export interface PlanModel {
   /** EXE-13: what this step waits for (`Runs after ...`, `Blocked: ...`, `Ready to start`), worded by the server. */
   startLine?: string;
 }
+/** APR-5, UI-2: a file a call sends, as the server's detail describes it. */
+export interface FileItem {
+  pointer: string;
+  id: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  sha256: string;
+  preview: 'image' | 'text' | 'none';
+  available: boolean;
+}
+/** Where a trusted page reads a file's content from; a widget has none (UI-6). */
+export interface FilesSource {
+  downloadUrl(id: string): string;
+  imageUrl(id: string): string;
+  text(id: string): Promise<{ text: string; truncated: boolean }>;
+}
 export interface ChangeSetViewModel {
   id: string;
   kind?: ChangeSetKind;
@@ -96,6 +113,8 @@ export interface ChangeSetViewModel {
   verificationTitles?: Record<string, string>;
   /** CS-9: the plan this change-set belongs to. */
   plan?: PlanModel;
+  /** CS-10, APR-5: the files the call sends. */
+  files?: FileItem[];
   pageUrl?: string;
   permissions: { canExclude: boolean; canSubmit: boolean; canCancel: boolean };
 }
@@ -127,6 +146,8 @@ export interface ApprovalViewModel {
   reasonTitles?: Record<string, string>;
   /** CS-9: the plan this change-set belongs to. */
   plan?: PlanModel;
+  /** CS-10, APR-5: the files the call sends. */
+  files?: FileItem[];
   itemFilter?: ItemFilter;
   viewer: {
     channel: 'page' | 'widget';
@@ -145,6 +166,8 @@ export interface DecisionInput {
   comment?: string;
 }
 export interface ChangeSetActions {
+  /** Only a trusted page has it: the content of the call's files (UI-6). */
+  filesSource?: FilesSource;
   loadItems(q: ItemsQuery): Promise<ActionResult<ItemsPageModel>>;
   refresh(): Promise<ActionResult<ChangeSetViewModel>>;
   exclude?(edit: { exclude: string[]; include: string[] }): Promise<ActionResult<ChangeSetViewModel>>;
@@ -156,6 +179,8 @@ export interface ChangeSetActions {
   rollback?(): Promise<ActionResult<ChangeSetViewModel | undefined>>;
 }
 export interface ApprovalActions {
+  /** Only a trusted page has it: the content of the call's files (UI-6). */
+  filesSource?: FilesSource;
   loadItems(q: { after?: string; status?: ItemFilter }): Promise<ActionResult<ItemsPageModel>>;
   resample(): Promise<ActionResult<{ seed: string; items: ItemRowModel[] }>>;
   decide?(input: DecisionInput): Promise<ActionResult<ApprovalViewModel>>;

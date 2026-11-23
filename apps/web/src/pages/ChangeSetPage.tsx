@@ -11,6 +11,7 @@ import {
   type ApprovalViewModel,
   type ChangeSetActions,
   type ChangeSetViewModel,
+  type FilesSource,
 } from '@mandate/widgets';
 import { toApprovalModel, toChangeSetModel, toItemsPage } from '../adapters.js';
 import { createApi, loginUrl, NotFound, toLogin, Unauthenticated, type DecideOutcome, type ItemsPage, type Session } from '../api.js';
@@ -127,7 +128,13 @@ export function ChangeSetPage(props: { id: string }): ReactElement {
     };
     const loadItems = (q: { after?: string; status?: string; verification?: string }) => orFail(async () => toItemsPage(await api.items(ready().id, q)));
 
+    const filesSource: FilesSource = {
+      downloadUrl: (fileId) => api.fileUrls(ready().id, fileId).content,
+      imageUrl: (fileId) => api.fileUrls(ready().id, fileId).preview,
+      text: (fileId) => api.filePreviewText(ready().id, fileId),
+    };
     const requester: ChangeSetActions = {
+      filesSource,
       loadItems,
       refresh: () => orFail(async () => (await reload()).model as ChangeSetViewModel),
       exclude(edit) {
@@ -185,6 +192,7 @@ export function ChangeSetPage(props: { id: string }): ReactElement {
       );
     };
     const approver: ApprovalActions = {
+      filesSource,
       loadItems,
       resample: () =>
         orFail(async () => {

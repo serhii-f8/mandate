@@ -400,3 +400,7 @@
 .mandate .plan .waiting {
   color: var(--color-text-secondary, #6b7280);
 }
+
+.files { list-style: none; padding: 0; }
+.files img { max-width: 100%; max-height: 24rem; }
+.files code { overflow-wrap: anywhere; }

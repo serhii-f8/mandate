@@ -251,7 +251,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 ### 5.9 Widgets and trusted pages
 
 - **UI-1** Each view is one React component, receiving data and actions as props, built twice: as a single-file MCP Apps bundle whose entry uses `@modelcontextprotocol/ext-apps/react`, and as a route in `web` whose entry uses the REST API.
-- **UI-2** Views: change-set preview, change-set detail, approval, execution progress and result, credential entry, audit search.
+- **UI-2** Views: change-set preview, change-set detail, approval, execution progress and result, credential entry, audit search, and the staged-files upload page. A change-set whose call sends files shows a Files section above the raw arguments on the preview, approval and result views: name, type, size and full hash; on a trusted page also the image or text preview (invisible and bidi characters escaped) and a download link, and a removal note when the content was purged. A widget shows the metadata only and points to the page.
 - **UI-3** Preview shows statistics, an item table with before and after, exclusion controls, export, and submit.
 - **UI-4** Result shows counts, per-item errors, and a rollback action when the manifest allows it.
 - **UI-5** Credential entry and audit search are available only as trusted pages, never as widgets (ADR 0042).

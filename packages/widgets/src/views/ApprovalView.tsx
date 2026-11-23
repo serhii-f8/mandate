@@ -3,6 +3,7 @@
 import { type ReactElement, useCallback, useState } from 'react';
 import { ItemTable } from '../components/ItemTable.js';
 import { Notice } from '../components/Notice.js';
+import { FilesSection } from '../components/FilesSection.js';
 import { RawArguments } from '../components/RawArguments.js';
 import { PlanSection } from '../components/PlanSection.js';
 import { Pager } from '../components/Pager.js';
@@ -242,6 +243,7 @@ export function ApprovalView({ data, actions, onData }: Props): ReactElement {
           </ul>
         )}
       </section>
+      {opaque ? <FilesSection files={data.files ?? []} {...(actions.filesSource === undefined ? {} : { source: actions.filesSource })} /> : null}
       {opaque ? <RawArguments args={request.args} /> : null}
       {opaque ? null : (
       <>

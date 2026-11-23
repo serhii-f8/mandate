@@ -448,6 +448,26 @@ describe('ChangeSetView', () => {
     expect(screen.getByText('Call outcome: written')).toBeTruthy();
   });
 
+  describe('UI-2 APR-5 files', () => {
+    const FILE = { pointer: '/image', id: '33333333-3333-4333-8333-333333333333', name: 'logo.png', mediaType: 'image/png', size: 2048, sha256: `sha256:${'a'.repeat(64)}`, preview: 'none' as const, available: true };
+
+    it('APR-5 the prepared and result views show the files before the raw arguments', () => {
+      for (const status of ['prepared', 'completed']) {
+        const { container } = setup(opaqueChangeSetModel({ status, files: [FILE] }));
+        const files = screen.getByRole('heading', { name: 'Files sent with this call (1)' });
+        const raw = screen.getByRole('heading', { name: 'Raw arguments' });
+        expect(files.compareDocumentPosition(raw) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(container.textContent).toContain('Open the page to see the file.');
+        cleanup();
+      }
+    });
+
+    it('APR-5 an opaque change-set without files shows no files section', () => {
+      setup(opaqueChangeSetModel());
+      expect(screen.queryByText(/Files sent with this call/)).toBeNull();
+    });
+  });
+
   describe('UI-4 CS-9 the plan', () => {
     const SIBLING = '22222222-2222-4222-8222-222222222222';
     const plan: NonNullable<ChangeSetViewModel['plan']> = {

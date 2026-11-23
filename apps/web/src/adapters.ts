@@ -4,6 +4,7 @@ import type {
   ApprovalStateModel,
   ApprovalViewModel,
   ChangeSetViewModel,
+  FileItem,
   ItemFilter,
   ItemRowModel,
   ItemsPageModel,
@@ -74,6 +75,11 @@ function verificationTitlesOf(detail: ChangeSetDetail): { verificationTitles?: R
   return titles === undefined || Object.keys(titles).length === 0 ? {} : { verificationTitles: titles };
 }
 
+/** CS-10, APR-5: the files only when the call sends any, so a model without files is unchanged. */
+function filesOf(detail: ChangeSetDetail): { files?: FileItem[] } {
+  return detail.files === undefined || detail.files.length === 0 ? {} : { files: detail.files };
+}
+
 /** CS-9, UI-4: the plan; a step links to its page only when the server marked it `visible` (SEC-1). */
 function planOf(detail: ChangeSetDetail): { plan?: PlanModel } {
   const plan = detail.plan;
@@ -109,6 +115,7 @@ export function toChangeSetModel(detail: ChangeSetDetail, items: ItemsPage, filt
     ...reasonTitlesOf(detail),
     ...verificationTitlesOf(detail),
     ...planOf(detail),
+    ...filesOf(detail),
     ...(kind === 'opaque' ? { args: detail.request.args } : {}),
     operation: { id: operation.id, ...(operation.title === undefined ? {} : { title: operation.title }) },
     status: detail.status,
@@ -151,6 +158,7 @@ export function toApprovalModel(
     ...actionOf(detail),
     ...reasonTitlesOf(detail),
     ...planOf(detail),
+    ...filesOf(detail),
     status: detail.status,
     ...(detail.hash === undefined ? {} : { hash: detail.hash }),
     operation: detail.operation,

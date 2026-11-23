@@ -266,6 +266,8 @@ change-set that is created shows the file's name, type, size and hash, not its b
 type and hash, never the name or the content. The body is stored as sent: a `Content-Encoding`
 other than identity is refused with 415.
 
+The page `/app/files` has a file picker, an `Upload` button and the list of your staged files with their IDs. On the change-set and approval pages a Files section above the raw arguments shows each file's name, type, size and full hash, an image or text preview where there is one, and a `Download` link. A widget shows the metadata only and points to the page.
+
 **Audit.** Every login, policy decision, tool call, approval, batch and configuration change is in
 the audit log at `/app/audit`, for roles with `view_audit`. The log can be filtered by actor,
 action, change-set, correlation ID, time and outcome, and exported as JSON Lines. Rows are hash

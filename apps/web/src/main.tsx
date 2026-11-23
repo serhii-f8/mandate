@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { ApprovalsPage } from './pages/ApprovalsPage.js';
 import { AuditPage } from './pages/AuditPage.js';
 import { ChangeSetPage } from './pages/ChangeSetPage.js';
+import { FilesPage } from './pages/FilesPage.js';
 import { CredentialsPage } from './pages/CredentialsPage.js';
 import { IndexPage } from './pages/IndexPage.js';
 import { route, type Route } from './routes.js';
@@ -28,6 +29,8 @@ function Page({ r }: { r: Route }): ReactElement {
       return <ApprovalsPage />;
     case 'audit':
       return <AuditPage />;
+    case 'files':
+      return <FilesPage />;
     case 'changeset':
       return <ChangeSetPage id={r.id} />;
     case 'not_found':

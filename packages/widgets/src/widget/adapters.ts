@@ -118,6 +118,7 @@ export function fromGetChangeset(structured: unknown, filter?: ItemFilter): Chan
     ...actionOf(cs.action),
     ...verificationTitlesOf(a.verificationTitles),
     ...toPlan(a.plan),
+    ...(a.files === undefined || a.files.length === 0 ? {} : { files: a.files }),
     ...(kind === 'opaque' && cs.args !== undefined ? { args: cs.args } : {}),
     operation: { id: cs.operation.id, ...(cs.operation.title === undefined ? {} : { title: cs.operation.title }) },
     status: cs.status,
@@ -182,6 +183,7 @@ export function fromReviewChangeset(structured: unknown, filter?: ItemFilter): A
     ...actionOf(detail.action),
     ...reasonTitlesOf(detail.reasonTitles),
     ...toPlan(detail.plan),
+    ...(detail.files === undefined || detail.files.length === 0 ? {} : { files: detail.files }),
     status: detail.status,
     ...(detail.hash === undefined ? {} : { hash: detail.hash }),
     operation: {

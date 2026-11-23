@@ -4,6 +4,7 @@ import { type ReactElement, useCallback, useEffect, useRef, useState } from 'rea
 import { ActionBar } from '../components/ActionBar.js';
 import { ItemTable } from '../components/ItemTable.js';
 import { Notice } from '../components/Notice.js';
+import { FilesSection } from '../components/FilesSection.js';
 import { RawArguments } from '../components/RawArguments.js';
 import { Pager } from '../components/Pager.js';
 import { RollbackCounts } from '../components/RollbackCounts.js';
@@ -96,6 +97,7 @@ export function ResultView({ data, actions, onData }: ViewProps<ChangeSetViewMod
           <StatusBadge status={data.status} />
         </header>
         <PlanSection plan={data.plan} />
+        <FilesSection files={data.files ?? []} {...(actions.filesSource === undefined ? {} : { source: actions.filesSource })} />
         <RawArguments args={data.args ?? {}} />
         <p className="outcome">{callOutcome(data)}</p>
         {data.errorCode === undefined ? null : <p className="error-code">{`Error: ${data.errorCode}`}</p>}

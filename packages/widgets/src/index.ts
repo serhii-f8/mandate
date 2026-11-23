@@ -4,6 +4,7 @@
 export * from "./model.js";
 export * from "./format.js";
 export * from "./components/ActionBar.js";
+export * from "./components/FilesSection.js";
 export * from "./components/ItemTable.js";
 export * from "./components/Notice.js";
 export * from "./components/Pager.js";
