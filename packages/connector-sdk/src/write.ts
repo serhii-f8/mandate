@@ -23,10 +23,27 @@ export type BulkStatusOutcome =
   | WriteFailure;
 
 /**
- * since 0.6.0, additive. What one opaque call addresses: an HTTP mapping of an OpenAPI
- * connection or a tool of an MCP connection.
+ * since 1.4.0, additive. One file sent as a part of a `multipart/form-data` request (CONN-9):
+ * `name` is the form field, `filename` the file name the upstream sees, `mediaType` the part's
+ * `Content-Type`. The content is exactly the bytes the change-set sealed.
  */
-export type CallTarget = { readonly kind: 'http'; readonly mapping: UpstreamMapping } | { readonly kind: 'mcp'; readonly tool: string };
+export interface FilePart {
+  readonly name: string;
+  readonly filename: string;
+  readonly mediaType: string;
+  readonly content: Uint8Array;
+}
+
+/**
+ * since 0.6.0, additive. What one opaque call addresses: an HTTP mapping of an OpenAPI
+ * connection or a tool of an MCP connection. `http_multipart` (since 1.4.0, additive) is an HTTP
+ * mapping whose body is sent as `multipart/form-data`: the mapping's `body` template renders the
+ * text fields and `parts` are the files. An adapter that does not know a kind sends nothing.
+ */
+export type CallTarget =
+  | { readonly kind: 'http'; readonly mapping: UpstreamMapping }
+  | { readonly kind: 'mcp'; readonly tool: string }
+  | { readonly kind: 'http_multipart'; readonly mapping: UpstreamMapping; readonly parts: readonly FilePart[] };
 
 /** since 0.6.0, additive. The outcome of one call sent at most once (EXE-4); codes only (SEC-3). */
 export interface CallOutcome {

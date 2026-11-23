@@ -45,6 +45,22 @@ function probes() {
   return { seen, credential, lookup, beforeSend };
 }
 
+describe('CONN-9 the MCP adapter does not know the multipart call target', () => {
+  it('CONN-9 callOnce with http_multipart answers not_sent/mapping and does nothing else', async () => {
+    const { seen, credential, lookup, beforeSend } = probes();
+    const adapter = createMcpToolAdapter({ lookup, sleep: () => Promise.resolve() });
+    const mapping = { method: 'POST', path: '/x', pathParams: {}, query: {}, headers: {}, response: { maxItems: 1 } } as const;
+    const parts = [{ name: 'f', filename: 'a.txt', mediaType: 'text/plain', content: new Uint8Array([1]) }];
+    const connection = { ...oauth1Connection(), auth: { scheme: 'bearer' as const } };
+    expect(await adapter.callOnce({ connection, target: { kind: 'http_multipart', mapping, parts }, args: {}, credential, beforeSend })).toEqual({
+      result: 'not_sent',
+      code: 'mapping',
+      durationMs: 0,
+    });
+    expect(seen).toEqual({ opened: 0, lookups: 0, beforeSend: 0 });
+  });
+});
+
 describe('CONN-3 the MCP adapter refuses oauth1 before sending', () => {
   it('CONN-3 list, call and call-once answer credential_unusable without opening the credential or resolving the host', async () => {
     const { seen, credential, lookup, beforeSend } = probes();

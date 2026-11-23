@@ -49,7 +49,7 @@ describe('CONN-3 password grant', () => {
     const { transport, seen } = recording();
     const p: OAuthTokenParams = { ...base, grant: grant('alice', 'pw'), clientAuth: 'body' };
     await oauthToken('pw-body', p, { now: () => 0 }, transport);
-    const form = new URLSearchParams(seen[0]?.body);
+    const form = new URLSearchParams(String(seen[0]?.body ?? ''));
     expect(form.get('grant_type')).toBe('password');
     expect(form.get('client_id')).toBe('cid');
     expect(form.get('client_secret')).toBe('csec');

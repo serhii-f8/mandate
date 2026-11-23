@@ -12,7 +12,8 @@ export interface HttpRequestSpec {
   method: HttpMethod;
   url: URL;
   headers: Record<string, string>;
-  body?: string;
+  /** A JSON text, or the bytes of a multipart body (CONN-9). */
+  body?: string | Uint8Array;
 }
 
 type Scalar = string | number | boolean;
@@ -48,6 +49,11 @@ function resolveScalars(
     return typeof t === 'object' && t.join !== undefined ? [v.map(String).join(t.join)] : v;
   }
   throw new MappingError(`parameter ${name} must be a scalar or an array of scalars`);
+}
+
+/** A body template resolved the way `buildRequest` resolves it; undefined means "omit" (CONN-9 reads the text fields from it). */
+export function resolveTemplate(t: TemplateValue, args: Readonly<Record<string, unknown>>): unknown {
+  return resolve(t, args, undefined);
 }
 
 const isDotSegment = (v: string): boolean => v === '.' || v === '..';

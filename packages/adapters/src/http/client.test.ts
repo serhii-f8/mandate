@@ -129,6 +129,27 @@ describe('CONN-3 credential injection', () => {
     }
   });
 
+  it('CONN-9 oauth1 signs a multipart request over method, URL and query only (RFC 5849 3.4.1.3: no body parameters)', async () => {
+    up.route('POST', '/upload', () => ({ status: 200, body: { ok: 1 } }));
+    const c = createConnectionClient(settings({ auth: { scheme: 'oauth1', signatureMethod: 'HMAC-SHA256' } }), noSleep);
+    const material = { consumer_key: 'ck-1', consumer_secret: 'sentinel-cs', token: 'tk-1', token_secret: 'sentinel-ts' };
+    // A part that looks like form parameters must not enter the signature base string.
+    const body = Buffer.from('--B\r\nContent-Disposition: form-data; name="x"\r\n\r\nq=1&oauth_nonce=forged\r\n--B--\r\n');
+    const r = await c.send(
+      {
+        method: 'POST',
+        url: new URL(`${up.url}/upload?q=a b`),
+        headers: { accept: 'application/json', 'content-type': 'multipart/form-data; boundary=B' },
+        body: new Uint8Array(body),
+      },
+      { credential: cred('oauth1', material), retryable: false },
+    );
+    expect(r.ok).toBe(true);
+    const request = up.requests[0];
+    expect(request?.headers['content-length']).toBe(String(body.length));
+    expect(verifyOauth1('POST', `http://${request?.headers.host ?? ''}/upload`, request?.query ?? new URLSearchParams(), request?.headers.authorization ?? '', material)).toBe(true);
+  });
+
   it('CONN-3 no auth configured sends no credential', async () => {
     const c = createConnectionClient(settings());
     const r = await c.send(get(), { retryable: false });

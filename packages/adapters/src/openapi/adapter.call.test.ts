@@ -235,3 +235,112 @@ describe('EXE-4 OpenAPI callOnce', () => {
     }
   });
 });
+
+describe('CONN-9 callOnce http_multipart', () => {
+  const MP_MAPPING = {
+    method: 'POST',
+    path: '/upload/{id}',
+    pathParams: { id: { arg: 'id' } },
+    query: {},
+    headers: {},
+    body: { arg: 'fields' },
+    response: { maxItems: 1 },
+    idempotency: { header: 'Idempotency-Key' },
+  } satisfies UpstreamMapping;
+  // Bytes below 0x80: the fake upstream records the body as UTF-8 text.
+  const CONTENT = new Uint8Array([1, 2, 3, 65, 66, 13, 10]);
+  const PART = { name: 'attachment', filename: 'a.png', mediaType: 'image/png', content: CONTENT };
+  const MP_ARGS = { id: '7', fields: { note: 'hi', n: 3, flag: true } };
+
+  /** Parses the multipart body as an upstream would; Node's parser is the independent reader here. */
+  async function parse(body: string, contentType: string): Promise<FormData> {
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- test-side parsing of a captured body
+    return new Response(body, { headers: { 'content-type': contentType } }).formData();
+  }
+
+  function mpCall(over: Partial<CallInput> & { mapping?: UpstreamMapping; parts?: (typeof PART)[] } = {}): ReturnType<typeof call> {
+    const { mapping = MP_MAPPING, parts = [PART], ...rest } = over;
+    return call({ target: { kind: 'http_multipart', mapping, parts }, args: MP_ARGS, ...rest });
+  }
+
+  it('CONN-9 sends one multipart request with its content type, length, key header and parts', async () => {
+    up.route('POST', '/upload/7', () => ({ status: 201, body: { ok: true } }));
+    const h = hook();
+    const r = await mpCall({ beforeSend: h.beforeSend });
+    expect(r).toEqual({ result: 'accepted', status: 201, durationMs: ANY_MS });
+    expect(up.requests).toHaveLength(1);
+    const req = up.requests[0];
+    const contentType = req?.headers['content-type'] ?? '';
+    expect(contentType).toMatch(/^multipart\/form-data; boundary=mandate-[0-9a-f]{32}$/);
+    expect(req?.headers['content-length']).toBe(String(Buffer.byteLength(req?.body ?? '')));
+    expect(req?.headers['idempotency-key']).toBe('cs-1:call');
+    expect(req?.headers.accept).toBe('application/json');
+    expect(h.seen).toEqual([0]);
+    const form = await parse(req?.body ?? '', contentType);
+    expect(form.get('note')).toBe('hi');
+    expect(form.get('n')).toBe('3');
+    expect(form.get('flag')).toBe('true');
+    const file = form.get('attachment');
+    if (!(file instanceof File)) throw new Error('attachment is not a file');
+    expect(file.name).toBe('a.png');
+    expect(file.type).toBe('image/png');
+    expect([...new Uint8Array(await file.arrayBuffer())]).toEqual([...CONTENT]);
+  });
+
+  it('CONN-9 without a body template there are only file parts', async () => {
+    up.route('POST', '/upload/7', () => ({ status: 200, body: {} }));
+    const noBody: UpstreamMapping = { ...MP_MAPPING };
+    delete noBody.body;
+    const r = await mpCall({ mapping: noBody });
+    expect(r).toMatchObject({ result: 'accepted' });
+    const contentType = up.requests[0]?.headers['content-type'] ?? '';
+    const form = await parse(up.requests[0]?.body ?? '', contentType);
+    expect([...form.keys()]).toEqual(['attachment']);
+  });
+
+  it.each([
+    ['a nested object', { id: '7', fields: { a: { b: 1 } } }],
+    ['an array', { id: '7', fields: [1, 2] }],
+    ['a null value', { id: '7', fields: { a: null } }],
+    ['a field name with a space', { id: '7', fields: { 'a b': 'x' } }],
+  ])('CONN-9 a body template rendering %s is not sent and beforeSend is not called', async (_n, args) => {
+    const h = hook();
+    expect(await mpCall({ args, beforeSend: h.beforeSend })).toEqual({ result: 'not_sent', code: 'mapping', durationMs: 0 });
+    expect(h.seen).toEqual([]);
+    expect(up.requests).toEqual([]);
+  });
+
+  it('CONN-9 empty parts are not sent', async () => {
+    const h = hook();
+    expect(await mpCall({ parts: [], beforeSend: h.beforeSend })).toEqual({ result: 'not_sent', code: 'mapping', durationMs: 0 });
+    expect(h.seen).toEqual([]);
+    expect(up.requests).toEqual([]);
+  });
+
+  it('CONN-9 a GET or bulk mapping is not sent', async () => {
+    expect(await mpCall({ mapping: { ...MP_MAPPING, method: 'GET' } })).toMatchObject({ result: 'not_sent', code: 'mapping' });
+    expect(up.requests).toEqual([]);
+  });
+
+  it.each([
+    [200, 'accepted'],
+    [422, 'refused'],
+    [500, 'unknown'],
+  ] as const)('CONN-9 status %i is %s with exactly one request', async (status, result) => {
+    up.route('POST', '/upload/7', () => ({ status, body: {} }));
+    expect((await mpCall()).result).toBe(result);
+    expect(up.requests).toHaveLength(1);
+  });
+
+  it('CONN-9 a timeout is unknown and the request is not repeated', async () => {
+    up.route('POST', '/upload/7', () => ({ status: 200, body: {}, delayMs: 500 }));
+    expect(await mpCall({ connection: settings({ timeoutMs: 100 }) })).toEqual({ result: 'unknown', code: 'timeout', durationMs: ANY_MS });
+    expect(up.requests).toHaveLength(1);
+  });
+
+  it('CONN-9 beforeSend throwing sends nothing', async () => {
+    const fenced = new Error('batch fenced');
+    await expect(mpCall({ beforeSend: () => Promise.reject(fenced) })).rejects.toBe(fenced);
+    expect(up.requests).toEqual([]);
+  });
+});

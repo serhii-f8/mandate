@@ -9,7 +9,7 @@ import { createHmac } from 'node:crypto';
  *
  * The signed parameters are the query of the request URL and the oauth parameters. A request body
  * is never part of the signature: it is signed only when it is not form-encoded, which the callers
- * of this module (JSON bodies) satisfy.
+ * of this module (JSON and multipart bodies, CONN-9) satisfy.
  */
 
 const UNRESERVED = /^[A-Za-z0-9\-._~]$/;

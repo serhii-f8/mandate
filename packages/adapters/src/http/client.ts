@@ -153,7 +153,7 @@ export function createTransport(settings: ConnectionSettings, lookup: LookupFunc
     return new Promise<RawResult>((resolve) => {
       let settled = false;
       const headers: Record<string, string> = { ...spec.headers };
-      if (spec.body !== undefined) headers['content-length'] = String(Buffer.byteLength(spec.body));
+      if (spec.body !== undefined) headers['content-length'] = String(typeof spec.body === 'string' ? Buffer.byteLength(spec.body) : spec.body.byteLength);
       const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
       let req: ReturnType<typeof request>;
       try {

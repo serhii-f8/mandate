@@ -30,6 +30,7 @@ import {
   type WriteRecord,
   parsePresetModule,
   type CallTarget,
+  type FilePart,
   type ConnectionSettings,
   type ReadErrorCode,
   type ToolListOutcome,
@@ -40,6 +41,22 @@ import {
   type WriteAdapter,
   type WriteErrorCode,
 } from './index.js';
+
+describe('NFR-18 CONN-9 connector SDK 1.4.0 multipart call target', () => {
+  it('NFR-18 CONN-9 CallTarget gains http_multipart with FilePart parts, additively', () => {
+    expectTypeOf<Extract<CallTarget, { kind: 'http_multipart' }>>().toEqualTypeOf<{
+      readonly kind: 'http_multipart';
+      readonly mapping: UpstreamMapping;
+      readonly parts: readonly FilePart[];
+    }>();
+    expectTypeOf<FilePart>().toEqualTypeOf<{
+      readonly name: string;
+      readonly filename: string;
+      readonly mediaType: string;
+      readonly content: Uint8Array;
+    }>();
+  });
+});
 
 describe('NFR-18 connector SDK 1.4.0', () => {
   it('NFR-18 reports version 1.4.0', () => {
@@ -88,7 +105,7 @@ describe('NFR-18 connector SDK 0.6.0 is additive', () => {
     expect('callOnce' in legacy).toBe(false);
   });
   it('NFR-18 EXE-4 WriteAdapter.callOnce takes an HTTP or MCP target and answers codes only', () => {
-    expectTypeOf<CallTarget>().toEqualTypeOf<
+    expectTypeOf<Extract<CallTarget, { kind: 'http' | 'mcp' }>>().toEqualTypeOf<
       { readonly kind: 'http'; readonly mapping: UpstreamMapping } | { readonly kind: 'mcp'; readonly tool: string }
     >();
     expectTypeOf<Parameters<NonNullable<WriteAdapter['callOnce']>>[0]['target']>().toEqualTypeOf<CallTarget>();

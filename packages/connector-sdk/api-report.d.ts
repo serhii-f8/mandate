@@ -413,12 +413,22 @@ export type BulkStatusOutcome = {
     }[];
     durationMs: number;
 } | WriteFailure;
+export interface FilePart {
+    readonly name: string;
+    readonly filename: string;
+    readonly mediaType: string;
+    readonly content: Uint8Array;
+}
 export type CallTarget = {
     readonly kind: 'http';
     readonly mapping: UpstreamMapping;
 } | {
     readonly kind: 'mcp';
     readonly tool: string;
+} | {
+    readonly kind: 'http_multipart';
+    readonly mapping: UpstreamMapping;
+    readonly parts: readonly FilePart[];
 };
 export interface CallOutcome {
     readonly result: 'accepted' | 'refused' | 'unknown' | 'not_sent';

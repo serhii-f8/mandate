@@ -37,7 +37,8 @@ import { lastTokenScopes, oauthToken, type OAuthTokenParams } from '../http/oaut
 import { buildBulkBody, extractBatchId, isSafeBatchId, mapBulkStatus } from './bulk.js';
 import { deriveCatalog } from './derive.js';
 import { normaliseSpec, validateSpecDocument } from './normalise.js';
-import { buildRequest, MappingError, type HttpRequestSpec } from './request.js';
+import { multipartBody, multipartFields, newBoundary } from './multipart.js';
+import { buildRequest, MappingError, resolveTemplate, type HttpRequestSpec } from './request.js';
 import { mapResponse } from './response.js';
 import { isPlainObject } from './schema-translate.js';
 import { fetchSpecUrl, loadSpecFile } from './spec-source.js';
@@ -367,14 +368,26 @@ export function createOpenApiAdapter(deps: OpenApiAdapterDeps = {}): OpenApiAdap
 
   async function callOnce(input: Parameters<NonNullable<WriteAdapter['callOnce']>>[0]): Promise<CallOutcome> {
     const { connection, target, args, credential, idempotencyKey, beforeSend } = input;
-    if (target.kind !== 'http') return callNotSent;
+    // A target kind this adapter does not know (an older SDK's, or a newer one) sends nothing.
+    if (target.kind !== 'http' && target.kind !== 'http_multipart') return callNotSent;
     const { mapping } = target;
     const { method, path } = mapping;
     // An opaque call is a write sent once: never a GET, never a bulk submission (R9).
     if (method === undefined || method === 'GET' || path === undefined || mapping.bulk !== undefined) return callNotSent;
     let req: HttpRequestSpec;
     try {
-      req = buildRequest(connection.baseUrl, { ...mapping, method, path }, args);
+      if (target.kind === 'http') {
+        req = buildRequest(connection.baseUrl, { ...mapping, method, path }, args);
+      } else {
+        // CONN-9: the `body` template becomes the text fields; the files are the parts.
+        if (target.parts.length === 0) return callNotSent;
+        const { body: template, ...withoutBody } = mapping;
+        req = buildRequest(connection.baseUrl, { ...withoutBody, method, path }, args);
+        const fields = template === undefined ? {} : multipartFields(resolveTemplate(template, args));
+        const boundary = newBoundary();
+        req.body = multipartBody(fields, target.parts, boundary);
+        req.headers['content-type'] = `multipart/form-data; boundary=${boundary}`;
+      }
     } catch (err) {
       if (err instanceof MappingError) return callNotSent;
       throw err;
