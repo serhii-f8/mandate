@@ -157,7 +157,10 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
 
   async create(cs: NewChangeSet, audit: AuditEventInput): Promise<ChangeSetRecord> {
     if (this.entries.has(cs.id)) throw new Error(`change-set ${cs.id} already exists`);
-    const links = (cs.files ?? []).map((l) => ({ pointer: l.pointer, fileId: l.fileId.toLowerCase() }));
+    const links = (cs.files ?? [])
+      .map((l) => ({ pointer: l.pointer, fileId: l.fileId.toLowerCase() }))
+      // As PostgreSQL returns them: by pointer, in code-unit order.
+      .sort((a, b) => (a.pointer < b.pointer ? -1 : a.pointer > b.pointer ? 1 : 0));
     if (links.length > 0) {
       if (this.fileStore === undefined) throw new Error('file links need an InMemoryFileStore');
       const pointer = this.fileStore.unavailable(cs.requester, links);
@@ -191,13 +194,15 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       verificationRounds: new Map(),
       verificationFinished: false,
     });
+    // Link in the same synchronous step as the check above, so no purge runs in between (CS-10).
+    if (links.length > 0) this.fileStore?.linkFor(cs.id, links, () => this.fileStatus(cs.id));
     try {
       await this.audit.append(audit);
     } catch (error) {
       this.entries.delete(cs.id);
+      this.fileStore?.unlinkFor(cs.id);
       throw error;
     }
-    if (links.length > 0) this.fileStore?.linkFor(cs.id, links, () => this.fileStatus(cs.id));
     return copyRecord(record);
   }
 

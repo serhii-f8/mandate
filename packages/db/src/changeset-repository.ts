@@ -318,6 +318,9 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     return guarded('change-set create', () =>
       this.db.transaction(async (tx) => {
         const links = (cs.files ?? []).map((l) => ({ pointer: l.pointer, fileId: l.fileId.toLowerCase() }));
+        // A malformed ID is an unavailable file, never a 22P02 from the database.
+        const malformed = links.find((l) => !UUID.test(l.fileId));
+        if (malformed !== undefined) throw new FileUnavailableError(malformed.pointer);
         if (links.length > 0) {
           // CS-10: this locked read decides. FOR SHARE waits for a purge holding the row, then PostgreSQL
           // re-evaluates the WHERE on the newest version, so a file purged meanwhile drops out of the result.
@@ -357,7 +360,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
         }
         await this.auditFor(tx).append(audit);
         return toRecord(row, [...links].sort((a, b) => (a.pointer < b.pointer ? -1 : a.pointer > b.pointer ? 1 : 0)));
-      }),
+      }, { isolationLevel: 'read committed' }),
     );
   }
 

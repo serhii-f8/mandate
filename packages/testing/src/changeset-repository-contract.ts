@@ -190,6 +190,25 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         });
       });
 
+      it('CS-10 links are returned ordered by pointer whatever order they were given', async () => {
+        await withRepo(async (c) => {
+          const owner = requester('owner');
+          const a = await stageFile(c, owner);
+          const b = await stageFile(c, owner);
+          const record = await c.repository.create({ ...newChangeSet(c.id), requester: owner, files: [{ pointer: '/b', fileId: b }, { pointer: '/a', fileId: a }] }, auditEvent(c.id));
+          const sorted = [{ pointer: '/a', fileId: a }, { pointer: '/b', fileId: b }];
+          expect(record.files).toEqual(sorted);
+          expect((await c.repository.get(c.id))?.files).toEqual(sorted);
+        });
+      });
+
+      it('CS-10 a file ID that is not a UUID refuses the creation with its pointer', async () => {
+        await withRepo(async (c) => {
+          const error = await refused(c, [{ pointer: '/bad', fileId: 'not-a-uuid' }], requester('owner'));
+          expect(error.pointer).toBe('/bad');
+        });
+      });
+
       it('CS-10 an unknown file refuses the creation with its pointer and leaves nothing', async () => {
         await withRepo(async (c) => {
           const error = await refused(c, [{ pointer: '/x', fileId: randomUUID() }], requester('owner'));

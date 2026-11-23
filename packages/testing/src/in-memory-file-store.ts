@@ -121,8 +121,8 @@ export class InMemoryFileStore implements FileStore {
 
   /**
    * The creation check of the PostgreSQL store (`FOR SHARE`, own file with content): the pointer of the first
-   * link whose file is unknown, not `owner`'s or purged, else undefined. Synchronous, so no purge runs between
-   * this check and the `linkFor` call that follows it.
+   * link whose file is unknown, not `owner`'s or purged, else undefined. The caller must call `linkFor` in
+   * the same synchronous step (no await between), so no purge runs between the check and the link.
    */
   unavailable(owner: string, links: readonly FileLink[]): string | undefined {
     for (const link of links) {
@@ -130,6 +130,12 @@ export class InMemoryFileStore implements FileStore {
       if (row?.file.owner !== owner || row.content === undefined) return link.pointer;
     }
     return undefined;
+  }
+
+  /** Undoes `linkFor` for a change-set whose creation failed after it. */
+  unlinkFor(changesetId: string): void {
+    const id = changesetId.toLowerCase();
+    for (let i = this.linked.length - 1; i >= 0; i -= 1) if (this.linked[i]?.changesetId === id) this.linked.splice(i, 1);
   }
 
   /** Records that the change-set carries `links`; `status` says whether it is final and when it ended. */

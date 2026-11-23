@@ -104,7 +104,6 @@ describe('CS-10 staged file schema', () => {
     const repository = new PostgresChangeSetRepository(database.db);
     const owner = `o-${randomUUID()}`;
     const bytes = new TextEncoder().encode('race');
-    let refused = 0;
     for (let i = 0; i < 20; i += 1) {
       const fileId = randomUUID();
       const staged = await store.stage(
@@ -129,14 +128,12 @@ describe('CS-10 staged file schema', () => {
       expect(purged.status).toBe('fulfilled');
       if (created.status === 'rejected') {
         expect(created.reason).toBeInstanceOf(FileUnavailableError);
-        refused += 1;
         expect(await repository.get(changesetId)).toBeUndefined();
       } else {
         expect(await store.content(fileId)).toBeDefined();
         expect((await repository.get(changesetId))?.files).toEqual([{ pointer: '/f', fileId }]);
       }
     }
-    expect(refused).toBeLessThanOrEqual(20);
   });
 
   it('CS-10 a creation that waits for a purge in flight refuses the purged file', async () => {
