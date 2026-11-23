@@ -311,6 +311,41 @@ files:
     max_bytes: 5000000
 ```
 
+A complete operation, with the explicit schema the loader requires:
+
+```yaml
+operations:
+  - id: media.upload
+    connection: shop
+    risk: write_opaque
+    description: Upload a product image.
+    upstream: { method: POST, path: /V1/products/media }
+    input_schema:
+      type: object
+      properties:
+        sku: { type: string }
+        entry:
+          type: object
+          properties:
+            content:
+              type: object
+              properties:
+                base64_encoded_data: { type: string, format: uuid }
+              required: [base64_encoded_data]
+          required: [content]
+      required: [sku, entry]
+      additionalProperties: false
+    files:
+      - at: /entry/content/base64_encoded_data
+        send: base64
+        media_types: [image/png, image/jpeg]
+        max_bytes: 5000000
+```
+
+The caller passes the staged file's ID at `entry.content.base64_encoded_data`; the worker puts the
+file's bytes, base64 encoded, in that place of the request body. See
+[Staged files](usage.md#administer) for the upload and the approver's view.
+
 A grant `scope` must not name an argument that is a one-segment file path: it holds a file ID, which
 no scope value could match.
 

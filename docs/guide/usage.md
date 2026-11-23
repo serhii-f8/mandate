@@ -248,25 +248,52 @@ again. The same page tests the connection:
 ![Credential page: a stored credential and the connection test](images/credentials.png)
 
 **Staged files.** An operation that declares file arguments takes a file the person staged first,
-not its bytes. `POST /api/v1/files` on the trusted page API (page session, `Origin` and CSRF token)
+not its bytes.
+
+*Upload.* `POST /api/v1/files` on the trusted page API (page session, `Origin` and CSRF token)
 takes the raw bytes as the body, the declared type as `Content-Type` and the percent-encoded UTF-8
 name in `X-File-Name`. It is open to a user with a role that grants such an operation (otherwise
 403 `forbidden`) and answers 201 with `{ id, name, mediaType, size, sha256, preview, createdAt,
-expiresAt }`. Refusals: 400 `invalid_name`, `invalid_media_type`, `empty_file`; 413
+expiresAt }`. The body is stored exactly as sent, and a `Content-Encoding` other than identity is
+refused with 415. Refusals: 400 `invalid_name`, `invalid_media_type`, `empty_file`; 413
 `payload_too_large` (above `files.max_bytes`); 409 `quota_exceeded`. `GET /api/v1/files` lists the
-user's own files that still have content.
+user's own files that still have content, newest first, at most 200. The page `/app/files` has a
+file picker, an `Upload` button and that list with the IDs. Each upload is audited as `file.staged`
+with its size, type and hash; the name and the content are never logged or audited.
 
-To use a staged file, the person uploads it on `/app/files` and the model passes its ID, a UUID, as
-the value of the file argument (for example `{ "image": "<id>" }`). `list_staged_files` answers the
-upload page URL and the caller's own staged files, so the model can find the ID after the upload. A
-file that is unknown, someone else's or purged is refused with the path of the argument and
-`file_not_found`; a file above the operation's size limit or of a type it does not allow is refused
-with `file_too_large` or `file_type_not_allowed`. Nothing is created in any of these cases, and the
-change-set that is created shows the file's name, type, size and hash, not its bytes. The upload is audited as `file.staged` with its size,
-type and hash, never the name or the content. The body is stored as sent: a `Content-Encoding`
-other than identity is refused with 415.
+*Using a file.* The person uploads the file, and the model passes its ID, a UUID, as the value of
+the file argument (for example `{ "content": "<id>" }`). `list_staged_files` answers the upload
+page URL and the caller's own staged files, so the model can find the ID after the upload. It is
+shown only to roles that may stage files, and answers metadata only, never bytes. A file that is
+unknown, someone else's or purged is refused with the path of the argument and `file_not_found`; a
+file above the operation's size limit or of a type it does not allow is refused with
+`file_too_large` or `file_type_not_allowed`. Nothing is created in any of these cases. The
+change-set that is created shows the file's name, type, size and hash, not its bytes, and is
+sealed with hash version 3.
 
-The page `/app/files` has a file picker, an `Upload` button and the list of your staged files with their IDs. On the change-set and approval pages a Files section above the raw arguments shows each file's name, type, size and full hash, an image or text preview where there is one, and a `Download` link. A widget shows the metadata only and points to the page.
+*What the approver sees.* On the change-set and approval pages a Files section above the raw
+arguments shows each file's name, declared type, size and full hash, an image or text preview where
+there is one (previews are decided at upload from the type and the bytes; SVG and HTML are never
+previewed) and a `Download` link. The page API serves the bytes at
+`GET /api/v1/changesets/:id/files/:fileId/content` (a download: `content-disposition: attachment`,
+`application/octet-stream`) and `GET .../preview` (the image, or `{ text, truncated }` for the first
+64 KiB of a text file; 404 `no_preview`, 410 `purged`). Both are limited to whoever may see the
+change-set, and every answer carries `x-content-type-options: nosniff`,
+`content-security-policy: sandbox; default-src 'none'` and `cache-control: no-store`. A widget shows
+the metadata only and points to the page.
+
+*Execution.* Before the first write the worker's guard loads the stored bytes and compares their
+hash with the sealed one; a change is refused as `hash_mismatch`. A configuration that dropped or
+moved the file argument since approval is refused as `policy_denied`. If the content changes or
+disappears between the guard and the send, the call ends `file_unavailable` and nothing is sent.
+
+*Limits and lifetime.* One file is at most `files.max_bytes` (default 10 MiB, at most 25 MiB; an
+operation may lower it), and one user holds at most `per_user_count` files (50) and `per_user_bytes`
+(250 MiB) with content. An hourly job on the worker removes content that is no longer needed:
+a file that no change-set uses after `staged_ttl_hours` (24), and a file whose change-sets have all
+ended after `keep_days` (7) since the last one ended. The row and its metadata stay, and each run
+that removed something is audited as `files.purged` with the count. See the
+[`files` settings](configuration.md#files).
 
 **Audit.** Every login, policy decision, tool call, approval, batch and configuration change is in
 the audit log at `/app/audit`, for roles with `view_audit`. The log can be filtered by actor,

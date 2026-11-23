@@ -131,6 +131,18 @@ What matters in this sequence:
   The worker restores the `before` value of each item this run wrote and skips items that changed
   upstream in the meantime.
 
+- **Files are staged, sealed and checked, never passed through the model.** A file argument holds
+  the ID of a file the user uploaded to the `api`. Its bytes live in PostgreSQL (`staged_file`,
+  with `change_set_file` linking them to change-sets) and nowhere else: not in a tool result, a
+  workflow input, signal or activity argument, a log or the audit log. The change-set carries only
+  a descriptor (ID, name, type, size, `sha256`) and its hash covers it (hash version 3). The
+  content is read in three places: the approver's page, to show and download it; the guard, which
+  compares the stored bytes' hash with the sealed one before the first write; and the send activity,
+  which compares again before it puts the bytes in the request. A mismatch refuses execution or
+  ends the call `file_unavailable`, and nothing is sent. A worker job removes content after its
+  retention and a change-set being created locks its files, so a live change-set never names a
+  purged file.
+
 Read-only and low-risk operations skip the workflow: `api` checks policy, calls the adapter and
 audits.
 
@@ -193,6 +205,7 @@ for destructive operations.
 | --- | --- |
 | Default deny | The policy engine in `packages/core`; the tool list is built per caller |
 | The model is not trusted | No model call anywhere in the server; upstream content is treated as data |
+| Staged file content is what was approved | The guard and the send activity hash the stored bytes against the sealed `sha256`; triggers allow only content removal |
 | Immutable change-sets, append-only audit and approvals | PostgreSQL triggers, in addition to the code |
 | Tamper-evident audit | A hash chain sealed by the worker; `mandate audit verify` checks it |
 | Credentials never leave the platform | AES-256-GCM envelope encryption in PostgreSQL; opened per call; scrubbed from logs, audit, tool results, workflow history and notifications; Temporal payloads are encrypted |

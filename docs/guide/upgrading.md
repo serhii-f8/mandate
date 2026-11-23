@@ -76,6 +76,23 @@ The built-in tool `list_staged_files` is new, so its name is reserved: a configu
 operation whose ID or tool name is exactly `list_staged_files` no longer loads. Rename the operation
 before you upgrade.
 
+Upgrade every `worker` and `api` instance before you add `files` to an operation or the global
+`files` settings. A 1.3 process does not know the key, so a configuration that uses it must not
+reach one; it refuses it and keeps its previous configuration (CFG-2). A change-set with files is
+sealed with hash version 3, which an older process refuses, so none may run after the first file
+change-set exists. With the single-host Compose setup, `docker compose up -d --wait` replaces both
+containers together and there is nothing more to do.
+
+The migration `0018_staged_files` adds two tables (`staged_file`, `change_set_file`) and a trigger
+that allows only the removal of a file's content. It changes no existing table, runs on start and is
+safe with several instances and with running workflows. Change-sets without files are sealed and
+executed exactly as before, and no workflow changed. After the upgrade the worker removes the
+content of staged files after `files.staged_ttl_hours` and `files.keep_days`
+([Staged files](usage.md#administer)); nothing is purged before a file is staged.
+
+The template preset, `examples/preset-template`, is 1.4.0 and shows a file argument on
+`notes.attach`. The Magento and Gitea presets do not change.
+
 ## Upgrading to 1.3.0
 
 1.3.0 is additive: the configuration schema and the connector SDK are 1.3.0, and a configuration that
