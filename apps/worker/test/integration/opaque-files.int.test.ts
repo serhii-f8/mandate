@@ -9,7 +9,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createAdapters } from '@mandate/adapters';
 import { loadConfigurationSources, type LoadedConfiguration } from '@mandate/config';
-import { createChangeSet, sha256Of } from '@mandate/core';
+import { createChangeSet, sha256Of, type ExecutionGuard } from '@mandate/core';
 import { PostgresFileStore } from '@mandate/db';
 import { createPayloadCodec, parseTemporalKeys } from '@mandate/temporal';
 import { startFakeUpstream, type FakeUpstream } from '@mandate/testing';
@@ -91,21 +91,31 @@ describe('EXE-4 CS-10 a file reaches the upstream as approved', () => {
   let configuration: LoadedConfiguration;
   let worker: TestWorker;
   let store: PostgresFileStore;
+  /** Every answer of the production guard the worker consulted. */
+  let guardOutcomes: Awaited<ReturnType<ExecutionGuard['check']>>[];
 
   beforeEach(async () => {
     up = await startFakeUpstream();
     up.route('POST', '/rest/V1/documents', () => ({ status: 201, body: { id: 7 } }));
     store = new PostgresFileStore(infra.database.db);
+    guardOutcomes = [];
     const adapter = createAdapters();
     const loaded = await loadConfigurationSources(sources(up.url), { resolver: adapter.resolver });
     if (!loaded.ok) throw new Error(`configuration invalid: ${JSON.stringify(loaded.issues)}`);
     configuration = loaded.configuration;
     const vault = new MemoryVault();
     await vault.put({ ref: CREDENTIAL_REF, scheme: 'bearer', secret: { token: FAKE_TOKEN }, actor: 'test' });
+    const guard = createExecutionGuard({ repository: infra.repository, audit: infra.audit, newId: randomUUID, files: store })(configuration);
     worker = await startTestWorker(infra, {
       configuration,
       writerFor: createWriterFor({ vault, adapter, files: store }),
-      guard: createExecutionGuard({ repository: infra.repository, audit: infra.audit, newId: randomUUID, files: store })(configuration),
+      guard: {
+        check: async (changeset) => {
+          const answer = await guard.check(changeset);
+          guardOutcomes.push(answer);
+          return answer;
+        },
+      },
       settingsFor: executionSettings,
     });
   });
@@ -225,6 +235,10 @@ describe('EXE-4 CS-10 a file reaches the upstream as approved', () => {
     const cs = await prepared(fileId);
     await corrupt(fileId);
     await execute(cs);
+    // The production guard named the refusal itself, not the caller's file_unavailable, and the run never reached the caller: no item ended failed/file_unavailable.
+    const items = await infra.repository.itemsPage(cs.id, { limit: 10 });
+    expect(guardOutcomes).toContainEqual({ ok: false, outcome: 'hash_mismatch' });
+    expect(items.map((i) => i.error)).not.toContain('file_unavailable');
 
     expect((await infra.repository.get(cs.id))?.status).toBe('failed');
     expect(up.requests).toEqual([]);

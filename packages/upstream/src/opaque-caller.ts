@@ -26,12 +26,12 @@ export interface OpaqueCallerDeps {
    * `(id) => verifyPinNow(lister, configuration, id)` (ruling F8). Absent (no tool lister wired),
    * an MCP call fails closed with `not_sent/upstream_unavailable`.
    */
+  readonly pinCheck?: (operationId: string) => Promise<PinEvaluation | undefined>;
   /**
    * The staged files' content (CS-10). Absent, a call of an operation with files, or one that
    * carries links, is `not_sent/file_unavailable`: content is never sent unchecked.
    */
   readonly files?: Pick<FileStore, 'content'>;
-  readonly pinCheck?: (operationId: string) => Promise<PinEvaluation | undefined>;
   readonly log?: (record: UpstreamCallLog) => void;
 }
 
