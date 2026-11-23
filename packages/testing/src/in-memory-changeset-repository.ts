@@ -36,6 +36,7 @@ import {
   countExclusions,
   EMPTY_STATS,
   evaluateLimits,
+  FileUnavailableError,
   isExpiryDue,
   planAllowsRollback,
   planShapeRefusal,
@@ -46,9 +47,11 @@ import {
   verificationStatusesOf,
 } from '@mandate/core';
 import { createHash, randomUUID } from 'node:crypto';
+import type { InMemoryFileStore } from './in-memory-file-store.js';
 import { InMemoryAuditLog } from './in-memory-audit-log.js';
 import { InMemoryNotificationOutbox } from './in-memory-notification-outbox.js';
 
+const FINAL_FILE_STATUSES: ReadonlySet<ChangeSetStatus> = new Set(['completed', 'completed_with_errors', 'failed', 'rejected', 'expired', 'cancelled', 'rolled_back']);
 const MAX_PAGE = 500;
 const MAX_BATCH = 1000;
 const DAY_MS = 24 * 3_600_000;
@@ -103,6 +106,8 @@ type PlanStepsResult = Awaited<ReturnType<ChangeSetRepository['planSteps']>>;
 export interface InMemoryChangeSetRepositoryOptions {
   /** The clock `requestRollback` judges the window on and stamps `updatedAt` with (PostgreSQL: `statement_timestamp()`). */
   readonly now?: () => Date;
+  /** CS-10: where `create` checks and records file links. Without it, `files` on a new change-set are refused. */
+  readonly files?: InMemoryFileStore;
 }
 
 function copyDate(d: Date): Date {
@@ -137,6 +142,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
   private readonly plans = new Map<string, PlanRecord>();
 
   private readonly now: () => Date;
+  private readonly fileStore: InMemoryFileStore | undefined;
 
   constructor(
     audit: InMemoryAuditLog = new InMemoryAuditLog(),
@@ -146,10 +152,17 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
     this.audit = audit;
     this.outbox = outbox;
     this.now = options.now ?? (() => new Date());
+    this.fileStore = options.files;
   }
 
   async create(cs: NewChangeSet, audit: AuditEventInput): Promise<ChangeSetRecord> {
     if (this.entries.has(cs.id)) throw new Error(`change-set ${cs.id} already exists`);
+    const links = (cs.files ?? []).map((l) => ({ pointer: l.pointer, fileId: l.fileId.toLowerCase() }));
+    if (links.length > 0) {
+      if (this.fileStore === undefined) throw new Error('file links need an InMemoryFileStore');
+      const pointer = this.fileStore.unavailable(cs.requester, links);
+      if (pointer !== undefined) throw new FileUnavailableError(pointer);
+    }
     const record: ChangeSetRecord = {
       id: cs.id,
       operation: cs.operation,
@@ -168,6 +181,7 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       expiresAt: copyDate(cs.expiresAt),
       approvalRound: 0,
       ...(cs.derivedFrom === undefined ? {} : { derivedFrom: cs.derivedFrom }),
+      ...(links.length === 0 ? {} : { files: links }),
     };
     // Apply before awaiting the audit append so concurrent callers see the change; undo if the append fails.
     this.entries.set(cs.id, {
@@ -183,7 +197,16 @@ export class InMemoryChangeSetRepository implements ChangeSetRepository {
       this.entries.delete(cs.id);
       throw error;
     }
+    if (links.length > 0) this.fileStore?.linkFor(cs.id, links, () => this.fileStatus(cs.id));
     return copyRecord(record);
+  }
+
+  /** Whether the change-set no longer needs its files, and when it ended (spec 4.2 "Lifetime"). */
+  private fileStatus(changesetId: string): { final: boolean; endedAt?: Date } {
+    const record = this.entries.get(changesetId)?.record;
+    if (record === undefined) return { final: false };
+    const final = FINAL_FILE_STATUSES.has(record.status);
+    return final && record.updatedAt !== undefined ? { final, endedAt: record.updatedAt } : { final };
   }
 
   appendItems(changesetId: string, items: readonly ChangeItemRecord[]): Promise<number> {

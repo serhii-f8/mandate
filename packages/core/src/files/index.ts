@@ -3,4 +3,4 @@
 export * from './model.js';
 export * from './file-args.js';
 export * from './preview.js';
-export type { FileStore } from './ports.js';
+export { FileUnavailableError, type FileStore } from './ports.js';

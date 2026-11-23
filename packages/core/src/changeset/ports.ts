@@ -2,6 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import type { ApprovalPlan, ApprovalRecord, NewNotification, Submission } from '../approval/model.js';
 import type { AuditEventInput } from '../audit.js';
+import type { FileLink } from '../files/model.js';
 import type { ManifestAction } from '../policy-model.js';
 import type { BatchCounts } from './execution.js';
 import type { HashVersion } from './hash.js';
@@ -48,6 +49,11 @@ export interface NewChangeSet {
   readonly expiresAt: Date;
   /** CS-5: the source change-set of a derived one. */
   readonly derivedFrom?: string;
+  /**
+   * CS-10: the staged files the arguments name. `create` links them in its transaction and throws
+   * `FileUnavailableError` when one is not the requester's, unknown or purged.
+   */
+  readonly files?: readonly FileLink[];
 }
 
 /** The outcome `completePreparation` stores. */

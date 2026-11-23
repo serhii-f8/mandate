@@ -54,7 +54,7 @@ export class InMemoryFileStore implements FileStore {
   }
 
   get(id: string): Promise<StagedFile | undefined> {
-    return Promise.resolve(UUID.test(id) ? this.rows.get(id)?.file : undefined);
+    return Promise.resolve(UUID.test(id) ? this.rows.get(id.toLowerCase())?.file : undefined);
   }
 
   ownedBy(owner: string, limit: number): Promise<readonly StagedFile[]> {
@@ -66,14 +66,14 @@ export class InMemoryFileStore implements FileStore {
   }
 
   content(id: string): Promise<Uint8Array | undefined> {
-    const content = UUID.test(id) ? this.rows.get(id)?.content : undefined;
+    const content = UUID.test(id) ? this.rows.get(id.toLowerCase())?.content : undefined;
     return Promise.resolve(content === undefined ? undefined : new Uint8Array(content));
   }
 
   ofChangeSet(changesetId: string): Promise<readonly { pointer: string; file: StagedFile }[]> {
     const out: { pointer: string; file: StagedFile }[] = [];
     for (const entry of this.linked) {
-      if (entry.changesetId !== changesetId) continue;
+      if (entry.changesetId !== changesetId.toLowerCase()) continue;
       for (const link of entry.links) {
         const row = this.rows.get(link.fileId);
         if (row !== undefined) out.push({ pointer: link.pointer, file: row.file });
@@ -119,8 +119,21 @@ export class InMemoryFileStore implements FileStore {
     row.content = new Uint8Array(content);
   }
 
+  /**
+   * The creation check of the PostgreSQL store (`FOR SHARE`, own file with content): the pointer of the first
+   * link whose file is unknown, not `owner`'s or purged, else undefined. Synchronous, so no purge runs between
+   * this check and the `linkFor` call that follows it.
+   */
+  unavailable(owner: string, links: readonly FileLink[]): string | undefined {
+    for (const link of links) {
+      const row = UUID.test(link.fileId) ? this.rows.get(link.fileId.toLowerCase()) : undefined;
+      if (row?.file.owner !== owner || row.content === undefined) return link.pointer;
+    }
+    return undefined;
+  }
+
   /** Records that the change-set carries `links`; `status` says whether it is final and when it ended. */
   linkFor(changesetId: string, links: readonly FileLink[], status: () => { final: boolean; endedAt?: Date }): void {
-    this.linked.push({ changesetId, links, status });
+    this.linked.push({ changesetId: changesetId.toLowerCase(), links: links.map((l) => ({ pointer: l.pointer, fileId: l.fileId.toLowerCase() })), status });
   }
 }

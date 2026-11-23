@@ -35,3 +35,14 @@ export interface FileStore {
     audit: (purged: number) => AuditEventInput,
   ): Promise<number>;
 }
+
+/**
+ * CS-10: thrown by `ChangeSetRepository.create` and nothing else when a file a change-set names is
+ * unknown, belongs to someone else or has no content any more. `pointer` is the first such link.
+ */
+export class FileUnavailableError extends Error {
+  override readonly name = 'FileUnavailableError';
+  constructor(readonly pointer: string) {
+    super('a file the change-set names is not available');
+  }
+}

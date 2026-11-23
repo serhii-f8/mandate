@@ -2,8 +2,9 @@
 // Copyright 2026 The Mandate Authors
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { sha256Of, type FileLink } from '@mandate/core';
+import { FileUnavailableError, sha256Of, type FileLink } from '@mandate/core';
 import { fileStoreContract, startPostgres, type StartedPostgres } from '@mandate/testing';
+import { PostgresChangeSetRepository } from '../../src/changeset-repository.js';
 import { createDb, type Database } from '../../src/client.js';
 import { PostgresFileStore } from '../../src/file-store.js';
 import { runMigrations } from '../../src/migrate.js';
@@ -91,5 +92,94 @@ describe('CS-10 staged file schema', () => {
     expect((await store.stage(input(randomUUID()), event('c-refused'))).ok).toBe(false);
     const n = await pool().query<{ n: number }>("SELECT count(*)::int AS n FROM audit_event WHERE correlation_id = 'c-refused'");
     expect(n.rows[0]?.n).toBe(0);
+  });
+
+  it('CS-10 TRUNCATE of staged_file and of change_set_file is refused', async () => {
+    await expect(refusal('TRUNCATE staged_file CASCADE', [])).resolves.toMatch(/staged_file/);
+    await expect(refusal('TRUNCATE change_set_file', [])).resolves.toMatch(/change_set_file/);
+  });
+
+  it('CS-10 a purge racing a creation never leaves a live change-set without content', async () => {
+    const store = new PostgresFileStore(database.db);
+    const repository = new PostgresChangeSetRepository(database.db);
+    const owner = `o-${randomUUID()}`;
+    const bytes = new TextEncoder().encode('race');
+    let refused = 0;
+    for (let i = 0; i < 20; i += 1) {
+      const fileId = randomUUID();
+      const staged = await store.stage(
+        { id: fileId, owner, name: 'r.txt', mediaType: 'text/plain', content: bytes, sha256: sha256Of(bytes), preview: 'text', createdAt: new Date(Date.now() - 48 * 3_600_000), quota: { count: 100, bytes: 100_000 } },
+        { id: randomUUID(), actor: owner, action: 'file.staged', outcome: 'ok', correlationId: randomUUID(), details: {} },
+      );
+      expect(staged.ok).toBe(true);
+      const changesetId = randomUUID();
+      const now = new Date();
+      const create = () =>
+        repository.create(
+          { id: changesetId, operation: 'op', connection: 'conn', requester: owner, args: {}, configHash: 'cfg', correlationId: 'corr', createdAt: now, expiresAt: new Date(now.getTime() + 86_400_000), files: [{ pointer: '/f', fileId }] },
+          { id: randomUUID(), actor: owner, action: 'changeset.transition', outcome: 'ok', correlationId: 'corr', changesetId, details: {} },
+        );
+      const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+      const purge = () =>
+        store.purge({ now, stagedTtlHours: 24, keepDays: 7, limit: 1000 }, (n) => ({
+          id: randomUUID(), actor: 'system', action: 'files.purged', outcome: 'ok', correlationId: randomUUID(), details: { purged: n },
+        }));
+      // The create starts 0..4 ms after the purge, so the purge's row lock is taken before, during and after it.
+      const [created, purged] = await Promise.allSettled([sleep(i % 5).then(create), purge()]);
+      expect(purged.status).toBe('fulfilled');
+      if (created.status === 'rejected') {
+        expect(created.reason).toBeInstanceOf(FileUnavailableError);
+        refused += 1;
+        expect(await repository.get(changesetId)).toBeUndefined();
+      } else {
+        expect(await store.content(fileId)).toBeDefined();
+        expect((await repository.get(changesetId))?.files).toEqual([{ pointer: '/f', fileId }]);
+      }
+    }
+    expect(refused).toBeLessThanOrEqual(20);
+  });
+
+  it('CS-10 a creation that waits for a purge in flight refuses the purged file', async () => {
+    const store = new PostgresFileStore(database.db);
+    const repository = new PostgresChangeSetRepository(database.db);
+    const owner = `o-${randomUUID()}`;
+    const bytes = new TextEncoder().encode('wait');
+    const fileId = randomUUID();
+    await store.stage(
+      { id: fileId, owner, name: 'w.txt', mediaType: 'text/plain', content: bytes, sha256: sha256Of(bytes), preview: 'text', createdAt: new Date(), quota: { count: 100, bytes: 100_000 } },
+      { id: randomUUID(), actor: owner, action: 'file.staged', outcome: 'ok', correlationId: randomUUID(), details: {} },
+    );
+    // A purge in flight: the row is locked and updated, not yet committed.
+    const holder = await pool().connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT id FROM staged_file WHERE id = $1 FOR UPDATE', [fileId]);
+      await holder.query('UPDATE staged_file SET content = NULL, purged_at = now() WHERE id = $1', [fileId]);
+      const changesetId = randomUUID();
+      const now = new Date();
+      let settled = false;
+      const creation = repository
+        .create(
+          { id: changesetId, operation: 'op', connection: 'conn', requester: owner, args: {}, configHash: 'cfg', correlationId: 'corr', createdAt: now, expiresAt: new Date(now.getTime() + 86_400_000), files: [{ pointer: '/f', fileId }] },
+          { id: randomUUID(), actor: owner, action: 'changeset.transition', outcome: 'ok', correlationId: 'corr', changesetId, details: {} },
+        )
+        .finally(() => {
+          settled = true;
+        });
+      creation.catch(() => undefined);
+      // Wait on observable state: the creation's locked read is blocked behind the purge.
+      for (let i = 0; i < 200; i += 1) {
+        const waiting = await pool().query("SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%for share%' AND query ILIKE '%staged_file%'");
+        if (waiting.rowCount !== 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(settled).toBe(false);
+      await holder.query('COMMIT');
+      await expect(creation).rejects.toBeInstanceOf(FileUnavailableError);
+      expect(await repository.get(changesetId)).toBeUndefined();
+    } finally {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release();
+    }
   });
 });

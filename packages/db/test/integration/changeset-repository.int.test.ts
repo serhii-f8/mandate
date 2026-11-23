@@ -22,6 +22,7 @@ import {
 import { DrizzleAuditLog } from '../../src/audit-log.js';
 import { PostgresChangeSetRepository } from '../../src/changeset-repository.js';
 import { createDb, type Database } from '../../src/client.js';
+import { PostgresFileStore } from '../../src/file-store.js';
 import { PostgresNotificationOutbox } from '../../src/notification-outbox.js';
 import { runMigrations } from '../../src/migrate.js';
 import { auditEvent } from '../../src/schema.js';
@@ -76,6 +77,7 @@ function harness(): Promise<ChangeSetRepositoryHarness> {
   });
   return Promise.resolve({
     repository,
+    files: new PostgresFileStore(database.db),
     auditEvents: allAuditEvents,
     failNextAudit: () => {
       failNext = true;

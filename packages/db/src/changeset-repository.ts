@@ -17,6 +17,7 @@ import type {
   ChangeSetStats,
   ChangeSetStatus,
   CreatePlanRefusal,
+  FileLink,
   ExecutionUsage,
   HashVersion,
   ItemOutcome,
@@ -39,6 +40,7 @@ import {
   countExclusions,
   EMPTY_STATS,
   evaluateLimits,
+  FileUnavailableError,
   isExpiryDue,
   planAllowsRollback,
   planShapeRefusal,
@@ -53,7 +55,7 @@ import { guarded, isUniqueViolation } from './errors.js';
 import type { Db, DbExecutor } from './client.js';
 import { START_LOCK_NAMESPACE } from './locks.js';
 import { insertNotifications } from './notification-outbox.js';
-import { approval, changeBatch, changeItem, changeRollbackBatch, changeSet, plan, type StoredSubmission } from './schema.js';
+import { approval, changeBatch, changeItem, changeRollbackBatch, changeSet, changeSetFile, plan, stagedFile, type StoredSubmission } from './schema.js';
 
 const MAX_PAGE = 500;
 const MAX_BATCH = 1000;
@@ -111,8 +113,35 @@ type CreatePlanResult = Awaited<ReturnType<ChangeSetRepository['createPlan']>>;
 type PlanStepsResult = Awaited<ReturnType<ChangeSetRepository['planSteps']>>;
 type PlanRow = typeof plan.$inferSelect;
 
-function toRecord(row: ChangeSetRow): ChangeSetRecord {
+/** CS-10: the links of these change-sets, by change-set ID, each ordered by pointer in code-point order. */
+async function linksOf(db: Db | DbExecutor, ids: readonly string[]): Promise<Map<string, FileLink[]>> {
+  const byId = new Map<string, FileLink[]>();
+  if (ids.length === 0) return byId;
+  const rows = await db
+    .select({ id: changeSetFile.changeSetId, pointer: changeSetFile.pointer, fileId: changeSetFile.fileId })
+    .from(changeSetFile)
+    .where(inArray(changeSetFile.changeSetId, [...ids]))
+    .orderBy(sql`${changeSetFile.pointer} COLLATE "C"`);
+  for (const r of rows) {
+    const list = byId.get(r.id) ?? [];
+    list.push({ pointer: r.pointer, fileId: r.fileId });
+    byId.set(r.id, list);
+  }
+  return byId;
+}
+
+async function recordOf(db: Db | DbExecutor, row: ChangeSetRow): Promise<ChangeSetRecord> {
+  return toRecord(row, (await linksOf(db, [row.id])).get(row.id));
+}
+
+async function recordsOf(db: Db | DbExecutor, rows: readonly ChangeSetRow[]): Promise<ChangeSetRecord[]> {
+  const links = await linksOf(db, rows.map((r) => r.id));
+  return rows.map((r) => toRecord(r, links.get(r.id)));
+}
+
+function toRecord(row: ChangeSetRow, files: readonly FileLink[] = []): ChangeSetRecord {
   return {
+    ...(files.length === 0 ? {} : { files }),
     id: row.id,
     operation: row.operation,
     connection: row.connection,
@@ -288,6 +317,22 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
   async create(cs: NewChangeSet, audit: AuditEventInput): Promise<ChangeSetRecord> {
     return guarded('change-set create', () =>
       this.db.transaction(async (tx) => {
+        const links = (cs.files ?? []).map((l) => ({ pointer: l.pointer, fileId: l.fileId.toLowerCase() }));
+        if (links.length > 0) {
+          // CS-10: this locked read decides. FOR SHARE waits for a purge holding the row, then PostgreSQL
+          // re-evaluates the WHERE on the newest version, so a file purged meanwhile drops out of the result.
+          // Not the foreign key and not an earlier unlocked read: only a row seen here is linked below.
+          const ids = [...new Set(links.map((l) => l.fileId))];
+          const live = await tx
+            .select({ id: stagedFile.id })
+            .from(stagedFile)
+            .where(and(inArray(stagedFile.id, ids), eq(stagedFile.owner, cs.requester), isNull(stagedFile.purgedAt)))
+            .orderBy(asc(stagedFile.id))
+            .for('share');
+          const available = new Set(live.map((r) => r.id));
+          const missing = links.find((l) => !available.has(l.fileId));
+          if (missing !== undefined) throw new FileUnavailableError(missing.pointer);
+        }
         const [row] = await tx
           .insert(changeSet)
           .values({
@@ -307,8 +352,11 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           })
           .returning();
         if (row === undefined) throw new Error('change-set insert returned no row');
+        if (links.length > 0) {
+          await tx.insert(changeSetFile).values(links.map((l) => ({ changeSetId: cs.id, pointer: l.pointer, fileId: l.fileId })));
+        }
         await this.auditFor(tx).append(audit);
-        return toRecord(row);
+        return toRecord(row, [...links].sort((a, b) => (a.pointer < b.pointer ? -1 : a.pointer > b.pointer ? 1 : 0)));
       }),
     );
   }
@@ -367,7 +415,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
     const [row] = await guarded('change-set read', () =>
       this.db.select().from(changeSet).where(eq(changeSet.id, changesetId)),
     );
-    return row === undefined ? undefined : toRecord(row);
+    return row === undefined ? undefined : await recordOf(this.db, row);
   }
 
   async itemsPage(changesetId: string, query: ItemsPageQuery): Promise<readonly ChangeItemRecord[]> {
@@ -425,7 +473,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
         .orderBy(sql`${submittedAt} desc`, desc(changeSet.id))
         .limit(q.limit),
     );
-    return rows.map(toRecord);
+    return await recordsOf(this.db, rows);
   }
 
   async sampleItems(changesetId: string, seed: string, size: number): Promise<readonly ChangeItemRecord[]> {
@@ -544,7 +592,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           return undefined;
         }
         await this.auditFor(tx).append(audit);
-        return toRecord(row);
+        return await recordOf(tx, row);
       }),
     );
   }
@@ -584,7 +632,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
       this.db.transaction(async (tx): Promise<SubmitResult> => {
         const [row] = await tx.select().from(changeSet).where(eq(changeSet.id, req.changesetId)).for('update');
         if (row === undefined) return { ok: false, reason: 'not_found' };
-        const record = toRecord(row);
+        const record = await recordOf(tx, row);
         // Judged at the submission time: the request carries no other clock (CS-6).
         if (record.status === 'prepared' && isExpiryDue(record, req.submission.at)) {
           await tx
@@ -624,7 +672,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
         await audit.append(req.audit.transition);
         await audit.append(req.audit.requested);
         await insertNotifications(tx, req.changesetId, req.notifications, req.submission.at);
-        return { ok: true, changeset: toRecord(updated) };
+        return { ok: true, changeset: await recordOf(tx, updated) };
       }),
     );
   }
@@ -697,7 +745,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           const audit = this.auditFor(tx);
           for (const event of req.audit) await audit.append(event);
           await insertNotifications(tx, req.changesetId, req.notifications, req.record.ts);
-          return { ok: true, changeset: toRecord(updated) };
+          return { ok: true, changeset: await recordOf(tx, updated) };
         });
       } catch (error) {
         // A concurrent decision of the same step stored its row first: the step key refused ours.
@@ -770,7 +818,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           // The row lock serializes starts of one change-set: a second start finds it executing.
           const [row] = await tx.select().from(changeSet).where(eq(changeSet.id, req.changesetId)).for('update');
           if (row === undefined) return { ok: false, reason: 'not_found' };
-          const record = toRecord(row);
+          const record = await recordOf(tx, row);
           if (isExpiryDue(record, req.now)) {
             await tx
               .update(changeSet)
@@ -832,7 +880,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           if (updated === undefined) return { ok: false, reason: 'not_executable' };
           await this.auditFor(tx).append(req.event({ kind: 'executing', from: record.status }, record));
           await insertNotifications(tx, req.changesetId, req.notifications ?? [], req.now);
-          return { ok: true, changeset: toRecord(updated) };
+          return { ok: true, changeset: await recordOf(tx, updated) };
         },
         { isolationLevel: 'read committed' },
       ),
@@ -914,7 +962,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
         if (row === undefined) return { ok: false };
         if (row.status !== 'executing') return { ok: false, status: row.status };
         // The first request wins: a later one answers the stored request unchanged.
-        if (row.cancelRequestedBy !== null) return { ok: true, changeset: toRecord(row) };
+        if (row.cancelRequestedBy !== null) return { ok: true, changeset: await recordOf(tx, row) };
         const [updated] = await tx
           .update(changeSet)
           .set({
@@ -926,7 +974,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           .where(eq(changeSet.id, changesetId))
           .returning();
         if (updated === undefined) throw new Error('cancel request update returned no row');
-        return { ok: true, changeset: toRecord(updated) };
+        return { ok: true, changeset: await recordOf(tx, updated) };
       }),
     );
   }
@@ -1141,7 +1189,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           // The row lock serializes requests: a second one finds the first one's status and request.
           const [row] = await tx.select().from(changeSet).where(eq(changeSet.id, req.changesetId)).for('update');
           if (row === undefined) return { ok: false, reason: 'not_found' };
-          const record = toRecord(row);
+          const record = await recordOf(tx, row);
           if (record.status === 'rolling_back' || record.status === 'rolled_back' || row.rollbackRequestedAt !== null) {
             return { ok: false, reason: 'already_rolled_back' };
           }
@@ -1176,7 +1224,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
           if (updated === undefined) throw new Error('rollback request update returned no row');
           const audit = this.auditFor(tx);
           for (const event of req.audit) await audit.append(event);
-          return { ok: true, changeset: toRecord(updated) };
+          return { ok: true, changeset: await recordOf(tx, updated) };
         },
         // Statements after the plan lock wait must see what the transaction holding it committed.
         { isolationLevel: 'read committed' },
@@ -1559,7 +1607,7 @@ export class PostgresChangeSetRepository implements ChangeSetRepository {
         await this.auditFor(tx).append(audit);
         // The transition's own clock: the request carries none (NTF-1).
         await insertNotifications(tx, changesetId, notifications, new Date());
-        return toRecord(row);
+        return await recordOf(tx, row);
       }),
     );
   }

@@ -3,6 +3,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  FileUnavailableError,
+  sha256Of,
   changesetBatchEvent,
   changesetRollbackBatchEvent,
   changesetVerificationEvent,
@@ -24,6 +26,7 @@ import type {
   ChangeSetStatus,
   CreatePlanRefusal,
   ExecutionLimits,
+  FileStore,
   ItemOutcome,
   ItemsPageQuery,
   NewChangeSet,
@@ -48,6 +51,8 @@ export interface ChangeSetRepositoryHarness {
   readonly failNextAudit: () => void;
   /** Outbox rows of one change-set (NTF-1, NTF-3), ordered by created_at, kind, step, target. */
   readonly notifications: (changesetId: string) => Promise<readonly NotificationRow[]>;
+  /** The file store the repository links against (CS-10). */
+  readonly files: FileStore;
   readonly close?: () => Promise<void>;
 }
 
@@ -127,6 +132,111 @@ export function describeChangeSetRepositoryContract(label: string, setup: () => 
         await h.close?.();
       }
     }
+
+    describe('CS-10 change-set file links', () => {
+      async function stageFile(c: Ctx, owner: string, createdAt: Date = NOW): Promise<string> {
+        const bytes = new TextEncoder().encode('file body');
+        const id = randomUUID();
+        const staged = await c.files.stage(
+          { id, owner, name: 'a.txt', mediaType: 'text/plain', content: bytes, sha256: sha256Of(bytes), preview: 'text', createdAt, quota: { count: 1000, bytes: 1_000_000 } },
+          { id: randomUUID(), actor: owner, action: 'file.staged', outcome: 'ok', correlationId: 'corr-file', details: {} },
+        );
+        expect(staged.ok).toBe(true);
+        return id;
+      }
+
+      async function refused(c: Ctx, files: readonly { pointer: string; fileId: string }[], owner: string): Promise<FileUnavailableError> {
+        const error = await c.repository.create({ ...newChangeSet(c.id), requester: owner, files }, auditEvent(c.id)).then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+        expect(error).toBeInstanceOf(FileUnavailableError);
+        expect(await c.repository.get(c.id)).toBeUndefined();
+        expect(await c.events()).toEqual([]);
+        return error as FileUnavailableError;
+      }
+
+      it('CS-10 a change-set is created with its links, which get and ofChangeSet return', async () => {
+        await withRepo(async (c) => {
+          const owner = requester('owner');
+          const fileId = await stageFile(c, owner);
+          const record = await c.repository.create({ ...newChangeSet(c.id), requester: owner, files: [{ pointer: '/image', fileId }] }, auditEvent(c.id));
+          expect(record.files).toEqual([{ pointer: '/image', fileId }]);
+          expect((await c.repository.get(c.id))?.files).toEqual([{ pointer: '/image', fileId }]);
+          expect((await c.files.ofChangeSet(c.id)).map((l) => [l.pointer, l.file.id])).toEqual([['/image', fileId]]);
+        });
+      });
+
+      it('CS-10 a change-set without files has no files key', async () => {
+        await withRepo(async (c) => {
+          const record = await c.repository.create(newChangeSet(c.id), auditEvent(c.id));
+          expect('files' in record).toBe(false);
+          expect('files' in ((await c.repository.get(c.id)) ?? {})).toBe(false);
+          const none = await c.repository.create({ ...newChangeSet(randomUUID()), files: [] }, auditEvent(c.id));
+          expect('files' in none).toBe(false);
+        });
+      });
+
+      it('CS-10 two pointers may name one file', async () => {
+        await withRepo(async (c) => {
+          const owner = requester('owner');
+          const fileId = await stageFile(c, owner);
+          const links = [
+            { pointer: '/a', fileId },
+            { pointer: '/b', fileId },
+          ];
+          await c.repository.create({ ...newChangeSet(c.id), requester: owner, files: links }, auditEvent(c.id));
+          expect((await c.repository.get(c.id))?.files).toEqual(links);
+        });
+      });
+
+      it('CS-10 an unknown file refuses the creation with its pointer and leaves nothing', async () => {
+        await withRepo(async (c) => {
+          const error = await refused(c, [{ pointer: '/x', fileId: randomUUID() }], requester('owner'));
+          expect(error.pointer).toBe('/x');
+        });
+      });
+
+      it('CS-10 another owner\'s file refuses the creation', async () => {
+        await withRepo(async (c) => {
+          const fileId = await stageFile(c, requester('someone-else'));
+          const error = await refused(c, [{ pointer: '/mine', fileId }], requester('owner'));
+          expect(error.pointer).toBe('/mine');
+        });
+      });
+
+      it('CS-10 a purged file refuses the creation', async () => {
+        await withRepo(async (c) => {
+          const owner = requester('owner');
+          const fileId = await stageFile(c, owner, new Date(NOW.getTime() - 48 * HOUR));
+          await c.files.purge({ now: NOW, stagedTtlHours: 24, keepDays: 7, limit: 1000 }, (n) => ({
+            id: randomUUID(), actor: 'system', action: 'files.purged', outcome: 'ok', correlationId: 'corr-purge', details: { purged: n },
+          }));
+          expect((await c.files.get(fileId))?.purgedAt).toBeDefined();
+          const error = await refused(c, [{ pointer: '/gone', fileId }], owner);
+          expect(error.pointer).toBe('/gone');
+        });
+      });
+
+      it('CS-10 the first unavailable pointer is named and nothing of the valid links is kept', async () => {
+        await withRepo(async (c) => {
+          const owner = requester('owner');
+          const ok = await stageFile(c, owner);
+          const error = await refused(c, [{ pointer: '/a', fileId: ok }, { pointer: '/b', fileId: randomUUID() }], owner);
+          expect(error.pointer).toBe('/b');
+          expect(await c.files.ofChangeSet(c.id)).toEqual([]);
+        });
+      });
+
+      it('CS-10 a file ID in upper case names the same file', async () => {
+        await withRepo(async (c) => {
+          const owner = requester('owner');
+          const fileId = await stageFile(c, owner);
+          await c.repository.create({ ...newChangeSet(c.id), requester: owner, files: [{ pointer: '/f', fileId: fileId.toUpperCase() }] }, auditEvent(c.id));
+          expect((await c.files.ofChangeSet(c.id)).map((l) => l.file.id)).toEqual([fileId]);
+        });
+      });
+    });
 
     async function created(c: Ctx): Promise<void> {
       await c.repository.create(newChangeSet(c.id), auditEvent(c.id));

@@ -140,7 +140,10 @@ export class PostgresFileStore implements FileStore {
     const ttlCut = new Date(input.now.getTime() - input.stagedTtlHours * 3_600_000);
     const keepCut = new Date(input.now.getTime() - input.keepDays * 86_400_000);
     // The condition is evaluated twice: to choose candidates (locked, skipping rows another transaction holds)
-    // and again in the UPDATE, so a link inserted between the two statements keeps the content.
+    // and again in the UPDATE. The second evaluation is defence in depth. The guarantee against a creation
+    // racing this purge is on the creation side: `ChangeSetRepository.create` locks the file rows FOR SHARE and
+    // re-checks `purged_at IS NULL` in that locked read, so it either waits for this transaction and then
+    // refuses the purged file, or links first and this purge's row lock waits for it (CS-10).
     const eligible = sql`
       f.content IS NOT NULL AND (
         (NOT EXISTS (SELECT 1 FROM change_set_file l WHERE l.file_id = f.id) AND f.created_at < ${ttlCut})
@@ -162,7 +165,7 @@ export class PostgresFileStore implements FileStore {
         if (ids.length === 0) return 0;
         const updated = await tx.execute(sql`
           UPDATE staged_file f SET content = NULL, purged_at = ${input.now}
-          WHERE f.id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)}) AND ${eligible}`);
+          WHERE f.id = ANY(${`{${ids.join(',')}}`}::uuid[]) AND ${eligible}`);
         const purged = updated.rowCount ?? 0;
         if (purged > 0) await new DrizzleAuditLog(tx).append(audit(purged));
         return purged;

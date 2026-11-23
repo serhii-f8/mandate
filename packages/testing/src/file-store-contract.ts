@@ -87,6 +87,8 @@ export function fileStoreContract(make: () => Promise<FileStoreHarness>): void {
       expect(result.ok && result.file).toEqual(file);
       expect(Array.from((await h.store.content(id)) ?? [])).toEqual(Array.from(bytes));
       expect(await h.store.ownedBy(owner, 10)).toEqual([file]);
+      expect(await h.store.get(id.toUpperCase())).toEqual(file);
+      expect(Array.from((await h.store.content(id.toUpperCase())) ?? [])).toEqual(Array.from(bytes));
       expect(await h.store.get('nope')).toBeUndefined();
       expect(await h.store.content('nope')).toBeUndefined();
       expect(await h.store.get(randomUUID())).toBeUndefined();

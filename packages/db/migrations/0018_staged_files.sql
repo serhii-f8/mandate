@@ -70,3 +70,18 @@ $$;
 --> statement-breakpoint
 CREATE TRIGGER change_set_file_guard BEFORE UPDATE OR DELETE ON change_set_file
   FOR EACH ROW EXECUTE FUNCTION change_set_file_guard();
+--> statement-breakpoint
+-- Neither table can be emptied in one statement: TRUNCATE skips the row triggers above.
+CREATE FUNCTION staged_file_no_truncate() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION '% truncate rejected: the table is not emptied', TG_TABLE_NAME
+    USING ERRCODE = 'integrity_constraint_violation';
+END;
+$$;
+--> statement-breakpoint
+CREATE TRIGGER staged_file_no_truncate BEFORE TRUNCATE ON staged_file
+  FOR EACH STATEMENT EXECUTE FUNCTION staged_file_no_truncate();
+--> statement-breakpoint
+CREATE TRIGGER change_set_file_no_truncate BEFORE TRUNCATE ON change_set_file
+  FOR EACH STATEMENT EXECUTE FUNCTION staged_file_no_truncate();
