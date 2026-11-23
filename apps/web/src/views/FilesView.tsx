@@ -105,7 +105,8 @@ export function FilesView({ files, forbidden, onUpload }: FilesViewProps): React
               <th>Type</th>
               <th>Size</th>
               <th>ID</th>
-              <th>Expires</th>
+              {/* expiresAt is when content goes if no change-set uses the file; a linked file is kept longer (CS-10). */}
+              <th>Expires if unused</th>
             </tr>
           </thead>
           <tbody>

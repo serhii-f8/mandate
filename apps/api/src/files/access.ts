@@ -23,7 +23,11 @@ export interface FileView {
   readonly sha256: string;
   readonly preview: FilePreview;
   readonly createdAt: string;
-  /** `createdAt` plus `files.staged_ttl_hours`: when an unused file loses its content. */
+  /**
+   * `createdAt` plus `files.staged_ttl_hours`: the content is removed at this time if the file is not used by a
+   * change-set. A file linked to a change-set keeps its content until `files.keep_days` after that change-set
+   * ends, so for such a file this time does not apply (CS-10).
+   */
   readonly expiresAt: string;
 }
 

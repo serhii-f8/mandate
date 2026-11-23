@@ -254,8 +254,10 @@ not its bytes.
 takes the raw bytes as the body, the declared type as `Content-Type` and the percent-encoded UTF-8
 name in `X-File-Name`. It is open to a user with a role that grants such an operation (otherwise
 403 `forbidden`) and answers 201 with `{ id, name, mediaType, size, sha256, preview, createdAt,
-expiresAt }`. The body is stored exactly as sent, and a `Content-Encoding` other than identity is
-refused with 415. Refusals: 400 `invalid_name`, `invalid_media_type`, `empty_file`; 413
+expiresAt }`; `expiresAt` is when the content is removed if the file is not used by a change-set
+(a file a change-set uses keeps it until `files.keep_days` after that change-set ends, and the page
+labels the column "Expires if unused"). The body is stored exactly as sent, and a
+`Content-Encoding` other than identity is refused with 415. Refusals: 400 `invalid_name`, `invalid_media_type`, `empty_file`; 413
 `payload_too_large` (above `files.max_bytes`); 409 `quota_exceeded`. `GET /api/v1/files` lists the
 user's own files that still have content, newest first, at most 200. The page `/app/files` has a
 file picker, an `Upload` button and that list with the IDs. Each upload is audited as `file.staged`
