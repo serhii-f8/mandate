@@ -179,4 +179,41 @@ describe('CS-10 staged file schema', () => {
       holder.release();
     }
   });
+
+  it('CS-10 a file the candidate read chose on a snapshot older than a committed creation keeps its content', async () => {
+    // The window: the candidate read takes its snapshot, a creation links the file and commits (releasing its
+    // FOR SHARE), then the read reaches the row. The row was locked but never updated, so PostgreSQL does not
+    // re-evaluate it: the read chooses a file that is now linked. While the purge holds the candidate's lock a
+    // creation cannot commit (its FOR SHARE waits), so the seam stands in for that stale answer and the test
+    // proves the UPDATE's own eligibility check, on its newer snapshot, refuses the linked file.
+    const owner = `o-${randomUUID()}`;
+    const bytes = new TextEncoder().encode('stale');
+    const fileId = randomUUID();
+    await new PostgresFileStore(database.db).stage(
+      { id: fileId, owner, name: 's.txt', mediaType: 'text/plain', content: bytes, sha256: sha256Of(bytes), preview: 'text', createdAt: new Date(Date.now() - 48 * 3_600_000), quota: { count: 100, bytes: 100_000 } },
+      { id: randomUUID(), actor: owner, action: 'file.staged', outcome: 'ok', correlationId: randomUUID(), details: {} },
+    );
+    const changesetId = randomUUID();
+    const now = new Date();
+    await new PostgresChangeSetRepository(database.db).create(
+      { id: changesetId, operation: 'op', connection: 'conn', requester: owner, args: {}, configHash: 'cfg', correlationId: 'corr', createdAt: now, expiresAt: new Date(now.getTime() + 86_400_000), files: [{ pointer: '/f', fileId }] },
+      { id: randomUUID(), actor: owner, action: 'changeset.transition', outcome: 'ok', correlationId: 'corr', changesetId, details: {} },
+    );
+    let chosen: readonly string[] | undefined;
+    const store = new PostgresFileStore(database.db, {
+      purgeCandidates: (ids) => {
+        chosen = ids;
+        // Only the stale choice, so files other tests left eligible are not purged here.
+        return [fileId];
+      },
+    });
+    const purged = await store.purge({ now, stagedTtlHours: 24, keepDays: 7, limit: 1000 }, (n) => ({
+      id: randomUUID(), actor: 'system', action: 'files.purged', outcome: 'ok', correlationId: randomUUID(), details: { purged: n },
+    }));
+    expect(chosen).toBeDefined();
+    expect(chosen).not.toContain(fileId);
+    expect(purged).toBe(0);
+    expect(Buffer.from((await store.content(fileId)) ?? [])).toEqual(Buffer.from(bytes));
+    expect((await store.get(fileId))?.purgedAt).toBeUndefined();
+  });
 });

@@ -43,13 +43,25 @@ const META = {
   purgedAt: stagedFile.purgedAt,
 };
 
+/** Test seams of `PostgresFileStore`. Production code passes none. */
+export interface PostgresFileStoreSeams {
+  /**
+   * Test only: receives the IDs the purge's candidate read chose and returns the IDs its UPDATE works on. It
+   * stands in for a candidate read that chose a file on a stale snapshot, which no test can time (CS-10).
+   */
+  readonly purgeCandidates?: (ids: readonly string[]) => readonly string[];
+}
+
 /**
  * PostgreSQL implementation of the core `FileStore` port (CS-10). `stage` and `purge` append their audit
  * event on the same transaction as the write. Errors carry codes only: file names and content never
  * reach a message (SEC-3).
  */
 export class PostgresFileStore implements FileStore {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly seams: PostgresFileStoreSeams = {},
+  ) {}
 
   async stage(
     input: Parameters<FileStore['stage']>[0],
@@ -139,11 +151,18 @@ export class PostgresFileStore implements FileStore {
   ): Promise<number> {
     const ttlCut = new Date(input.now.getTime() - input.stagedTtlHours * 3_600_000);
     const keepCut = new Date(input.now.getTime() - input.keepDays * 86_400_000);
-    // The condition is evaluated twice: to choose candidates (locked, skipping rows another transaction holds)
-    // and again in the UPDATE. The second evaluation is defence in depth. The guarantee against a creation
-    // racing this purge is on the creation side: `ChangeSetRepository.create` locks the file rows FOR SHARE and
-    // re-checks `purged_at IS NULL` in that locked read, so it either waits for this transaction and then
-    // refuses the purged file, or links first and this purge's row lock waits for it (CS-10).
+    // The condition is evaluated twice, and both evaluations are needed (CS-10):
+    // 1. The candidate read locks the rows it chooses, skipping rows another transaction holds. It evaluates
+    //    the condition on its own snapshot. A creation that links a file and commits after that snapshot was
+    //    taken but before the read reaches the row has released its FOR SHARE lock, so the row is not skipped;
+    //    the creation locked the row without updating it, so PostgreSQL does not re-evaluate the condition on
+    //    a newer version either. The read then chooses a file that is linked to a live change-set.
+    // 2. The UPDATE is a new statement with a new snapshot (READ COMMITTED) and sees that link, so `AND
+    //    eligible` drops the file. This re-check closes the "creation committed after the candidate snapshot"
+    //    window and must not be removed.
+    // The other ordering is closed on the creation side: `ChangeSetRepository.create` locks the file rows FOR
+    // SHARE and re-checks `purged_at IS NULL` in that locked read, so a creation that waits for this purge
+    // refuses the purged file.
     const eligible = sql`
       f.content IS NOT NULL AND (
         (NOT EXISTS (SELECT 1 FROM change_set_file l WHERE l.file_id = f.id) AND f.created_at < ${ttlCut})
@@ -161,7 +180,8 @@ export class PostgresFileStore implements FileStore {
         const candidates = await tx.execute<{ id: string }>(sql`
           SELECT f.id FROM staged_file f WHERE ${eligible}
           ORDER BY f.created_at, f.id LIMIT ${input.limit} FOR UPDATE OF f SKIP LOCKED`);
-        const ids = candidates.rows.map((r) => r.id);
+        const chosen = candidates.rows.map((r) => r.id);
+        const ids = this.seams.purgeCandidates?.(chosen) ?? chosen;
         if (ids.length === 0) return 0;
         const updated = await tx.execute(sql`
           UPDATE staged_file f SET content = NULL, purged_at = ${input.now}
