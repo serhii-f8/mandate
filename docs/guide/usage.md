@@ -246,6 +246,16 @@ again. The same page tests the connection:
 
 ![Credential page: a stored credential and the connection test](images/credentials.png)
 
+**Staged files.** An operation that declares file arguments takes a file the person staged first,
+not its bytes. `POST /api/v1/files` on the trusted page API (page session, `Origin` and CSRF token)
+takes the raw bytes as the body, the declared type as `Content-Type` and the percent-encoded UTF-8
+name in `X-File-Name`. It is open to a user with a role that grants such an operation (otherwise
+403 `forbidden`) and answers 201 with `{ id, name, mediaType, size, sha256, preview, createdAt,
+expiresAt }`. Refusals: 400 `invalid_name`, `invalid_media_type`, `empty_file`; 413
+`payload_too_large` (above `files.max_bytes`); 409 `quota_exceeded`. `GET /api/v1/files` lists the
+user's own files that still have content. The upload is audited as `file.staged` with its size,
+type and hash, never the name or the content.
+
 **Audit.** Every login, policy decision, tool call, approval, batch and configuration change is in
 the audit log at `/app/audit`, for roles with `view_audit`. The log can be filtered by actor,
 action, change-set, correlation ID, time and outcome, and exported as JSON Lines. Rows are hash

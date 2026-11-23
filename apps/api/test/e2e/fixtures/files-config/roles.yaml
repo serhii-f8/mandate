@@ -1,0 +1,13 @@
+version: 1
+roles:
+  - id: editor
+    grants:
+      - operation: shop.upload_image
+    approval: { required: never }
+  - id: viewer
+    grants:
+      - operation: shop.post_note
+    approval: { required: never }
+role_mapping:
+  - { group: editors, roles: [editor] }
+  - { group: viewers, roles: [viewer] }

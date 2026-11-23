@@ -2,6 +2,7 @@
 // Copyright 2026 The Mandate Authors
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
 import { performance } from 'node:perf_hooks';
 import { Inject, Module, type DynamicModule, type INestApplication, type OnApplicationShutdown } from '@nestjs/common';
 import { APP_GUARD, NestFactory, Reflector } from '@nestjs/core';
@@ -15,11 +16,13 @@ import type { McpToolAdapter, ReadAdapter } from '@mandate/connector-sdk';
 import { ConfigurationUnavailableError, createSchemaCompiler, type ApiEnv, type ConfigurationHolder } from '@mandate/config';
 import {
   changesetKind,
+  HARD_MAX_FILE_BYTES,
   rolesOf,
   type AuditLog,
   type ChangeSetExecutor,
   type ChangeSetRepository,
   type CredentialVault,
+  type FileStore,
   type OperationInvoker,
   type RateCounter,
   type TaskRepository,
@@ -27,7 +30,7 @@ import {
 } from '@mandate/core';
 import { parseTemporalKeys, TemporalExecutor, TemporalWorkflowStarter } from '@mandate/temporal';
 import type { Client, Connection } from '@temporalio/client';
-import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresAuditReader, PostgresChangeSetRepository, PostgresCredentialVault, PostgresRateCounter, PostgresSessionStore, PostgresTaskRepository, type Database } from '@mandate/db';
+import { createDb, DrizzleAuditLog, parseMasterKeys, PostgresAuditReader, PostgresChangeSetRepository, PostgresCredentialVault, PostgresFileStore, PostgresRateCounter, PostgresSessionStore, PostgresTaskRepository, type Database } from '@mandate/db';
 import { createBearerGate } from './auth/bearer-gate.js';
 import { createJwtVerifier } from './auth/jwt-verifier.js';
 import { ProtectedResourceController } from './auth/protected-resource.controller.js';
@@ -42,6 +45,7 @@ import { ApprovalsController } from './approvals/approvals.controller.js';
 import { ChangeSetPagesController } from './approvals/changeset-pages.controller.js';
 import { ChangeSetActionsController } from './changesets/changeset-actions.controller.js';
 import { SubmitService } from './changesets/submit-service.js';
+import { FilesController } from './files/files.controller.js';
 import { ChangeSetExportController } from './export/export.controller.js';
 import { createBuiltinTools } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
@@ -61,6 +65,7 @@ import {
   CONNECTION_TEST,
   CREDENTIAL_VAULT,
   DATABASE,
+  FILE_STORE,
   LOGGER,
   MCP_HANDLER,
   OIDC_CLIENT,
@@ -240,7 +245,7 @@ class AppModule {
     const pageChecks: PageChecks = { publicOrigin: env.publicUrl.origin, freshAuthSeconds: env.freshAuthSeconds };
     return {
       module: AppModule,
-      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, ApprovalsController, ChangeSetPagesController, ChangeSetExportController, ChangeSetActionsController, AuditController, WebAppController],
+      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, ApprovalsController, ChangeSetPagesController, ChangeSetExportController, ChangeSetActionsController, AuditController, FilesController, WebAppController],
       providers: [
         { provide: API_ENV, useValue: env },
         { provide: LOGGER, useValue: logger },
@@ -280,6 +285,7 @@ class AppModule {
           inject: [RATE_COUNTER, AUDIT_LOG],
           useFactory: (rateCounter: RateCounter, audit: AuditLog) => new EndpointRateLimiter({ rateCounter, audit, wallClock, logger }),
         },
+        { provide: FILE_STORE, inject: [DATABASE], useFactory: (d: Database): FileStore => new PostgresFileStore(d.db) },
         {
           provide: CREDENTIAL_VAULT,
           inject: [DATABASE],
@@ -472,6 +478,11 @@ export interface CreateAppOptions {
   readonly telemetry?: ApiTelemetry;
 }
 
+/** The one request whose body is raw bytes: `POST /api/v1/files` (CS-10). */
+function isFileUpload(req: IncomingMessage): boolean {
+  return req.method === 'POST' && /^\/api\/v1\/files\/?(\?|$)/.test(req.url ?? '');
+}
+
 /** Builds the api application without listening (used by `main.ts` and the e2e tests). */
 export async function createApp(options: CreateAppOptions): Promise<INestApplication> {
   // The api checks fully: specs resolved and presets loaded (CONN-2, ADR 0021). Without an active
@@ -486,6 +497,11 @@ export async function createApp(options: CreateAppOptions): Promise<INestApplica
   );
   // SEC-10: `req.ip` honours X-Forwarded-For only across the configured number of proxy hops (0: none).
   app.set('trust proxy', options.env.trustProxy);
+  // CS-10: an upload is the raw bytes of any content type, up to the hard file limit. This parser reads
+  // only `POST /api/v1/files` (its `type` test); it must come first: once it has read the stream, the
+  // JSON parser below finds the request finished and skips it, so an `application/json` upload is not
+  // re-serialised and the 4 MiB JSON limit does not apply to it.
+  app.useBodyParser('raw', { type: isFileUpload, limit: HARD_MAX_FILE_BYTES });
   // MCP request bodies up to 4 MiB, the SDK's default bound (ADR 0013).
   app.useBodyParser('json', { limit: '4mb' });
   // Directly after the parser: its errors quote the body, so they get fixed bodies (SEC-3).

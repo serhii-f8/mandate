@@ -13,6 +13,8 @@ export const CONNECTION_TEST = Symbol('ConnectionTestService');
 export const CREDENTIAL_VAULT = Symbol('CredentialVault');
 export const DATABASE = Symbol('Database');
 export const MCP_HANDLER = Symbol('McpHttpHandler');
+/** The staged-file store (CS-10). */
+export const FILE_STORE = Symbol('FileStore');
 export const LOGGER = Symbol('Logger');
 export const OIDC_CLIENT = Symbol('OidcClient');
 /** The caller's shutdown step, run after the api's own resources closed (`AppOverrides.onShutdown`). */

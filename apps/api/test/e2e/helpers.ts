@@ -356,3 +356,37 @@ export function modernRequest(method: string, params: Record<string, unknown> = 
     },
   };
 }
+
+/** What `uploadFile` sends; every header is overridable, `null` leaves one out. */
+export interface UploadOptions {
+  /** Raw bytes of the body. */
+  readonly body: Uint8Array;
+  /** `X-File-Name` as sent (already percent-encoded); `null` omits it. Default `file.png`. */
+  readonly name?: string | null;
+  /** `Content-Type` as sent; `null` omits it. Default `image/png`. */
+  readonly type?: string | null;
+  /** Page session cookie; none when `null`. */
+  readonly cookie?: string | null;
+  /** `X-CSRF-Token`; omitted when `null`. */
+  readonly csrfToken?: string | null;
+}
+
+/** `POST /api/v1/files` as the trusted page sends it (CS-10): raw bytes, the name in a header. */
+export async function uploadFile(apiUrl: string, options: UploadOptions): Promise<{ status: number; body: unknown; correlationId: string }> {
+  const name = options.name === undefined ? 'file.png' : options.name;
+  const type = options.type === undefined ? 'image/png' : options.type;
+  const response = await fetch(`${apiUrl}/api/v1/files`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: {
+      origin: new URL(apiUrl).origin,
+      ...(options.cookie === null || options.cookie === undefined ? {} : { cookie: options.cookie }),
+      ...(options.csrfToken === null || options.csrfToken === undefined ? {} : { 'x-csrf-token': options.csrfToken }),
+      ...(name === null ? {} : { 'x-file-name': name }),
+      ...(type === null ? {} : { 'content-type': type }),
+    },
+    body: options.body,
+  });
+  const text = await response.text();
+  return { status: response.status, body: text === '' ? undefined : (JSON.parse(text) as unknown), correlationId: response.headers.get('x-correlation-id') ?? '' };
+}

@@ -1,0 +1,7 @@
+# File staging e2e (CS-10). The fixture needs no reachable upstream: nothing here sends a request.
+version: 1
+connections:
+  - id: shop
+    adapter: openapi
+    base_url: http://127.0.0.1:9/rest
+    allow_private_network: true
