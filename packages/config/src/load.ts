@@ -10,8 +10,9 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import type { CodeOperation, ConnectionSettings, CredentialScheme, SpecIssue, ToolListOutcome, UpstreamResolver } from '@mandate/connector-sdk';
-import { grantReference, type DisabledOperation, type FieldApprovalRule, type GrantDefinition, type PolicyConfiguration, type RoleApprovalRule, type RoleDefinition, type RoleNotifyTargets } from '@mandate/core';
+import { grantReference, type DisabledOperation, type FileSettings, type FieldApprovalRule, type GrantDefinition, type PolicyConfiguration, type RoleApprovalRule, type RoleDefinition, type RoleNotifyTargets } from '@mandate/core';
 import { createSchemaCompiler, type ArgumentValidator } from './argument-validators.js';
+import { toFileSettings } from './files.js';
 import { pathToString, type ConfigIssue } from './issues.js';
 import { checkManifests, DEFAULT_EXPIRE_AFTER_HOURS, DEFAULT_FAILURE_THRESHOLD, DEFAULT_ITEMS_PER_WORKFLOW_RUN, DEFAULT_ROLLBACK_WINDOW_HOURS } from './manifest.js';
 import { bindPresetParams, readSpecFile, resolvePreset, withPath, type LoadedPreset } from './presets.js';
@@ -122,6 +123,8 @@ export interface LoadedConfiguration {
   readonly audit: { readonly retentionDays?: number };
   /** SEC-10: effective endpoint rate limits; defaults filled key by key. */
   readonly rateLimits: RateLimits;
+  /** OPS-8: effective file staging settings; defaults filled key by key. */
+  readonly files: FileSettings;
   /** SEC-1, AUD-6: role IDs with view_audit: true. */
   readonly auditViewers: ReadonlySet<string>;
   /** AUD-4: union of every loaded manifest's sensitive_fields (presets included). */
@@ -286,6 +289,15 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     if (rateLimitsBlock === undefined) rateLimitsBlock = { value: doc.rate_limits, source, path: ['rate_limits'] };
     else at(source, ['rate_limits'], `may be set in one document only; first set in ${rateLimitsBlock.source.file}`);
   }
+
+  // OPS-8: file settings come from at most one document.
+  let filesBlock: Located<NonNullable<ConfigDocument['files']>> | undefined;
+  for (const { source, doc } of documents) {
+    if (doc.files === undefined) continue;
+    if (filesBlock === undefined) filesBlock = { value: doc.files, source, path: ['files'] };
+    else at(source, ['files'], `may be set in one document only; first set in ${filesBlock.source.file}`);
+  }
+  const fileSettings = toFileSettings(filesBlock?.value);
 
   const connectionById = indexById(connections);
   const roleById = indexById(roles);
@@ -500,6 +512,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
     codeModules: new Map([...resolvedPresets].flatMap(([id, preset]) => (preset.code === undefined ? [] : [[id, preset.code.module] as const]))),
     operationsIncomplete,
     reserved: new Set(options.reservedToolNames ?? BUILTIN_TOOL_NAMES),
+    fileMaxBytes: fileSettings.maxBytes,
     compile,
     at,
   });
@@ -645,6 +658,11 @@ export async function loadConfigurationSources(sources: readonly { file: string;
           // A constraint on an argument the upstream never sees restricts nothing (POL-2).
           else if (sent !== undefined && !sent.has(arg)) at(source, [...gPath, 'scope', arg], `scope argument ${arg} is not sent upstream by operation ${definition.id}`);
         }
+      }
+      // OPS-8: a one-segment file path holds a staged file's ID, which no scope value could match.
+      for (const file of definition.files ?? []) {
+        const [only] = file.path;
+        if (file.path.length === 1 && only !== undefined && Object.hasOwn(grant.scope, only)) at(source, [...gPath, 'scope', only], 'names a file argument');
       }
       if (manifest !== undefined) {
         for (const arg of Object.keys(grant.scope)) {
@@ -805,6 +823,7 @@ export async function loadConfigurationSources(sources: readonly { file: string;
         mcpServiceAccountPerMinute: rateLimitsBlock?.value.mcp_service_account_per_minute ?? DEFAULT_RATE_LIMITS.mcpServiceAccountPerMinute,
         unauthenticatedPerMinute: rateLimitsBlock?.value.unauthenticated_per_minute ?? DEFAULT_RATE_LIMITS.unauthenticatedPerMinute,
       },
+      files: fileSettings,
       auditViewers: new Set(roles.filter(({ value }) => value.view_audit).map(({ value }) => value.id)),
       sensitiveFields: new Set([...registry.all.values()].flatMap((op) => op.located.value.manifest?.sensitive_fields ?? [])),
       changesets: {

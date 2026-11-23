@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/serhii-f8/mandate/actions/workflows/ci.yml/badge.svg)](https://github.com/serhii-f8/mandate/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-![Version 1.3.0](https://img.shields.io/badge/version-1.3.0-informational.svg)
+![Version 1.4.0](https://img.shields.io/badge/version-1.4.0-informational.svg)
 
 Mandate is a self-hosted, open-source [MCP](https://modelcontextprotocol.io) server
 that sits between AI clients such as Claude or ChatGPT and your company's systems. It decides who

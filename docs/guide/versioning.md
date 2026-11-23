@@ -1,7 +1,7 @@
 # Versioning
 
 This page says what you can rely on when you upgrade, and how breaking changes are announced.
-The product follows [semantic versioning](https://semver.org). The current release is 1.3.0.
+The product follows [semantic versioning](https://semver.org). The current release is 1.4.0.
 
 ## What is versioned
 
@@ -9,16 +9,16 @@ Four things carry a version, and two of them are public interfaces with a writte
 
 | Artifact | Version | Where you see it | Public contract |
 | --- | --- | --- | --- |
-| Product (`api`, `worker`, images) | 1.3.0 | `version` field of `GET /healthz`; image label `org.opencontainers.image.version` | The behaviour this guide describes |
-| Connector SDK (`@mandate/connector-sdk`) | 1.3.0 | package version; `CONNECTOR_SDK_VERSION` | `packages/connector-sdk/api-report.d.ts`; the preset format in `packages/config/schema/mandate-preset.v1.json` |
-| Configuration schema | 1.3.0 | `CONFIG_SCHEMA_VERSION`; the `version: 1` line of every YAML file is its major | `packages/config/schema/mandate-config.v1.json` |
+| Product (`api`, `worker`, images) | 1.4.0 | `version` field of `GET /healthz`; image label `org.opencontainers.image.version` | The behaviour this guide describes |
+| Connector SDK (`@mandate/connector-sdk`) | 1.4.0 | package version; `CONNECTOR_SDK_VERSION` | `packages/connector-sdk/api-report.d.ts`; the preset format in `packages/config/schema/mandate-preset.v1.json` |
+| Configuration schema | 1.4.0 | `CONFIG_SCHEMA_VERSION`; the `version: 1` line of every YAML file is its major | `packages/config/schema/mandate-config.v1.json` |
 | Presets (`@mandate/magento2-catalog`, `@mandate/gitea-issues`) | 1.1.0 (`magento2-catalog`), 1.0.0 (`gitea-issues`) | package version | Each preset's `mandate.sdk` range |
 
 ```bash
 curl -fsS "http://localhost:${MANDATE_API_PORT:-8400}/healthz"
 ```
 
-The answer is `{"ok":true,"version":"1.3.0"}`. The worker answers the same on its health port.
+The answer is `{"ok":true,"version":"1.4.0"}`. The worker answers the same on its health port.
 
 ## The rules
 
@@ -111,7 +111,8 @@ refused before anything runs. A preset with `^1.0.0` loads on every 1.x platform
 A preset that uses a feature added in a minor declares that minor: one that declares `params` needs
 SDK 1.1.0 and says `"sdk": "^1.1.0"` (see [Presets](presets.md#parameters)); one that uses
 `records_arg`, `action`, `checks` or `lookups` needs SDK 1.2.0 and says `"sdk": "^1.2.0"`; one that uses
-`verify_after` needs SDK 1.3.0 and says `"sdk": "^1.3.0"`.
+`verify_after` needs SDK 1.3.0 and says `"sdk": "^1.3.0"`; one that uses `files` needs SDK 1.4.0 and says
+`"sdk": "^1.4.0"`.
 Presets before 1.0 declared `^0.6.0`; that range does not match 1.0.0, so a preset you wrote earlier
 needs its range changed, and a rebuild, after you upgrade. See [Presets](presets.md).
 

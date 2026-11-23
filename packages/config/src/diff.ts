@@ -100,6 +100,7 @@ function entitiesOf(configuration: LoadedConfiguration): ReadonlyMap<EntityKind,
   put('setting', 'changesets', configuration.changesets);
   put('setting', 'audit', configuration.audit);
   put('setting', 'rate_limits', configuration.rateLimits);
+  put('setting', 'files', configuration.files);
   return kinds;
 }
 

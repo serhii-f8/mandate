@@ -18,7 +18,7 @@ production values see [Production hardening](production.md).
   silently. Only `input_schema` and the `args` of a connection test are open objects.
 - List keys (`connections`, `operations`, `roles`, `role_mapping`, ...) concatenate across files.
   An `id` may appear once across all files.
-- `changesets`, `audit` and `rate_limits` may be set in one file only.
+- `changesets`, `audit`, `rate_limits` and `files` may be set in one file only.
 - Credentials never go in YAML. A connection names a secret with `credential_ref`; you enter the
   value on the credential page. A URL with a user name or password is refused.
 - `id` values match `^[a-z][a-z0-9_-]{0,62}$`. Operation IDs match
@@ -40,6 +40,7 @@ production values see [Production hardening](production.md).
 | `changesets` | object | see below | Change-set lifecycle |
 | `audit` | object | keep forever | Audit retention |
 | `rate_limits` | object | see below | Endpoint rate limits |
+| `files` | object | see below | Staging of files that operations take as arguments (since 1.4.0) |
 
 ### `version`
 
@@ -104,6 +105,7 @@ connections:
 | `input_schema` | JSON Schema object | derived from the spec | Open object; required when `upstream` uses templates |
 | `fields_arg` | string | none | 1-128 characters; the argument that selects returned fields; for a write it defaults to, and must equal, `manifest.values_arg` or `manifest.records_arg` |
 | `manifest` | object | none | Required for `write`; allowed on `destructive`; not allowed on `read` or `write_opaque` |
+| `files` | list | none | Since 1.4.0. 1-5 file arguments; only on `write_opaque`, or `destructive` without a manifest, with an HTTP binding; see below |
 
 `upstream` takes one of three forms, chosen by its keys:
 
@@ -287,6 +289,31 @@ A grant
 `scope` key must be an argument of the operation and, for a write with a manifest, a key of
 `manifest.scope_args`.
 
+`files` (since 1.4.0, optional) declares which arguments of an opaque HTTP operation hold a staged
+file. The caller passes the ID of an uploaded file there; the change-set carries the file's descriptor
+and content hash instead. The operation needs an explicit `input_schema`: every parent along `at` is
+`type: object` with the next name in `required`, and the leaf is exactly `{ type: string, format: uuid }`
+(besides `title` and `description`), so a file argument is always present.
+
+| Key | Type | Default | Bounds / notes |
+| --- | --- | --- | --- |
+| `at` | string | required | Where the file sits in the arguments: `/a/b/c`, 1-8 property names each matching `^[A-Za-z_][A-Za-z0-9_]{0,63}$`; no array index, no `~` escape. Paths are distinct and none is a prefix of another |
+| `send` | `base64` | required | How the file is sent upstream |
+| `media_types` | list of strings | required | 1-20 declared types the caller may send, lower case, `type/subtype` |
+| `max_bytes` | integer | `files.max_bytes` | 1 to `files.max_bytes` |
+| `part` | string | none | `^[A-Za-z0-9_.-]{1,64}$`; allowed only with `send: multipart`, so it is refused for now |
+
+```yaml
+files:
+  - at: /entry/content/base64_encoded_data
+    send: base64
+    media_types: [image/png, image/jpeg]
+    max_bytes: 5000000
+```
+
+A grant `scope` must not name an argument that is a one-segment file path: it holds a file ID, which
+no scope value could match.
+
 ### `roles`
 
 | Key | Type | Default | Bounds / notes |
@@ -416,6 +443,25 @@ The client address comes from `X-Forwarded-For` only as far as `MANDATE_TRUST_PR
 rate_limits:
   mcp_user_per_minute: 300
   unauthenticated_per_minute: 30
+```
+
+### `files`
+
+Settings of staged files (OPS-8, since 1.4.0); at most one document may set them. Absent keys take the
+defaults.
+
+| Key | Type | Default | Bounds / notes |
+| --- | --- | --- | --- |
+| `max_bytes` | integer | 10485760 | 1-26214400 (25 MiB). The most an uploaded file and any `files[].max_bytes` may be |
+| `staged_ttl_hours` | integer | 24 | 1-720. An unreferenced file's content is removed after this |
+| `keep_days` | integer | 7 | 0-365. Content is kept this long after the last change-set that uses it ended |
+| `per_user_count` | integer | 50 | 1-1000. Files with content per uploader |
+| `per_user_bytes` | integer | 262144000 | 1-10737418240. Bytes with content per uploader |
+
+```yaml
+files:
+  max_bytes: 5242880
+  keep_days: 3
 ```
 
 ## Environment variables

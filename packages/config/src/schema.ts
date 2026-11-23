@@ -19,6 +19,7 @@ import {
 } from './upstream-schema.js';
 import { changesetsSchema, manifestSchema } from './manifest.js';
 import { presetParamValuesSchema } from './preset-params.js';
+import { fileArgumentsSchema, fileSettingsSchema } from './files.js';
 
 export { OPERATION_ID };
 const credentialRef = id;
@@ -64,6 +65,8 @@ const operationFields = {
   fields_arg: z.string().min(1).max(128).optional(),
   /** OPS-2: how a write operation's targets and after values are prepared. */
   manifest: manifestSchema.optional(),
+  /** OPS-8: file arguments of an opaque operation with an HTTP binding. */
+  files: fileArgumentsSchema.optional(),
 };
 const operation = z.strictObject({ ...operationFields, connection: id });
 /** A preset operation: bound to the connection that applies the preset. */
@@ -180,6 +183,8 @@ export const configDocumentSchema = z.strictObject({
   changesets: changesetsSchema.optional(),
   /** AUD-7: at most one document may set it; absent retention keeps the trail forever. */
   audit: z.strictObject({ retention_days: z.number().int().min(1).max(36500).optional() }).optional(),
+  /** OPS-8: at most one document may set it; absent keys take DEFAULT_FILE_SETTINGS. */
+  files: fileSettingsSchema.optional(),
   /** SEC-10: at most one document may set it; absent keys take DEFAULT_RATE_LIMITS. */
   rate_limits: z
     .strictObject({

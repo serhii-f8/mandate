@@ -2,6 +2,19 @@
 
 All notable changes are recorded here. The project follows [semantic versioning](docs/guide/versioning.md).
 
+## 1.4.0
+
+Additive release: the configuration schema and the connector SDK are 1.4.0. A preset that declares
+`files` declares `mandate.sdk: ^1.4.0`. See [Upgrading](docs/guide/upgrading.md#upgrading-to-140).
+
+### Added
+
+- An opaque operation with an HTTP binding may declare `files`: 1 to 5 file arguments, each with `at`
+  (a path of required objects ending in a `format: uuid` string), `send`, `media_types`, `max_bytes`
+  and `part`; the global `files` settings (`max_bytes`, `staged_ttl_hours`, `keep_days`,
+  `per_user_count`, `per_user_bytes`) may be set in one document. The loader checks both and refuses
+  a grant scope that names a one-segment file argument (OPS-8, ADR 0075).
+
 ## 1.3.0
 
 Additive release: the configuration schema and the connector SDK are 1.3.0. A preset that uses

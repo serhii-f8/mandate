@@ -13,6 +13,7 @@ import { pathToString } from './issues.js';
 import type { OverrideConfig, PresetOperationConfig } from './schema.js';
 import type { SourceDocument } from './yaml-source.js';
 import { toManifestDefinition } from './manifest.js';
+import { fileArgumentIssues, toFileArguments } from './files.js';
 import { isMcpUpstream, type McpCatalogState, type McpUpstreamConfig } from './mcp.js';
 import {
   hasTemplates,
@@ -121,6 +122,8 @@ export interface RegistryInput {
   /** A bound preset failed to load, so an unknown operation ID may be one of its operations. */
   readonly operationsIncomplete?: boolean;
   readonly reserved: ReadonlySet<string>;
+  /** OPS-8: the global `files.max_bytes`. */
+  readonly fileMaxBytes: number;
   readonly compile: (schema: Readonly<Record<string, unknown>>) => ArgumentValidator;
   readonly at: At;
 }
@@ -174,6 +177,7 @@ export function buildRegistry(input: RegistryInput): Registry {
       inputSchema: schema,
       ...(fieldsArg === undefined ? {} : { fieldsArg }),
       ...(op.manifest === undefined ? {} : { manifest: toManifestDefinition(op.manifest) }),
+      ...(op.files === undefined ? {} : { files: toFileArguments(op.files, input.fileMaxBytes) }),
     };
     return { definition, enabled: override?.enabled ?? true };
   };
@@ -196,6 +200,15 @@ export function buildRegistry(input: RegistryInput): Registry {
     } else {
       disabled.push({ key: op.id, connection, method: 'MCP', path: u.tool, tool: u.tool });
     }
+  };
+
+  /** OPS-8: reports the issues of an operation's `files`. */
+  const checkFiles = (located: OperationSource, binding: 'http' | 'mcp' | 'code'): void => {
+    const { value: op, source, path } = located;
+    if (op.files === undefined) return;
+    const opaque = op.risk === 'write_opaque' || (op.risk === 'destructive' && op.manifest === undefined);
+    const issues = fileArgumentIssues({ files: op.files, inputSchema: op.input_schema, explicitSchema: op.input_schema !== undefined, opaque, binding, maxBytes: input.fileMaxBytes });
+    for (const issue of issues) at(source, [...path, ...issue.path], issue.message);
   };
 
   /** An operation whose upstream is refused: its definition only, no binding. */
@@ -282,6 +295,7 @@ export function buildRegistry(input: RegistryInput): Registry {
       if (op.risk === 'write') at(source, [...path, 'risk'], 'write needs a manifest, which MCP-backed operations cannot carry (use read, write_opaque or destructive)');
       if (op.manifest !== undefined) at(source, [...path, 'manifest'], 'is not allowed on an MCP-backed operation');
       if (op.fields_arg !== undefined) at(source, [...path, 'fields_arg'], 'is not allowed on an MCP-backed operation');
+      checkFiles(located, 'mcp');
       const toolKey = `${connection}\0${u.tool}`;
       const boundBy = boundTools.get(toolKey);
       if (boundBy !== undefined) upstreamAt(['tool'], `tool ${u.tool} of connection ${connection} is already bound by operation ${boundBy}`);
@@ -298,6 +312,7 @@ export function buildRegistry(input: RegistryInput): Registry {
     }
     // After the mcp-connection refusal (ledger F22): none of the HTTP rules below applies to code.
     if (isCodeUpstream(u)) {
+      checkFiles(located, 'code');
       registerCode(located, u);
       continue;
     }
@@ -362,6 +377,7 @@ export function buildRegistry(input: RegistryInput): Registry {
     const binding = bindingOf(connection, op, u, entry);
     const { definition, enabled } = definitionOf(located, schema);
     const opaque = isOpaque(definition);
+    checkFiles(located, 'http');
     // A non-GET call labelled read would skip the change-set path (MCP-4).
     const method = binding?.mapping.method ?? u.method;
     const methodAt = [u.method === undefined ? 'operation' : 'method'];

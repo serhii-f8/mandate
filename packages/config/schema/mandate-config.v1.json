@@ -622,6 +622,37 @@
       },
       "type": "array"
     },
+    "files": {
+      "additionalProperties": false,
+      "properties": {
+        "keep_days": {
+          "maximum": 365,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_bytes": {
+          "maximum": 26214400,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "per_user_bytes": {
+          "maximum": 10737418240,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "per_user_count": {
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "staged_ttl_hours": {
+          "maximum": 720,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "notifications": {
       "items": {
         "oneOf": [
@@ -709,6 +740,50 @@
             "maxLength": 128,
             "minLength": 1,
             "type": "string"
+          },
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "at": {
+                  "pattern": "^\\/[A-Za-z_][A-Za-z0-9_]{0,63}(\\/[A-Za-z_][A-Za-z0-9_]{0,63}){0,7}$",
+                  "type": "string"
+                },
+                "max_bytes": {
+                  "maximum": 26214400,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "media_types": {
+                  "items": {
+                    "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}\\/[a-z0-9][a-z0-9!#$&^_.+-]{0,62}$",
+                    "type": "string"
+                  },
+                  "maxItems": 20,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "part": {
+                  "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+                  "type": "string"
+                },
+                "send": {
+                  "enum": [
+                    "base64"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "at",
+                "send",
+                "media_types"
+              ],
+              "type": "object"
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "type": "array"
           },
           "id": {
             "maxLength": 64,
@@ -3043,5 +3118,5 @@
     "version"
   ],
   "type": "object",
-  "x-mandate-schema-version": "1.3.0"
+  "x-mandate-schema-version": "1.4.0"
 }
