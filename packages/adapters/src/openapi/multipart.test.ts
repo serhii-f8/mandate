@@ -67,6 +67,10 @@ describe('CONN-9 multipart body', () => {
     expect(() => multipartBody({}, [part({ name: 'a b' })], 'B')).toThrow(MappingError);
   });
 
+  it.each([['image/png\r\nX-Evil: 1'], ['image/\x00png'], ['a\x7f']])('CONN-9 a media type with a control character %j throws MappingError', (mediaType) => {
+    expect(() => multipartBody({}, [part({ mediaType })], 'B')).toThrow(MappingError);
+  });
+
   it('CONN-9 newBoundary gives a different mandate-<32 hex> each time', () => {
     const a = newBoundary();
     const b = newBoundary();

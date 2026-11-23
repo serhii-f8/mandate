@@ -82,6 +82,12 @@ element of an `anyOf` or `oneOf` list in a schema, is judged additive because it
 accepted, yet for an output type that a preset or a client handles exhaustively (a `switch` over every
 variant) it is breaking. Reviewers judge that case and ask for the major bump.
 
+A case of this kind in the SDK is `CallTarget`, which gained `http_multipart` in 1.4.0. A write
+adapter that implements `callOnce` must answer `not_sent` for any `target.kind` it does not handle.
+One that narrows with `kind === 'http' ? ... : target.tool`, or was compiled against 1.3, would treat
+`http_multipart` as `mcp` and could send a request without its file. The bundled adapters refuse
+unknown kinds (CONN-9, ADR 0076).
+
 The gate exits 2 when an explicit `--base` does not resolve, or when neither `main` nor `origin/main`
 resolves under CI (`CI` set). Outside CI it prints `skipped: no base`.
 

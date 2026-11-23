@@ -318,7 +318,19 @@ describe('CONN-9 callOnce http_multipart', () => {
   });
 
   it('CONN-9 a GET or bulk mapping is not sent', async () => {
-    expect(await mpCall({ mapping: { ...MP_MAPPING, method: 'GET' } })).toMatchObject({ result: 'not_sent', code: 'mapping' });
+    const STATUS = {
+      method: 'GET' as const,
+      path: '/bulk/{batch_id}',
+      items: 'items',
+      index: 'id',
+      state: 'status',
+      states: { ok: [1], retriable: [2], failed: [3], open: [4] },
+    };
+    for (const mapping of [{ ...MP_MAPPING, method: 'GET' as const }, { ...MP_MAPPING, bulk: { body: {}, batchId: 'id', status: STATUS } }]) {
+      const h = hook();
+      expect(await mpCall({ mapping, beforeSend: h.beforeSend })).toEqual({ result: 'not_sent', code: 'mapping', durationMs: 0 });
+      expect(h.seen).toEqual([]);
+    }
     expect(up.requests).toEqual([]);
   });
 

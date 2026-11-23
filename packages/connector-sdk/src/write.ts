@@ -38,7 +38,9 @@ export interface FilePart {
  * since 0.6.0, additive. What one opaque call addresses: an HTTP mapping of an OpenAPI
  * connection or a tool of an MCP connection. `http_multipart` (since 1.4.0, additive) is an HTTP
  * mapping whose body is sent as `multipart/form-data`: the mapping's `body` template renders the
- * text fields and `parts` are the files. An adapter that does not know a kind sends nothing.
+ * text fields and `parts` are the files. An adapter must answer `not_sent` for any `kind` it does
+ * not handle; do not narrow with `kind === 'http' ? ... : target.tool`, which would read
+ * `http_multipart` as `mcp` and could send a call without its file.
  */
 export type CallTarget =
   | { readonly kind: 'http'; readonly mapping: UpstreamMapping }

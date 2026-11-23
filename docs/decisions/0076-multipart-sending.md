@@ -79,12 +79,17 @@ Option 1 in each question.
 
 ## Consequences
 
-- A preset or an adapter written against 1.3 keeps working. A 1.3 adapter given the new kind sends
-  nothing, which the worker reports as `not_sent`.
+- A preset keeps working. The bundled adapters refuse the new kind, which the worker reports as
+  `not_sent`. A third-party adapter stays safe only if it answers `not_sent` for any `target.kind` it
+  does not handle: one that narrows with `kind === 'http' ? ... : target.tool`, or was compiled
+  against 1.3, would read `http_multipart` as `mcp` and could send a call without its file. This is
+  the exhaustive-handling case that `docs/guide/versioning.md` leaves to review; the SDK's
+  `CallTarget` comment and that guide say so.
 - Files are held in memory twice at most (the stored content and the assembled body), bounded by the
   global `files.max_bytes` (at most 25 MiB) and five files per operation.
 - A text field value that contains a line looking like the boundary cannot end its part, because the
   boundary is random per request and not derivable from the content.
+- A backslash in a file name is sent as is: the WHATWG form-data rule escapes only `"`, CR and LF.
 - Upstreams that need `filename*` or another encoding for non-ASCII names are not served; a later
   option on the declaration would add it.
 
