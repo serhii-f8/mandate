@@ -4,12 +4,15 @@ import { approvalRuleFor, type LoadedConfiguration } from '@mandate/config';
 import {
   approvalRequirement,
   changesetKind,
+  fileDescriptorAt,
   createPolicyEngine,
   hashStoredItems,
   isOpaque,
   manifestAction,
   OPAQUE_TARGET_ID,
   planStepMayStart,
+  sha256Of,
+  storedFilesMatch,
   policyDecisionAuditEvent,
   UnknownHashVersionError,
   type AuditLog,
@@ -18,6 +21,7 @@ import {
   type ChangeSetRecord,
   type ChangeSetRepository,
   type ExecutionGuard,
+  type FileStore,
   type ManifestAction,
   type OperationDefinition,
   type PolicyDecision,
@@ -56,6 +60,8 @@ export interface ExecutionGuardDeps {
   readonly newId: () => string;
   /** Called once per stored-items page while hashing, so a long hash keeps its activity alive. */
   readonly heartbeat?: () => void;
+  /** The staged files' content (CS-10). Without it a change-set with files cannot be checked and is refused. */
+  readonly files?: Pick<FileStore, 'content'>;
 }
 
 /**
@@ -74,6 +80,12 @@ export interface ExecutionGuardDeps {
  * Before 2, a plan step above step 1 needs its predecessor `completed`, read now: the stored status may have
  * moved since the start, so a step that may no longer start is refused as `policy_denied` (EXE-13, fail closed).
  * It is not a policy decision and is not audited as one.
+ *
+ * Also before 2, the files (CS-10): the operation's `files` under the current configuration must equal the
+ * stored links and each stored argument at a path must be the descriptor of the linked file (`policy_denied`:
+ * the operation changed, in either direction); each linked file's stored content must be present and hash to
+ * the descriptor's `sha256`, and without a file store it cannot be shown (`hash_mismatch`: what was approved is
+ * not what is stored). A change-set without files and an operation without files is not touched.
  *
  * Also before 2, the kind the change-set was prepared as (its stored items) must equal the kind of its
  * operation under the current configuration; a reload that flips an operation between
@@ -138,6 +150,21 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
     for (const step of requirement.steps) needed.set(step, (needed.get(step) ?? 0) + 1);
     return [...needed].every(([role, count]) => (approvedBy.get(role) ?? 0) >= count);
   }
+
+  /** Whether every linked file's stored content is present and hashes to the sealed descriptor (CS-10, CS-4). */
+  async function storedFilesIntact(changeset: ChangeSetRecord): Promise<boolean> {
+    const links = changeset.files ?? [];
+    if (links.length === 0) return true;
+    if (deps.files === undefined) return false;
+    for (const link of links) {
+      heartbeat?.();
+      const path = link.pointer.split('/').slice(1); // segments are plain identifiers (OPS-8)
+      const descriptor = fileDescriptorAt(changeset.args, path);
+      const content = await deps.files.content(link.fileId);
+      if (descriptor === undefined || content === undefined || sha256Of(content) !== descriptor.sha256) return false;
+    }
+    return true;
+  }
   return (configuration) => ({
     async check(changeset) {
       let hash: string | undefined;
@@ -160,6 +187,8 @@ export function createExecutionGuard(deps: ExecutionGuardDeps): (configuration: 
       if (changesetKind(operation) !== (await storedKind(changeset))) return { ok: false, outcome: 'policy_denied' };
       // A change-set stored without an action is an update, so it never runs as a create or a delete (OPS-2, ADR 0071).
       if (!storedActionMatches(configuration.policy.operations, changeset, 'execute')) return { ok: false, outcome: 'policy_denied' };
+      if (!storedFilesMatch(operation?.files, changeset)) return { ok: false, outcome: 'policy_denied' };
+      if (!(await storedFilesIntact(changeset))) return { ok: false, outcome: 'hash_mismatch' };
       const caller: Caller = {
         subject: request.actor,
         groups: request.groups,

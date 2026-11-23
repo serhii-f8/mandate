@@ -23,6 +23,7 @@ import {
   PostgresChangeSetRepository,
   PostgresConfigRevisionStore,
   PostgresCredentialVault,
+  PostgresFileStore,
   PostgresNotificationOutbox,
   PostgresRateCounter,
   runAuditRetention,
@@ -88,6 +89,8 @@ interface RuntimeStores {
   readonly logger: Logger;
   /** EXE-13: the executor `advancePlan` starts the next plan step with. */
   readonly executor: TemporalExecutor;
+  /** CS-10: the staged files' content the execution guard checks. */
+  readonly files: PostgresFileStore;
 }
 
 /**
@@ -117,6 +120,7 @@ function activitiesFor(stores: RuntimeStores): WorkerActivities {
         repository,
         audit: stores.audit,
         newId: randomUUID,
+        files: stores.files,
         heartbeat: () => {
           heartbeat();
         },
@@ -289,6 +293,7 @@ export async function startWorkerRuntime(
       tuning: env.activityTuning,
       logger,
       executor,
+      files: new PostgresFileStore(database.db),
     }), meter);
     const dispatcher = createNotificationDispatcher({
       outbox: new PostgresNotificationOutbox(database.db),
