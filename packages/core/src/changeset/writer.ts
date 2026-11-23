@@ -23,6 +23,8 @@ export type WriteOutcomeCode =
   | 'egress_denied'
   | 'credential_missing'
   | 'credential_unusable'
+  /** A file of an opaque call is missing or changed since approval; nothing was sent (CS-10, EXE-4). */
+  | 'file_unavailable'
   /** The upstream answered `ok`, but a create is still absent or a delete still present (CS-7). */
   | 'not_applied';
 

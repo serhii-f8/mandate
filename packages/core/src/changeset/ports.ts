@@ -436,7 +436,9 @@ export type OpaqueNotSentCode =
   | 'credential_unusable'
   | 'egress_denied'
   | 'upstream_changed'
-  | 'upstream_unavailable';
+  | 'upstream_unavailable'
+  /** A file of the call is missing, was purged or no longer hashes to the sealed descriptor (CS-10, EXE-4). */
+  | 'file_unavailable';
 
 /** The answer to one opaque call: codes only, never upstream text (SEC-3, SEC-5). */
 export type OpaqueCallOutcome =
@@ -461,6 +463,8 @@ export interface OpaqueCaller {
   call(input: {
     readonly args: Readonly<Record<string, unknown>>;
     readonly idempotencyKey: string;
+    /** The change-set's file links (CS-10); the caller sends nothing unless each file's stored content hashes to its descriptor. */
+    readonly files?: readonly FileLink[];
     readonly beforeSend: () => Promise<void>;
   }): Promise<OpaqueCallOutcome>;
 }

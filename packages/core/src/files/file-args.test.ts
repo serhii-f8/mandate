@@ -125,4 +125,22 @@ describe('OPS-8 CS-10 file arguments', () => {
     expect(() => withValueAt({ entry: 'str' }, ['entry', 'x'], 1)).toThrow(TypeError);
     expect(() => withValueAt({}, ['entry', 'x'], 1)).toThrow(TypeError);
   });
+
+  it('OPS-8 a __proto__ path segment sets and reads an own property, never the prototype', () => {
+    const d = { id: F, name: 'a.png', media_type: 'image/png', size: 10, sha256: staged.sha256 };
+    const own = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+    const set = withValueAt({}, ['__proto__'], 'v');
+    expect(own(set, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(set)).toBe(Object.prototype);
+    const nested = JSON.parse('{"__proto__":{"k":1}}') as Record<string, unknown>;
+    const deep = withValueAt(nested, ['__proto__', 'k'], 'v');
+    expect(Object.getPrototypeOf(deep)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(deep, '__proto__')?.value).toEqual({ k: 'v' });
+    expect(Object.getOwnPropertyDescriptor(nested, '__proto__')?.value).toEqual({ k: 1 });
+    expect(own(withValueAt(set, ['__proto__'], OMIT), '__proto__')).toBe(false);
+    // Reading: an inherited `__proto__` is no value; an own one is.
+    expect(fileDescriptorAt({}, ['__proto__'])).toBeUndefined();
+    const holder = JSON.parse(JSON.stringify({ x: 1 }).replace('{"x":1}', `{"__proto__":{"$file":${JSON.stringify(d)}}}`)) as Record<string, unknown>;
+    expect(fileDescriptorAt(holder, ['__proto__'])).toEqual(d);
+  });
 });

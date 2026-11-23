@@ -19,6 +19,7 @@ type CallInput = Parameters<OpaqueCaller['call']>[0];
 /** Honours the port contract: pre-flight (`not_sent` answers before `beforeSend`), then `beforeSend`, then one send. */
 class ScriptedCaller implements OpaqueCaller {
   readonly calls: { args: Readonly<Record<string, unknown>>; idempotencyKey: string }[] = [];
+  readonly files: (CallInput['files'])[] = [];
   readonly idempotencyHeader?: string;
   constructor(
     private readonly events: string[],
@@ -29,6 +30,7 @@ class ScriptedCaller implements OpaqueCaller {
   }
   async call(input: CallInput): Promise<OpaqueCallOutcome> {
     this.calls.push({ args: input.args, idempotencyKey: input.idempotencyKey });
+    this.files.push(input.files);
     if (this.outcome.kind === 'not_sent') return this.outcome;
     await input.beforeSend();
     this.events.push('send');
@@ -100,6 +102,7 @@ const NOT_SENT_CODES: readonly OpaqueNotSentCode[] = [
   'egress_denied',
   'upstream_changed',
   'upstream_unavailable',
+  'file_unavailable',
 ];
 
 describe('EXE-4 NFR-2 OpaqueCallWriter', () => {
@@ -251,5 +254,35 @@ describe('EXE-4 NFR-2 OpaqueCallWriter', () => {
       callerFor: () => ({ call: () => Promise.reject(boom) }),
     });
     await expect(writer.writeBatch({ changeset, items: [callItem], batch })).rejects.toBe(boom);
+  });
+});
+
+describe('EXE-4 CS-10 OpaqueCallWriter with files', () => {
+  const links = [{ pointer: '/doc', fileId: '11111111-1111-4111-8111-111111111111' }] as const;
+  const withFiles: ChangeSetRecord = { ...changeset, files: links };
+
+  it('CS-10 not_sent/file_unavailable makes the item failed with error file_unavailable', async () => {
+    const { batch, writer } = setup({ kind: 'not_sent', code: 'file_unavailable' });
+    expect(await writer.writeBatch({ changeset: withFiles, items: [callItem], batch })).toEqual([
+      { targetId: 'call', status: 'failed', error: 'file_unavailable' },
+    ]);
+    expect(batch.recorded).toEqual([]);
+  });
+
+  it('CS-10 the change-set links go to the caller on the first send and on the resend of a keyed submission', async () => {
+    const first = setup({ kind: 'accepted' }, { idempotencyHeader: HEADER });
+    await first.writer.writeBatch({ changeset: withFiles, items: [callItem], batch: first.batch });
+    expect(first.caller.files).toEqual([links]);
+
+    const resend = setup({ kind: 'accepted' }, { idempotencyHeader: HEADER });
+    resend.batch.submission = RECORDED_KEYED;
+    await resend.writer.writeBatch({ changeset: withFiles, items: [callItem], batch: resend.batch });
+    expect(resend.caller.files).toEqual([links]);
+  });
+
+  it('CS-10 a change-set without files passes none', async () => {
+    const { caller, batch, writer } = setup({ kind: 'accepted' });
+    await writer.writeBatch({ changeset, items: [callItem], batch });
+    expect(caller.files).toEqual([undefined]);
   });
 });

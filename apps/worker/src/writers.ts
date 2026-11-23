@@ -18,6 +18,7 @@ import type { CodeAdapter, ReadAdapter, RecordWriteAdapter, WriteAdapter } from 
 import type { LoadedConfiguration } from '@mandate/config';
 import {
   isOpaque,
+  type FileStore,
   ManifestBatchWriter,
   OpaqueCallWriter,
   UnsupportedWriter,
@@ -57,6 +58,11 @@ export interface WriterForDeps {
   /** Default: wall-clock time and a `setTimeout` sleep. */
   readonly clock?: Clock;
   readonly log?: (record: UpstreamCallLog) => void;
+  /**
+   * The staged files' content for an opaque call with files (EXE-4, CS-10). Absent, such a call is
+   * `not_sent/file_unavailable`: nothing is sent without its verified content.
+   */
+  readonly files?: Pick<FileStore, 'content'>;
 }
 
 export type WriterFor = (configuration: LoadedConfiguration, operationId: string) => ChangeWriter;
@@ -185,10 +191,11 @@ const unavailableCaller: OpaqueCaller = {
 function opaqueWriter(deps: WriterForDeps, configuration: LoadedConfiguration, operationId: string): OpaqueCallWriter {
   const { vault, adapter, toolLister } = deps;
   const log = deps.log === undefined ? {} : { log: deps.log };
+  const files = deps.files === undefined ? {} : { files: deps.files };
   const pinCheck = toolLister === undefined ? {} : { pinCheck: (id: string) => verifyPinNow(toolLister, configuration, id) };
   return new OpaqueCallWriter({
     callerFor: (cs) =>
-      createOpaqueCaller({ configuration, vault, adapter, operationId, correlationId: executionCorrelation(cs), ...pinCheck, ...log }) ??
+      createOpaqueCaller({ configuration, vault, adapter, operationId, correlationId: executionCorrelation(cs), ...pinCheck, ...files, ...log }) ??
       unavailableCaller,
   });
 }

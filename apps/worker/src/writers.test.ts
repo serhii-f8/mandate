@@ -20,6 +20,7 @@ import {
   EMPTY_STATS,
   ManifestBatchWriter,
   OpaqueCallWriter,
+  sha256Of,
   UnsupportedWriter,
   type BatchContext,
   type BatchSubmission,
@@ -28,7 +29,7 @@ import {
   type Clock,
   type RollbackStrategy,
 } from '@mandate/core';
-import { installFakeMagentoCatalog, startFakeUpstream, type FakeMagentoCatalog, type FakeUpstream } from '@mandate/testing';
+import { installFakeMagentoCatalog, InMemoryFileStore, startFakeUpstream, type FakeMagentoCatalog, type FakeUpstream } from '@mandate/testing';
 import { createBulkWriter, createUpstreamReader, type ToolLister, type UpstreamCallLog } from '@mandate/upstream';
 import { loadMagentoPreset, MAGENTO_BASE_PATH, MemoryVault, vaultWithToken } from '../test/support/magento.js';
 import { createRollbackWriterFor, createWriterFor } from './writers.js';
@@ -724,5 +725,74 @@ describe('OPS-2 EXE-8 create and its rollback through the worker writers', () =>
     expect(lines.filter((l) => l.method === 'DELETE').map((l) => l.operation)).toEqual(['catalog.delete_product']);
     expect(lines.filter((l) => l.method === 'POST')).toEqual([]);
     expect(catalog.product('N1')).toBeUndefined();
+  });
+});
+
+const FILE_OPERATIONS = `version: 1
+operations:
+  - id: catalog.upload
+    connection: magento
+    risk: write_opaque
+    description: Upload a document.
+    upstream: { method: POST, path: /V1/documents, body: { arg: doc } }
+    input_schema: { type: object, properties: { doc: { type: string, format: uuid } }, required: [doc] }
+    files: [{ at: /doc, send: base64, media_types: [text/plain] }]
+`;
+
+describe('EXE-4 CS-10 worker writerFor of an opaque operation with a file', () => {
+  const FILE_ID = '11111111-1111-4111-8111-111111111111';
+  const BYTES = new TextEncoder().encode('the approved document bytes');
+  const NAME = 'distinctive-document-name.txt';
+  let up: FakeUpstream;
+  let configuration: LoadedConfiguration;
+  let vault: MemoryVault;
+  let lines: UpstreamCallLog[];
+  let store: InMemoryFileStore;
+
+  beforeEach(async () => {
+    up = await startFakeUpstream();
+    up.route('POST', `${MAGENTO_BASE_PATH}/V1/documents`, () => ({ status: 201, body: { id: 7 } }));
+    configuration = await loadMagentoPreset(`${up.url}${MAGENTO_BASE_PATH}`, [{ file: 'operations.yaml', text: FILE_OPERATIONS }]);
+    vault = await vaultWithToken(FAKE_TOKEN);
+    lines = [];
+    store = new InMemoryFileStore();
+    const now = new Date('2026-11-23T10:00:00.000Z');
+    await store.stage(
+      { id: FILE_ID, owner: 'alice', name: NAME, mediaType: 'text/plain', content: BYTES, sha256: sha256Of(BYTES), preview: 'text', createdAt: now, quota: { count: 5, bytes: 1_000_000 } },
+      { id: 'a', ts: now } as never, // the in-memory store drops the audit event
+    );
+  });
+  afterEach(async () => {
+    await up.close();
+  });
+
+  const changeset = (): ChangeSetRecord => ({
+    ...changesetFor('catalog.upload'),
+    args: { doc: { $file: { id: FILE_ID, name: NAME, media_type: 'text/plain', size: BYTES.byteLength, sha256: sha256Of(BYTES) } } },
+    files: [{ pointer: '/doc', fileId: FILE_ID }],
+    hashVersion: 3,
+    executionRequest: EXECUTION_REQUEST,
+  });
+  const item = (cs: ChangeSetRecord): readonly ChangeItemRecord[] => [{ targetId: 'call', status: 'pending', before: null, after: cs.args }];
+  const run = (files: Pick<InMemoryFileStore, 'content'> | undefined) => {
+    const cs = changeset();
+    const writer = createWriterFor({ vault, adapter: createOpenApiAdapter(), log: (l) => lines.push(l), ...(files === undefined ? {} : { files }) })(configuration, 'catalog.upload');
+    return writer.writeBatch({ changeset: cs, items: item(cs), batch: new FakeBatch(() => 0) });
+  };
+
+  it('CS-10 EXE-4 the stored bytes go out as base64 in the one request', async () => {
+    expect(await run(store)).toEqual([{ targetId: 'call', status: 'written' }]);
+    expect(up.requests).toHaveLength(1);
+    expect(JSON.parse(up.requests[0]?.body ?? 'null')).toBe(Buffer.from(BYTES).toString('base64'));
+    const logged = JSON.stringify(lines);
+    expect(logged).not.toContain(NAME);
+    expect(logged).not.toContain(Buffer.from(BYTES).toString('base64'));
+  });
+
+  it('CS-10 EXE-4 without the store, or with changed content, the item fails file_unavailable and nothing is sent', async () => {
+    expect(await run(undefined)).toEqual([{ targetId: 'call', status: 'failed', error: 'file_unavailable' }]);
+    store.corrupt(FILE_ID, new TextEncoder().encode('swapped after approval'));
+    expect(await run(store)).toEqual([{ targetId: 'call', status: 'failed', error: 'file_unavailable' }]);
+    expect(up.requests).toEqual([]);
   });
 });

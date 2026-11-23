@@ -75,15 +75,17 @@ export class OpaqueCallWriter implements ChangeWriter {
     const caller = this.deps.callerFor(changeset);
     const header = caller.idempotencyHeader;
     const idempotencyKey = `${changeset.id}:${OPAQUE_TARGET_ID}`;
+    // CS-10: the links go with every send, the first and the resend; the caller loads and verifies the content.
+    const files = changeset.files === undefined ? {} : { files: changeset.files };
 
     if (batch.submission !== undefined) {
       const sent = recordedHeader(batch.submission);
       if (sent === undefined || sent !== header) return [failed(targetId, 'no_outcome')];
-      const answer = await caller.call({ args: changeset.args, idempotencyKey, beforeSend: () => Promise.resolve() });
+      const answer = await caller.call({ args: changeset.args, idempotencyKey, ...files, beforeSend: () => Promise.resolve() });
       return [answer.kind === 'accepted' ? { targetId, status: 'written' } : failed(targetId, 'no_outcome')];
     }
 
-    const answer = await caller.call({ args: changeset.args, idempotencyKey, beforeSend: () => record(batch, header) });
+    const answer = await caller.call({ args: changeset.args, idempotencyKey, ...files, beforeSend: () => record(batch, header) });
     return [outcomeOf(targetId, answer)];
   }
 }

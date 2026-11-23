@@ -71,20 +71,24 @@ export function fileDescriptorAt(args: Readonly<Record<string, unknown>>, path: 
 /** Marks `withValueAt` to remove the property instead of setting it. */
 export const OMIT: unique symbol = Symbol('omit');
 
+/** Defines `key` as an own data property, so a `__proto__` segment (OPS-8 admits it) never reaches the prototype setter. */
+function setOwn(target: Record<string, unknown>, key: string, value: unknown): Record<string, unknown> {
+  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+  return target;
+}
+
 /** A copy of `args` with the value at `path` replaced, or the property removed when `value` is `OMIT`; only the objects on the path are copied. Throws TypeError when a parent on the path is not a plain object. */
 export function withValueAt(args: Readonly<Record<string, unknown>>, path: readonly string[], value: unknown): Record<string, unknown> {
   const [head, ...rest] = path;
   if (head === undefined) throw new TypeError('empty path');
   const copy: Record<string, unknown> = { ...args };
   if (rest.length === 0) {
-    if (value === OMIT) return Object.fromEntries(Object.entries(copy).filter(([k]) => k !== head));
-    copy[head] = value;
-    return copy;
+    if (value === OMIT) return Object.fromEntries(Object.entries(copy).filter(([k]) => k !== head)); // fromEntries defines own properties
+    return setOwn(copy, head, value);
   }
   const child = Object.prototype.hasOwnProperty.call(args, head) ? args[head] : undefined;
   if (!isPlain(child)) throw new TypeError('a parent on the path is not an object');
-  copy[head] = withValueAt(child, rest, value);
-  return copy;
+  return setOwn(copy, head, withValueAt(child, rest, value));
 }
 
 export type FileRefusal = 'file_not_found' | 'file_too_large' | 'file_type_not_allowed';

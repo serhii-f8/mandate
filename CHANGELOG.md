@@ -17,6 +17,7 @@ Additive release: the configuration schema and the connector SDK are 1.4.0. A pr
 - A change-set with files stores each file's descriptor in its arguments and is sealed with hash
   version 3; change-sets without files keep version 2 (CS-4, CS-10).
 - `list_staged_files` answers the upload page URL and the caller's own staged files, and a tool call passes a staged file by ID; `list_staged_files` is now a reserved tool name (MCP-11, CS-10). **Action needed before upgrading:** a configuration with an operation named exactly `list_staged_files` no longer loads; rename it.
+- An opaque call with a `send: base64` file loads the stored content inside the activity, compares its hash with the sealed descriptor and sends it as base64; changed or missing content, or links that do not match the operation, end the item `failed/file_unavailable` with nothing sent (EXE-4, CS-10).
 
 ## 1.3.0
 

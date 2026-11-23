@@ -10,7 +10,7 @@
  */
 import type { LoadedConfiguration, PinEvaluation } from '@mandate/config';
 import type { CallOutcome, CallTarget, CodeAdapter, ConnectionSettings, CodeCallOperation, CodeCallResult, WriteAdapter, WriteErrorCode } from '@mandate/connector-sdk';
-import { isOpaque, type CredentialVault, type OpaqueCaller, type OpaqueCallOutcome, type OpaqueNotSentCode } from '@mandate/core';
+import { fileDescriptorAt, isOpaque, sha256Of, storedFilesMatch, withValueAt, type CredentialVault, type FileArgument, type FileLink, type FileStore, type OpaqueCaller, type OpaqueCallOutcome, type OpaqueNotSentCode } from '@mandate/core';
 import { connectionCredential, type UpstreamCallLog } from './read.js';
 
 export interface OpaqueCallerDeps {
@@ -26,6 +26,11 @@ export interface OpaqueCallerDeps {
    * `(id) => verifyPinNow(lister, configuration, id)` (ruling F8). Absent (no tool lister wired),
    * an MCP call fails closed with `not_sent/upstream_unavailable`.
    */
+  /**
+   * The staged files' content (CS-10). Absent, a call of an operation with files, or one that
+   * carries links, is `not_sent/file_unavailable`: content is never sent unchecked.
+   */
+  readonly files?: Pick<FileStore, 'content'>;
   readonly pinCheck?: (operationId: string) => Promise<PinEvaluation | undefined>;
   readonly log?: (record: UpstreamCallLog) => void;
 }
@@ -85,6 +90,34 @@ function pinRefusal(evaluation: PinEvaluation | undefined): OpaqueNotSentCode | 
 }
 
 /**
+ * The arguments with each `send: base64` file replaced by its stored content, standard base64 with padding
+ * (EXE-4, CS-10); undefined when a file is missing, purged, differs from its sealed descriptor, or the links
+ * are not exactly what the operation declares. Nothing is returned for content that does not hash to the
+ * descriptor's `sha256`, and neither content nor name is logged or thrown (SEC-3).
+ */
+async function argsWithFiles(
+  operation: { readonly files?: readonly FileArgument[] },
+  args: Readonly<Record<string, unknown>>,
+  links: readonly FileLink[],
+  store: Pick<FileStore, 'content'> | undefined,
+): Promise<Readonly<Record<string, unknown>> | undefined> {
+  if (!storedFilesMatch(operation.files, { args, files: links })) return undefined;
+  if (store === undefined) return undefined;
+  let sent = args;
+  for (const entry of operation.files ?? []) {
+    const descriptor = fileDescriptorAt(args, entry.path);
+    if (descriptor === undefined) return undefined;
+    const content = await store.content(descriptor.id);
+    if (content === undefined) return undefined;
+    if (content.byteLength !== descriptor.size || sha256Of(content) !== descriptor.sha256) return undefined;
+    // Only base64 exists until multipart sending lands; any other kind never goes out as base64.
+    if (entry.send !== 'base64') return undefined;
+    sent = withValueAt(sent, entry.path, Buffer.from(content).toString('base64'));
+  }
+  return sent;
+}
+
+/**
  * undefined when the operation has no binding or connection settings, or is not opaque. Creating
  * the caller has no side effects (the `callerFor` contract of `OpaqueCallWriter`): the vault, the
  * pin check and the adapter are reached only in `call`.
@@ -128,15 +161,24 @@ export function createOpaqueCaller(deps: OpaqueCallerDeps): OpaqueCaller | undef
 
   return {
     ...(idempotencyHeader === undefined ? {} : { idempotencyHeader }),
-    async call({ args, idempotencyKey, beforeSend }) {
+    async call({ args: callArgs, idempotencyKey, files, beforeSend }) {
+      let args = callArgs;
       // An adapter written against connector-sdk 0.5.x has no callOnce (NFR-18): fail closed, nothing sent.
       if (adapter.callOnce === undefined) return refuse('upstream_unavailable');
       const credential = await connectionCredential(deps.vault, connection.credentialRef);
       if (credential === 'unusable') return refuse('credential_unusable');
       if (binding.kind === 'mcp') {
+        // A file argument is an HTTP feature (OPS-8): a link here is a mismatch and nothing is sent.
+        if ((files?.length ?? 0) > 0) return refuse('file_unavailable');
         // Fail closed: without a fresh list the pin cannot be verified (ruling F8, F20).
         const refusal = deps.pinCheck === undefined ? 'upstream_unavailable' : pinRefusal(await deps.pinCheck(operationId));
         if (refusal !== undefined) return refuse(refusal);
+      }
+      if ((operation.files?.length ?? 0) > 0 || (files?.length ?? 0) > 0) {
+        // CS-10: load each file, hash it against the sealed descriptor, and only then put it into the request.
+        const withFiles = binding.kind === 'http' ? await argsWithFiles(operation, args, files ?? [], deps.files) : undefined;
+        if (withFiles === undefined) return refuse('file_unavailable');
+        args = withFiles;
       }
       // beforeSend goes to the adapter unchanged: if it throws, nothing is sent and the error propagates.
       const outcome = await adapter.callOnce({
@@ -177,8 +219,9 @@ function createCodeCaller(
     return { kind: 'not_sent', code };
   };
   return {
-    async call({ args, beforeSend }) {
+    async call({ args, files, beforeSend }) {
       const { adapter } = deps;
+      if ((files?.length ?? 0) > 0) return refuse('file_unavailable');
       const { codeCall } = adapter;
       if (codeCall === undefined) return refuse('upstream_unavailable');
       const credential = await connectionCredential(deps.vault, connection.credentialRef);

@@ -113,7 +113,7 @@ function activitiesFor(stores: RuntimeStores): WorkerActivities {
       repository,
       configuration: () => configuration.current,
       // The tool list behind the pin check opens the connection's credential only inside the adapter (SEC-2, CONN-4).
-      writerFor: createWriterFor({ vault, adapter, toolLister: vaultToolLister(adapter, vault), log }),
+      writerFor: createWriterFor({ vault, adapter, toolLister: vaultToolLister(adapter, vault), log, files: stores.files }),
       rollbackWriterFor: createRollbackWriterFor({ vault, adapter, log }),
       readerFor: (current, correlationId) => createUpstreamReader({ configuration: current, vault, adapter, correlationId, log }),
       guardFor: createExecutionGuard({

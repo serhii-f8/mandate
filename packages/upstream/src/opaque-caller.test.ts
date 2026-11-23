@@ -16,6 +16,8 @@ import {
   type WriteErrorCode,
 } from '@mandate/connector-sdk';
 import type { CredentialHandle, CredentialStatus, CredentialVault, OpaqueNotSentCode } from '@mandate/core';
+import { sha256Of } from '@mandate/core';
+import { InMemoryFileStore } from '@mandate/testing';
 import { createOpaqueCaller, type OpaqueCallerDeps } from './opaque-caller.js';
 import { verifyPinNow, type ToolLister } from './pin-monitor.js';
 import type { UpstreamCallLog } from './read.js';
@@ -76,6 +78,18 @@ operations:
     description: Opaque write with an idempotency key.
     upstream: { method: POST, path: /V1/orders, idempotency: { header: Idempotency-Key } }
     input_schema: { type: object }
+  - id: shop.upload
+    connection: shop
+    risk: write_opaque
+    description: Opaque write with a file.
+    upstream: { method: POST, path: /V1/media, body: { arg: entry } }
+    input_schema:
+      type: object
+      properties:
+        label: { type: string }
+        entry: { type: object, properties: { doc: { type: string, format: uuid } }, required: [doc] }
+      required: [entry]
+    files: [{ at: /entry/doc, send: base64, media_types: [text/plain] }]
   - id: tools.send
     connection: tools
     risk: write_opaque
@@ -389,6 +403,105 @@ describe('EXE-4 CONN-4 createOpaqueCaller', () => {
     expect(createOpaqueCaller({ ...base, operationId: 'shop.get' })).toBeUndefined();
     expect(createOpaqueCaller({ ...base, operationId: 'shop.bulk' })).toBeUndefined();
     expect(createOpaqueCaller({ ...base, operationId: 'unknown.op' })).toBeUndefined();
+  });
+});
+
+describe('EXE-4 CS-10 an opaque call with a file', () => {
+  const FILE_ID = '11111111-1111-4111-8111-111111111111';
+  const BYTES = Uint8Array.from({ length: 3072 }, (_, i) => (i * 7 + 3) % 256);
+  const NAME = 'quarterly-report-distinctive-name.txt';
+  const descriptor = (over: Record<string, unknown> = {}) => ({
+    $file: { id: FILE_ID, name: NAME, media_type: 'text/plain', size: BYTES.byteLength, sha256: sha256Of(BYTES), ...over },
+  });
+  const ARGS_WITH_FILE = { label: 'L', entry: { doc: descriptor() } };
+  const LINKS = [{ pointer: '/entry/doc', fileId: FILE_ID }] as const;
+
+  async function stored(): Promise<InMemoryFileStore> {
+    const store = new InMemoryFileStore();
+    const now = new Date('2026-11-23T10:00:00.000Z');
+    await store.stage(
+      { id: FILE_ID, owner: 'alice', name: NAME, mediaType: 'text/plain', content: BYTES, sha256: sha256Of(BYTES), preview: 'none', createdAt: now, quota: { count: 5, bytes: 1_000_000 } },
+      { id: 'a', ts: now } as never, // the in-memory store drops the audit event
+    );
+    return store;
+  }
+
+  const refusedFor = async (overrides: Partial<OpaqueCallerDeps>, call: { args?: Record<string, unknown>; files?: readonly { pointer: string; fileId: string }[] } = {}) => {
+    const { adapter, caller, lines } = await setup('shop.upload', overrides);
+    const { seen, beforeSend } = hooked();
+    const outcome = await caller.call({ args: call.args ?? ARGS_WITH_FILE, idempotencyKey: KEY, ...(call.files === undefined ? { files: LINKS } : { files: call.files }), beforeSend });
+    return { outcome, adapter, lines, seen };
+  };
+
+  it('EXE-4 CS-10 the adapter gets the base64 of the stored bytes at the path and the rest untouched', async () => {
+    const { adapter, caller, lines } = await setup('shop.upload', { files: await stored() });
+    const { seen, beforeSend } = hooked();
+    await expect(caller.call({ args: ARGS_WITH_FILE, idempotencyKey: KEY, files: LINKS, beforeSend })).resolves.toEqual({ kind: 'accepted' });
+    expect(adapter.calls).toHaveLength(1);
+    expect(adapter.calls[0]?.args).toEqual({ label: 'L', entry: { doc: Buffer.from(BYTES).toString('base64') } });
+    // The change-set's own arguments are not modified.
+    expect(ARGS_WITH_FILE.entry.doc).toEqual(descriptor());
+    expect(seen.calls).toBe(1);
+    expect(adapter.sent).toBe(1);
+    const text = JSON.stringify(lines);
+    expect(text).not.toContain(Buffer.from(BYTES).toString('base64').slice(0, 40));
+    expect(text).not.toContain(NAME);
+  });
+
+  it('CS-10 corrupt content, purged content, a missing store and a mismatching hash each answer not_sent/file_unavailable', async () => {
+    const corrupt = await stored();
+    corrupt.corrupt(FILE_ID, new TextEncoder().encode('changed after approval'));
+    const purged = await stored();
+    await purged.purge({ now: new Date('2030-01-01T00:00:00.000Z'), stagedTtlHours: 1, keepDays: 0, limit: 10 }, () => ({ id: 'p', ts: new Date() }) as never);
+    const cases: [string, Partial<OpaqueCallerDeps>, Record<string, unknown>?][] = [
+      ['corrupt', { files: corrupt }],
+      ['purged', { files: purged }],
+      ['no store', {}],
+      ['descriptor hash differs from the stored bytes', { files: await stored() }, { label: 'L', entry: { doc: descriptor({ sha256: sha256Of(new Uint8Array([1])) }) } }],
+    ];
+    for (const [name, overrides, args] of cases) {
+      const { outcome, adapter, lines, seen } = await refusedFor(overrides, args === undefined ? {} : { args });
+      expect(outcome, name).toEqual({ kind: 'not_sent', code: 'file_unavailable' });
+      expect(adapter.calls, name).toEqual([]);
+      expect(seen.calls, name).toBe(0);
+      expect(lines.map((l) => l.errorCode), name).toEqual(['file_unavailable']);
+      const text = JSON.stringify(lines);
+      expect(text, name).not.toContain(NAME);
+      expect(text, name).not.toContain(ARG_VALUE);
+    }
+  });
+
+  it('CS-10 links that do not match the operation files answer file_unavailable and call nothing', async () => {
+    const store = await stored();
+    for (const [name, files] of [
+      ['no links', []],
+      ['another pointer', [{ pointer: '/entry/other', fileId: FILE_ID }]],
+      ['another file', [{ pointer: '/entry/doc', fileId: '22222222-2222-4222-8222-222222222222' }]],
+      ['an extra link', [...LINKS, { pointer: '/x', fileId: FILE_ID }]],
+    ] as const) {
+      const { outcome, adapter, seen } = await refusedFor({ files: store }, { files });
+      expect(outcome, name).toEqual({ kind: 'not_sent', code: 'file_unavailable' });
+      expect(adapter.calls, name).toEqual([]);
+      expect(seen.calls, name).toBe(0);
+    }
+  });
+
+  it('CS-10 an operation without files refuses a call that has links; a call without links is unchanged', async () => {
+    const plain = await setup('shop.plain', { files: await stored() });
+    const { seen, beforeSend } = hooked();
+    await expect(plain.caller.call({ args: ARGS, idempotencyKey: KEY, files: LINKS, beforeSend })).resolves.toEqual({ kind: 'not_sent', code: 'file_unavailable' });
+    expect(plain.adapter.calls).toEqual([]);
+    expect(seen.calls).toBe(0);
+    await expect(plain.caller.call({ args: ARGS, idempotencyKey: KEY, beforeSend })).resolves.toEqual({ kind: 'accepted' });
+    expect(plain.adapter.calls[0]?.args).toBe(ARGS);
+  });
+
+  it('CS-10 the MCP and code branches refuse a call that has links', async () => {
+    const mcp = await setup('tools.send', { files: await stored() });
+    const { seen, beforeSend } = hooked();
+    await expect(mcp.caller.call({ args: {}, idempotencyKey: KEY, files: LINKS, beforeSend })).resolves.toEqual({ kind: 'not_sent', code: 'file_unavailable' });
+    expect(mcp.adapter.calls).toEqual([]);
+    expect(seen.calls).toBe(0);
   });
 });
 
