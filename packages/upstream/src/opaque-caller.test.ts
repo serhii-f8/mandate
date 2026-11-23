@@ -582,6 +582,27 @@ describe('CONN-9 an opaque call with multipart files', () => {
     }
   });
 
+  it('CONN-9 an operation whose file entries mix send values answers not_sent/file_unavailable and calls nothing', async () => {
+    // The loader refuses this configuration; the caller does not rely on it.
+    const mixed: LoadedConfiguration = {
+      ...CONFIG,
+      policy: {
+        ...CONFIG.policy,
+        operations: CONFIG.policy.operations.map((op) => {
+          if (op.id !== 'shop.photos' || op.files === undefined) return op;
+          const [front, back] = op.files;
+          if (front === undefined || back === undefined) throw new Error('shop.photos has two files');
+          return { ...op, files: [front, { pointer: back.pointer, path: back.path, send: 'base64' as const, mediaTypes: back.mediaTypes, maxBytes: back.maxBytes }] };
+        }),
+      },
+    };
+    const { adapter, caller } = await setup('shop.photos', { files: await stored(), configuration: mixed });
+    const { seen, beforeSend } = hooked();
+    await expect(caller.call({ args: ARGS_MP, idempotencyKey: KEY, files: LINKS, beforeSend })).resolves.toEqual({ kind: 'not_sent', code: 'file_unavailable' });
+    expect(adapter.calls).toEqual([]);
+    expect(seen.calls).toBe(0);
+  });
+
   it('CONN-9 an adapter that answers not_sent for the target yields not_sent', async () => {
     const adapter = new FakeWriteAdapter({ result: 'not_sent', code: 'mapping', durationMs: 0 });
     const { caller } = await setup('shop.photos', { files: await stored(), adapter });

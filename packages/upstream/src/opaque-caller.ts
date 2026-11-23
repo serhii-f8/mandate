@@ -104,6 +104,9 @@ async function argsWithFiles(
 ): Promise<{ readonly args: Readonly<Record<string, unknown>>; readonly parts: readonly FilePart[] | undefined } | undefined> {
   if (!storedFilesMatch(operation.files, { args, files: links })) return undefined;
   if (store === undefined) return undefined;
+  // One request carries its files one way. The loader refuses entries that mix `send`; a configuration that
+  // reaches here without that check is refused too, never sent half as parts (CONN-9).
+  if (new Set((operation.files ?? []).map((entry) => entry.send)).size > 1) return undefined;
   let sent = args;
   const parts: FilePart[] = [];
   let multipart = false;
