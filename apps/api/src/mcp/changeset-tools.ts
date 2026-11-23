@@ -16,12 +16,14 @@ import {
   type ChangeSetExecutor,
   type ChangeSetRepository,
   type ExecutionProgress,
+  type FileStore,
   type ItemStatus,
   type VerificationFilter,
   VERIFICATION_FILTERS,
 } from '@mandate/core';
 import { verificationTitlesOf } from '../approvals/texts.js';
 import { decodeCursor } from '../approvals/page-query.js';
+import { fileRows } from '../files/file-rows.js';
 import { executionSummaryText } from '../changesets/results.js';
 import { planBlock } from '../changesets/plan-view.js';
 import { rollbackBlock } from '../changesets/rollback.js';
@@ -32,6 +34,8 @@ export interface ChangesetToolDeps {
   readonly executor: ChangeSetExecutor;
   readonly newId: () => string;
   readonly now: () => Date;
+  /** The files of a change-set for `get_changeset` (APR-5, CS-10). */
+  readonly files?: Pick<FileStore, 'ofChangeSet'>;
 }
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -170,6 +174,7 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
       const operation = snapshot.configuration.policy.operations.find((op) => op.id === record.operation);
       const kind = changesetKind(operation);
       const verificationTitles = verificationTitlesOf(operation, record.stats);
+      const files = deps.files === undefined ? [] : await fileRows(deps.files, id);
       const structured: Record<string, unknown> = {
         changeset: {
           id: record.id,
@@ -189,6 +194,7 @@ function getChangeset(deps: ChangesetToolDeps): BuiltinTool {
         ...(progress === undefined ? {} : { progress: { total: progress.total, done: progress.done, failed: progress.failed, skipped: progress.skipped } }),
         ...(approval === undefined ? {} : { approval }),
         ...(plan === undefined ? {} : { plan }),
+        ...(files.length === 0 ? {} : { files }),
         items,
         ...(nextCursor === undefined ? {} : { nextCursor }),
         ...(record.derivedFrom === undefined ? {} : { derivedFrom: record.derivedFrom }),

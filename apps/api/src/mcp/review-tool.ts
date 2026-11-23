@@ -13,6 +13,7 @@ import { allApprovalRules, createSchemaCompiler, type LoadedConfiguration } from
 import { callerKind, canView, currentStep, encodeCursor, rolesOf, type ApprovalRecord, type Approver, type Caller, type ChangeSetRecord, type ItemStatus } from '@mandate/core';
 import { changesetDetailWith, itemRow, widgetViewerBlock, type ViewerBlock } from '../approvals/detail.js';
 import { decodeCursor, newSeed } from '../approvals/page-query.js';
+import { fileRows } from '../files/file-rows.js';
 import { planBlockFor } from '../changesets/plan-view.js';
 import { rollbackBlock } from '../changesets/rollback.js';
 import { DECISION_REFUSAL_TEXT } from '../approvals/texts.js';
@@ -118,8 +119,10 @@ export function reviewChangesetTool(deps: BuiltinToolDeps): BuiltinTool {
       const rollback = await rollbackBlock({ repository: deps.repository, snapshot, now: deps.now }, cs, caller);
       // UI-4, CS-9: the plan, each sibling marked with the same visibility check as the page.
       const plan = await planBlockFor(deps.repository, cs, { subject: caller.subject, roles });
+      const files = await fileRows(deps.files, id);
       const detail = changesetDetailWith({
         changeset: cs,
+        files,
         ...(plan === undefined ? {} : { plan }),
         approvals,
         ...(operation === undefined ? {} : { operation }),

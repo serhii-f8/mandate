@@ -12,13 +12,15 @@ import {
   type ChangeSetExecutor,
   type ChangeSetRecord,
   type ChangeSetRepository,
+  type FileStore,
   type StartOutcome,
 } from '@mandate/core';
+import { fileRows } from '../files/file-rows.js';
 import { planBlockFor } from '../changesets/plan-view.js';
 import { rollbackBlock } from '../changesets/rollback.js';
 import { progressOf } from '../mcp/changeset-tools.js';
 import { snapshotOf } from '../mcp/tool-pipeline.js';
-import { APPROVAL_SERVICE, AUDIT_LOG, CHANGESET_EXECUTOR, CHANGESET_REPOSITORY, CONFIGURATION, PAGE_CHECKS } from '../tokens.js';
+import { APPROVAL_SERVICE, AUDIT_LOG, CHANGESET_EXECUTOR, CHANGESET_REPOSITORY, CONFIGURATION, FILE_STORE, PAGE_CHECKS } from '../tokens.js';
 import { PageAccess, pageDenial, pageOf, type PageChecks, type PageRequest } from '../web/access.js';
 import { pageCorrelation } from '../web/correlation.js';
 import type { ApprovalService } from './approval-service.js';
@@ -31,6 +33,22 @@ import { refuse, REFUSAL_STATUS, type PageRefusal } from './refusals.js';
 export function pageAnswer(req: PageRequest, res: Response): void {
   pageCorrelation(req, res);
   res.setHeader('cache-control', 'no-store');
+}
+
+/**
+ * The change-set and its approvals when `viewer` may see it (`canView`, UI-7); `undefined` for an
+ * unknown, foreign or malformed ID alike. The one visibility rule of every change-set page route.
+ */
+export async function visibleChangeset(
+  repository: Pick<ChangeSetRepository, 'get' | 'approvals'>,
+  id: string,
+  viewer: PageViewer,
+): Promise<{ changeset: ChangeSetRecord; approvals: readonly ApprovalRecord[] } | undefined> {
+  if (!CHANGESET_ID.test(id)) return undefined;
+  const changeset = await repository.get(id);
+  if (changeset === undefined) return undefined;
+  const approvals = await repository.approvals(id);
+  return canView(changeset, approvals, viewer) ? { changeset, approvals } : undefined;
 }
 
 /** The signed-in page user as the approval checks see them; `fresh` per SEC-8. */
@@ -69,6 +87,7 @@ export class ChangeSetPagesController {
     @Inject(PAGE_CHECKS) private readonly checks: PageChecks,
     @Inject(AUDIT_LOG) private readonly audit: AuditLog,
     @Inject(APPROVAL_SERVICE) private readonly approvals: ApprovalService,
+    @Inject(FILE_STORE) private readonly fileStore: Pick<FileStore, 'ofChangeSet'>,
   ) {}
 
   /**
@@ -81,13 +100,8 @@ export class ChangeSetPagesController {
     res: Response,
     refuser?: Refuser,
   ): Promise<{ changeset: ChangeSetRecord; approvals: readonly ApprovalRecord[] } | undefined> {
-    if (CHANGESET_ID.test(id)) {
-      const changeset = await this.repository.get(id);
-      if (changeset !== undefined) {
-        const approvals = await this.repository.approvals(id);
-        if (canView(changeset, approvals, viewer)) return { changeset, approvals };
-      }
-    }
+    const found = await visibleChangeset(this.repository, id, viewer);
+    if (found !== undefined) return found;
     await (refuser === undefined ? refuse(res, 'not_found') : refuser('not_found'));
     return undefined;
   }
@@ -209,9 +223,11 @@ export class ChangeSetPagesController {
     const rollback = await rollbackBlock({ repository: this.repository, snapshot, now: () => now }, changeset, caller);
     // UI-4, CS-9: the plan, each sibling marked with the same visibility check that guards its page.
     const plan = await planBlockFor(this.repository, changeset, viewer);
+    const files = await fileRows(this.fileStore, changeset.id);
     res.status(200).json(
       changesetDetail({
         changeset,
+        files,
         rollback,
         ...(plan === undefined ? {} : { plan }),
         ...(drift === undefined ? {} : { drift }),

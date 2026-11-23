@@ -19,6 +19,8 @@ Additive release: the configuration schema and the connector SDK are 1.4.0. A pr
 - `list_staged_files` answers the upload page URL and the caller's own staged files, and a tool call passes a staged file by ID; `list_staged_files` is now a reserved tool name (MCP-11, CS-10). **Action needed before upgrading:** a configuration with an operation named exactly `list_staged_files` no longer loads; rename it.
 - An opaque call with a `send: base64` file loads the stored content inside the activity, compares its hash with the sealed descriptor and sends it as base64; changed or missing content, or links that do not match the operation, end the item `failed/file_unavailable` with nothing sent (EXE-4, CS-10).
 
+- The change-set detail, `get_changeset` and `review_changeset` list a change-set's staged files without content, and the page API serves each file as a download and an image or text preview to whoever may see the change-set; purged files answer 410 (APR-5, UI-7).
+
 ## 1.3.0
 
 Additive release: the configuration schema and the connector SDK are 1.3.0. A preset that uses

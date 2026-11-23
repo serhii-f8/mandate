@@ -55,7 +55,7 @@ export interface BuiltinToolDeps {
   /** Pin states for `list_my_operations` (CONN-4). */
   readonly upstreamTools?: UpstreamToolView;
   /** The caller's staged files for `list_staged_files` (MCP-11, CS-10). */
-  readonly files: Pick<FileStore, 'ownedBy'>;
+  readonly files: Pick<FileStore, 'ownedBy' | 'ofChangeSet'>;
 }
 
 /** What `exclude_changeset_items` needs besides the shared deps: the derived change-set's workflow start (EXE-1). */

@@ -30,6 +30,7 @@ import {
 } from '@mandate/core';
 import type { RollbackBlock } from '../changesets/rollback.js';
 import type { PlanBlock } from '../changesets/plan-view.js';
+import type { FileRow } from '../files/file-rows.js';
 import { verificationTitlesOf } from './texts.js';
 
 export interface PageViewer {
@@ -137,6 +138,8 @@ export interface ChangeSetDetail {
   verificationTitles?: Record<string, string>;
   /** CS-9, UI-4: the plan this change-set is a step of; each step says whether the viewer may open it. */
   plan?: PlanBlock;
+  /** CS-10, APR-5: the staged files this change-set carries, present only when it has any. */
+  files?: readonly FileRow[];
   viewer: ViewerBlock;
 }
 
@@ -260,6 +263,7 @@ export function changesetDetail(input: {
   drift?: number;
   rollback: RollbackBlock;
   plan?: PlanBlock;
+  files?: readonly FileRow[];
 }): ChangeSetDetail {
   const { viewer, now, ...rest } = input;
   return changesetDetailWith({ ...rest, viewer: viewerBlock(input.changeset, input.approvals, viewer, now) });
@@ -275,6 +279,7 @@ export function changesetDetailWith(input: {
   drift?: number;
   rollback: RollbackBlock;
   plan?: PlanBlock;
+  files?: readonly FileRow[];
 }): ChangeSetDetail {
   const { changeset: cs, approvals, progress } = input;
   const submission = cs.submission;
@@ -326,6 +331,7 @@ export function changesetDetailWith(input: {
     reasonTitles: reasonTitlesOf(input.operation),
     ...optionalVerificationTitles(cs.stats, input.operation),
     ...(input.plan === undefined ? {} : { plan: input.plan }),
+    ...(input.files === undefined || input.files.length === 0 ? {} : { files: input.files }),
     // CS-5: an opaque change-set has no items to exclude.
     viewer: kind === 'opaque' ? { ...input.viewer, canExclude: false } : input.viewer,
   };

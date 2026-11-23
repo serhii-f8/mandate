@@ -14,7 +14,7 @@ operations:
       required: [image]
       additionalProperties: false
     files:
-      - { at: /image, send: base64, media_types: [image/png, application/json] }
+      - { at: /image, send: base64, media_types: [image/png, application/json, text/csv, text/plain] }
   - id: shop.post_note
     connection: shop
     risk: write_opaque

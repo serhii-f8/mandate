@@ -46,6 +46,7 @@ import { ChangeSetPagesController } from './approvals/changeset-pages.controller
 import { ChangeSetActionsController } from './changesets/changeset-actions.controller.js';
 import { SubmitService } from './changesets/submit-service.js';
 import { FilesController } from './files/files.controller.js';
+import { ChangeSetFilesController } from './files/changeset-files.controller.js';
 import { ChangeSetExportController } from './export/export.controller.js';
 import { createBuiltinTools } from './mcp/builtin-tools.js';
 import { McpController } from './mcp/mcp.controller.js';
@@ -246,7 +247,7 @@ class AppModule {
     const pageChecks: PageChecks = { publicOrigin: env.publicUrl.origin, freshAuthSeconds: env.freshAuthSeconds };
     return {
       module: AppModule,
-      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, ApprovalsController, ChangeSetPagesController, ChangeSetExportController, ChangeSetActionsController, AuditController, FilesController, WebAppController],
+      controllers: [McpController, ProtectedResourceController, HealthController, AuthController, SessionController, CredentialsController, ConnectionsController, ApprovalsController, ChangeSetPagesController, ChangeSetExportController, ChangeSetActionsController, AuditController, FilesController, ChangeSetFilesController, WebAppController],
       providers: [
         { provide: API_ENV, useValue: env },
         { provide: LOGGER, useValue: logger },

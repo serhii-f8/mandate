@@ -227,7 +227,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 - **APR-2** Enforce separation of duties: the requester cannot approve their own change-set.
 - **APR-3** Support single and multi-step approval chains.
 - **APR-4** Support approve, reject, and return with comment.
-- **APR-5** The approval view, on the page and in a widget alike, is rendered from data the server reads from storage, never from content supplied by the model or the client: original request text, requester, client, policy check results, statistics, a random sample of items with re-sampling, and full item access.
+- **APR-5** The approval view, on the page and in a widget alike, is rendered from data the server reads from storage, never from content supplied by the model or the client: original request text, requester, client, policy check results, statistics, a random sample of items with re-sampling, and full item access. For a change-set that names staged files (CS-10), the view also lists them (pointer, name, media type, size, hash, whether content is still available) in the detail answer, in `get_changeset` and in `review_changeset`, never with content; the approver may download each file, and preview an image or text one, through routes guarded like the change-set page. A purged file answers `purged` (410), a file without a safe preview `no_preview` (404); every such answer is `no-store`, `nosniff` and sandboxed, and a download is always an attachment.
 - **APR-6** The approve action states the number of changes being approved.
 - **APR-7** Approval links are single-purpose, require login, and carry no authority by themselves.
 - **APR-8** Approval decisions are made on the trusted page. Deciding in a widget is an opt-in per role, off by default, and never available for operations that require step-up authentication or are `destructive`. The channel of every decision (`page` or `widget`) is recorded in audit.
@@ -256,7 +256,7 @@ Requirements are grouped by module. Each has a stable ID for reference in issues
 - **UI-4** Result shows counts, per-item errors, and a rollback action when the manifest allows it.
 - **UI-5** Credential entry and audit search are available only as trusted pages, never as widgets (ADR 0042).
 - **UI-6** Widgets call back only to the platform's own tools, through the host (`tools/call` over the MCP Apps bridge), make no direct network requests (empty `_meta.ui.csp`), and adopt the host client's theme from the standard MCP Apps CSS variables with their own fallbacks. The server cannot tell a widget-originated tool call from a model-originated one, so every call is authorized server-side on its own.
-- **UI-7** Pages show only data the logged-in user is allowed to see under policy.
+- **UI-7** Pages show only data the logged-in user is allowed to see under policy. A change-set's files, their content and previews are visible to exactly those who may see the change-set; a file not linked to it, an unknown one and a malformed ID answer the same 404.
 
 ### 5.10 Audit
 

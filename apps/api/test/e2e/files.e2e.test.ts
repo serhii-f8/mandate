@@ -363,3 +363,146 @@ describe('MCP-11 CS-10 a tool call with a file', () => {
     }
   });
 });
+
+const LEAD: TestLoginUser = { sub: 'lead-id', username: 'lead', groups: ['leads'] };
+const OWN: TestLoginUser = { sub: 'own-id', username: 'own', groups: ['editors'] };
+const OTHER: TestLoginUser = { sub: 'other-id', username: 'other', groups: ['editors'] };
+const SVG = new TextEncoder().encode('<svg onload=alert(1)>');
+const CSV = new TextEncoder().encode('a,b\n1,2\n');
+
+interface Prepared {
+  readonly fileId: string;
+  readonly changesetId: string;
+}
+
+/** Stages `body` as `owner` (a page login), names it in a call and submits, so an approver may see it. */
+async function pendingWithFile(owner: Page, options: { body: Uint8Array; name?: string; type?: string }): Promise<Prepared> {
+  const staged = (await upload(api, owner, options)).body as { id: string };
+  const token = await tokenFor(issuer, api, OWN.sub, ['editors']);
+  const { result } = await callTool(token, 'shop.upload_image', { image: staged.id });
+  const prepared = result.structuredContent?.changeset as { id: string; hash: string };
+  const { result: submitted } = await callTool(token, 'submit_for_approval', { changeset_id: prepared.id, hash: prepared.hash });
+  expect(submitted.isError).toBeUndefined();
+  return { fileId: staged.id, changesetId: prepared.id };
+}
+
+const get = (page: Page, path: string): Promise<Response> => fetch(`${api.url}/api/v1/changesets/${path}`, { headers: { cookie: page.cookie } });
+const HARDENING = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': "sandbox; default-src 'none'" };
+const expectHardened = (response: Response): void => {
+  for (const [name, value] of Object.entries(HARDENING)) expect(response.headers.get(name), name).toBe(value);
+};
+
+describe('APR-5 UI-7 the files of a change-set', () => {
+  // Page logins are rate limited: each identity signs in once.
+  let own: Page;
+  let lead: Page;
+  let stranger: Page;
+  beforeAll(async () => {
+    own = await login(api, OWN);
+    lead = await login(api, LEAD);
+    stranger = await login(api, OTHER);
+  });
+
+  it('APR-5 UI-7 the requester and an approver get the detail with the file row; anyone else gets 404 on detail, content and preview', async () => {
+    const { fileId, changesetId } = await pendingWithFile(own, { body: PNG, name: 'logo.png' });
+    const expected = { pointer: '/image', id: fileId, name: 'logo.png', mediaType: 'image/png', size: PNG.length, sha256: sha256Of(PNG), preview: 'image', available: true };
+    for (const page of [own, lead]) {
+      const detail = await get(page, changesetId);
+      expect(detail.status).toBe(200);
+      expect(((await detail.json()) as { files: unknown[] }).files).toEqual([expected]);
+    }
+    for (const path of [changesetId, `${changesetId}/files/${fileId}/content`, `${changesetId}/files/${fileId}/preview`]) {
+      const response = await get(stranger, path);
+      expect(response.status, path).toBe(404);
+      expect(await response.json()).toEqual({ error: 'not_found' });
+    }
+  });
+
+  it('APR-5 a change-set without files has no files member', async () => {
+    const vi = await login(api, VI);
+    const token = await tokenFor(issuer, api, VI.sub, ['viewers']);
+    const { result } = await callTool(token, 'shop.post_note', { note: 'hello' });
+    const prepared = result.structuredContent?.changeset as { id: string };
+    const detail = (await (await get(vi, prepared.id)).json()) as Record<string, unknown>;
+    expect(detail).not.toHaveProperty('files');
+  });
+
+  it('UI-7 content returns the exact bytes as an attachment with the hardening headers; a quote in the name is escaped', async () => {
+    const { fileId, changesetId } = await pendingWithFile(own, { body: PNG, name: encodeURIComponent('a"b.png') });
+    const response = await get(lead, `${changesetId}/files/${fileId}/content`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/octet-stream');
+    expect(response.headers.get('content-length')).toBe(String(PNG.length));
+    const disposition = response.headers.get('content-disposition') ?? '';
+    expect(disposition).toBe("attachment; filename*=UTF-8''a%22b.png");
+    expect(disposition.slice(0, disposition.indexOf('filename'))).not.toContain('"');
+    expect(disposition).not.toContain('"');
+    expectHardened(response);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(PNG);
+  });
+
+  it('UI-7 preview of a PNG is the bytes as image/png; of a CSV is its text; of 70000 bytes is cut at 65536', async () => {
+    const png = await pendingWithFile(own, { body: PNG, name: 'a.png' });
+    const image = await get(lead, `${png.changesetId}/files/${png.fileId}/preview`);
+    expect(image.status).toBe(200);
+    expect(image.headers.get('content-type')).toBe('image/png');
+    expectHardened(image);
+    expect(new Uint8Array(await image.arrayBuffer())).toEqual(PNG);
+
+    const csv = await pendingWithFile(own, { body: CSV, name: 'a.csv', type: 'text/csv' });
+    const text = await get(lead, `${csv.changesetId}/files/${csv.fileId}/preview`);
+    expect(text.status).toBe(200);
+    expectHardened(text);
+    expect(await text.json()).toEqual({ text: 'a,b\n1,2\n', truncated: false });
+
+    const big = await pendingWithFile(own, { body: new TextEncoder().encode('x'.repeat(70_000)), name: 'big.txt', type: 'text/plain' });
+    const cut = (await (await get(lead, `${big.changesetId}/files/${big.fileId}/preview`)).json()) as { text: string; truncated: boolean };
+    expect(cut.truncated).toBe(true);
+    expect(cut.text.length).toBe(65_536);
+  });
+
+  it('UI-7 SEC-3 an SVG uploaded as image/png has no preview and downloads only as an attachment', async () => {
+    const { fileId, changesetId } = await pendingWithFile(own, { body: SVG, name: 'evil.png' });
+    const row = ((await (await get(lead, changesetId)).json()) as { files: { preview: string }[] }).files[0];
+    expect(row?.preview).toBe('none');
+    const preview = await get(lead, `${changesetId}/files/${fileId}/preview`);
+    expect(preview.status).toBe(404);
+    expect(await preview.json()).toEqual({ error: 'no_preview' });
+    expectHardened(preview);
+    const content = await get(lead, `${changesetId}/files/${fileId}/content`);
+    expect(content.status).toBe(200);
+    expect(content.headers.get('content-type')).toBe('application/octet-stream');
+    expect(content.headers.get('content-disposition')).toMatch(/^attachment;/);
+    expectHardened(content);
+  });
+
+  it('UI-7 a file not linked to this change-set, and a malformed file ID, are 404; a purged file is 410 and reads available: false', async () => {
+    const first = await pendingWithFile(own, { body: PNG, name: 'first.png' });
+    const second = await pendingWithFile(own, { body: PNG, name: 'second.png' });
+    for (const path of [`${first.changesetId}/files/${second.fileId}/content`, `${first.changesetId}/files/x/content`, `${first.changesetId}/files/x/preview`, `${first.changesetId}/files/${second.fileId}/preview`]) {
+      const response = await get(lead, path);
+      expect(response.status, path).toBe(404);
+      expect(await response.json()).toEqual({ error: 'not_found' });
+    }
+    // A linked file purges only once its change-set is final; the test applies what the purge does (content NULL, purged_at set).
+    await query('update staged_file set content = null, purged_at = now() where id = $1', [first.fileId]);
+    for (const route of ['content', 'preview']) {
+      const response = await get(lead, `${first.changesetId}/files/${first.fileId}/${route}`);
+      expect(response.status, route).toBe(410);
+      expect(await response.json()).toEqual({ error: 'purged' });
+      expectHardened(response);
+    }
+    const row = ((await (await get(lead, first.changesetId)).json()) as { files: { available: boolean }[] }).files[0];
+    expect(row?.available).toBe(false);
+  });
+
+  it('APR-5 SEC-3 get_changeset carries the file row and not one byte of content', async () => {
+    const body = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x11, 0x22, 0x33, 0x44]);
+    const { fileId, changesetId } = await pendingWithFile(own, { body, name: 'bytes.png' });
+    const { result } = await callTool(await tokenFor(issuer, api, OWN.sub, ['editors']), 'get_changeset', { changeset_id: changesetId });
+    expect(result.structuredContent?.files).toEqual([{ pointer: '/image', id: fileId, name: 'bytes.png', mediaType: 'image/png', size: body.length, sha256: sha256Of(body), preview: 'image', available: true }]);
+    const serialised = JSON.stringify(result);
+    expect(serialised).not.toContain(Buffer.from(body).toString('base64'));
+    expect(serialised).not.toContain(Buffer.from(body).toString('hex'));
+  });
+});

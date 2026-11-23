@@ -3,7 +3,9 @@ roles:
   - id: editor
     grants:
       - operation: shop.upload_image
-    approval: { required: never }
+    approval: { required: always, steps: [{ role: lead }] }
+  - id: lead
+    grants: []
   - id: viewer
     grants:
       - operation: shop.post_note
@@ -11,3 +13,4 @@ roles:
 role_mapping:
   - { group: editors, roles: [editor] }
   - { group: viewers, roles: [viewer] }
+  - { group: leads, roles: [lead] }
